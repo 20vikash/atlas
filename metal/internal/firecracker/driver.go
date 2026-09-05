@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -66,6 +66,7 @@ type Driver struct {
 	operationLocks        operationLocks
 	warmupDelay           time.Duration
 	sshSlots              chan struct{}
+	logger                *slog.Logger
 }
 
 // maxConcurrentSSHSessions limits host-wide SSH console sessions.
@@ -80,7 +81,11 @@ func New(
 	snapshotStore snapshotStore,
 	networkAllocator network.Allocator,
 	consoleBroker consoleBroker,
+	logger *slog.Logger,
 ) *Driver {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Driver{
 		cfg:                   configuration,
 		units:                 units,
@@ -91,6 +96,7 @@ func New(
 		consoleBroker:         consoleBroker,
 		warmupDelay:           5 * time.Minute,
 		sshSlots:              make(chan struct{}, maxConcurrentSSHSessions),
+		logger:                logger,
 	}
 }
 
@@ -282,7 +288,7 @@ func (d *Driver) reboot(id string) {
 
 	unlock, err := d.operationLocks.lock(ctx, id)
 	if err != nil {
-		log.Printf("firecracker: reboot vm %s: lock: %v", id, err)
+		d.logger.Error("reboot lock failed", "virtual_machine_id", id, "error", err)
 		return
 	}
 	defer unlock()
@@ -293,11 +299,11 @@ func (d *Driver) reboot(id string) {
 	}
 	machine := d.newMachine(configuration)
 	if err := machine.stopUnlocked(ctx); err != nil {
-		log.Printf("firecracker: reboot vm %s: stop: %v", id, err)
+		d.logger.Error("reboot stop failed", "virtual_machine_id", id, "error", err)
 		return
 	}
 	if err := machine.startUnlocked(ctx); err != nil {
-		log.Printf("firecracker: reboot vm %s: start: %v", id, err)
+		d.logger.Error("reboot start failed", "virtual_machine_id", id, "error", err)
 	}
 }
 
@@ -543,12 +549,7 @@ func (d *Driver) prepareBoot(ctx context.Context, configuration vmConfig, networ
 	if err != nil {
 		return err
 	}
-	log.Printf(
-		"firecracker: vm %s kernel=%s cmdline=%q",
-		configuration.ID,
-		bootConfiguration.Kernel,
-		bootArguments(bootConfiguration, networkInterface),
-	)
+	d.logger.Debug("configured Firecracker VM", "virtual_machine_id", configuration.ID, "kernel", bootConfiguration.Kernel, "cmdline", bootArguments(bootConfiguration, networkInterface))
 	return configure(
 		ctx,
 		api.New(configuration.Sock),
@@ -660,7 +661,7 @@ func (d *Driver) launchSnapshot(
 	}
 	if metadata != nil {
 		if err := client.PutMMDS(ctx, metadata); err != nil {
-			log.Printf("firecracker: vm %s MMDS refresh: %v", configuration.ID, err)
+			d.logger.Error("MMDS refresh failed", "virtual_machine_id", configuration.ID, "error", err)
 		}
 	}
 	return client.Resume(ctx)

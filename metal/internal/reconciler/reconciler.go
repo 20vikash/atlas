@@ -3,7 +3,7 @@ package reconciler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -21,6 +21,8 @@ const (
 
 // Config controls reconciliation work within one pass.
 type Config struct {
+	// Logger receives reconciliation errors.
+	Logger *slog.Logger
 	// MaxConcurrentOperations limits active VM operations in one pass.
 	MaxConcurrentOperations int
 	// OperationTimeout limits one list or reconcile operation.
@@ -34,6 +36,7 @@ type Reconciler struct {
 	wake                    chan struct{}
 	maxConcurrentOperations int
 	operationTimeout        time.Duration
+	logger                  *slog.Logger
 }
 
 // New returns a Reconciler with the specified interval.
@@ -44,12 +47,16 @@ func New(driver Driver, interval time.Duration, configuration Config) *Reconcile
 	if configuration.OperationTimeout <= 0 {
 		configuration.OperationTimeout = defaultOperationTimeout
 	}
+	if configuration.Logger == nil {
+		configuration.Logger = slog.Default()
+	}
 	return &Reconciler{
 		driver:                  driver,
 		interval:                interval,
 		wake:                    make(chan struct{}, 1),
 		maxConcurrentOperations: configuration.MaxConcurrentOperations,
 		operationTimeout:        configuration.OperationTimeout,
+		logger:                  configuration.Logger,
 	}
 }
 
@@ -82,7 +89,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 	cancelList()
 	if err != nil {
 		if ctx.Err() == nil {
-			log.Printf("reconciler: list: %v", err)
+			r.logger.Error("reconciler list failed", "error", err)
 		}
 		return
 	}
@@ -120,6 +127,6 @@ func (r *Reconciler) reconcile(ctx context.Context, id string) {
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
 	if err := r.driver.Reconcile(operationContext, id); err != nil && ctx.Err() == nil {
-		log.Printf("reconciler: vm %s: %v", id, err)
+		r.logger.Error("virtual machine reconciliation failed", "virtual_machine_id", id, "error", err)
 	}
 }

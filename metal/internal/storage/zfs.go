@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -25,6 +28,7 @@ type ImageStore struct {
 	policiesFile string
 	httpClient   *http.Client
 	imageLocks   sync.Map
+	logger       *slog.Logger
 }
 
 // SnapshotStore manages staged image snapshots.
@@ -35,8 +39,14 @@ type SnapshotStore struct {
 	httpClient    *http.Client
 	snapshotLocks sync.Map
 
-	uploadsMutex sync.Mutex
-	uploads      map[string]*snapshotUpload
+	uploadsMutex     sync.Mutex
+	uploads          map[string]*snapshotUpload
+	lifecycleMutex   sync.Mutex
+	rootContext      context.Context
+	rootCancel       context.CancelFunc
+	uploadsWaitGroup sync.WaitGroup
+	closed           bool
+	logger           *slog.Logger
 }
 
 // Stores contains the host storage services.
@@ -48,7 +58,11 @@ type Stores struct {
 }
 
 // NewStores returns storage services for one ZFS pool.
-func NewStores(poolName, imagesDirectory string) Stores {
+func NewStores(parentContext context.Context, poolName, imagesDirectory string, logger *slog.Logger) Stores {
+	rootContext, rootCancel := context.WithCancel(parentContext)
+	if logger == nil {
+		logger = slog.Default()
+	}
 	pool := &ZFSPool{name: poolName}
 	baseDirectory := filepath.Dir(imagesDirectory)
 	images := &ImageStore{
@@ -56,6 +70,7 @@ func NewStores(poolName, imagesDirectory string) Stores {
 		directory:    imagesDirectory,
 		policiesFile: filepath.Join(baseDirectory, "image-policies.json"),
 		httpClient:   newImageHTTPClient(),
+		logger:       logger,
 	}
 
 	return Stores{
@@ -63,12 +78,37 @@ func NewStores(poolName, imagesDirectory string) Stores {
 		VirtualMachines: &VirtualMachineStore{pool: pool, images: images},
 		Images:          images,
 		Snapshots: &SnapshotStore{
-			pool:       pool,
-			images:     images,
-			directory:  filepath.Join(baseDirectory, "snapshots"),
-			httpClient: newImageHTTPClient(),
-			uploads:    make(map[string]*snapshotUpload),
+			pool:        pool,
+			images:      images,
+			directory:   filepath.Join(baseDirectory, "snapshots"),
+			httpClient:  newImageHTTPClient(),
+			uploads:     make(map[string]*snapshotUpload),
+			rootContext: rootContext,
+			rootCancel:  rootCancel,
+			logger:      logger,
 		},
+	}
+}
+
+// Shutdown stops new uploads and waits for active uploads to finish.
+func (store *SnapshotStore) Shutdown(shutdownContext context.Context) error {
+	store.lifecycleMutex.Lock()
+	if !store.closed {
+		store.closed = true
+		store.rootCancel()
+	}
+	store.lifecycleMutex.Unlock()
+
+	finished := make(chan struct{})
+	go func() {
+		store.uploadsWaitGroup.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+		return nil
+	case <-shutdownContext.Done():
+		return fmt.Errorf("wait for snapshot uploads: %w", shutdownContext.Err())
 	}
 }
 

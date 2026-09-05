@@ -14,6 +14,8 @@ Package `api` validates HTTP requests and calls small service interfaces. Lifecy
 
 Request and response types are split by resource. `Server` owns the handlers and injected services.
 
+Each request receives safe `X-Request-ID` and `X-Operation-ID` response headers. The server preserves valid incoming values and generates values for missing or invalid headers. JSON logs include both values.
+
 ## Request flow
 
 ```text

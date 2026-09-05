@@ -49,7 +49,7 @@ func testDriver(t *testing.T) (*Driver, *fakeNetwork, *fakeImages) {
 		MachinesDir: filepath.Join(directory, "machines"),
 		SocketsDir:  filepath.Join(directory, "sockets"),
 		IDs:         idalloc.Range{Min: 1000, Max: 1001},
-	}, &stubUnits{}, images, images, images, networkAllocator, &stubConsoleBroker{})
+	}, &stubUnits{}, images, images, images, networkAllocator, &stubConsoleBroker{}, nil)
 	return driver, networkAllocator, images
 }
 

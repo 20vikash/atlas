@@ -17,7 +17,7 @@ import (
 )
 
 func TestNames(t *testing.T) {
-	pool := NewStores("metal", "/images").Pool
+	pool := NewStores(t.Context(), "metal", "/images", nil).Pool
 	if got := pool.baseDataset("ubuntu"); got != "metal/images/ubuntu" {
 		t.Errorf("baseDataset = %q", got)
 	}
@@ -74,7 +74,7 @@ func TestKernelArguments(t *testing.T) {
 }
 
 func TestEnsureImageRejectsDifferentContentForReference(t *testing.T) {
-	imageStore := NewStores("metal", t.TempDir()).Images
+	imageStore := NewStores(t.Context(), "metal", t.TempDir(), nil).Images
 	original := imageManifest{RootfsSHA256: strings.Repeat("a", 64), KernelSHA256: strings.Repeat("b", 64), Architecture: runtime.GOARCH}
 	if err := imageStore.saveImageManifest("ubuntu", original); err != nil {
 		t.Fatal(err)

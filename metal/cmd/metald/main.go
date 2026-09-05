@@ -8,11 +8,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +47,7 @@ const (
 var version = "dev"
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	args := os.Args[1:]
 	cmd := "serve"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -62,10 +63,11 @@ func main() {
 	}
 	o, err := load(configPath)
 	if err == nil {
-		err = serve(o)
+		err = serve(o, logger)
 	}
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("metald stopped", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -129,7 +131,7 @@ func connectMesh(o opts) (*network.Mesh, error) {
 	return mesh, nil
 }
 
-func serve(o opts) error {
+func serve(o opts, logger *slog.Logger) (serveError error) {
 	if o.authTokenHash == "" {
 		return fmt.Errorf("metald.auth_token_hash is required")
 	}
@@ -145,9 +147,17 @@ func serve(o opts) error {
 	if err != nil {
 		return fmt.Errorf("connect systemd: %w", err)
 	}
-	defer units.Close()
 
-	stores := storage.NewStores(o.pool, o.imagesDir)
+	daemonContext, cancelDaemon := context.WithCancel(context.Background())
+	stores := storage.NewStores(daemonContext, o.pool, o.imagesDir, logger)
+	consoleBroker := console.NewBroker(filepath.Join(o.cfg.SocketsDir, "consoles"))
+	daemon := newDaemon(daemonContext, cancelDaemon, logger, stores.Snapshots, consoleBroker, units)
+	defer func() {
+		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+		defer cancelShutdown()
+		serveError = errors.Join(serveError, daemon.Shutdown(shutdownContext))
+	}()
+
 	wireGuardManager, err := network.NewWireGuardManager(network.WireGuardConfig{
 		InterfaceName: o.wireGuardName,
 		StatePath:     filepath.Join(o.baseDir, "wireguard-peers.json"),
@@ -155,9 +165,6 @@ func serve(o opts) error {
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	consoleBroker := console.NewBroker(filepath.Join(o.cfg.SocketsDir, "consoles"))
-	defer consoleBroker.Shutdown()
-
 	virtualMachineDriver := firecracker.New(
 		o.cfg,
 		units,
@@ -166,35 +173,31 @@ func serve(o opts) error {
 		stores.Snapshots,
 		network.NewLinuxAllocator(mesh),
 		consoleBroker,
+		logger,
 	)
 	// A VM keeps running without its mesh registration, so report the failure
 	// and serve. Refusing to start would take the API and the reconcilers down.
 	if err := virtualMachineDriver.RestoreNetworks(context.Background()); err != nil {
-		log.Printf("metald: restore VM networks: %v", err)
+		logger.Error("restore VM networks failed", "error", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	virtualMachineReconciler := reconciler.New(
 		virtualMachineDriver,
 		reconcileInterval,
-		reconciler.Config{},
+		reconciler.Config{Logger: logger},
 	)
 	imageReconciler := reconciler.NewImageReconciler(
 		stores.Images,
 		stores.Snapshots,
 		virtualMachineDriver,
 		imageReconcileInterval,
-		reconciler.ImageConfig{},
+		reconciler.ImageConfig{Logger: logger},
 	)
-	go virtualMachineReconciler.Run(ctx)
-	go imageReconciler.Run(ctx)
-
 	wakeReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
 	}
-	server, err := api.New(api.Config{AuthTokenHash: o.authTokenHash}, api.Dependencies{
+	server, err := api.New(api.Config{AuthTokenHash: o.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineDriver: virtualMachineDriver,
 		SnapshotCreator:      virtualMachineDriver,
 		SnapshotStore:        stores.Snapshots,
@@ -214,10 +217,9 @@ func serve(o opts) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", o.listen, err)
 	}
-	log.Printf("metald %s listening on %s", version, o.listen)
+	logger.Info("metald listening", "version", version, "address", o.listen)
 	server.Listener = listener
-	if err := server.Start(""); err != nil && err != http.ErrServerClosed {
-		return err
-	}
-	return nil
+	daemon.StartWorker(virtualMachineReconciler.Run)
+	daemon.StartWorker(imageReconciler.Run)
+	return daemon.Serve(server)
 }

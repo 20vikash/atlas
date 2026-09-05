@@ -297,6 +297,23 @@ func newServerWithServices(
 	return server
 }
 
+func TestCorrelationHeadersAreGeneratedAndPreserveSafeValues(t *testing.T) {
+	server := newTestServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request.Header.Set("X-Request-ID", "request-123")
+	request.Header.Set("X-Operation-ID", "operation-456")
+	recorder := httptest.NewRecorder()
+
+	server.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get("X-Request-ID"); got != "request-123" {
+		t.Fatalf("request ID: got %q", got)
+	}
+	if got := recorder.Header().Get("X-Operation-ID"); got != "operation-456" {
+		t.Fatalf("operation ID: got %q", got)
+	}
+}
+
 type stubSSHConnector struct{}
 
 func (stubSSHConnector) DialSSH(context.Context, string) (vm.SSHConn, error) {

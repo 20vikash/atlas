@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -21,6 +22,7 @@ import (
 // Config contains HTTP server configuration.
 type Config struct {
 	AuthTokenHash string
+	Logger        *slog.Logger
 }
 
 // PrivilegedMesh replaces the Atlas WG Mesh privileged VM whitelist.
@@ -92,6 +94,7 @@ type Server struct {
 	consoleBroker        ConsoleBroker
 	sshConnector         SSHConnector
 	authTokenHash        []byte
+	logger               *slog.Logger
 }
 
 // New builds the HTTP router from explicit configuration and dependencies.
@@ -113,10 +116,27 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 		sshConnector:         dependencies.SSHConnector,
 		authTokenHash:        []byte(configuration.AuthTokenHash),
 	}
+	if configuration.Logger == nil {
+		configuration.Logger = slog.Default()
+	}
+	server.logger = configuration.Logger
 
 	router := echo.New()
 	router.HideBanner = true
 	router.HTTPErrorHandler = errorHandler
+	router.Use(correlationMiddleware)
+	router.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("logger", server.logger)
+			err := next(c)
+			status := c.Response().Status
+			if err != nil {
+				status = publicAPIError(err).status
+			}
+			server.logger.Info("API request", "method", c.Request().Method, "path", c.Path(), "status", status, "request_id", requestID(c.Request().Context()), "operation_id", operationID(c.Request().Context()))
+			return err
+		}
+	})
 	router.Use(server.authenticate)
 	server.registerRoutes(router)
 

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/frappe/atlas/metal/internal/atomicfile"
 	"github.com/frappe/atlas/metal/internal/hostcmd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -207,42 +208,7 @@ func (store *ImageStore) saveImageManifest(imageReference string, manifest image
 	}
 	data = append(data, '\n')
 
-	directory := store.imageDirectory(imageReference)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(directory, ".manifest-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := file.Name()
-	defer os.Remove(temporaryPath)
-
-	if err := file.Chmod(0o644); err != nil {
-		file.Close()
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, store.manifestFile(imageReference)); err != nil {
-		return err
-	}
-
-	directoryFile, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	defer directoryFile.Close()
-	return directoryFile.Sync()
+	return atomicfile.Write(store.manifestFile(imageReference), data, 0o644)
 }
 
 func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kernelURL, expectedDigest string) error {
@@ -256,7 +222,7 @@ func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kerne
 		return err
 	}
 
-	kernel, err := download(ctx, store.httpClient, store.directory, kernelURL, expectedDigest)
+	kernel, err := download(ctx, store.httpClient, store.directory, kernelURL, expectedDigest, store.logger)
 	if err != nil {
 		return fmt.Errorf("download kernel: %w", err)
 	}
@@ -271,7 +237,7 @@ func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kerne
 }
 
 func (store *ImageStore) importRootFileSystem(ctx context.Context, imageReference, rootfsURL, expectedDigest string) error {
-	rootfs, err := download(ctx, store.httpClient, store.directory, rootfsURL, expectedDigest)
+	rootfs, err := download(ctx, store.httpClient, store.directory, rootfsURL, expectedDigest, store.logger)
 	if err != nil {
 		return fmt.Errorf("download root file system: %w", err)
 	}
@@ -316,7 +282,11 @@ func newImageHTTPClient() *http.Client {
 	return &http.Client{Transport: transport, Timeout: downloadTimeout}
 }
 
-func download(ctx context.Context, client *http.Client, directory, source, expectedDigest string) (string, error) {
+func download(ctx context.Context, client *http.Client, directory, source, expectedDigest string, loggers ...*slog.Logger) (string, error) {
+	logger := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	if _, err := parseImageURL(source); err != nil {
 		return "", err
 	}
@@ -329,7 +299,7 @@ func download(ctx context.Context, client *http.Client, directory, source, expec
 	for attempt := 1; attempt <= downloadAttempts; attempt++ {
 		if attempt > 1 {
 			delay := downloadBaseDelay << (attempt - 2)
-			log.Printf("storage: download %s failed (attempt %d/%d), retry in %s: %v", redactedSource, attempt-1, downloadAttempts, delay, lastErr)
+			logger.Warn("image download failed, retrying", "source", redactedSource, "attempt", attempt-1, "maximum_attempts", downloadAttempts, "retry_after", delay, "error", lastErr)
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/frappe/atlas/metal/internal/atomicfile"
 	"github.com/frappe/atlas/metal/internal/hostcmd"
 )
 
@@ -199,28 +200,42 @@ type snapshotUpload struct {
 // StartUpload begins an asynchronous artifact upload and returns at once. It is
 // idempotent: a call while an upload runs, or after it completes, does nothing.
 func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, request SnapshotUploadRequest) error {
+	store.lifecycleMutex.Lock()
+	if store.closed {
+		store.lifecycleMutex.Unlock()
+		return fmt.Errorf("snapshot store is shutting down")
+	}
+	store.uploadsWaitGroup.Add(1)
+	rootContext := store.rootContext
+	store.lifecycleMutex.Unlock()
+
 	lock := store.snapshotLock(snapshotID)
 	lock.Lock()
 	defer lock.Unlock()
 
 	metadata, found, err := store.loadStagedSnapshot(snapshotID)
 	if err != nil {
+		store.uploadsWaitGroup.Done()
 		return err
 	}
 	if !found {
+		store.uploadsWaitGroup.Done()
 		return ErrNotFound
 	}
 	if metadata.UploadState == UploadStateCompleted {
+		store.uploadsWaitGroup.Done()
 		return nil
 	}
 	if err := validateUploadParts(request.Rootfs.Parts, metadata.RootfsSizeBytes); err != nil {
+		store.uploadsWaitGroup.Done()
 		return fmt.Errorf("rootfs parts: %w", err)
 	}
 	if err := validateUploadParts(request.Kernel.Parts, metadata.KernelSizeBytes); err != nil {
+		store.uploadsWaitGroup.Done()
 		return fmt.Errorf("kernel parts: %w", err)
 	}
 
-	uploadContext, cancel := context.WithCancel(context.Background())
+	uploadContext, cancel := context.WithCancel(rootContext)
 	upload := &snapshotUpload{
 		cancel: cancel,
 		done:   make(chan struct{}),
@@ -231,6 +246,7 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	if _, running := store.uploads[snapshotID]; running {
 		store.uploadsMutex.Unlock()
 		cancel()
+		store.uploadsWaitGroup.Done()
 		return nil
 	}
 	store.uploads[snapshotID] = upload
@@ -243,6 +259,7 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 		cancel()
 		store.removeUpload(snapshotID, upload)
 		close(upload.done)
+		store.uploadsWaitGroup.Done()
 		return err
 	}
 
@@ -254,6 +271,7 @@ func (store *SnapshotStore) runUpload(ctx context.Context, snapshotID string, up
 	defer func() {
 		store.removeUpload(snapshotID, upload)
 		close(upload.done)
+		store.uploadsWaitGroup.Done()
 	}()
 
 	rootfs, err := store.uploadArtifact(ctx, store.pool.stagingDevicePath(snapshotID), rootfsSize, request.Rootfs.Parts, &upload.uploaded)
@@ -574,40 +592,5 @@ func writeJSONFile(path string, value any, mode os.FileMode) error {
 	}
 	data = append(data, '\n')
 
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o750); err != nil {
-		return err
-	}
-	temporaryFile, err := os.CreateTemp(directory, ".metadata-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporaryFile.Name()
-	defer os.Remove(temporaryPath)
-
-	if err := temporaryFile.Chmod(mode); err != nil {
-		temporaryFile.Close()
-		return err
-	}
-	if _, err := temporaryFile.Write(data); err != nil {
-		temporaryFile.Close()
-		return err
-	}
-	if err := temporaryFile.Sync(); err != nil {
-		temporaryFile.Close()
-		return err
-	}
-	if err := temporaryFile.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-
-	directoryFile, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	defer directoryFile.Close()
-	return directoryFile.Sync()
+	return atomicfile.Write(path, data, mode)
 }

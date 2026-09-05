@@ -1,11 +1,9 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -44,10 +42,13 @@ func errorHandler(err error, c echo.Context) {
 
 	// A masked error tells the caller nothing, so log the cause under an ID that
 	// the response carries back.
-	requestID := ""
+	requestID := requestID(c.Request().Context())
 	if publicError.status >= http.StatusInternalServerError {
-		requestID = newRequestID()
-		log.Printf("api: %s %s: request %s: %v", c.Request().Method, c.Path(), requestID, err)
+		logger, ok := c.Get("logger").(*slog.Logger)
+		if !ok || logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("API request failed", "method", c.Request().Method, "path", c.Path(), "request_id", requestID, "operation_id", operationID(c.Request().Context()), "error", err)
 	}
 
 	_ = c.JSON(publicError.status, errorResponse{Error: errorBody{
@@ -55,14 +56,6 @@ func errorHandler(err error, c echo.Context) {
 		Message:   publicError.message,
 		RequestID: requestID,
 	}})
-}
-
-func newRequestID() string {
-	value := make([]byte, 8)
-	if _, err := rand.Read(value); err != nil {
-		return "unknown"
-	}
-	return hex.EncodeToString(value)
 }
 
 func publicAPIError(err error) *apiError {

@@ -3,7 +3,6 @@ package firecracker
 import (
 	"context"
 	"fmt"
-	"log"
 	"path/filepath"
 	"time"
 
@@ -53,7 +52,7 @@ func (d *Driver) buildMemorySnapshot(
 	}
 	defer func() {
 		if err := machine.Destroy(context.WithoutCancel(ctx)); err != nil {
-			log.Printf("firecracker: remove warmup vm %s: %v", virtualMachineID, err)
+			d.logger.Error("remove warmup VM failed", "virtual_machine_id", virtualMachineID, "error", err)
 		}
 	}()
 

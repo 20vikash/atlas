@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"syscall"
 	"time"
@@ -55,7 +54,7 @@ func (m *machine) startUnlocked(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		log.Printf("firecracker: warm boot for vm %s failed, use cold boot: %v", m.cfg.ID, err)
+		m.d.logger.Warn("warm boot failed, using cold boot", "virtual_machine_id", m.cfg.ID, "error", err)
 		if err := m.d.virtualMachineStorage.Release(ctx, m.cfg.ID); err != nil {
 			return err
 		}
@@ -73,7 +72,7 @@ func (m *machine) startUnlocked(ctx context.Context) error {
 
 func (m *machine) recordImageUse() {
 	if err := m.d.imageStore.RecordImageUse(m.cfg.Spec.Image.Name, time.Now()); err != nil {
-		log.Printf("firecracker: record image use for vm %s: %v", m.cfg.ID, err)
+		m.d.logger.Error("record image use failed", "virtual_machine_id", m.cfg.ID, "error", err)
 	}
 }
 

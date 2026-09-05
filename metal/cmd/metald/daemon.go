@@ -1,0 +1,140 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const gracefulShutdownTimeout = 30 * time.Second
+
+type daemonHTTPServer interface {
+	Start(address string) error
+	Shutdown(context.Context) error
+}
+
+type snapshotUploadOwner interface {
+	Shutdown(context.Context) error
+}
+
+type consoleSessionOwner interface {
+	Shutdown()
+}
+
+type systemdConnection interface {
+	Close()
+}
+
+type daemon struct {
+	context          context.Context
+	cancel           context.CancelFunc
+	logger           *slog.Logger
+	snapshotUploads  snapshotUploadOwner
+	consoleSessions  consoleSessionOwner
+	systemd          systemdConnection
+	workers          sync.WaitGroup
+	httpServer       daemonHTTPServer
+	httpServerErrors chan error
+}
+
+func newDaemon(
+	daemonContext context.Context,
+	cancel context.CancelFunc,
+	logger *slog.Logger,
+	snapshotUploads snapshotUploadOwner,
+	consoleSessions consoleSessionOwner,
+	systemd systemdConnection,
+) *daemon {
+	return &daemon{
+		context:         daemonContext,
+		cancel:          cancel,
+		logger:          logger,
+		snapshotUploads: snapshotUploads,
+		consoleSessions: consoleSessions,
+		systemd:         systemd,
+	}
+}
+
+// StartWorker starts one daemon-owned background worker.
+func (daemon *daemon) StartWorker(run func(context.Context)) {
+	daemon.workers.Add(1)
+	go func() {
+		defer daemon.workers.Done()
+		run(daemon.context)
+	}()
+}
+
+// Serve runs the HTTP server until it stops or the daemon receives a signal.
+func (daemon *daemon) Serve(server daemonHTTPServer) error {
+	daemon.httpServer = server
+	daemon.httpServerErrors = make(chan error, 1)
+	go func() { daemon.httpServerErrors <- server.Start("") }()
+
+	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	select {
+	case err := <-daemon.httpServerErrors:
+		daemon.httpServer = nil
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case <-signalContext.Done():
+		daemon.logger.Info("metald shutdown requested")
+		return nil
+	}
+}
+
+// Shutdown stops daemon work without stopping guest virtual machines.
+func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
+	var shutdownErrors []error
+	if daemon.httpServer != nil {
+		if err := daemon.httpServer.Shutdown(shutdownContext); err != nil && err != http.ErrServerClosed {
+			shutdownErrors = append(shutdownErrors, fmt.Errorf("shut down HTTP server: %w", err))
+		}
+	}
+
+	daemon.cancel()
+	if err := waitForGroup(shutdownContext, &daemon.workers); err != nil {
+		shutdownErrors = append(shutdownErrors, fmt.Errorf("wait for reconcilers: %w", err))
+	}
+	if err := daemon.snapshotUploads.Shutdown(shutdownContext); err != nil {
+		shutdownErrors = append(shutdownErrors, err)
+	}
+	daemon.consoleSessions.Shutdown()
+	daemon.systemd.Close()
+
+	if daemon.httpServer != nil {
+		select {
+		case err := <-daemon.httpServerErrors:
+			if err != nil && err != http.ErrServerClosed {
+				shutdownErrors = append(shutdownErrors, fmt.Errorf("serve HTTP: %w", err))
+			}
+		case <-shutdownContext.Done():
+			shutdownErrors = append(shutdownErrors, fmt.Errorf("wait for HTTP server: %w", shutdownContext.Err()))
+		}
+	}
+	daemon.logger.Info("metald stopped")
+	return errors.Join(shutdownErrors...)
+}
+
+func waitForGroup(waitContext context.Context, workers *sync.WaitGroup) error {
+	finished := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+		return nil
+	case <-waitContext.Done():
+		return waitContext.Err()
+	}
+}

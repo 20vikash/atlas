@@ -76,7 +76,7 @@ func newDriver(t *testing.T) *Driver {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { units.Close() })
-	stores := storage.NewStores(env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"))
+	stores := storage.NewStores(t.Context(), env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"), nil)
 	consoleBroker := console.NewBroker(t.TempDir())
 	t.Cleanup(consoleBroker.Shutdown)
 	return New(
@@ -87,6 +87,7 @@ func newDriver(t *testing.T) *Driver {
 		stores.Snapshots,
 		network.NewLinuxAllocator(integrationMesh(t)),
 		consoleBroker,
+		nil,
 	)
 }
 

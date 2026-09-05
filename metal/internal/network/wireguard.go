@@ -9,11 +9,11 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/frappe/atlas/metal/internal/atomicfile"
 	"github.com/frappe/atlas/metal/internal/hostcmd"
 )
 
@@ -234,46 +234,7 @@ func saveWireGuardPeers(path string, peers []WireGuardPeer) error {
 	}
 	data = append(data, '\n')
 
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o750); err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(directory, ".wireguard-peers-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := file.Name()
-	defer os.Remove(temporaryPath)
-
-	if err := writeWireGuardPeerFile(file, data); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-
-	directoryFile, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	defer directoryFile.Close()
-	return directoryFile.Sync()
-}
-
-func writeWireGuardPeerFile(file *os.File, data []byte) error {
-	if err := file.Chmod(0o600); err != nil {
-		file.Close()
-		return err
-	}
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return err
-	}
-	return file.Close()
+	return atomicfile.Write(path, data, 0o600)
 }
 
 // wireGuardCommands runs host network commands.

@@ -2,7 +2,7 @@ package reconciler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/vm"
@@ -33,6 +33,8 @@ type MemorySnapshotBuilder interface {
 
 // ImageConfig controls image reconciliation.
 type ImageConfig struct {
+	// Logger receives image reconciliation errors.
+	Logger              *slog.Logger
 	OperationTimeout    time.Duration
 	ImageMaximumIdle    time.Duration
 	SnapshotMaximumIdle time.Duration
@@ -48,6 +50,7 @@ type ImageReconciler struct {
 	imageMaximumIdle    time.Duration
 	snapshotMaximumIdle time.Duration
 	wake                chan struct{}
+	logger              *slog.Logger
 }
 
 // NewImageReconciler returns an image reconciler.
@@ -67,6 +70,9 @@ func NewImageReconciler(
 	if configuration.SnapshotMaximumIdle <= 0 {
 		configuration.SnapshotMaximumIdle = defaultSnapshotMaximumIdle
 	}
+	if configuration.Logger == nil {
+		configuration.Logger = slog.Default()
+	}
 	return &ImageReconciler{
 		imageStore:          imageStore,
 		snapshotStore:       snapshotStore,
@@ -76,6 +82,7 @@ func NewImageReconciler(
 		imageMaximumIdle:    configuration.ImageMaximumIdle,
 		snapshotMaximumIdle: configuration.SnapshotMaximumIdle,
 		wake:                make(chan struct{}, 1),
+		logger:              configuration.Logger,
 	}
 }
 
@@ -151,6 +158,6 @@ func (reconciler *ImageReconciler) reconcileImage(ctx context.Context, image vm.
 
 func (reconciler *ImageReconciler) logError(ctx context.Context, operation string, err error) {
 	if ctx.Err() == nil {
-		log.Printf("image reconciler: %s: %v", operation, err)
+		reconciler.logger.Error("image reconciliation failed", "operation", operation, "error", err)
 	}
 }

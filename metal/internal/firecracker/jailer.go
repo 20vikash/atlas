@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/frappe/atlas/metal/internal/atomicfile"
 )
 
 // apiSockRel is the firecracker API socket path relative to the chroot root.
@@ -63,5 +65,5 @@ func (c Config) jailerArgs(id string, uid, gid uint32, netns string) []string {
 // word-splits $JAILER_ARGS in ExecStart, so the args must not contain spaces.
 func (c Config) writeJailerEnv(id string, arguments []string) error {
 	line := "JAILER_ARGS=" + strings.Join(arguments, " ") + "\n"
-	return atomicWriteFile(filepath.Join(c.vmDir(id), "jailer.env"), []byte(line), 0o640)
+	return atomicfile.Write(filepath.Join(c.vmDir(id), "jailer.env"), []byte(line), 0o640)
 }

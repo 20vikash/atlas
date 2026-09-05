@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/frappe/atlas/metal/internal/atomicfile"
 	"github.com/frappe/atlas/metal/internal/idalloc"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -71,7 +72,7 @@ func (c Config) writeStatus(id string, state vm.State, reconcileErr error) error
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(c.statusPath(id), b, 0o640)
+	return atomicfile.Write(c.statusPath(id), b, 0o640)
 }
 
 func (c Config) readStatus(id string) (vmStatus, bool) {
@@ -91,50 +92,7 @@ func (c Config) writeVMConfig(configuration vmConfig) error {
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(c.configPath(configuration.ID), data, 0o640)
-}
-
-func atomicWriteFile(path string, data []byte, mode fs.FileMode) error {
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o750); err != nil {
-		return err
-	}
-
-	temporaryFile, err := os.CreateTemp(directory, "."+filepath.Base(path)+"-*")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporaryFile.Name()
-	defer func() {
-		_ = temporaryFile.Close()
-		_ = os.Remove(temporaryPath)
-	}()
-
-	if err := temporaryFile.Chmod(mode); err != nil {
-		return err
-	}
-	if _, err := temporaryFile.Write(data); err != nil {
-		return err
-	}
-	if err := temporaryFile.Sync(); err != nil {
-		return err
-	}
-	if err := temporaryFile.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	return syncDirectory(directory)
-}
-
-func syncDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return atomicfile.Write(c.configPath(configuration.ID), data, 0o640)
 }
 
 func (c Config) readVMConfig(id string) (vmConfig, error) {

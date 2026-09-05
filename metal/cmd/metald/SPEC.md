@@ -37,7 +37,7 @@ load configuration
    -> listen and serve
 ```
 
-The storage constructor is `storage.NewStores(pool, imagesDirectory)`. It returns the pool, VM, image, and snapshot stores.
+The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
 
 The network constructor is `network.NewLinuxAllocator(mesh)`. `NewMesh` checks that the CLI exists, so metald fails before it starts anything when Atlas WG Mesh is absent. The Firecracker driver receives separate VM, image, and snapshot dependencies.
 
@@ -65,6 +65,10 @@ See `config.example.toml` for the complete file format.
 ## Runtime loops
 
 The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data.
+
+The daemon owns both reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for uploads, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
+
+The daemon writes structured JSON logs. Log records include request and operation correlation fields when the operation comes from the API.
 
 ## Related
 

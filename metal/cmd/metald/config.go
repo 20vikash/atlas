@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
@@ -123,7 +122,6 @@ func applyFile(o *opts, path string) error {
 	overlay(&o.wireGuardName, fc.WireGuard.Interface)
 	overlay(&o.mesh.binaryPath, fc.WGMesh.BinaryPath)
 	overlay(&o.mesh.uplinkName, fc.WGMesh.Uplink)
-	log.Printf("loaded config from %s", path)
 	return nil
 }
 
