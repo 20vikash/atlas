@@ -146,17 +146,13 @@ func (s *Server) getHostCapacity(ctx context.Context) (capacityResponse, error) 
 }
 
 func (s *Server) getComputeCapacity(ctx context.Context) (availableCPUCount, availableMemoryMiB, virtualMachineCount int, err error) {
-	virtualMachines, err := s.virtualMachineDriver.List(ctx)
+	virtualMachines, err := s.virtualMachineManager.List(ctx)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
 	allocatedCPUCount := 0
-	for _, machine := range virtualMachines {
-		information, err := machine.Info(ctx)
-		if err != nil {
-			return 0, 0, 0, err
-		}
+	for _, information := range virtualMachines {
 		allocatedCPUCount += information.VCPUs
 	}
 

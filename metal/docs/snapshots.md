@@ -77,8 +77,8 @@ The key includes the image reference, architecture, image digests, VM shape, and
 ## Flow across packages
 
 ```text
-api -> firecracker driver -> snapshot store -> HTTP object upload
-sync -> image reconciler -> firecracker driver -> image store -> local warm cache
+api -> VM manager -> snapshot store -> HTTP object upload
+sync -> image reconciler -> warm image builder -> image store -> local warm cache
 ```
 
 The public flow creates an image transfer. The internal flow creates a local boot optimization.

@@ -17,6 +17,8 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/atomicfile"
 	"github.com/frappe/atlas/metal/internal/hostcmd"
+	"github.com/frappe/atlas/metal/internal/vm"
+	"github.com/google/uuid"
 )
 
 // SnapshotPartSizeBytes is the fixed multipart upload size.
@@ -102,6 +104,24 @@ type stagedSnapshotMetadata struct {
 	UploadState  string                `json:"upload_state,omitempty"`
 	UploadError  string                `json:"upload_error,omitempty"`
 	UploadResult *SnapshotUploadResult `json:"upload_result,omitempty"`
+}
+
+// Stage creates a staged snapshot for the VM manager.
+func (store *SnapshotStore) Stage(ctx context.Context, request vm.SnapshotRequest) (vm.StagedSnapshot, error) {
+	snapshotID, err := uuid.NewV7()
+	if err != nil {
+		return vm.StagedSnapshot{}, fmt.Errorf("generate snapshot identifier: %w", err)
+	}
+	staged, err := store.StageSnapshot(ctx, request.VirtualMachineID, snapshotID.String(), request.ImageReference)
+	if err != nil {
+		return vm.StagedSnapshot{}, err
+	}
+	return vm.StagedSnapshot{
+		ID:                     staged.ID,
+		SourceVirtualMachineID: staged.SourceVirtualMachineID,
+		RootfsSizeBytes:        staged.Rootfs.SizeBytes,
+		KernelSizeBytes:        staged.Kernel.SizeBytes,
+	}, nil
 }
 
 // StageSnapshot creates a stable root file system clone and kernel link.

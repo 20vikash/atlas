@@ -60,7 +60,7 @@ func (s *Server) resumeVirtualMachine(c echo.Context) error {
 // @Failure	404	{object}	errorResponse
 // @Router		/vms/{id}/actions/terminate [post]
 func (s *Server) terminateVirtualMachine(c echo.Context) error {
-	if err := s.virtualMachineDriver.SetDesiredState(c.Request().Context(), c.Param("id"), vm.StateDestroyed); err != nil {
+	if err := s.virtualMachineManager.SetDesiredState(c.Request().Context(), c.Param("id"), vm.StateDestroyed); err != nil {
 		return err
 	}
 
@@ -76,14 +76,15 @@ func (s *Server) terminateVirtualMachine(c echo.Context) error {
 // @Failure	409	{object}	errorResponse
 // @Router		/vms/{id}/actions/reboot [post]
 func (s *Server) rebootVirtualMachine(c echo.Context) error {
-	if err := s.virtualMachineDriver.Reboot(c.Request().Context(), c.Param("id")); err != nil {
+	if err := s.virtualMachineManager.RequestRestart(c.Request().Context(), c.Param("id")); err != nil {
 		return err
 	}
+	s.wakeReconciler()
 	return c.NoContent(http.StatusAccepted)
 }
 
 func (s *Server) setDesiredState(c echo.Context, desiredState vm.State) error {
-	if err := s.virtualMachineDriver.SetDesiredState(c.Request().Context(), c.Param("id"), desiredState); err != nil {
+	if err := s.virtualMachineManager.SetDesiredState(c.Request().Context(), c.Param("id"), desiredState); err != nil {
 		return err
 	}
 

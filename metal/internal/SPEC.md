@@ -12,8 +12,8 @@ The `vm` package defines the contracts. The other packages implement or consume 
 
 | Package | Role |
 |---|---|
-| [vm](vm/SPEC.md) | VM interfaces and value types. |
-| [firecracker](firecracker/SPEC.md) | Firecracker VM implementation and desired-state operations. |
+| [vm](vm/SPEC.md) | VM manager, records, reconciliation, interfaces, and value types. |
+| [firecracker](firecracker/SPEC.md) | Firecracker runtime and warm image builder. |
 | [firecracker/api](firecracker/api/SPEC.md) | Firecracker REST client over a Unix socket. |
 | [api](api/SPEC.md) | Authenticated HTTP API. |
 | [reconciler](../docs/architecture.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
@@ -27,14 +27,14 @@ The `vm` package defines the contracts. The other packages implement or consume 
 
 ```text
 cmd/metald
-   ├─ api -> vm
-   ├─ reconciler -> vm
-   ├─ firecracker -> vm, storage, network, systemd, idalloc, firecracker/api
+   ├─ api -> vm.Manager
+   ├─ reconciler -> vm.Manager
+   ├─ firecracker -> vm, storage, systemd, firecracker/api
    ├─ storage -> vm, hostcmd
    └─ network -> vm, hostcmd
 ```
 
-Consumer packages define their interfaces. The `vm` package contains the public VM driver and VM contracts.
+The `vm` package defines small host service interfaces. The `vm.Manager` owns VM state and operations.
 
 ## Related
 

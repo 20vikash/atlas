@@ -103,8 +103,8 @@ func TestPauseStoppedVirtualMachineReturnsConflict(t *testing.T) {
 	units := &stubUnits{}
 	units.shutdown()
 	machine := &machine{
-		d:   &Driver{units: units, operationLocks: operationLocks{}},
-		cfg: vmConfig{ID: "vm-1"},
+		d:     &Runtime{units: units},
+		input: vm.RuntimeMachine{ID: "vm-1"},
 	}
 
 	if err := machine.Pause(context.Background()); err != vm.ErrConflict {

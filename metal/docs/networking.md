@@ -40,7 +40,7 @@ For `uplink` and `mesh`, Metal derives one transit `/30` from the VM user ID. Th
 
 `uplink` adds a default route and namespace NAT. Host setup adds uplink NAT for the transit range.
 
-`Allocate` is idempotent when the namespace already exists. `Release` removes public IPv4 rules before it removes the namespace.
+`Ensure` makes the complete host network agree with the desired state. `Release` removes public IPv4 rules before it removes the namespace.
 
 ## Public IPv4
 

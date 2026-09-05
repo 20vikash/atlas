@@ -200,8 +200,8 @@ func (request networkRequest) validate() error {
 	return nil
 }
 
-func (request networkRequest) spec() vm.Network {
-	return vm.Network{
+func (request networkRequest) spec() vm.NetworkConfiguration {
+	return vm.NetworkConfiguration{
 		PublicIPv4:                    request.PublicIPv4,
 		WireGuardMeshIPv6:             request.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: request.PrivateNetworkThroughputMiBps,

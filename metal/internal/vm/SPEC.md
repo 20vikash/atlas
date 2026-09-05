@@ -1,76 +1,76 @@
-# vm: virtual machine contract
+# vm: virtual machine manager
 
 [internal SPEC](../SPEC.md) · overview: [docs/vm.md](../../docs/vm.md)
 
 ## Purpose
 
-Package `vm` defines hypervisor-independent VM interfaces and value types. It owns no runtime state.
+Package `vm` owns the desired state, the observed state, and VM reconciliation. It uses host services through small interfaces.
 
 ## Types
 
 | Type | Role |
 |---|---|
-| `Driver` | Reserve, load, list, resize, and set desired VM state. |
-| `VM` | Operate one VM and read its observed information. |
-| `Spec` | CPU, memory, disk, image, network, SSH, hostname, and user data. |
-| `ImageRef` | Immutable image identity, transport data, and local cache policy. |
-| `Info` | Observed state, desired state, resource data, image data, and network data. |
-| `State` | `unknown`, `created`, `running`, `paused`, `stopped`, `failed`, or `destroyed`. |
-| `ExitStatus` | Process exit code and signal. |
+| `Manager` | Owns VM records, locks, operations, reconciliation, and cleanup. |
+| `DesiredRecord` | Stores the version, reservation, fingerprint, generations, state, and complete specification. |
+| `ObservedRecord` | Stores applied generations, state, phase, error, resource data, and cleanup progress. |
+| `Runtime` | Controls the VM process and guest operations. |
+| `Network` | Makes the complete host network agree with the desired state. |
+| `Storage` | Gives disk usage, disk growth, and disk release operations. |
+| `Snapshots` | Stages a root file system and a kernel. |
+| `Spec` | Contains compute, disk, image, network, and guest data. |
+| `Info` | Combines safe desired data and observed data for consumers. |
 
-## Driver boundary
+The daemon creates one `Manager`. A temporary `machine` value does not keep a record or an API client.
+
+## Records
 
 ```text
-Create
-Load
-List
-SetDesiredState
-ReplaceSSHKeys
-ResizeCompute
+machines/<id>/config.json   desired state
+machines/<id>/status.json   observed state
 ```
 
-`Create` accepts a controller-supplied ID. Repeat create calls can refresh image transport and cache fields when reservation identity is unchanged.
+Both records use schema version `1`. The manager rejects unknown fields, extra JSON values, invalid states, and unsupported versions.
 
-## VM
+The daemon does a check of all records during startup. It does not change or remove an incompatible record.
+
+The create fingerprint is a SHA-256 value. It does not include signed image URLs.
+
+The desired generation increases only when desired data changes. The restart generation increases for each accepted restart request.
+
+## Reconciliation
 
 ```text
+desired running   -> Start or Resume
+desired paused    -> Start when necessary, then Pause
+desired stopped   -> Stop
+desired destroyed -> Remove runtime -> Release network -> Release storage
+```
+
+The manager stores the phase and operation ID before each host operation. A failure record has a safe message and local detail.
+
+Runtime, network, and storage cleanup have separate progress values. The manager removes the VM directory after all cleanup operations succeed.
+
+## Runtime boundary
+
+The `Runtime` interface has these operations:
+
+```text
+Inspect
 Start
 Stop
 Pause
 Resume
-Destroy
-Wait
-ResizeDisk
-Info
+Remove
+RefreshMetadata
+RefreshDisk
+ConnectSSH
 ```
 
-Snapshot creation is a driver service in the Firecracker package. It is not part of the hypervisor-independent VM handle.
-
-## State machine
-
-The API stores a desired state. The reconciler compares it with the observed state and calls the required VM operation.
-
-```text
-desired running   -> Start or Resume
-desired paused    -> Start when required, then Pause
-desired stopped   -> Stop
-desired destroyed -> Destroy and remove the reservation
-```
-
-A repeated request for the current desired state is valid.
-
-## Snapshots and images
-
-The VM package does not provide image list or delete operations. Images enter through VM reservations and controller sync policy.
-
-`cache_image` retains compatible image artifacts. `memory_snapshot` requests an exact-shape host-local warm artifact when caching is enabled.
-
-## scripts/
-
-Host setup scripts live in `metal/scripts/`. They create required host services and ZFS parent datasets.
+The runtime does not own VM records, network identities, reconciliation, or cleanup progress.
 
 ## Related
 
-- [docs/vm.md](../../docs/vm.md) describes VM behavior.
-- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) implements these contracts.
-- [internal/storage/SPEC.md](../storage/SPEC.md) and [internal/network/SPEC.md](../network/SPEC.md) describe host resources.
+- [docs/vm.md](../../docs/vm.md) gives the VM lifecycle.
+- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) describes the Firecracker runtime.
+- [internal/storage/SPEC.md](../storage/SPEC.md) describes disks and snapshots.
+- [internal/network/SPEC.md](../network/SPEC.md) describes host networks.

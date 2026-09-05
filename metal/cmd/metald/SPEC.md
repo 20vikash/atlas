@@ -30,8 +30,8 @@ load configuration
    -> create storage stores
    -> create the WireGuard manager
    -> connect Atlas WG Mesh and configure the host
-   -> create the Firecracker driver
-   -> restore VM mesh registrations
+   -> create the Firecracker runtime
+   -> validate all VM records and create the VM manager
    -> start the VM and image reconcilers
    -> create the authenticated API
    -> listen and serve
@@ -39,9 +39,9 @@ load configuration
 
 The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
 
-The network constructor is `network.NewLinuxAllocator(mesh)`. `NewMesh` checks that the CLI exists, so metald fails before it starts anything when Atlas WG Mesh is absent. The Firecracker driver receives separate VM, image, and snapshot dependencies.
+The network constructor is `network.NewLinuxAllocator(mesh)`. The VM manager receives the runtime, network, disk, and snapshot services.
 
-`connectMesh` runs on every start. It runs `atlas-wg-mesh status`, and configures the host when the CLI reports no configuration. `RestoreNetworks` then replays each non-destroyed VM network, so a reinstalled or reset host recovers its VM mesh registrations without an operator.
+`connectMesh` runs on every start. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 
 `wg_mesh.uplink` has no default. The Atlas WG Mesh uplink hook consumes discovery traffic for every VLAN under the interface it attaches to, so a parent interface silently blackholes discovery for its own VLANs. Only the controller knows which interface carries discovery, so metald requires the name.
 
@@ -74,5 +74,5 @@ The daemon writes structured JSON logs. Log records include request and operatio
 
 - [docs/architecture.md](../../docs/architecture.md) describes the runtime graph.
 - [internal/api/SPEC.md](../../internal/api/SPEC.md) describes the server.
-- [internal/firecracker/SPEC.md](../../internal/firecracker/SPEC.md) describes the driver.
+- [internal/firecracker/SPEC.md](../../internal/firecracker/SPEC.md) describes the runtime.
 - [docs/testing.md](../../docs/testing.md) describes host setup.

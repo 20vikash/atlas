@@ -8,7 +8,7 @@ Package `idalloc` supplies one host user ID for each virtual machine from `[1000
 
 ## Stateless allocation
 
-`idalloc` keeps no table. The Firecracker driver scans persisted VM configurations before allocation. A mutex protects concurrent reservations.
+`idalloc` keeps no table. The VM manager scans desired records before allocation. A mutex protects concurrent reservations.
 
 ```text
 Create in internal/firecracker:

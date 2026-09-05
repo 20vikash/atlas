@@ -11,79 +11,85 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+type temporaryMachineRunner interface {
+	RunTemporary(context.Context, string, vm.Spec, func(vm.RuntimeMachine) error) error
+}
+
+// MemorySnapshotBuilder creates local warm image artifacts.
+type MemorySnapshotBuilder struct {
+	machines    temporaryMachineRunner
+	runtime     *Runtime
+	images      imageStore
+	warmupDelay time.Duration
+}
+
+// NewMemorySnapshotBuilder returns a warm image builder.
+func NewMemorySnapshotBuilder(machines temporaryMachineRunner, runtime *Runtime, images imageStore) *MemorySnapshotBuilder {
+	return &MemorySnapshotBuilder{
+		machines: machines, runtime: runtime, images: images,
+		warmupDelay: 5 * time.Minute,
+	}
+}
+
 // EnsureMemorySnapshot builds the requested local memory snapshot when needed.
-func (d *Driver) EnsureMemorySnapshot(ctx context.Context, image vm.ImageRef) error {
+func (builder *MemorySnapshotBuilder) EnsureMemorySnapshot(ctx context.Context, image vm.ImageRef) error {
 	configuration := image.MemorySnapshotConfiguration
 	if !image.CacheImage || !image.MemorySnapshot || configuration == nil {
 		return nil
 	}
-	if err := d.imageStore.EnsureImage(ctx, image); err != nil {
+	if err := builder.images.EnsureImage(ctx, image); err != nil {
 		return err
 	}
-
-	compatibility := d.firecrackerCompatibility()
+	compatibility := builder.runtime.firecrackerCompatibility()
 	key := storage.WarmImageKey(image, *configuration, compatibility)
-	if err := d.imageStore.RemoveOtherWarmImages(ctx, image.Name, key); err != nil {
+	if err := builder.images.RemoveOtherWarmImages(ctx, image.Name, key); err != nil {
 		return err
 	}
-	if _, found, err := d.imageStore.WarmImage(ctx, image, *configuration, compatibility); err != nil || found {
+	if _, found, err := builder.images.WarmImage(ctx, image, *configuration, compatibility); err != nil || found {
 		return err
 	}
-
-	return d.buildMemorySnapshot(ctx, image, *configuration, compatibility, key)
+	return builder.build(ctx, image, *configuration, compatibility, key)
 }
 
-func (d *Driver) buildMemorySnapshot(
+func (builder *MemorySnapshotBuilder) build(
 	ctx context.Context,
 	image vm.ImageRef,
 	configuration vm.MemorySnapshotConfiguration,
 	compatibility string,
 	key string,
 ) error {
-	virtualMachineID := "warm-" + key[:32]
-	specification := warmupSpecification(image, configuration)
-	virtualMachine, err := d.Create(ctx, virtualMachineID, specification)
-	if err != nil {
-		return fmt.Errorf("create warmup virtual machine: %w", err)
-	}
-	machine, ok := virtualMachine.(*machine)
-	if !ok {
-		return fmt.Errorf("create warmup virtual machine: unexpected driver result")
-	}
-	defer func() {
-		if err := machine.Destroy(context.WithoutCancel(ctx)); err != nil {
-			d.logger.Error("remove warmup VM failed", "virtual_machine_id", virtualMachineID, "error", err)
+	identifier := "warm-" + key[:32]
+	return builder.machines.RunTemporary(ctx, identifier, warmupSpecification(image, configuration), func(machine vm.RuntimeMachine) error {
+		if err := waitForWarmup(ctx, builder.warmupDelay); err != nil {
+			return err
 		}
-	}()
+		if err := builder.runtime.Pause(ctx, machine); err != nil {
+			return fmt.Errorf("pause warmup virtual machine: %w", err)
+		}
+		return builder.capture(ctx, machine, image, configuration, compatibility)
+	})
+}
 
-	if err := d.Reconcile(ctx, virtualMachineID); err != nil {
-		return fmt.Errorf("start warmup virtual machine: %w", err)
-	}
-	if err := waitForWarmup(ctx, d.warmupDelay); err != nil {
-		return err
-	}
-	if err := machine.Pause(ctx); err != nil {
-		return fmt.Errorf("pause warmup virtual machine: %w", err)
-	}
-
+func (builder *MemorySnapshotBuilder) capture(
+	ctx context.Context,
+	machine vm.RuntimeMachine,
+	image vm.ImageRef,
+	configuration vm.MemorySnapshotConfiguration,
+	compatibility string,
+) error {
 	const snapshotName = "warm"
-	if err := d.imageStore.CreateWarmSourceSnapshot(ctx, virtualMachineID, snapshotName); err != nil {
+	if err := builder.images.CreateWarmSourceSnapshot(ctx, machine.ID, snapshotName); err != nil {
 		return fmt.Errorf("snapshot warmup disk: %w", err)
 	}
-	defer d.imageStore.DeleteWarmSourceSnapshot(context.WithoutCancel(ctx), virtualMachineID, snapshotName)
-
-	stateFile, memoryFile, err := d.createWarmupMemoryFiles(ctx, machine, virtualMachineID)
+	defer builder.images.DeleteWarmSourceSnapshot(context.WithoutCancel(ctx), machine.ID, snapshotName)
+	stateFile, memoryFile, err := builder.runtime.CreateMemorySnapshot(ctx, machine)
 	if err != nil {
 		return err
 	}
-	_, err = d.imageStore.PromoteWarmSnapshot(ctx, storage.WarmImagePromotion{
-		Image:                    image,
-		Configuration:            configuration,
-		FirecrackerCompatibility: compatibility,
-		SourceVirtualMachineID:   virtualMachineID,
-		SourceSnapshotName:       snapshotName,
-		StateFile:                stateFile,
-		MemoryFile:               memoryFile,
+	_, err = builder.images.PromoteWarmSnapshot(ctx, storage.WarmImagePromotion{
+		Image: image, Configuration: configuration, FirecrackerCompatibility: compatibility,
+		SourceVirtualMachineID: machine.ID, SourceSnapshotName: snapshotName,
+		StateFile: stateFile, MemoryFile: memoryFile,
 	})
 	if err != nil {
 		return fmt.Errorf("store warm image: %w", err)
@@ -91,20 +97,14 @@ func (d *Driver) buildMemorySnapshot(
 	return nil
 }
 
-func (d *Driver) createWarmupMemoryFiles(
-	ctx context.Context,
-	machine *machine,
-	virtualMachineID string,
-) (string, string, error) {
-	directory := filepath.Join(d.cfg.chrootRoot(virtualMachineID), "warm")
-	if err := mkdirChown(directory, machine.cfg.UID, machine.cfg.GID); err != nil {
+// CreateMemorySnapshot writes Firecracker state and memory files.
+func (runtime *Runtime) CreateMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine) (string, string, error) {
+	directory := filepath.Join(runtime.configuration.chrootRoot(machine.ID), "warm")
+	if err := mkdirChown(directory, machine.UserID, machine.GroupID); err != nil {
 		return "", "", err
 	}
-
-	if err := machine.api.CreateSnapshot(ctx, api.CreateSnapshotRequest{
-		SnapshotType: "Full",
-		SnapshotPath: "warm/state",
-		MemoryFile:   "warm/memory",
+	if err := api.New(runtime.configuration.sockPath(machine.ID)).CreateSnapshot(ctx, api.CreateSnapshotRequest{
+		SnapshotType: "Full", SnapshotPath: "warm/state", MemoryFile: "warm/memory",
 	}); err != nil {
 		return "", "", fmt.Errorf("create warmup memory snapshot: %w", err)
 	}
@@ -115,11 +115,9 @@ func warmupSpecification(image vm.ImageRef, configuration vm.MemorySnapshotConfi
 	image.MemorySnapshot = false
 	image.MemorySnapshotConfiguration = nil
 	return vm.Spec{
-		VCPUs:     configuration.VirtualCPUCount,
-		MemoryMiB: configuration.MemoryMiB,
-		DiskMiB:   configuration.DiskMiB,
-		Image:     image,
-		Network:   vm.Network{Egress: vm.EgressNone},
+		VCPUs: configuration.VirtualCPUCount, MemoryMiB: configuration.MemoryMiB,
+		DiskMiB: configuration.DiskMiB, Image: image,
+		Network: vm.NetworkConfiguration{Egress: vm.EgressNone},
 	}
 }
 

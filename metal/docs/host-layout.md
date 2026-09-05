@@ -25,8 +25,8 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 ├── wireguard-peers.json            atomically saved managed peer set
 └── machines/                       derived from metald.base_dir
     └── <id>/                       one directory for each VM ID
-        ├── config.json             reservation, desired state, and cleanup progress
-        ├── status.json             observed state and reconciliation error
+        ├── config.json             versioned reservation and desired state
+        ├── status.json             versioned observed state and cleanup progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
         └── firecracker/            the executable name that jailer appends
             └── <id>/

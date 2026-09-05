@@ -46,7 +46,4 @@ type Drive struct {
 }
 
 // Usage describes disk allocation.
-type Usage struct {
-	SizeMiB int
-	UsedMiB int
-}
+type Usage = vm.DiskUsage

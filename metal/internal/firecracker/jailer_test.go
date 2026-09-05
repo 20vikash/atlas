@@ -2,7 +2,6 @@ package firecracker
 
 import (
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -27,7 +26,7 @@ func TestLayout(t *testing.T) {
 		t.Errorf("chrootSockPath = %q", got)
 	}
 	if !strings.HasPrefix(c.chrootRoot("abc"), c.vmDir("abc")+"/") {
-		t.Error("the chroot is outside the VM dir, so Destroy would leave it behind")
+		t.Error("the chroot is outside the VM directory")
 	}
 }
 
@@ -94,35 +93,5 @@ func TestJailerEnv(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(b), "JAILER_ARGS=--id abc ") {
 		t.Errorf("env = %q", b)
-	}
-}
-
-func TestVMConfigRoundtrip(t *testing.T) {
-	c := testConfig(t.TempDir())
-	vc := vmConfig{ID: "abc", UID: 100000, GID: 100000, IP: "172.16.0.2", MAC: "02:aa:bb:cc:dd:ee", Sock: "/s"}
-	if err := c.writeVMConfig(vc); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.readVMConfig("abc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, vc) {
-		t.Errorf("got %+v, want %+v", got, vc)
-	}
-
-	used, err := c.usedIDs()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !used[100000] {
-		t.Errorf("usedIDs missing 100000: %v", used)
-	}
-}
-
-func TestReadVMConfigNotFound(t *testing.T) {
-	c := testConfig(t.TempDir())
-	if _, err := c.readVMConfig("missing"); err == nil {
-		t.Error("want error for missing config")
 	}
 }

@@ -54,7 +54,7 @@ Wait: poll ActiveState every 500 ms
 
 ## State mapping
 
-The driver derives the VM state from `ActiveState`. `failed` maps to VM `failed`,
+The runtime derives the VM state from `ActiveState`. `failed` maps to VM `failed`,
 `inactive` and `deactivating` map to VM `stopped`, and an active unit is queried
 over the firecracker API for `created`, `paused`, or `running`. Full mapping:
 [internal/firecracker/SPEC.md](../firecracker/SPEC.md).

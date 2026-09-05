@@ -21,7 +21,7 @@ func newRecordingDriver(ids ...string) *recordingDriver {
 	return &recordingDriver{ids: ids, seen: map[string]int{}, done: make(chan string, 16)}
 }
 
-func (d *recordingDriver) IDs(context.Context) ([]string, error) {
+func (d *recordingDriver) ListIDs(context.Context) ([]string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.ids, d.listErr
@@ -103,7 +103,7 @@ type concurrencyDriver struct {
 	maximumObserved int
 }
 
-func (d *concurrencyDriver) IDs(context.Context) ([]string, error) { return d.ids, nil }
+func (d *concurrencyDriver) ListIDs(context.Context) ([]string, error) { return d.ids, nil }
 
 func (d *concurrencyDriver) Reconcile(ctx context.Context, id string) error {
 	d.mutex.Lock()
@@ -171,7 +171,7 @@ type timeoutDriver struct {
 	timedOut chan struct{}
 }
 
-func (d *timeoutDriver) IDs(context.Context) ([]string, error) { return []string{"a"}, nil }
+func (d *timeoutDriver) ListIDs(context.Context) ([]string, error) { return []string{"a"}, nil }
 
 func (d *timeoutDriver) Reconcile(ctx context.Context, _ string) error {
 	<-ctx.Done()

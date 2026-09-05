@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// Driver reconciles virtual machine reservations.
-type Driver interface {
-	IDs(ctx context.Context) ([]string, error)
+// Target lists and reconciles virtual machine records.
+type Target interface {
+	ListIDs(ctx context.Context) ([]string, error)
 	Reconcile(ctx context.Context, id string) error
 }
 
@@ -31,7 +31,7 @@ type Config struct {
 
 // Reconciler runs reconciliation at an interval and on demand.
 type Reconciler struct {
-	driver                  Driver
+	target                  Target
 	interval                time.Duration
 	wake                    chan struct{}
 	maxConcurrentOperations int
@@ -40,7 +40,7 @@ type Reconciler struct {
 }
 
 // New returns a Reconciler with the specified interval.
-func New(driver Driver, interval time.Duration, configuration Config) *Reconciler {
+func New(target Target, interval time.Duration, configuration Config) *Reconciler {
 	if configuration.MaxConcurrentOperations <= 0 {
 		configuration.MaxConcurrentOperations = defaultMaxConcurrentOperations
 	}
@@ -51,7 +51,7 @@ func New(driver Driver, interval time.Duration, configuration Config) *Reconcile
 		configuration.Logger = slog.Default()
 	}
 	return &Reconciler{
-		driver:                  driver,
+		target:                  target,
 		interval:                interval,
 		wake:                    make(chan struct{}, 1),
 		maxConcurrentOperations: configuration.MaxConcurrentOperations,
@@ -85,7 +85,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 
 func (r *Reconciler) reconcileAll(ctx context.Context) {
 	listContext, cancelList := context.WithTimeout(ctx, r.operationTimeout)
-	ids, err := r.driver.IDs(listContext)
+	ids, err := r.target.ListIDs(listContext)
 	cancelList()
 	if err != nil {
 		if ctx.Err() == nil {
@@ -126,7 +126,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 func (r *Reconciler) reconcile(ctx context.Context, id string) {
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
-	if err := r.driver.Reconcile(operationContext, id); err != nil && ctx.Err() == nil {
+	if err := r.target.Reconcile(operationContext, id); err != nil && ctx.Err() == nil {
 		r.logger.Error("virtual machine reconciliation failed", "virtual_machine_id", id, "error", err)
 	}
 }

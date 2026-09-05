@@ -7,21 +7,15 @@ import (
 )
 
 func (m *machine) status(ctx context.Context) (vm.State, error) {
-	unitStatus, err := m.d.units.Status(ctx, m.cfg.ID)
+	unitStatus, err := m.d.units.Status(ctx, m.input.ID)
 	if err != nil {
 		return "", err
 	}
-	return m.state(ctx, unitStatus), nil
+	return m.state(ctx, unitStatus)
 }
 
 // Pause halts the guest virtual CPUs.
 func (m *machine) Pause(ctx context.Context) error {
-	unlock, err := m.d.operationLocks.lock(ctx, m.cfg.ID)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
 	return m.pauseUnlocked(ctx)
 }
 
@@ -38,12 +32,6 @@ func (m *machine) pauseUnlocked(ctx context.Context) error {
 
 // Resume returns a paused guest to the running state.
 func (m *machine) Resume(ctx context.Context) error {
-	unlock, err := m.d.operationLocks.lock(ctx, m.cfg.ID)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
 	return m.resumeUnlocked(ctx)
 }
 

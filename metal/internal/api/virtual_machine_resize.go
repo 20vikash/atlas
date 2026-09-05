@@ -37,10 +37,7 @@ func (s *Server) resizeVirtualMachineCompute(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	information, err := virtualMachine.Info(ctx)
-	if err != nil {
-		return err
-	}
+	information := virtualMachine
 	if information.State != vm.StateStopped {
 		return echo.NewHTTPError(http.StatusConflict, "stop the virtual machine before changing CPU or memory")
 	}
@@ -56,7 +53,7 @@ func (s *Server) resizeVirtualMachineCompute(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "not enough host memory capacity")
 	}
 
-	if err := s.virtualMachineDriver.ResizeCompute(ctx, virtualMachine.ID(), request.VCPUs, request.MemoryMiB); err != nil {
+	if err := s.virtualMachineManager.ResizeCompute(ctx, virtualMachine.ID, request.VCPUs, request.MemoryMiB); err != nil {
 		return err
 	}
 
@@ -91,11 +88,15 @@ func (s *Server) growVirtualMachineDisk(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := virtualMachine.ResizeDisk(c.Request().Context(), request.DiskMiB); err != nil {
+	if err := s.virtualMachineManager.ResizeDisk(c.Request().Context(), virtualMachine.ID, request.DiskMiB); err != nil {
 		return err
 	}
-
-	return s.respondWithVirtualMachine(c, http.StatusAccepted, virtualMachine)
+	s.wakeReconciler()
+	updatedVirtualMachine, err := s.loadVirtualMachine(c)
+	if err != nil {
+		return err
+	}
+	return s.respondWithVirtualMachine(c, http.StatusAccepted, updatedVirtualMachine)
 }
 
 func needsMoreThanAvailable(requested, current, available int) bool {

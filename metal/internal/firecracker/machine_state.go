@@ -2,77 +2,35 @@ package firecracker
 
 import (
 	"context"
-	"maps"
+	"fmt"
 
 	"github.com/frappe/atlas/metal/internal/systemd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-func (m *machine) Info(ctx context.Context) (vm.Info, error) {
-	st, err := m.d.units.Status(ctx, m.cfg.ID)
-	if err != nil {
-		return vm.Info{}, err
-	}
-	info := vm.Info{
-		ID:                            m.cfg.ID,
-		State:                         m.state(ctx, st),
-		DesiredState:                  m.cfg.DesiredState,
-		VCPUs:                         m.cfg.Spec.VCPUs,
-		MemoryMiB:                     m.cfg.Spec.MemoryMiB,
-		DiskMiB:                       m.cfg.Spec.DiskMiB,
-		DiskThroughputMiBps:           m.cfg.Spec.Disk.ThroughputMiBps,
-		DiskIOPS:                      m.cfg.Spec.Disk.IOPS,
-		Image:                         m.cfg.Spec.Image,
-		SSHKeys:                       append([]string(nil), m.cfg.Spec.SSHKeys...),
-		Hostname:                      m.cfg.Spec.Hostname,
-		Metadata:                      maps.Clone(m.cfg.Spec.Metadata),
-		MAC:                           m.cfg.MAC,
-		PublicIPv4:                    m.cfg.Spec.Network.PublicIPv4,
-		WireGuardMeshIPv6:             m.cfg.Spec.Network.WireGuardMeshIPv6,
-		PrivateNetworkThroughputMiBps: m.cfg.Spec.Network.PrivateNetworkThroughputMiBps,
-		PublicNetworkThroughputMiBps:  m.cfg.Spec.Network.PublicNetworkThroughputMiBps,
-		Egress:                        m.cfg.Spec.Network.Egress,
-	}
-
-	if usage, err := m.d.virtualMachineStorage.DiskUsage(ctx, m.cfg.ID); err == nil {
-		if usage.SizeMiB > 0 {
-			info.DiskMiB = usage.SizeMiB
-		}
-		info.DiskUsedMiB = usage.UsedMiB
-	}
-
-	if status, ok := m.d.cfg.readStatus(m.cfg.ID); ok && status.Error != "" {
-		info.Error = status.Error
-		if info.State != vm.StateRunning {
-			info.State = vm.StateFailed
-		}
-	}
-	return info, nil
-}
-
-func (m *machine) state(ctx context.Context, st systemd.Status) vm.State {
-	switch st.ActiveState {
+func (m *machine) state(ctx context.Context, status systemd.Status) (vm.State, error) {
+	switch status.ActiveState {
 	case "failed":
-		return vm.StateFailed
+		return vm.StateFailed, nil
 	case "inactive", "deactivating":
-		return vm.StateStopped
+		return vm.StateStopped, nil
 	case "active":
 	default:
-		return vm.StateUnknown
+		return vm.StateUnknown, nil
 	}
 
 	instance, err := m.api.InstanceInfo(ctx)
 	if err != nil {
-		return vm.StateUnknown
+		return vm.StateUnknown, fmt.Errorf("inspect Firecracker instance: %w", err)
 	}
 	switch instance.State {
 	case "Not started":
-		return vm.StateCreated
+		return vm.StateCreated, nil
 	case "Running":
-		return vm.StateRunning
+		return vm.StateRunning, nil
 	case "Paused":
-		return vm.StatePaused
+		return vm.StatePaused, nil
 	default:
-		return vm.StateUnknown
+		return vm.StateUnknown, nil
 	}
 }

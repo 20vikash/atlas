@@ -13,7 +13,7 @@ type Spec struct {
 	DiskMiB   int
 	Disk      Disk
 	Image     ImageRef
-	Network   Network
+	Network   NetworkConfiguration
 	SSHKeys   []string
 	Hostname  string
 	UserData  string
@@ -46,13 +46,21 @@ type Disk struct {
 	IOPS            int
 }
 
-// Network contains the requested VM network configuration.
-type Network struct {
+// NetworkConfiguration contains the requested VM network configuration.
+type NetworkConfiguration struct {
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
 	Egress                        Egress
+}
+
+// NetworkUpdate contains mutable virtual machine network settings.
+type NetworkUpdate struct {
+	Egress                        Egress
+	PublicIPv4                    string
+	PrivateNetworkThroughputMiBps int
+	PublicNetworkThroughputMiBps  int
 }
 
 // SameReservation reports whether two specifications reserve the same VM.

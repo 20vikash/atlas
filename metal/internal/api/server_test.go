@@ -18,38 +18,18 @@ import (
 )
 
 type fakeVM struct {
-	info    vm.Info
-	started bool
+	info vm.Info
 }
 
-func (f *fakeVM) ID() string { return f.info.ID }
-func (f *fakeVM) Start(context.Context) error {
-	f.started = true
-	f.info.State = vm.StateRunning
-	return nil
-}
-func (f *fakeVM) Stop(context.Context) error                  { f.info.State = vm.StateStopped; return nil }
-func (f *fakeVM) Destroy(context.Context) error               { return nil }
-func (f *fakeVM) Wait(context.Context) (vm.ExitStatus, error) { return vm.ExitStatus{}, nil }
-func (f *fakeVM) Info(context.Context) (vm.Info, error)       { return f.info, nil }
-func (f *fakeVM) Pause(context.Context) error                 { f.info.State = vm.StatePaused; return nil }
-func (f *fakeVM) Resume(context.Context) error                { f.info.State = vm.StateRunning; return nil }
-func (f *fakeVM) ResizeDisk(_ context.Context, diskMiB int) error {
-	if diskMiB < f.info.DiskMiB {
-		return vm.ErrConflict
-	}
-	f.info.DiskMiB = diskMiB
-	return nil
-}
-
-type fakeVirtualMachineDriver struct {
+type fakeVirtualMachineManager struct {
 	virtualMachines map[string]*fakeVM
 	listError       error
+	services        *fakeRuntimeServices
 }
 
-func (driver *fakeVirtualMachineDriver) Create(_ context.Context, id string, specification vm.Spec) (vm.VM, error) {
-	if existing, found := driver.virtualMachines[id]; found {
-		return existing, nil
+func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Spec) (vm.Info, error) {
+	if existing, found := manager.virtualMachines[id]; found {
+		return existing.info, nil
 	}
 
 	virtualMachine := &fakeVM{info: vm.Info{
@@ -68,35 +48,35 @@ func (driver *fakeVirtualMachineDriver) Create(_ context.Context, id string, spe
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
 	}}
-	driver.virtualMachines[id] = virtualMachine
+	manager.virtualMachines[id] = virtualMachine
 
-	return virtualMachine, nil
+	return virtualMachine.info, nil
 }
 
-func (driver *fakeVirtualMachineDriver) Load(_ context.Context, id string) (vm.VM, error) {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) Information(_ context.Context, id string) (vm.Info, error) {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
-		return nil, vm.ErrNotFound
+		return vm.Info{}, vm.ErrNotFound
 	}
 
-	return virtualMachine, nil
+	return virtualMachine.info, nil
 }
 
-func (driver *fakeVirtualMachineDriver) List(context.Context) ([]vm.VM, error) {
-	if driver.listError != nil {
-		return nil, driver.listError
+func (manager *fakeVirtualMachineManager) List(context.Context) ([]vm.Info, error) {
+	if manager.listError != nil {
+		return nil, manager.listError
 	}
 
-	virtualMachines := make([]vm.VM, 0, len(driver.virtualMachines))
-	for _, virtualMachine := range driver.virtualMachines {
-		virtualMachines = append(virtualMachines, virtualMachine)
+	virtualMachines := make([]vm.Info, 0, len(manager.virtualMachines))
+	for _, virtualMachine := range manager.virtualMachines {
+		virtualMachines = append(virtualMachines, virtualMachine.info)
 	}
 
 	return virtualMachines, nil
 }
 
-func (driver *fakeVirtualMachineDriver) SetDesiredState(_ context.Context, id string, state vm.State) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) SetDesiredState(_ context.Context, id string, state vm.State) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -105,12 +85,12 @@ func (driver *fakeVirtualMachineDriver) SetDesiredState(_ context.Context, id st
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) ReplaceSSHKeys(
+func (manager *fakeVirtualMachineManager) ReplaceSSHKeys(
 	_ context.Context,
 	id string,
 	sshKeys []string,
 ) error {
-	virtualMachine, found := driver.virtualMachines[id]
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -118,12 +98,12 @@ func (driver *fakeVirtualMachineDriver) ReplaceSSHKeys(
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) ReplaceMetadata(
+func (manager *fakeVirtualMachineManager) ReplaceMetadata(
 	_ context.Context,
 	id string,
 	metadata map[string]string,
 ) error {
-	virtualMachine, found := driver.virtualMachines[id]
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -131,8 +111,8 @@ func (driver *fakeVirtualMachineDriver) ReplaceMetadata(
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) UpdateNetwork(_ context.Context, id string, update vm.NetworkUpdate) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) UpdateNetwork(_ context.Context, id string, update vm.NetworkUpdate) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -143,14 +123,18 @@ func (driver *fakeVirtualMachineDriver) UpdateNetwork(_ context.Context, id stri
 	return nil
 }
 
-func (virtualMachine *fakeVM) UpdateDiskLimits(_ context.Context, limits vm.Disk) error {
+func (manager *fakeVirtualMachineManager) UpdateDiskLimits(_ context.Context, id string, limits vm.Disk) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
 	virtualMachine.info.DiskThroughputMiBps = limits.ThroughputMiBps
 	virtualMachine.info.DiskIOPS = limits.IOPS
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) ResizeCompute(_ context.Context, id string, virtualCPUCount, memoryMiB int) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) ResizeCompute(_ context.Context, id string, virtualCPUCount, memoryMiB int) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -164,8 +148,8 @@ func (driver *fakeVirtualMachineDriver) ResizeCompute(_ context.Context, id stri
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) Reboot(_ context.Context, id string) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) RequestRestart(_ context.Context, id string) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -174,6 +158,31 @@ func (driver *fakeVirtualMachineDriver) Reboot(_ context.Context, id string) err
 	}
 	virtualMachine.info.State = vm.StateRunning
 	return nil
+}
+
+func (manager *fakeVirtualMachineManager) ResizeDisk(_ context.Context, id string, diskMiB int) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
+	if diskMiB < virtualMachine.info.DiskMiB {
+		return vm.ErrConflict
+	}
+	virtualMachine.info.DiskMiB = diskMiB
+	return nil
+}
+
+func (manager *fakeVirtualMachineManager) CreateSnapshot(_ context.Context, id string) (vm.StagedSnapshot, error) {
+	snapshotID := "01900000-0000-7000-8000-000000000001"
+	manager.services.snapshots[snapshotID] = storage.StagedSnapshot{
+		ID: snapshotID, SourceVirtualMachineID: id,
+		Rootfs: storage.ArtifactSize{SizeBytes: 1024}, Kernel: storage.ArtifactSize{SizeBytes: 512},
+	}
+	return vm.StagedSnapshot{ID: snapshotID, SourceVirtualMachineID: id, RootfsSizeBytes: 1024, KernelSizeBytes: 512}, nil
+}
+
+func (manager *fakeVirtualMachineManager) ConnectSSH(context.Context, string) (vm.SSHConn, error) {
+	return nil, errors.New("ssh unavailable")
 }
 
 type fakeRuntimeServices struct {
@@ -262,33 +271,34 @@ const (
 
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
-	return newServer(t, &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}})
+	return newServer(t, &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}})
 }
 
-func newServer(t *testing.T, virtualMachineDriver vm.Driver) http.Handler {
+func newServer(t *testing.T, virtualMachineManager VirtualMachineManager) http.Handler {
 	t.Helper()
-	return newServerWithServices(t, virtualMachineDriver, newFakeRuntimeServices(), &fakeWireGuardManager{})
+	return newServerWithServices(t, virtualMachineManager, newFakeRuntimeServices(), &fakeWireGuardManager{})
 }
 
 func newServerWithServices(
 	t *testing.T,
-	virtualMachineDriver vm.Driver,
+	virtualMachineManager VirtualMachineManager,
 	services *fakeRuntimeServices,
 	wireGuardManager *fakeWireGuardManager,
 ) http.Handler {
 	t.Helper()
 
+	if manager, ok := virtualMachineManager.(*fakeVirtualMachineManager); ok {
+		manager.services = services
+	}
 	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
-		VirtualMachineDriver: virtualMachineDriver,
-		SnapshotCreator:      services,
-		SnapshotStore:        services,
-		ImagePolicyStore:     services,
-		WakeReconciler:       func() {},
-		WireGuardManager:     wireGuardManager,
-		Mesh:                 services,
-		Storage:              fakeCapacityProvider{},
-		ConsoleBroker:        stubConsoleBroker{},
-		SSHConnector:         stubSSHConnector{},
+		VirtualMachineManager: virtualMachineManager,
+		SnapshotStore:         services,
+		ImagePolicyStore:      services,
+		WakeReconciler:        func() {},
+		WireGuardManager:      wireGuardManager,
+		Mesh:                  services,
+		Storage:               fakeCapacityProvider{},
+		ConsoleBroker:         stubConsoleBroker{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -312,12 +322,6 @@ func TestCorrelationHeadersAreGeneratedAndPreserveSafeValues(t *testing.T) {
 	if got := recorder.Header().Get("X-Operation-ID"); got != "operation-456" {
 		t.Fatalf("operation ID: got %q", got)
 	}
-}
-
-type stubSSHConnector struct{}
-
-func (stubSSHConnector) DialSSH(context.Context, string) (vm.SSHConn, error) {
-	return nil, errors.New("ssh unavailable")
 }
 
 type stubConsoleBroker struct{}
@@ -446,7 +450,7 @@ func TestGetUnknownIs404(t *testing.T) {
 }
 
 func TestInternalErrorDoesNotLeakDetails(t *testing.T) {
-	driver := &fakeVirtualMachineDriver{
+	driver := &fakeVirtualMachineManager{
 		virtualMachines: map[string]*fakeVM{},
 		listError:       errors.New("download https://images.example/rootfs?signature=secret failed"),
 	}
@@ -620,7 +624,7 @@ func TestResizeComputeChecksOnlyAdditionalCapacity(t *testing.T) {
 }
 
 func TestResizeComputeUpdatesStoppedVM(t *testing.T) {
-	driver := &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}}
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	srv := newServer(t, driver)
 	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
 	driver.virtualMachines["vm1"].info.State = vm.StateStopped
@@ -650,7 +654,7 @@ func TestNewRequiresAuthenticationHash(t *testing.T) {
 func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 	wireGuardManager := &fakeWireGuardManager{}
 	services := newFakeRuntimeServices()
-	driver := &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}}
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	server := newServerWithServices(t, driver, services, wireGuardManager)
 
 	request := `{
@@ -735,7 +739,7 @@ func do(t *testing.T, srv http.Handler, method, path, body string, want int) *ht
 
 func TestCreateAndDeleteImageStagingSnapshot(t *testing.T) {
 	services := newFakeRuntimeServices()
-	driver := &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}}
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	server := newServerWithServices(t, driver, services, &fakeWireGuardManager{})
 
 	recorder := do(t, server, http.MethodPost, "/vms/vm1/snapshots", "", http.StatusCreated)

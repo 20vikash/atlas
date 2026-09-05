@@ -1,20 +1,6 @@
 package vm
 
-import "context"
-
-// VM controls one virtual machine.
-type VM interface {
-	ID() string
-	Start(ctx context.Context) error
-	Stop(ctx context.Context) error
-	Pause(ctx context.Context) error
-	Resume(ctx context.Context) error
-	Destroy(ctx context.Context) error
-	Wait(ctx context.Context) (ExitStatus, error)
-	ResizeDisk(ctx context.Context, diskMiB int) error
-	UpdateDiskLimits(ctx context.Context, limits Disk) error
-	Info(ctx context.Context) (Info, error)
-}
+import "time"
 
 // Info describes a virtual machine.
 type Info struct {
@@ -38,10 +24,12 @@ type Info struct {
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
 	Egress                        Egress
-}
-
-// ExitStatus describes a stopped virtual machine process.
-type ExitStatus struct {
-	Code   int
-	Signal string
+	DesiredGeneration             uint64
+	DesiredRestartGeneration      uint64
+	ObservedGeneration            uint64
+	ObservedRestartGeneration     uint64
+	Phase                         string
+	OperationID                   string
+	OperationStartedAt            time.Time
+	UpdatedAt                     time.Time
 }

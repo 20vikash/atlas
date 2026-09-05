@@ -32,93 +32,39 @@ type LinuxAllocator struct {
 // NewLinuxAllocator returns a Linux network allocator.
 func NewLinuxAllocator(mesh *Mesh) *LinuxAllocator { return &LinuxAllocator{mesh: mesh} }
 
-// Allocate creates virtual machine network resources.
-func (allocator *LinuxAllocator) Allocate(ctx context.Context, request Request) (Interface, error) {
+// Ensure converges all host network resources to the requested state.
+func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkRequest) (vm.NetworkInterface, error) {
+	request := request{
+		VirtualMachineID:              desired.VirtualMachineID,
+		Egress:                        desired.Configuration.Egress,
+		PublicIPv4:                    desired.Configuration.PublicIPv4,
+		WireGuardMeshIPv6:             desired.Configuration.WireGuardMeshIPv6,
+		PrivateNetworkThroughputMiBps: desired.Configuration.PrivateNetworkThroughputMiBps,
+		PublicNetworkThroughputMiBps:  desired.Configuration.PublicNetworkThroughputMiBps,
+		UserID:                        desired.UserID,
+		GroupID:                       desired.GroupID,
+	}
 	exists, err := networkNamespaceExists(ctx, request.VirtualMachineID)
 	if err != nil {
-		return Interface{}, err
+		return vm.NetworkInterface{}, err
 	}
-	if exists {
-		if err := configureTrafficControl(ctx, request.trafficControl()); err != nil {
-			return Interface{}, fmt.Errorf("configure traffic control: %w", err)
-		}
-		if request.Egress.HasVirtualEthernet() {
-			if err := allocator.addMeshRegistration(ctx, request.VirtualMachineID, request.UserID, request.WireGuardMeshIPv6); err != nil {
-				return Interface{}, err
-			}
-		}
-		return allocator.Resolve(request.VirtualMachineID), nil
+	if !exists {
+		return allocator.allocate(ctx, request)
 	}
-
-	namespace := namespaceName(request.VirtualMachineID)
-	userID, groupID := fmt.Sprint(request.UserID), fmt.Sprint(request.GroupID)
-	hostVirtualEthernet, guestVirtualEthernet := virtualEthernetNames(request.UserID)
-	hostIPAddress, namespaceIPAddress := transitAddresses(request.UserID)
-	gatewayCIDR := fmt.Sprintf("%s/%d", gatewayIPAddress, networkPrefixLength)
-
-	steps := [][]string{
-		{"ip", "netns", "add", namespace},
-		{"ip", "-n", namespace, "link", "set", "lo", "up"},
-
-		{"ip", "-n", namespace, "tuntap", "add", tapName, "mode", "tap", "user", userID, "group", groupID},
-		{"ip", "-n", namespace, "addr", "add", gatewayCIDR, "dev", tapName},
-		{"ip", "-n", namespace, "link", "set", tapName, "up"},
+	if err := allocator.ensureExisting(ctx, request); err != nil {
+		return vm.NetworkInterface{}, err
 	}
-	egress := request.Egress
-	if egress.HasVirtualEthernet() {
-		steps = append(steps, virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, hostIPAddress, namespaceIPAddress)...)
-	}
-	if egress.HasInternetPath() {
-		steps = append(steps, internetPathSteps(namespace, guestVirtualEthernet, hostIPAddress)...)
-	}
-	if request.PublicIPv4 != "" {
-		if !egress.HasInternetPath() {
-			return Interface{}, fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
-		}
-		steps = append(steps, publicIPv4Steps(request.VirtualMachineID, namespace, guestVirtualEthernet, namespaceIPAddress, request.PublicIPv4)...)
-	}
-	for _, step := range steps {
-		if err := hostcmd.Run(ctx, step[0], step[1:]...); err != nil {
-			releaseError := allocator.Release(ctx, request.release())
-			linkError := hostcmd.Run(ctx, "ip", "link", "del", hostVirtualEthernet)
-			return Interface{}, errors.Join(err, releaseError, linkError)
-		}
-	}
-	if err := configureTrafficControl(ctx, request.trafficControl()); err != nil {
-		return Interface{}, errors.Join(fmt.Errorf("configure traffic control: %w", err), allocator.Release(ctx, request.release()))
-	}
-	if egress.HasVirtualEthernet() {
-		if err := allocator.addMeshRegistration(ctx, request.VirtualMachineID, request.UserID, request.WireGuardMeshIPv6); err != nil {
-			return Interface{}, errors.Join(err, allocator.Release(ctx, request.release()))
-		}
-	}
-	return allocator.Resolve(request.VirtualMachineID), nil
+	return allocator.resolve(request.VirtualMachineID), nil
 }
 
-// Update applies mutable network settings to an allocated virtual machine. A
-// failure rolls back with the reverse transition, so every step is safe to repeat.
-func (allocator *LinuxAllocator) Update(ctx context.Context, request UpdateRequest) error {
-	if err := allocator.update(ctx, request); err != nil {
-		rollbackRequest := request
-		rollbackRequest.Previous, rollbackRequest.Desired = request.Desired, request.Previous
-		return errors.Join(err, allocator.update(ctx, rollbackRequest))
-	}
-	return nil
-}
-
-// update reconciles the host to the desired settings.
-func (allocator *LinuxAllocator) update(ctx context.Context, request UpdateRequest) error {
-	exists, err := networkNamespaceExists(ctx, request.VirtualMachineID)
-	if err != nil || !exists {
-		return err
-	}
-
-	previous, desired := request.Previous.Egress, request.Desired.Egress
-	if request.Desired.PublicIPv4 != "" && !desired.HasInternetPath() {
+func (allocator *LinuxAllocator) ensureExisting(ctx context.Context, request request) error {
+	if request.PublicIPv4 != "" && !request.Egress.HasInternetPath() {
 		return fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
 	}
-
-	if request.Previous.PublicIPv4 != request.Desired.PublicIPv4 {
+	if err := ensureNamespaceBase(ctx, request); err != nil {
+		return err
+	}
+	if request.PublicIPv4 == "" {
 		if err := removePublicIPv4Rules(ctx, request.VirtualMachineID); err != nil {
 			return err
 		}
@@ -126,53 +72,54 @@ func (allocator *LinuxAllocator) update(ctx context.Context, request UpdateReque
 			return err
 		}
 	}
-
-	meshAddress := request.Desired.WireGuardMeshIPv6
-	if !desired.HasVirtualEthernet() {
-		if err := allocator.removeMeshRegistration(ctx, request.UserID, meshAddress); err != nil {
+	if !request.Egress.HasVirtualEthernet() {
+		if err := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6); err != nil {
 			return err
 		}
 	}
-
-	if previous.HasInternetPath() && !desired.HasInternetPath() {
+	if !request.Egress.HasInternetPath() {
 		if err := removeInternetPath(ctx, request.VirtualMachineID, request.UserID); err != nil {
 			return err
 		}
 	}
-	if previous.HasVirtualEthernet() != desired.HasVirtualEthernet() {
-		if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, desired.HasVirtualEthernet()); err != nil {
-			return err
-		}
+	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.Egress.HasVirtualEthernet()); err != nil {
+		return err
 	}
-	if desired.HasInternetPath() && !(previous.HasInternetPath() && previous.HasVirtualEthernet()) {
+	if request.Egress.HasInternetPath() {
 		if err := addInternetPath(ctx, request.VirtualMachineID, request.UserID); err != nil {
 			return err
 		}
 	}
-
-	if request.Previous.PublicIPv4 != request.Desired.PublicIPv4 && request.Desired.PublicIPv4 != "" {
-		if err := addPublicIPv4(ctx, request.VirtualMachineID, request.UserID, request.Desired.PublicIPv4); err != nil {
+	if request.PublicIPv4 != "" {
+		if err := ensurePublicIPv4(ctx, request.VirtualMachineID, request.UserID, request.PublicIPv4); err != nil {
 			return err
 		}
 	}
-
-	if desired.HasVirtualEthernet() {
-		if err := allocator.addMeshRegistration(ctx, request.VirtualMachineID, request.UserID, meshAddress); err != nil {
+	if request.Egress.HasVirtualEthernet() {
+		if err := allocator.addMeshRegistration(ctx, request.VirtualMachineID, request.UserID, request.WireGuardMeshIPv6); err != nil {
 			return err
 		}
 	}
-
-	return configureTrafficControl(ctx, trafficControlRequest{
-		VirtualMachineID:              request.VirtualMachineID,
-		UserID:                        request.UserID,
-		Egress:                        desired,
-		PrivateNetworkThroughputMiBps: request.Desired.PrivateNetworkThroughputMiBps,
-		PublicNetworkThroughputMiBps:  request.Desired.PublicNetworkThroughputMiBps,
-	})
+	return configureTrafficControl(ctx, request.trafficControl())
 }
 
-// Resolve returns network settings for one virtual machine.
-func (allocator *LinuxAllocator) Resolve(virtualMachineID string) Interface {
+func (allocator *LinuxAllocator) allocate(ctx context.Context, request request) (Interface, error) {
+	exists, err := networkNamespaceExists(ctx, request.VirtualMachineID)
+	if err != nil {
+		return Interface{}, err
+	}
+	if !exists {
+		if err := hostcmd.Run(ctx, "ip", "netns", "add", namespaceName(request.VirtualMachineID)); err != nil {
+			return Interface{}, err
+		}
+	}
+	if err := allocator.ensureExisting(ctx, request); err != nil {
+		return Interface{}, err
+	}
+	return allocator.resolve(request.VirtualMachineID), nil
+}
+
+func (allocator *LinuxAllocator) resolve(virtualMachineID string) Interface {
 	return Interface{
 		NetworkNamespacePath: namespacePath(virtualMachineID),
 		TapName:              tapName,
@@ -180,6 +127,36 @@ func (allocator *LinuxAllocator) Resolve(virtualMachineID string) Interface {
 		GuestIPAddress:       guestIPAddress,
 		GatewayIPAddress:     gatewayIPAddress,
 	}
+}
+
+func ensureNamespaceBase(ctx context.Context, request request) error {
+	namespace := namespaceName(request.VirtualMachineID)
+	if err := hostcmd.Run(ctx, "ip", "-n", namespace, "link", "set", "lo", "up"); err != nil {
+		return err
+	}
+	tapExists, err := namespaceLinkExists(ctx, namespace, tapName)
+	if err != nil {
+		return err
+	}
+	if !tapExists {
+		userID, groupID := fmt.Sprint(request.UserID), fmt.Sprint(request.GroupID)
+		if err := hostcmd.Run(ctx, "ip", "-n", namespace, "tuntap", "add", tapName, "mode", "tap", "user", userID, "group", groupID); err != nil {
+			return err
+		}
+	}
+	gatewayCIDR := fmt.Sprintf("%s/%d", gatewayIPAddress, networkPrefixLength)
+	if err := hostcmd.Run(ctx, "ip", "-n", namespace, "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
+		return err
+	}
+	return hostcmd.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up")
+}
+
+func namespaceLinkExists(ctx context.Context, namespace, name string) (bool, error) {
+	output, err := hostcmd.Output(ctx, "ip", "-n", namespace, "-o", "link", "show")
+	if err != nil {
+		return false, err
+	}
+	return linkListContains(output, name), nil
 }
 
 // Release removes a virtual machine network. It removes the mesh registration
@@ -361,6 +338,10 @@ func networkLinkExists(ctx context.Context, name string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("list network links: %w", err)
 	}
+	return linkListContains(output, name), nil
+}
+
+func linkListContains(output, name string) bool {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
@@ -368,10 +349,10 @@ func networkLinkExists(ctx context.Context, name string) (bool, error) {
 		}
 		device := strings.SplitN(strings.TrimSuffix(fields[1], ":"), "@", 2)[0]
 		if device == name {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 func runSteps(ctx context.Context, steps [][]string) error {
@@ -383,11 +364,44 @@ func runSteps(ctx context.Context, steps [][]string) error {
 	return nil
 }
 
-func addPublicIPv4(ctx context.Context, virtualMachineID string, userID uint32, publicIPv4 string) error {
+func ensurePublicIPv4(ctx context.Context, virtualMachineID string, userID uint32, publicIPv4 string) error {
 	namespace := namespaceName(virtualMachineID)
 	_, guestVirtualEthernet := virtualEthernetNames(userID)
 	_, namespaceIPAddress := transitAddresses(userID)
-	return runSteps(ctx, publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespaceIPAddress, publicIPv4))
+	steps := publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespaceIPAddress, publicIPv4)
+
+	for _, step := range steps {
+		exists, err := ruleExists(ctx, publicIPv4RuleCheck(step))
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if err := removePublicIPv4Rules(ctx, virtualMachineID); err != nil {
+			return err
+		}
+		if err := removePublicIPv4NamespaceRules(ctx, virtualMachineID); err != nil {
+			return err
+		}
+		return runSteps(ctx, steps)
+	}
+	return nil
+}
+
+func publicIPv4RuleCheck(step []string) []string {
+	check := append([]string(nil), step...)
+	for index, argument := range check {
+		switch argument {
+		case "-A":
+			check[index] = "-C"
+			return check
+		case "-I":
+			check[index] = "-C"
+			return append(check[:index+2], check[index+3:]...)
+		}
+	}
+	return check
 }
 
 func transitAddresses(userID uint32) (hostIPAddress, namespaceIPAddress string) {
@@ -489,4 +503,4 @@ func publicIPv4Comment(virtualMachineID string) string {
 	return "metal-public-ipv4-" + virtualMachineID
 }
 
-var _ Allocator = (*LinuxAllocator)(nil)
+var _ vm.Network = (*LinuxAllocator)(nil)

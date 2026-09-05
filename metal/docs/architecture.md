@@ -12,11 +12,11 @@ Read the [system architecture](../../docs/architecture.md) for the Atlas-to-Meta
 controller
     |
     v
-api ----> firecracker.Driver ----> systemd ----> jailer ----> Firecracker
- |                |                    |
- |                |                    └─ one unit for each VM
- |                ├─ storage stores
- |                └─ network allocator
+api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> Firecracker
+ |            |                                      |
+ |            |                                      └─ one unit for each VM
+ |            ├─ storage stores
+ |            └─ network manager
  |
  └─ wake reconcilers
        ├─ VM desired-state reconciliation
@@ -27,20 +27,20 @@ api ----> firecracker.Driver ----> systemd ----> jailer ----> Firecracker
 
 ## Layering
 
-`vm` defines the host-independent contract. `firecracker` implements that contract. `api` exposes controller operations, and `reconciler` applies desired state.
+`vm.Manager` owns records, operations, reconciliation, and cleanup. `firecracker.Runtime` owns Firecracker process and guest operations.
 
 The storage, network, systemd, and Firecracker API packages own host integration. See [internal/SPEC.md](../internal/SPEC.md) for the package graph.
 
 ## Stateless design
 
 ```text
-machines/<id>/config.json   reservation, desired state, and cleanup progress
-machines/<id>/status.json   observed state and the last reconciliation error
+machines/<id>/config.json   versioned reservation and desired state
+machines/<id>/status.json   versioned observed state, operation data, and cleanup progress
 systemd                     Firecracker process state
 ZFS                         images, VM disks, staging, and warm disks
 ```
 
-A metald restart does not stop a VM. `Load` and `List` rebuild VM handles from `config.json`.
+A metald restart does not stop a VM. Startup rejects an incompatible or damaged VM record.
 
 ## Request flow
 
@@ -72,7 +72,7 @@ If warm boot fails, Metal removes the attempted VM disk and uses cold boot.
 
 ## Network
 
-Each VM uses one Linux network namespace and one `tap0` device. `uplink` and `mesh` egress add a veth pair. `uplink` also adds routes and NAT rules. Public IPv4 support adds host forwarding rules.
+Each VM uses one Linux network namespace and one `tap0` device. `Network.Ensure` applies the complete desired network state.
 
 `POST /sync` also applies the managed WireGuard peer set for the host.
 
@@ -103,7 +103,7 @@ All routes except the documentation routes require a bearer token. The configura
 **Host safety**
 
 - Bearer authentication applies to TCP and Unix listeners.
-- Per-VM operation locks serialize conflicting changes.
+- The manager uses one operation lock for each VM.
 - Cleanup progress remains on disk until all owned resources are gone.
 
 ## Read next

@@ -40,11 +40,6 @@ type CapacityProvider interface {
 	Capacity(ctx context.Context) (storage.Capacity, error)
 }
 
-// SnapshotCreator creates local image staging snapshots.
-type SnapshotCreator interface {
-	CreateSnapshot(ctx context.Context, virtualMachineID string) (storage.StagedSnapshot, error)
-}
-
 // SnapshotStore uploads and removes local image staging snapshots.
 type SnapshotStore interface {
 	StartUpload(ctx context.Context, snapshotID string, request storage.SnapshotUploadRequest) error
@@ -62,39 +57,47 @@ type ConsoleBroker interface {
 	Attach(ctx context.Context, id string, client io.ReadWriter, resize <-chan console.Winsize) error
 }
 
-// SSHConnector opens an interactive SSH session to a virtual machine guest.
-type SSHConnector interface {
-	DialSSH(ctx context.Context, id string) (vm.SSHConn, error)
+// VirtualMachineManager owns virtual machine state and operations.
+type VirtualMachineManager interface {
+	Create(context.Context, string, vm.Spec) (vm.Info, error)
+	Information(context.Context, string) (vm.Info, error)
+	List(context.Context) ([]vm.Info, error)
+	SetDesiredState(context.Context, string, vm.State) error
+	RequestRestart(context.Context, string) error
+	ResizeCompute(context.Context, string, int, int) error
+	ResizeDisk(context.Context, string, int) error
+	UpdateDiskLimits(context.Context, string, vm.Disk) error
+	UpdateNetwork(context.Context, string, vm.NetworkUpdate) error
+	ReplaceSSHKeys(context.Context, string, []string) error
+	ReplaceMetadata(context.Context, string, map[string]string) error
+	CreateSnapshot(context.Context, string) (vm.StagedSnapshot, error)
+	ConnectSSH(context.Context, string) (vm.SSHConn, error)
 }
 
 // Dependencies contains services used by the HTTP handlers.
 type Dependencies struct {
-	VirtualMachineDriver vm.Driver
-	SnapshotCreator      SnapshotCreator
-	SnapshotStore        SnapshotStore
-	ImagePolicyStore     ImagePolicyStore
-	WakeReconciler       func()
-	WireGuardManager     WireGuardManager
-	Mesh                 PrivilegedMesh
-	Storage              CapacityProvider
-	ConsoleBroker        ConsoleBroker
-	SSHConnector         SSHConnector
+	VirtualMachineManager VirtualMachineManager
+	SnapshotStore         SnapshotStore
+	ImagePolicyStore      ImagePolicyStore
+	WakeReconciler        func()
+	WireGuardManager      WireGuardManager
+	Mesh                  PrivilegedMesh
+	Storage               CapacityProvider
+	ConsoleBroker         ConsoleBroker
 }
 
 // Server owns the HTTP handlers and their dependencies.
 type Server struct {
-	virtualMachineDriver vm.Driver
-	snapshotCreator      SnapshotCreator
-	snapshotStore        SnapshotStore
-	imagePolicyStore     ImagePolicyStore
-	wakeReconciler       func()
-	wireGuardManager     WireGuardManager
-	mesh                 PrivilegedMesh
-	storage              CapacityProvider
-	consoleBroker        ConsoleBroker
-	sshConnector         SSHConnector
-	authTokenHash        []byte
-	logger               *slog.Logger
+	virtualMachineManager VirtualMachineManager
+	snapshotStore         SnapshotStore
+	imagePolicyStore      ImagePolicyStore
+	wakeReconciler        func()
+	wireGuardManager      WireGuardManager
+	mesh                  PrivilegedMesh
+	storage               CapacityProvider
+	consoleBroker         ConsoleBroker
+	authTokenHash         []byte
+	logger                *slog.Logger
 }
 
 // New builds the HTTP router from explicit configuration and dependencies.
@@ -104,17 +107,15 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	}
 
 	server := &Server{
-		virtualMachineDriver: dependencies.VirtualMachineDriver,
-		snapshotCreator:      dependencies.SnapshotCreator,
-		snapshotStore:        dependencies.SnapshotStore,
-		imagePolicyStore:     dependencies.ImagePolicyStore,
-		wakeReconciler:       dependencies.WakeReconciler,
-		wireGuardManager:     dependencies.WireGuardManager,
-		mesh:                 dependencies.Mesh,
-		storage:              dependencies.Storage,
-		consoleBroker:        dependencies.ConsoleBroker,
-		sshConnector:         dependencies.SSHConnector,
-		authTokenHash:        []byte(configuration.AuthTokenHash),
+		virtualMachineManager: dependencies.VirtualMachineManager,
+		snapshotStore:         dependencies.SnapshotStore,
+		imagePolicyStore:      dependencies.ImagePolicyStore,
+		wakeReconciler:        dependencies.WakeReconciler,
+		wireGuardManager:      dependencies.WireGuardManager,
+		mesh:                  dependencies.Mesh,
+		storage:               dependencies.Storage,
+		consoleBroker:         dependencies.ConsoleBroker,
+		authTokenHash:         []byte(configuration.AuthTokenHash),
 	}
 	if configuration.Logger == nil {
 		configuration.Logger = slog.Default()
@@ -150,7 +151,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineDriver == nil || dependencies.SnapshotCreator == nil || dependencies.SnapshotStore == nil || dependencies.ImagePolicyStore == nil || dependencies.WakeReconciler == nil || dependencies.WireGuardManager == nil || dependencies.Mesh == nil || dependencies.Storage == nil || dependencies.ConsoleBroker == nil || dependencies.SSHConnector == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.ImagePolicyStore == nil || dependencies.WakeReconciler == nil || dependencies.WireGuardManager == nil || dependencies.Mesh == nil || dependencies.Storage == nil || dependencies.ConsoleBroker == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil

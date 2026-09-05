@@ -67,7 +67,7 @@ A successful VM start records image use. Metal keeps an image when a dependent V
 
 ## Snapshot and image operations
 
-`StageSnapshot` creates a VM disk snapshot, a read-only staging clone, a staged kernel, and metadata. Snapshot IDs are UUIDv7 values from the Firecracker driver.
+`Stage` creates a UUIDv7 value and stages a VM disk and kernel for the VM manager.
 
 `StartUpload` validates 2 GiB multipart ranges and starts an asynchronous upload. Uploads use a store-owned root context and wait group. Shutdown cancels new and active uploads and waits up to the daemon deadline. `UploadStatus` returns the upload state, SHA-256 values, and HTTP ETag values after completion.
 
@@ -87,5 +87,5 @@ Metal links the kernel into the jail and creates a block node for the VM volume.
 
 - [docs/storage.md](../../docs/storage.md) gives the broad storage model.
 - [docs/snapshots.md](../../docs/snapshots.md) describes staging and warm artifacts.
-- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) coordinates VM operations.
+- [internal/vm/SPEC.md](../vm/SPEC.md) coordinates VM operations.
 - [docs/host-layout.md](../../docs/host-layout.md) lists files and datasets.

@@ -69,14 +69,14 @@ func (s *Server) createVirtualMachineSnapshot(c echo.Context) error {
 		return badRequest("invalid virtual machine identifier")
 	}
 
-	snapshot, err := s.snapshotCreator.CreateSnapshot(c.Request().Context(), virtualMachineID)
+	snapshot, err := s.virtualMachineManager.CreateSnapshot(c.Request().Context(), virtualMachineID)
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusCreated, snapshotCreatedResponse{
 		ID:     snapshot.ID,
-		Rootfs: snapshotArtifactResponse{SizeBytes: snapshot.Rootfs.SizeBytes},
-		Kernel: snapshotArtifactResponse{SizeBytes: snapshot.Kernel.SizeBytes},
+		Rootfs: snapshotArtifactResponse{SizeBytes: snapshot.RootfsSizeBytes},
+		Kernel: snapshotArtifactResponse{SizeBytes: snapshot.KernelSizeBytes},
 	})
 }
 

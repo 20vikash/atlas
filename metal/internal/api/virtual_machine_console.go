@@ -65,7 +65,7 @@ func (s *Server) streamSerialConsole(ctx context.Context, connection *websocket.
 
 // streamSSHConsole bridges an interactive SSH session to the websocket.
 func (s *Server) streamSSHConsole(ctx context.Context, cancel context.CancelFunc, connection *websocket.Conn, id string) {
-	session, err := s.sshConnector.DialSSH(ctx, id)
+	session, err := s.virtualMachineManager.ConnectSSH(ctx, id)
 	if err != nil {
 		connection.Close(websocket.StatusGoingAway, "ssh session unavailable")
 		return

@@ -48,9 +48,13 @@ func (d *DBus) Start(ctx context.Context, id string) error {
 }
 
 func (d *DBus) Stop(ctx context.Context, id string) error {
-	return d.job(ctx, "stop", func(ch chan<- string) (int, error) {
+	err := d.job(ctx, "stop", func(ch chan<- string) (int, error) {
 		return d.conn.StopUnitContext(ctx, unitName(id), "replace", ch)
 	})
+	if isUnitNotLoaded(err) {
+		return nil
+	}
+	return err
 }
 
 func (d *DBus) job(ctx context.Context, verb string, start func(chan<- string) (int, error)) error {
@@ -97,6 +101,9 @@ func isUnitNotLoaded(err error) bool {
 func (d *DBus) Status(ctx context.Context, id string) (Status, error) {
 	unit := unitName(id)
 	props, err := d.conn.GetUnitPropertiesContext(ctx, unit)
+	if isUnitNotLoaded(err) {
+		return Status{ActiveState: "inactive", SubState: "dead"}, nil
+	}
 	if err != nil {
 		return Status{}, err
 	}

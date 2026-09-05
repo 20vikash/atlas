@@ -25,6 +25,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/systemd"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 const (
@@ -165,31 +166,42 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	virtualMachineDriver := firecracker.New(
+	networkManager := network.NewLinuxAllocator(mesh)
+	virtualMachineRuntime := firecracker.NewRuntime(
 		o.cfg,
 		units,
 		stores.VirtualMachines,
 		stores.Images,
-		stores.Snapshots,
-		network.NewLinuxAllocator(mesh),
 		consoleBroker,
 		logger,
 	)
-	// A VM keeps running without its mesh registration, so report the failure
-	// and serve. Refusing to start would take the API and the reconcilers down.
-	if err := virtualMachineDriver.RestoreNetworks(context.Background()); err != nil {
-		logger.Error("restore VM networks failed", "error", err)
+	virtualMachineManager, err := vm.NewManager(
+		vm.ManagerConfig{MachinesDirectory: o.cfg.MachinesDir},
+		vm.ManagerDependencies{
+			Runtime:   virtualMachineRuntime,
+			Network:   networkManager,
+			Storage:   stores.VirtualMachines,
+			Snapshots: stores.Snapshots,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("configure VM manager: %w", err)
 	}
+	memorySnapshotBuilder := firecracker.NewMemorySnapshotBuilder(
+		virtualMachineManager,
+		virtualMachineRuntime,
+		stores.Images,
+	)
 
 	virtualMachineReconciler := reconciler.New(
-		virtualMachineDriver,
+		virtualMachineManager,
 		reconcileInterval,
 		reconciler.Config{Logger: logger},
 	)
 	imageReconciler := reconciler.NewImageReconciler(
 		stores.Images,
 		stores.Snapshots,
-		virtualMachineDriver,
+		memorySnapshotBuilder,
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
 	)
@@ -198,16 +210,14 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		imageReconciler.Wake()
 	}
 	server, err := api.New(api.Config{AuthTokenHash: o.authTokenHash, Logger: logger}, api.Dependencies{
-		VirtualMachineDriver: virtualMachineDriver,
-		SnapshotCreator:      virtualMachineDriver,
-		SnapshotStore:        stores.Snapshots,
-		ImagePolicyStore:     stores.Images,
-		WakeReconciler:       wakeReconcilers,
-		WireGuardManager:     wireGuardManager,
-		Mesh:                 mesh,
-		Storage:              stores.Pool,
-		ConsoleBroker:        consoleBroker,
-		SSHConnector:         virtualMachineDriver,
+		VirtualMachineManager: virtualMachineManager,
+		SnapshotStore:         stores.Snapshots,
+		ImagePolicyStore:      stores.Images,
+		WakeReconciler:        wakeReconcilers,
+		WireGuardManager:      wireGuardManager,
+		Mesh:                  mesh,
+		Storage:               stores.Pool,
+		ConsoleBroker:         consoleBroker,
 	})
 	if err != nil {
 		return fmt.Errorf("configure API: %w", err)

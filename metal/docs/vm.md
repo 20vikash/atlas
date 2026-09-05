@@ -34,6 +34,7 @@ Start, stop, pause, resume, and terminate return `202`. Poll the VM until `state
 | Disk resize | Grow the VM disk. |
 | SSH key replacement | Replace all keys and refresh MMDS when active. |
 | Snapshot | Create rootfs and kernel image staging. |
+| Restart | Increase the restart generation. Keep the request after daemon restart. |
 
 Metal does not support in-place snapshot restore or promotion.
 
@@ -49,9 +50,17 @@ Metal sends Ctrl+Alt+Del and waits up to 30 seconds. It sends `SIGKILL` when the
 
 ## Cleanup
 
-Terminate stores the desired `destroyed` state. Reconciliation records cleanup progress for systemd, network, and storage.
+Terminate stores the desired `destroyed` state. Reconciliation records separate cleanup progress for the runtime, network, and storage.
 
 Metal removes the VM directory only after all cleanup steps succeed.
+
+## Records
+
+`config.json` stores schema version `1`, the create fingerprint, desired generations, and the complete desired specification.
+
+`status.json` stores schema version `1`, applied generations, operation data, safe errors, local errors, and cleanup progress.
+
+Metal rejects unknown fields, extra JSON values, and unsupported record versions during daemon startup.
 
 ## Design notes
 

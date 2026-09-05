@@ -41,13 +41,14 @@ func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
 	if err := validateMetadata(request.Metadata); err != nil {
 		return badRequest(err.Error())
 	}
-	if err := s.virtualMachineDriver.ReplaceMetadata(
+	if err := s.virtualMachineManager.ReplaceMetadata(
 		c.Request().Context(),
 		virtualMachineID,
 		request.Metadata,
 	); err != nil {
 		return err
 	}
+	s.wakeReconciler()
 
 	virtualMachine, err := s.loadVirtualMachine(c)
 	if err != nil {

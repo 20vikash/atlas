@@ -27,6 +27,11 @@ type stubUnits struct {
 	waits  int
 }
 
+type stubConsoleBroker struct{}
+
+func (*stubConsoleBroker) Open(string) error  { return nil }
+func (*stubConsoleBroker) Close(string) error { return nil }
+
 func (s *stubUnits) shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -121,8 +126,8 @@ func fcSocket(t *testing.T, onRequest func()) string {
 
 func testMachine(units systemd.Manager, sock string, timeout time.Duration) *machine {
 	return &machine{
-		d:           &Driver{units: units, consoleBroker: &stubConsoleBroker{}},
-		cfg:         vmConfig{ID: "abc", Sock: sock},
+		d:           &Runtime{units: units, consoleBroker: &stubConsoleBroker{}},
+		input:       vm.RuntimeMachine{ID: "abc"},
 		api:         api.New(sock),
 		stopTimeout: timeout,
 	}
@@ -186,25 +191,25 @@ func TestStopClearsTheFailedUnitState(t *testing.T) {
 	if err := m.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	st, err := units.Status(context.Background(), m.cfg.ID)
+	st, err := units.Status(context.Background(), m.input.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.state(context.Background(), st); got != vm.StateStopped {
+	if got, stateError := m.state(context.Background(), st); stateError != nil || got != vm.StateStopped {
 		t.Errorf("state = %q, want %q", got, vm.StateStopped)
 	}
 }
 
-func TestActiveVMWithUnreadableStateReportsUnknown(t *testing.T) {
+func TestActiveVMWithUnreadableStateReturnsError(t *testing.T) {
 	units := &stubUnits{active: true}
 	machine := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	status, err := units.Status(context.Background(), machine.cfg.ID)
+	status, err := units.Status(context.Background(), machine.input.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := machine.state(context.Background(), status); got != vm.StateUnknown {
-		t.Errorf("state = %q, want %q", got, vm.StateUnknown)
+	if got, stateError := machine.state(context.Background(), status); stateError == nil || got != vm.StateUnknown {
+		t.Errorf("state = %q, error = %v", got, stateError)
 	}
 }
 
@@ -212,11 +217,11 @@ func TestCrashedVMReportsFailed(t *testing.T) {
 	units := &stubUnits{failed: true}
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	st, err := units.Status(context.Background(), m.cfg.ID)
+	st, err := units.Status(context.Background(), m.input.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.state(context.Background(), st); got != vm.StateFailed {
+	if got, stateError := m.state(context.Background(), st); stateError != nil || got != vm.StateFailed {
 		t.Errorf("state = %q, want %q", got, vm.StateFailed)
 	}
 }

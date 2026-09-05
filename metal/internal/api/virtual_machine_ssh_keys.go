@@ -43,13 +43,14 @@ func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
 	if err != nil {
 		return badRequest(err.Error())
 	}
-	if err := s.virtualMachineDriver.ReplaceSSHKeys(
+	if err := s.virtualMachineManager.ReplaceSSHKeys(
 		c.Request().Context(),
 		virtualMachineID,
 		sshKeys,
 	); err != nil {
 		return err
 	}
+	s.wakeReconciler()
 
 	virtualMachine, err := s.loadVirtualMachine(c)
 	if err != nil {

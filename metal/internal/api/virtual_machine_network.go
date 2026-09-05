@@ -41,9 +41,10 @@ func (s *Server) updateVirtualMachineNetwork(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.virtualMachineDriver.UpdateNetwork(c.Request().Context(), virtualMachine.ID(), request.update()); err != nil {
+	if err := s.virtualMachineManager.UpdateNetwork(c.Request().Context(), virtualMachine.ID, request.update()); err != nil {
 		return err
 	}
+	s.wakeReconciler()
 
 	updatedVirtualMachine, err := s.loadVirtualMachine(c)
 	if err != nil {

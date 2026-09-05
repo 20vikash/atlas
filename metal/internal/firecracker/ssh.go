@@ -15,20 +15,14 @@ import (
 // sshConsoleUser is the guest account used by the SSH console.
 const sshConsoleUser = "root"
 
-// DialSSH opens an interactive SSH session to a VM guest.
-func (d *Driver) DialSSH(ctx context.Context, id string) (vm.SSHConn, error) {
+// ConnectSSH opens an interactive SSH session to a VM guest.
+func (d *Runtime) ConnectSSH(ctx context.Context, input vm.RuntimeMachine) (vm.SSHConn, error) {
 	select {
 	case d.sshSlots <- struct{}{}:
 	default:
 		return nil, fmt.Errorf("ssh session limit reached")
 	}
 	releaseSlot := func() { <-d.sshSlots }
-
-	configuration, err := d.cfg.readVMConfig(id)
-	if err != nil {
-		releaseSlot()
-		return nil, err
-	}
 
 	keyPair, err := generateSSHKey()
 	if err != nil {
@@ -41,7 +35,7 @@ func (d *Driver) DialSSH(ctx context.Context, id string) (vm.SSHConn, error) {
 		return nil, err
 	}
 
-	client := api.New(configuration.Sock)
+	client := api.New(d.configuration.sockPath(input.ID))
 	if err := d.authorizeSSHConsoleKey(ctx, client, index, strings.TrimSpace(keyPair.authorizedKey)); err != nil {
 		releaseSlot()
 		return nil, fmt.Errorf("authorize ssh key: %w", err)
@@ -50,8 +44,8 @@ func (d *Driver) DialSSH(ctx context.Context, id string) (vm.SSHConn, error) {
 		_ = d.authorizeSSHConsoleKey(context.WithoutCancel(ctx), client, index, nil)
 	}
 
-	namespace := filepath.Base(d.networkAllocator.Resolve(id).NetworkNamespacePath)
-	session, err := startSSHSession(ctx, d.cfg.SocketsDir, namespace, sshConsoleUser, configuration.IP, keyPair.privatePEM)
+	namespace := filepath.Base(input.NetworkInterface.NetworkNamespacePath)
+	session, err := startSSHSession(ctx, d.configuration.SocketsDir, namespace, sshConsoleUser, input.NetworkInterface.GuestIPAddress, keyPair.privatePEM)
 	if err != nil {
 		removeKey()
 		releaseSlot()
@@ -64,7 +58,7 @@ func (d *Driver) DialSSH(ctx context.Context, id string) (vm.SSHConn, error) {
 }
 
 // authorizeSSHConsoleKey adds or removes one SSH console key in MMDS.
-func (d *Driver) authorizeSSHConsoleKey(ctx context.Context, client *api.Client, index string, authorizedKey any) error {
+func (d *Runtime) authorizeSSHConsoleKey(ctx context.Context, client *api.Client, index string, authorizedKey any) error {
 	patch := map[string]any{
 		"latest": map[string]any{
 			"meta-data": map[string]any{

@@ -33,8 +33,8 @@ func TestTransitAddresses(t *testing.T) {
 
 func TestGuestMACAddressIsTheSameForEveryVirtualMachine(t *testing.T) {
 	allocator := &LinuxAllocator{}
-	address := allocator.Resolve("vm-1").MACAddress
-	if address != allocator.Resolve("vm-2").MACAddress {
+	address := allocator.resolve("vm-1").MACAddress
+	if address != allocator.resolve("vm-2").MACAddress {
 		t.Error("MAC address differs between virtual machines")
 	}
 	if address != "06:00:ac:10:00:02" {
@@ -50,6 +50,15 @@ func TestRuleCommentMatchesExactly(t *testing.T) {
 	}
 	if hasRuleComment(arguments, "metal-public-ipv4-vm-1") {
 		t.Fatal("comment prefix matched another VM")
+	}
+}
+
+func TestPublicIPv4RuleCheckRemovesInsertPosition(t *testing.T) {
+	step := []string{"iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", "10.0.0.2", "-j", "SNAT"}
+	want := []string{"iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "10.0.0.2", "-j", "SNAT"}
+
+	if check := publicIPv4RuleCheck(step); !slices.Equal(check, want) {
+		t.Fatalf("rule check = %v, want %v", check, want)
 	}
 }
 

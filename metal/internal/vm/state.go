@@ -23,3 +23,12 @@ func IsDesiredState(s State) bool {
 		return false
 	}
 }
+
+func isObservedState(state State) bool {
+	switch state {
+	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateDestroyed:
+		return true
+	default:
+		return false
+	}
+}

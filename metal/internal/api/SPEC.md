@@ -10,7 +10,7 @@ Package `api` validates HTTP requests and calls small service interfaces. Lifecy
 
 `New(Config, Dependencies)` validates authentication and required services. It returns the configured Echo router or an error.
 
-`Dependencies` contains the VM driver, snapshot services, image policy store, reconciler wake function, WireGuard manager, and capacity provider.
+`Dependencies` contains the VM manager, snapshot store, image policy store, wake function, WireGuard manager, and capacity provider.
 
 Request and response types are split by resource. `Server` owns the handlers and injected services.
 

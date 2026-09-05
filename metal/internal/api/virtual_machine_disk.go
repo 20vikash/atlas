@@ -35,8 +35,13 @@ func (s *Server) updateVirtualMachineDiskLimits(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := virtualMachine.UpdateDiskLimits(c.Request().Context(), request.spec()); err != nil {
+	if err := s.virtualMachineManager.UpdateDiskLimits(c.Request().Context(), virtualMachine.ID, request.spec()); err != nil {
 		return err
 	}
-	return s.respondWithVirtualMachine(c, http.StatusOK, virtualMachine)
+	s.wakeReconciler()
+	updatedVirtualMachine, err := s.loadVirtualMachine(c)
+	if err != nil {
+		return err
+	}
+	return s.respondWithVirtualMachine(c, http.StatusOK, updatedVirtualMachine)
 }
