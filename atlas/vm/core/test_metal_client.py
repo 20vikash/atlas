@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import Mock, patch
+
+import requests
+from frappe.tests import UnitTestCase
+
+from atlas.vm.core.metal_client import MetalClient, MetalClientError
+
+
+def build_client() -> MetalClient:
+	client = MetalClient.__new__(MetalClient)
+	client.base_url = "http://10.0.0.2:9000"
+	client.headers = {"Authorization": "Bearer token"}
+	client.timeout_seconds = 5
+	return client
+
+
+def build_response(status: int, body: Any = None, content: bytes | None = None) -> Mock:
+	response = Mock(spec=requests.Response)
+	response.status_code = status
+	response.content = content if content is not None else (b"{}" if body is None else b"body")
+	response.json.return_value = {} if body is None else body
+	return response
+
+
+class TestMetalClientErrors(UnitTestCase):
+	def test_transport_failure_is_retryable(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			side_effect=requests.ConnectionError("refused"),
+		):
+			with self.assertRaises(MetalClientError) as caught:
+				client.get_virtual_machine("VM-00001")
+
+		self.assertTrue(caught.exception.retryable)
+		self.assertFalse(caught.exception.uncertain)
+
+	def test_a_write_that_may_have_landed_is_uncertain(self) -> None:
+		"""A lost response on a write must not be retried as if it never happened."""
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			side_effect=requests.ConnectionError("timeout"),
+		):
+			with self.assertRaises(MetalClientError) as caught:
+				client.put_virtual_machine("VM-00001", {})
+
+		self.assertTrue(caught.exception.uncertain)
+
+	def test_metal_retryable_flag_wins_over_the_status_default(self) -> None:
+		client = build_client()
+		body = {"error": {"message": "shutting down", "code": "unavailable", "retryable": False}}
+
+		with patch("atlas.vm.core.metal_client.requests.request", return_value=build_response(503, body)):
+			with self.assertRaises(MetalClientError) as caught:
+				client.get_virtual_machine("VM-00001")
+
+		self.assertFalse(caught.exception.retryable)
+		self.assertEqual(caught.exception.code, "unavailable")
+
+	def test_client_status_defaults_to_not_retryable(self) -> None:
+		client = build_client()
+		body = {"error": {"message": "bad request", "code": "invalid_request"}}
+
+		with patch("atlas.vm.core.metal_client.requests.request", return_value=build_response(400, body)):
+			with self.assertRaises(MetalClientError) as caught:
+				client.get_virtual_machine("VM-00001")
+
+		self.assertFalse(caught.exception.retryable)
+
+	def test_server_status_defaults_to_retryable(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(500, {"error": {"message": "boom"}}),
+		):
+			with self.assertRaises(MetalClientError) as caught:
+				client.get_virtual_machine("VM-00001")
+
+		self.assertTrue(caught.exception.retryable)
+
+	def test_not_found_is_reported_for_deletion_decisions(self) -> None:
+		"""Reconciliation deletes a record only on a confirmed absence."""
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(404, {"error": {"message": "gone"}}),
+		):
+			with self.assertRaises(MetalClientError) as caught:
+				client.get_virtual_machine("VM-00001")
+
+		self.assertTrue(caught.exception.is_not_found)
+
+	def test_unparsable_error_body_keeps_the_status(self) -> None:
+		client = build_client()
+		response = build_response(502)
+		response.json.side_effect = ValueError("not json")
+
+		with patch("atlas.vm.core.metal_client.requests.request", return_value=response):
+			with self.assertRaises(MetalClientError) as caught:
+				client.get_virtual_machine("VM-00001")
+
+		self.assertEqual(caught.exception.status, 502)
+		self.assertTrue(caught.exception.retryable)
+
+	def test_non_object_response_is_rejected(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(200, ["not", "an", "object"], content=b"[]"),
+		):
+			with self.assertRaises(MetalClientError):
+				client.get_virtual_machine("VM-00001")
+
+	def test_empty_body_is_accepted_for_a_no_content_route(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(204, content=b""),
+		):
+			self.assertIsNone(client.delete_snapshot("SNAP-1"))
+
+
+class TestMetalClientPaths(UnitTestCase):
+	def test_identifiers_are_escaped_in_the_path(self) -> None:
+		"""A name is caller-supplied, so it must never change the route shape."""
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(204, content=b""),
+		) as request:
+			client.delete_snapshot("a/b")
+
+		self.assertEqual(request.call_args.args[1], "http://10.0.0.2:9000/v1/snapshots/a%2Fb")
+
+	def test_snapshot_routes_use_the_versioned_paths(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(202, content=b""),
+		) as request:
+			client.start_snapshot_upload("SNAP-1", {"rootfs": {"parts": []}})
+
+		self.assertEqual(
+			request.call_args.args[:2], ("POST", "http://10.0.0.2:9000/v1/snapshots/SNAP-1/upload")
+		)
