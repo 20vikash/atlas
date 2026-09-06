@@ -1,0 +1,47 @@
+# host: controller synchronization and capacity
+
+[internal SPEC](../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
+
+## Purpose
+
+The controller owns some host state directly: WireGuard peers, image policies, and the privileged virtual machine address set. The `host` package is the one place that accepts those sets and applies them.
+
+Each set arrives complete and replaces the previous one. The controller sends no incremental changes, so a lost message costs one sync interval, not a divergent host.
+
+## Types
+
+| Type | Responsibility |
+|---|---|
+| `Service` | Applies desired host state, then reports capacity. |
+| `DesiredState` | The 3 controller-owned sets, each complete. |
+| `Capacity` | What the controller needs to place the next VM. |
+| `PrivilegedMesh`, `WireGuardManager`, `ImagePolicyStore`, `VirtualMachineSource`, `StorageCapacitySource` | The services a sync calls out to. |
+
+`Service` holds no state of its own. Each named service owns the state it applies, and `metald` supplies them all at startup.
+
+## Synchronize
+
+```text
+POST /v1/sync
+   |
+   +-> ApplyPrivilegedAddresses   privileged VM address set
+   +-> Apply                      WireGuard peers
+   +-> SetImagePolicies           image policies
+   +-> Wake                       start a reconcile pass now
+   +-> Capacity                   returned in the same response
+```
+
+The steps run in order and stop at the first error, so a failed step leaves the later sets untouched and the controller retries the whole sync. `Wake` follows the writes, so the reconciler acts on the new policies at once instead of at its next tick.
+
+## Capacity
+
+CPU is reported against reservations, not against host load: available CPU is the host count minus the virtual CPUs that existing VMs reserve, and it never goes below zero. The host may therefore be busy while CPU still reads as available.
+
+Memory and storage are read from the host instead. Available memory comes from `MemAvailable` in `/proc/meminfo`, which counts cache the kernel can reclaim. Free memory alone would understate what a new guest can use.
+
+## Related
+
+- [docs/architecture.md](../../docs/architecture.md) places the sync in the daemon.
+- [internal/api/SPEC.md](../api/SPEC.md) owns the sync request and response shapes.
+- [internal/network/SPEC.md](../network/SPEC.md) owns WireGuard peers and the privileged mesh.
+- [internal/storage/SPEC.md](../storage/SPEC.md) owns image policies and pool capacity.

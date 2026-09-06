@@ -16,7 +16,7 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [firecracker](firecracker/SPEC.md) | Firecracker runtime and optional warm capability. |
 | [firecracker/api](firecracker/api/SPEC.md) | Firecracker REST client over a Unix socket. |
 | [api](api/SPEC.md) | Authenticated HTTP API. |
-| `host` | Host synchronization and capacity. |
+| [host](host/SPEC.md) | Host synchronization and capacity. |
 | [console](console/SPEC.md) | VM serial consoles over PTYs. |
 | [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
@@ -28,6 +28,7 @@ The `vm` package defines the contracts. The other packages implement or consume 
 ```text
 cmd/metald
    ├─ api -> vm.Manager, host.Service, console.SerialBroker
+   ├─ host -> vm, network, storage
    ├─ reconciler -> vm.Manager, storage stores
    ├─ firecracker -> vm, storage, platform, console, firecracker/api
    ├─ storage -> vm, platform
