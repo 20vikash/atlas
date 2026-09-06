@@ -32,10 +32,10 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 ## Snapshot upload stays pending or completing
 
 - Symptom: Atlas does not receive completed artifact hashes, or multipart completion does not finish.
-- Owner: Metal upload worker, network access to signed S3 URLs, or Atlas multipart completion.
+- Owner: Metal upload worker, network access to the signed object storage URLs, or Atlas multipart completion.
 - Safe checks: Read `GET /v1/snapshots/{id}`. Check the snapshot activity time and Metal logs. In Atlas, check image status and upload IDs.
 - Expected evidence: Metal reports pending, uploading, completed, or failed with progress. Atlas keeps retry identifiers.
-- Safe recovery: Correct network or object storage access. Retry from Atlas. The Metal start request and S3 completion are safe to repeat.
+- Safe recovery: Correct network or object storage access. Retry from Atlas. The Metal start request and the multipart completion are safe to repeat.
 - Do not: Do not log signed URLs. Do not remove staging during an active retry.
 
 ## Machine image cleanup fails

@@ -69,16 +69,16 @@ The policy is:
 | No | Yes | Use a normal cold boot. |
 | Yes | Yes | Retain the artifacts and build a local warm snapshot. |
 
-Atlas never uploads memory or Firecracker state to S3. A memory snapshot needs an explicit CPU, memory, and disk configuration. Metal boots a local template for about 5 minutes. It keeps the disk, state, and memory on that host. Only an exact VM shape can use these artifacts.
+Atlas never uploads memory or Firecracker state to object storage. A memory snapshot needs an explicit CPU, memory, and disk configuration. Metal boots a local template for about 5 minutes. It keeps the disk, state, and memory on that host. Only an exact VM shape can use these artifacts.
 
 ## Machine image transfer
 
 The Create Machine Image action calls `POST /v1/vms/{id}/snapshots`. Metal returns a UUIDv7 for local staging. Atlas uses it as the Virtual Machine Image name. A background job then:
 
-1. Creates separate S3 multipart uploads for `images/{image-id}/rootfs.img` and `images/{image-id}/kernel`.
+1. Creates separate multipart uploads for `images/{image-id}/rootfs.img` and `images/{image-id}/kernel`.
 2. Signs 2 GiB upload parts for 24 hours.
 3. Calls `POST /v1/snapshots/{snapshot_id}/upload`.
-4. Verifies the sizes, SHA-256 values, part numbers, ETags, and final S3 object sizes.
+4. Verifies the sizes, SHA-256 values, part numbers, ETags, and final stored object sizes.
 5. Completes both uploads and deletes the local staging data.
 
 The image record keeps the source server, upload IDs, status, and errors. Atlas saves the upload IDs before it asks Metal to start. A start or finalization error marks the image as Failed and keeps the retry values. Retry Transfer uses these values. `source_virtual_machine` is audit text only. Metal deletes staging after 48 hours without activity.

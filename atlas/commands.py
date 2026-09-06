@@ -17,7 +17,7 @@ from atlas.atlas.core.host_binaries import (
 	publish_host_binary,
 	source_digest,
 )
-from atlas.atlas.s3 import S3Error
+from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.image_builder import build_ubuntu_image, publish_ubuntu_image
 
 
@@ -98,7 +98,7 @@ def build_ubuntu_base_image(
 					image_path,
 					kernel_path,
 				)
-			except S3Error as error:
+			except ObjectStorageError as error:
 				raise click.UsageError(str(error)) from error
 			frappe.db.commit()  # nosemgrep
 			click.echo(f"Created Virtual Machine Image for {site}")

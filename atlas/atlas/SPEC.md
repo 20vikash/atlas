@@ -19,7 +19,7 @@ This module also holds site-wide settings and builds the binaries a host downloa
 | `registry` | The map from a stable provider name to its implementation. |
 | `DNSProvider`, `Route53Provider` | The DNS contract and its Route 53 implementation. |
 | `host_binaries` | Building and publishing `metald` and the Atlas WG Mesh CLI. |
-| `ssh`, `parsing`, `mesh_address`, `s3` | Host access, strict input parsing, mesh addressing, and object storage. |
+| `ssh`, `parsing`, `mesh_address`, `object_storage` | Host access, strict input parsing, mesh addressing, and object storage. |
 
 ## Provider boundary
 

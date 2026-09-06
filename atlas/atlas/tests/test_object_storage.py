@@ -2,14 +2,14 @@ from unittest.mock import Mock, patch
 
 from frappe.tests import UnitTestCase
 
-from atlas.atlas.s3 import S3Client
+from atlas.atlas.object_storage import ObjectStorageClient
 
 
-class TestS3Client(UnitTestCase):
-	def make_client(self) -> tuple[S3Client, Mock]:
+class TestObjectStorageClient(UnitTestCase):
+	def make_client(self) -> tuple[ObjectStorageClient, Mock]:
 		boto_client = Mock()
-		with patch("atlas.atlas.s3.boto3.client", return_value=boto_client):
-			client = S3Client(bucket="bucket", access_key_id="access", secret_access_key="secret")
+		with patch("atlas.atlas.object_storage.boto3.client", return_value=boto_client):
+			client = ObjectStorageClient(bucket="bucket", access_key_id="access", secret_access_key="secret")
 		return client, boto_client
 
 	def test_create_and_sign_multipart_upload(self) -> None:

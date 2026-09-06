@@ -13,7 +13,7 @@ import frappe
 from atlas.vm.core.multipart_upload import bytes_to_mib
 
 if TYPE_CHECKING:
-	from atlas.atlas.s3 import S3Client
+	from atlas.atlas.object_storage import ObjectStorageClient
 
 
 def build_ubuntu_image(
@@ -60,9 +60,9 @@ def publish_ubuntu_image(
 	image_key = f"vm-images/sha256/{image_sha256}/{image_path.name}"
 	kernel_key = f"vm-images/sha256/{kernel_sha256}/{kernel_path.name}"
 	settings = frappe.get_single("Atlas Settings")
-	s3_client = settings.get_s3_client()
-	upload_with_progress(s3_client, image_path, image_key)
-	upload_with_progress(s3_client, kernel_path, kernel_key)
+	object_storage_client = settings.get_object_storage_client()
+	upload_with_progress(object_storage_client, image_path, image_key)
+	upload_with_progress(object_storage_client, kernel_path, kernel_key)
 
 	file_values = {
 		"status": "Available",
@@ -103,8 +103,8 @@ def get_sha256(path: Path) -> str:
 	return digest.hexdigest()
 
 
-def upload_with_progress(s3_client: S3Client, source: Path, key: str) -> None:
-	"""Upload a file to S3 and show its progress."""
+def upload_with_progress(object_storage_client: ObjectStorageClient, source: Path, key: str) -> None:
+	"""Upload a file to object storage and show its progress."""
 	total_bytes = source.stat().st_size
 	transferred_bytes = 0
 	progress_lock = threading.Lock()
@@ -120,5 +120,5 @@ def upload_with_progress(s3_client: S3Client, source: Path, key: str) -> None:
 				nl=False,
 			)
 
-	s3_client.upload_file(str(source), key, on_progress=on_progress)
+	object_storage_client.upload_file(str(source), key, on_progress=on_progress)
 	click.echo()

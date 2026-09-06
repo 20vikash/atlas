@@ -168,7 +168,7 @@ class VirtualMachineImage(Document):
 		if not object_key:
 			frappe.throw(_("Virtual Machine Image {0} has no object key.").format(self.title))
 		settings = cast("AtlasSettings", frappe.get_single("Atlas Settings"))
-		return settings.get_s3_client().object_url(object_key, expiry_seconds=expiry_seconds)
+		return settings.get_object_storage_client().object_url(object_key, expiry_seconds=expiry_seconds)
 
 	@frappe.whitelist(methods=["POST"])
 	def retry_transfer(self) -> None:

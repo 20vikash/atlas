@@ -8,12 +8,12 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 
-class S3Error(Exception):
-	"""Report an S3 operation failure."""
+class ObjectStorageError(Exception):
+	"""Report an object storage operation failure."""
 
 
-class S3Client:
-	"""Access object storage through an S3-compatible API."""
+class ObjectStorageClient:
+	"""Access object storage through the Boto3 API."""
 
 	def __init__(
 		self,
@@ -26,7 +26,9 @@ class S3Client:
 		signed_url_expiry: int = 86400,
 	) -> None:
 		if not bucket or not access_key_id or not secret_access_key:
-			raise S3Error("S3 is not configured. Set the bucket and credentials in Atlas Settings.")
+			raise ObjectStorageError(
+				"Object storage is not configured. Set the bucket and credentials in Atlas Settings."
+			)
 		self.bucket = bucket
 		self.signed_url_expiry = signed_url_expiry
 		self._client = boto3.client(
@@ -66,7 +68,7 @@ class S3Client:
 			raise self._error("create a multipart upload", key, error) from error
 		upload_id = response.get("UploadId")
 		if not isinstance(upload_id, str) or not upload_id:
-			raise S3Error(f"S3 did not return a multipart upload ID for {key}")
+			raise ObjectStorageError(f"Object storage did not return a multipart upload ID for {key}")
 		return upload_id
 
 	def sign_upload_part(self, key: str, upload_id: str, part_number: int, *, expiry_seconds: int) -> str:
@@ -149,8 +151,8 @@ class S3Client:
 			raise self._error("delete an object", key, error) from error
 
 	@staticmethod
-	def _error(operation: str, key: str, error: Exception) -> S3Error:
+	def _error(operation: str, key: str, error: Exception) -> ObjectStorageError:
 		code = "unknown"
 		if isinstance(error, ClientError):
 			code = str(error.response.get("Error", {}).get("Code") or code)
-		return S3Error(f"Could not {operation} for {key}. S3 error code: {code}")
+		return ObjectStorageError(f"Could not {operation} for {key}. Error code: {code}")

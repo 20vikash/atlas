@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-	from atlas.atlas.s3 import S3Client
+	from atlas.atlas.object_storage import ObjectStorageClient
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 MEBIBYTE = 1 << 20
@@ -15,21 +15,25 @@ class MultipartUploadError(Exception):
 
 
 class MultipartUploadService:
-	"""Own multipart upload state and S3 validation for one image."""
+	"""Own multipart upload state and object storage validation for one image."""
 
-	def __init__(self, image: VirtualMachineImage, s3_client: S3Client) -> None:
+	def __init__(self, image: VirtualMachineImage, object_storage_client: ObjectStorageClient) -> None:
 		self.image = image
-		self.s3_client = s3_client
+		self.object_storage_client = object_storage_client
 
 	def ensure_uploads(self, *, save: bool = True) -> None:
 		"""Create missing multipart uploads and optionally save the image."""
 		if not self.image.rootfs_multipart_upload_id:
 			object_key = self.require_value(self.image.image_object_key, "rootfs object key")
-			self.image.rootfs_multipart_upload_id = self.s3_client.create_multipart_upload(object_key)
+			self.image.rootfs_multipart_upload_id = self.object_storage_client.create_multipart_upload(
+				object_key
+			)
 
 		if not self.image.kernel_multipart_upload_id:
 			object_key = self.require_value(self.image.kernel_object_key, "kernel object key")
-			self.image.kernel_multipart_upload_id = self.s3_client.create_multipart_upload(object_key)
+			self.image.kernel_multipart_upload_id = self.object_storage_client.create_multipart_upload(
+				object_key
+			)
 
 		if save:
 			self.image.save(ignore_permissions=True)
@@ -58,7 +62,7 @@ class MultipartUploadService:
 		return [
 			{
 				"part_number": part_number,
-				"url": self.s3_client.sign_upload_part(
+				"url": self.object_storage_client.sign_upload_part(
 					object_key, upload_id, part_number, expiry_seconds=86400
 				),
 			}
@@ -83,10 +87,10 @@ class MultipartUploadService:
 
 	def get_stored_parts(self, object_key: str, upload_id: str, size_mib: int) -> list[dict[str, Any]]:
 		"""Return and validate the parts stored for one artifact."""
-		head = self.s3_client.head_object(object_key)
+		head = self.object_storage_client.head_object(object_key)
 		if head and self.has_expected_size(head, size_mib):
 			return []
-		parts = self.s3_client.list_multipart_parts(object_key, upload_id)
+		parts = self.object_storage_client.list_multipart_parts(object_key, upload_id)
 		self.validate_parts("stored", size_mib, parts)
 		return parts
 
@@ -109,13 +113,13 @@ class MultipartUploadService:
 		self, object_key: str, upload_id: str, size_mib: int, parts: list[dict[str, Any]]
 	) -> None:
 		"""Complete one upload and verify the stored object size."""
-		head = self.s3_client.head_object(object_key)
+		head = self.object_storage_client.head_object(object_key)
 		if head and self.has_expected_size(head, size_mib):
 			return
-		self.s3_client.complete_multipart_upload(object_key, upload_id, parts)
-		head = self.s3_client.head_object(object_key)
+		self.object_storage_client.complete_multipart_upload(object_key, upload_id, parts)
+		head = self.object_storage_client.head_object(object_key)
 		if not head or not self.has_expected_size(head, size_mib):
-			raise MultipartUploadError(f"S3 stored an invalid size for {object_key}")
+			raise MultipartUploadError(f"Object storage stored an invalid size for {object_key}")
 
 	@staticmethod
 	def validate_parts(artifact: str, size_mib: int, parts: list[dict[str, Any]]) -> None:
@@ -129,7 +133,7 @@ class MultipartUploadService:
 
 	@staticmethod
 	def has_expected_size(head: dict[str, Any], size_mib: int) -> bool:
-		"""Return whether an S3 object has the expected rounded size."""
+		"""Return whether a stored object has the expected rounded size."""
 		content_length = head.get("ContentLength")
 		return isinstance(content_length, int) and bytes_to_mib(content_length) == size_mib
 

@@ -13,7 +13,7 @@ from frappe.model.document import Document
 if TYPE_CHECKING:
 	from atlas.atlas.core.dns_providers.base import DnsProvider
 	from atlas.atlas.core.server_providers.base import ServerProvider
-	from atlas.atlas.s3 import S3Client
+	from atlas.atlas.object_storage import ObjectStorageClient
 
 
 class AtlasSettings(Document):
@@ -41,12 +41,12 @@ class AtlasSettings(Document):
 		route53_access_key_id: DF.Data | None
 		route53_access_key_secret: DF.Password | None
 		route53_dns_zone_id: DF.Data | None
-		s3_access_key_id: DF.Data | None
-		s3_bucket: DF.Data | None
-		s3_endpoint_url: DF.Data | None
-		s3_region: DF.Data | None
-		s3_secret_access_key: DF.Password | None
-		s3_signed_url_expiry: DF.Int
+		object_storage_access_key_id: DF.Data | None
+		object_storage_bucket: DF.Data | None
+		object_storage_endpoint_url: DF.Data | None
+		object_storage_region: DF.Data | None
+		object_storage_secret_access_key: DF.Password | None
+		object_storage_signed_url_expiry: DF.Int
 		scaleway_access_key: DF.Data | None
 		scaleway_machine_billing_cycle: DF.Literal["Hourly", "Monthly"]
 		scaleway_organization_id: DF.Data | None
@@ -91,17 +91,17 @@ class AtlasSettings(Document):
 
 		return get_dns_provider(settings=self)
 
-	def get_s3_client(self) -> "S3Client":
-		"""Create the configured S3 client."""
-		from atlas.atlas.s3 import S3Client
+	def get_object_storage_client(self) -> "ObjectStorageClient":
+		"""Create the configured object storage client."""
+		from atlas.atlas.object_storage import ObjectStorageClient
 
-		return S3Client(
-			bucket=self.s3_bucket,
-			access_key_id=self.s3_access_key_id,
-			secret_access_key=self.get_password("s3_secret_access_key", raise_exception=False),
-			endpoint_url=self.s3_endpoint_url or "",
-			region=self.s3_region or "",
-			signed_url_expiry=self.s3_signed_url_expiry or 86400,
+		return ObjectStorageClient(
+			bucket=self.object_storage_bucket,
+			access_key_id=self.object_storage_access_key_id,
+			secret_access_key=self.get_password("object_storage_secret_access_key", raise_exception=False),
+			endpoint_url=self.object_storage_endpoint_url or "",
+			region=self.object_storage_region or "",
+			signed_url_expiry=self.object_storage_signed_url_expiry or 86400,
 		)
 
 	def validate(self) -> None:

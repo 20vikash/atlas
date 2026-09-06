@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import frappe
 from frappe.tests import UnitTestCase
 
-from atlas.atlas.s3 import S3Error
+from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.image_transfer import MachineImageTransferService
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.multipart_upload import (
@@ -211,15 +211,20 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			image_size_mib=MULTIPART_PART_SIZE_MIB + 1,
 			kernel_size_mib=1,
 		)
-		s3_client = Mock()
-		s3_client.sign_upload_part.side_effect = lambda key, upload_id, part, **kwargs: f"url-{part}"
+		object_storage_client = Mock()
+		object_storage_client.sign_upload_part.side_effect = lambda key, upload_id, part, **kwargs: (
+			f"url-{part}"
+		)
 
-		request = MultipartUploadService(image, s3_client).get_upload_request()
+		request = MultipartUploadService(image, object_storage_client).get_upload_request()
 
 		self.assertEqual([part["part_number"] for part in request["rootfs"]["parts"]], [1, 2])
 		self.assertEqual([part["part_number"] for part in request["kernel"]["parts"]], [1])
 		self.assertTrue(
-			all(call.kwargs["expiry_seconds"] == 86400 for call in s3_client.sign_upload_part.call_args_list)
+			all(
+				call.kwargs["expiry_seconds"] == 86400
+				for call in object_storage_client.sign_upload_part.call_args_list
+			)
 		)
 
 	def test_successful_transfer_marks_image_available_and_deletes_staging(self) -> None:
@@ -234,7 +239,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		)
 		server = SimpleNamespace(name="server-1")
 		metal_client = Mock()
-		settings = SimpleNamespace(get_s3_client=Mock(return_value=Mock()))
+		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
 		service = MachineImageTransferService()
 
 		with (
@@ -265,7 +270,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			"rootfs": {"sha256": "a" * 64},
 			"kernel": {"sha256": "b" * 64},
 		}
-		settings = SimpleNamespace(get_s3_client=Mock(return_value=Mock()))
+		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
 		service = MachineImageTransferService()
 
 		with (
@@ -299,7 +304,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		)
 		metal_client = Mock()
 		metal_client.get_snapshot.return_value = {"state": "pending"}
-		settings = SimpleNamespace(get_s3_client=Mock(return_value=Mock()))
+		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
 		service = MachineImageTransferService()
 
 		with (
@@ -323,7 +328,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		with (
 			patch("atlas.vm.core.image_transfer.frappe.get_doc", return_value=image),
 			patch("atlas.vm.core.image_transfer.frappe.log_error"),
-			patch.object(service, "advance", side_effect=S3Error("upload failed")),
+			patch.object(service, "advance", side_effect=ObjectStorageError("upload failed")),
 		):
 			service.transfer("image-1")
 
@@ -348,15 +353,15 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		metal_client.start_snapshot_upload.side_effect = MetalClientError(
 			"upload failed", status=500, code="upload_failed", retryable=True
 		)
-		s3_client = Mock()
-		s3_client.create_multipart_upload.side_effect = ["rootfs-upload", "kernel-upload"]
+		object_storage_client = Mock()
+		object_storage_client.create_multipart_upload.side_effect = ["rootfs-upload", "kernel-upload"]
 		service = MachineImageTransferService()
 
 		with self.assertRaises(MetalClientError):
 			service.start_upload(
 				image,
 				metal_client,
-				MultipartUploadService(image, s3_client),
+				MultipartUploadService(image, object_storage_client),
 			)
 
 		self.assertEqual(image.rootfs_multipart_upload_id, "rootfs-upload")

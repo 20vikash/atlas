@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import frappe
 
-from atlas.atlas.s3 import S3Error
+from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.multipart_upload import MultipartUploadError, MultipartUploadService, bytes_to_mib
 from atlas.vm.core.vm_service import VirtualMachineService
@@ -104,7 +104,12 @@ class MachineImageTransferService:
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
 		try:
 			self.advance(image)
-		except (MetalClientError, S3Error, MultipartUploadError, MachineImageTransferError) as error:
+		except (
+			MetalClientError,
+			ObjectStorageError,
+			MultipartUploadError,
+			MachineImageTransferError,
+		) as error:
 			self.mark_failed(image, str(error))
 			frappe.log_error(
 				title=f"Machine image transfer failed for {image.name}",
@@ -118,8 +123,10 @@ class MachineImageTransferService:
 			frappe.get_doc("Server", self.require_value(image.source_server, "source server")),
 		)
 		metal_client = MetalClient(server)
-		s3_client = cast("AtlasSettings", frappe.get_single("Atlas Settings")).get_s3_client()
-		multipart_upload = MultipartUploadService(image, s3_client)
+		object_storage_client = cast(
+			"AtlasSettings", frappe.get_single("Atlas Settings")
+		).get_object_storage_client()
+		multipart_upload = MultipartUploadService(image, object_storage_client)
 
 		if image.image_sha256 and image.kernel_sha256:
 			self.finalize(image, metal_client, multipart_upload)

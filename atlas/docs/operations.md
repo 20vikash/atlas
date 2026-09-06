@@ -68,8 +68,8 @@ Use Frappe Desk Error Log and the named documents first. Keep the durable Atlas 
 ## Machine image transfer does not finish
 
 - Symptom: A Machine image stays Pending, Uploading, Completing, Cleaning, or Failed.
-- Owner: Metal snapshot staging, S3 multipart upload, or Atlas finalization.
+- Owner: Metal snapshot staging, the object storage multipart upload, or Atlas finalization.
 - Safe checks: Open the image and record its status, error, source Server, snapshot ID, object keys, and upload IDs. Check Atlas and Metal logs without printing signed URLs.
 - Expected evidence: Failed transfers keep all retry identifiers. Completed uploads have both SHA-256 values before cleanup.
-- Safe recovery: Correct Metal or S3 access. Use Retry Transfer for a Failed image. Let periodic work advance an active image.
+- Safe recovery: Correct Metal or object storage access. Use Retry Transfer for a Failed image. Let periodic work advance an active image.
 - Do not: Do not clear upload IDs before completion. Do not delete Metal staging while Atlas still needs it.
