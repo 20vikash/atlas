@@ -15,14 +15,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/frappe/atlas/metal/internal/idalloc"
 	"github.com/google/uuid"
 )
 
 // ManagerConfig contains persistent VM manager settings.
 type ManagerConfig struct {
 	MachinesDirectory string
-	UserIDRange       idalloc.Range
+	UserIDRange       UserIDRange
 	FastApplyTimeout  time.Duration
 }
 
@@ -55,8 +54,8 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	if configuration.MachinesDirectory == "" {
 		return nil, fmt.Errorf("VM machines directory is required")
 	}
-	if configuration.UserIDRange == (idalloc.Range{}) {
-		configuration.UserIDRange = idalloc.DefaultRange
+	if configuration.UserIDRange == (UserIDRange{}) {
+		configuration.UserIDRange = DefaultUserIDRange
 	}
 	if configuration.FastApplyTimeout <= 0 {
 		configuration.FastApplyTimeout = 2 * time.Second
@@ -209,7 +208,7 @@ func (manager *Manager) allocateUserID() (uint32, error) {
 	for userID := range manager.temporaryUserIDs {
 		used[userID] = true
 	}
-	return manager.configuration.UserIDRange.Allocate(used)
+	return manager.configuration.UserIDRange.allocate(used)
 }
 
 func (manager *Manager) publicIPv4InUse(identifier, address string) (bool, error) {

@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/frappe/atlas/metal/internal/idalloc"
 )
 
 func TestNamespaceNames(t *testing.T) {
@@ -63,7 +61,7 @@ func TestPublicIPv4RuleCheckRemovesInsertPosition(t *testing.T) {
 }
 
 func TestVirtualEthernetNamesFitInterfaceLimit(t *testing.T) {
-	hostName, guestName := virtualEthernetNames(idalloc.DefaultRange.Max)
+	hostName, guestName := virtualEthernetNames(165535)
 	if hostName != "vh-165535" || guestName != "vg-165535" {
 		t.Errorf("virtualEthernetNames = %q, %q", hostName, guestName)
 	}

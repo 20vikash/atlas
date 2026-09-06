@@ -24,6 +24,7 @@ Package `vm` owns the desired state, the observed state, and VM reconciliation. 
 The daemon creates one `Manager`. A temporary `machine` value does not keep a record or an API client.
 
 `ManagerConfig.FastApplyTimeout` limits an immediate metadata operation. The default value is 2 seconds.
+`ManagerConfig.UserIDRange` sets the reserved host user IDs. The manager allocates the lowest free ID and uses it as the group ID.
 
 ## Records
 

@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/frappe/atlas/metal/internal/idalloc"
 )
 
 type fakeRuntime struct {
@@ -117,7 +115,7 @@ func newTestManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetwork, *fakeSt
 	network := &fakeNetwork{}
 	storage := &fakeStorage{}
 	manager, err := NewManager(
-		ManagerConfig{MachinesDirectory: t.TempDir(), UserIDRange: idalloc.Range{Min: 1000, Max: 1010}},
+		ManagerConfig{MachinesDirectory: t.TempDir(), UserIDRange: UserIDRange{Min: 1000, Max: 1010}},
 		ManagerDependencies{Runtime: runtime, Network: network, Storage: storage, Snapshots: fakeSnapshots{}},
 	)
 	if err != nil {

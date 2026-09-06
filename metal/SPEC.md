@@ -12,7 +12,6 @@ Metal manages virtual machines on a host. Its executable is `metald`.
 cmd/metald/                  metald executable
 internal/api/                HTTP API
 internal/firecracker/        Firecracker support
-internal/idalloc/            ID allocation
 internal/network/            Linux VM networking and WireGuard peer management
 internal/reconciler/         VM and image reconciliation
 internal/storage/            ZFS images, VM disks, and pool capacity

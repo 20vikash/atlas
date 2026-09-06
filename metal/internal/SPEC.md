@@ -21,7 +21,6 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
 | [network](network/SPEC.md) | VM namespaces and managed WireGuard peers. |
 | [systemd](systemd/SPEC.md) | Unit control through D-Bus. |
-| [idalloc](idalloc/SPEC.md) | Host user ID allocation. |
 | `hostcmd` | Host command execution. |
 
 ## Dependency graph
