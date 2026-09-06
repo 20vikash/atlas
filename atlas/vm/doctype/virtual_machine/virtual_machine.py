@@ -182,9 +182,9 @@ class VirtualMachine(Document):
 		if not title:
 			frappe.throw(_("Image title is required."))
 
-		from atlas.vm.core.virtual_machine_image_manager import VirtualMachineImageManager
+		from atlas.vm.core.image_transfer import MachineImageTransferService
 
-		return VirtualMachineImageManager().create_from_virtual_machine(
+		return MachineImageTransferService().create_from_virtual_machine(
 			self,
 			title,
 			cache_image=bool(cint(cache_image)),

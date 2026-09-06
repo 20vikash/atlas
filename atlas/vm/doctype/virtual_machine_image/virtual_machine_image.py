@@ -161,12 +161,6 @@ class VirtualMachineImage(Document):
 		if self.image_type != "Machine" or self.status != "Failed":
 			frappe.throw(_("Only a failed Machine image transfer can be retried."))
 
-		frappe.enqueue(
-			"atlas.vm.core.virtual_machine_image_manager.transfer_machine_image",
-			queue="long",
-			timeout=7200,
-			image_name=self.name,
-			job_id=f"atlas||machine-image||{self.name}",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
+		from atlas.vm.core.image_transfer import MachineImageTransferService
+
+		MachineImageTransferService().enqueue(self.name, queue="long", timeout=7200)

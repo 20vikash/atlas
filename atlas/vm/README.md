@@ -47,7 +47,7 @@ The Create Machine Image action calls `POST /v1/vms/{id}/snapshots`. Metal retur
 4. Verifies the sizes, SHA-256 values, part numbers, ETags, and final S3 object sizes.
 5. Completes both uploads and deletes the local staging data.
 
-The image record keeps the source server, upload IDs, status, and errors. Retry Transfer uses these values. `source_virtual_machine` is audit text only. Metal deletes staging after 48 hours without activity.
+The image record keeps the source server, upload IDs, status, and errors. Atlas saves the upload IDs before it asks Metal to start. A start or finalization error marks the image as Failed and keeps the retry values. Retry Transfer uses these values. `source_virtual_machine` is audit text only. Metal deletes staging after 48 hours without activity.
 
 ## System image publisher
 
@@ -57,7 +57,7 @@ Build and publish a pinned Ubuntu image:
 bench --site <site> atlas build-ubuntu-base-image --version 24.04 --architecture amd64
 ```
 
-The publisher creates an Available System image and stores exact artifact sizes.
+`image_builder.py` owns the build and publication behavior. The CLI command only validates its options and connects to each selected site. The publisher creates an Available System image and stores exact artifact sizes.
 
 ## SSH keys
 
