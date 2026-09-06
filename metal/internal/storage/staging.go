@@ -15,7 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// ArtifactSize contains the exact artifact size.
+// ArtifactSize contains the exact artifact size. The controller needs the byte
+// count to plan a multipart upload.
 type ArtifactSize struct {
 	SizeBytes int64
 }
@@ -28,6 +29,8 @@ type StagedSnapshot struct {
 	Kernel                 ArtifactSize
 }
 
+// stagedSnapshotMetadata is the on-disk record of one staged snapshot. It
+// survives a restart, so an upload can be reported and retried after one.
 type stagedSnapshotMetadata struct {
 	ID                     string `json:"id"`
 	SourceVirtualMachineID string `json:"source_virtual_machine_id"`
@@ -81,6 +84,9 @@ func (store *SnapshotStore) StageSnapshot(ctx context.Context, virtualMachineID,
 	return store.createStagedSnapshot(ctx, virtualMachineID, snapshotID, imageReference)
 }
 
+// createStagedSnapshot snapshots the live disk, clones it read-only, and stages
+// the kernel beside it. A failure attempts to destroy the clone and snapshot, so
+// a retry normally starts clean.
 func (store *SnapshotStore) createStagedSnapshot(ctx context.Context, virtualMachineID, snapshotID, imageReference string) (_ StagedSnapshot, resultError error) {
 	sourceSnapshot := store.pool.snapshot(virtualMachineID, snapshotID)
 	stagingDataset := store.pool.stagingDataset(snapshotID)
@@ -130,6 +136,8 @@ func (store *SnapshotStore) createStagedSnapshot(ctx context.Context, virtualMac
 	return metadata.snapshot(), nil
 }
 
+// stageKernel places the image kernel beside the staged disk and returns its
+// size. A hard link is used when the staging directory shares a file system.
 func (store *SnapshotStore) stageKernel(ctx context.Context, imageReference, destination string) (int64, error) {
 	source := store.images.kernelFile(imageReference)
 	if err := os.Link(source, destination); err != nil {
@@ -145,8 +153,8 @@ func (store *SnapshotStore) stageKernel(ctx context.Context, imageReference, des
 	return information.Size(), nil
 }
 
-// snapshotUpload tracks one running upload goroutine so a delete can cancel it
-// and wait for it to stop before it removes the staging data.
+// DeleteSnapshot cancels any running upload, waits for it to stop, and then
+// removes the staging clone, the source snapshot, and the staged files.
 func (store *SnapshotStore) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	store.cancelAndWaitUpload(snapshotID)
 
@@ -165,6 +173,8 @@ func (store *SnapshotStore) DeleteSnapshot(ctx context.Context, snapshotID strin
 	return store.deleteStagedSnapshot(ctx, snapshotID, metadata)
 }
 
+// deleteStagedSnapshot removes the clone, the source snapshot, and the files.
+// The clone goes first, because ZFS keeps a snapshot alive while a clone exists.
 func (store *SnapshotStore) deleteStagedSnapshot(
 	ctx context.Context,
 	snapshotID string,
@@ -183,6 +193,7 @@ func (store *SnapshotStore) deleteStagedSnapshot(
 	return nil
 }
 
+// destroyIfPresent removes a dataset and accepts one that is already gone.
 func destroyIfPresent(ctx context.Context, dataset string) error {
 	err := platform.Run(ctx, "zfs", "destroy", "-r", dataset)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
@@ -191,6 +202,7 @@ func destroyIfPresent(ctx context.Context, dataset string) error {
 	return nil
 }
 
+// loadStagedSnapshot reads and validates one staging record.
 func (store *SnapshotStore) loadStagedSnapshot(snapshotID string) (stagedSnapshotMetadata, bool, error) {
 	data, err := os.ReadFile(filepath.Join(store.snapshotDirectory(snapshotID), "metadata.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -210,6 +222,7 @@ func (store *SnapshotStore) loadStagedSnapshot(snapshotID string) (stagedSnapsho
 	return metadata, true, nil
 }
 
+// saveStagedSnapshot replaces one staging record.
 func (store *SnapshotStore) saveStagedSnapshot(metadata stagedSnapshotMetadata) error {
 	path := filepath.Join(store.snapshotDirectory(metadata.ID), "metadata.json")
 	return writeJSONFile(path, metadata, 0o640)
@@ -241,6 +254,7 @@ func (store *SnapshotStore) PruneStagedSnapshots(
 	return nil
 }
 
+// pruneStagedSnapshot removes staging that has been idle past maximumIdle.
 func (store *SnapshotStore) pruneStagedSnapshot(
 	ctx context.Context,
 	snapshotID string,
@@ -262,6 +276,7 @@ func (store *SnapshotStore) pruneStagedSnapshot(
 	return store.deleteStagedSnapshot(ctx, snapshotID, metadata)
 }
 
+// snapshot returns the caller-facing view of one staging record.
 func (metadata stagedSnapshotMetadata) snapshot() StagedSnapshot {
 	return StagedSnapshot{
 		ID:                     metadata.ID,
@@ -271,6 +286,7 @@ func (metadata stagedSnapshotMetadata) snapshot() StagedSnapshot {
 	}
 }
 
+// writeJSONFile publishes one JSON document with an atomic rename.
 func writeJSONFile(path string, value any, mode os.FileMode) error {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

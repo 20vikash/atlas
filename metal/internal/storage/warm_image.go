@@ -12,7 +12,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// WarmImageArtifacts contains host-local Firecracker snapshot files.
+// WarmImageArtifacts contains host-local Firecracker snapshot files. A warm
+// image restores a booted guest, so a VM starts without going through boot.
 type WarmImageArtifacts struct {
 	Key          string
 	RootSnapshot string
@@ -59,7 +60,7 @@ func (store *ImageStore) WarmImage(ctx context.Context, image vm.Image, configur
 	key := vm.WarmImageKey(image, configuration, firecrackerCompatibility)
 	artifacts := store.warmImageArtifacts(image.Name, key)
 
-	exists, err := datasetExists(ctx, strings.TrimSuffix(artifacts.RootSnapshot, "@ready"))
+	exists, err := datasetExists(ctx, strings.TrimSuffix(artifacts.RootSnapshot, readySnapshotSuffix))
 	if err != nil || !exists {
 		return WarmImageArtifacts{}, false, err
 	}
@@ -84,7 +85,8 @@ func (store *ImageStore) DeleteWarmSourceSnapshot(ctx context.Context, virtualMa
 	return destroyIfPresent(ctx, store.pool.snapshot(virtualMachineID, snapshotName))
 }
 
-// PromoteWarmSnapshot saves local root disk, state, and memory artifacts.
+// PromoteWarmSnapshot saves local root disk, state, and memory artifacts. A
+// failed promotion attempts to remove the dataset and files it created.
 func (store *ImageStore) PromoteWarmSnapshot(ctx context.Context, promotion WarmImagePromotion) (WarmImageArtifacts, error) {
 	key := vm.WarmImageKey(promotion.Image, promotion.Configuration, promotion.FirecrackerCompatibility)
 	artifacts := store.warmImageArtifacts(promotion.Image.Name, key)
@@ -96,7 +98,7 @@ func (store *ImageStore) PromoteWarmSnapshot(ctx context.Context, promotion Warm
 	lock.Lock()
 	defer lock.Unlock()
 
-	destinationDataset := strings.TrimSuffix(artifacts.RootSnapshot, "@ready")
+	destinationDataset := strings.TrimSuffix(artifacts.RootSnapshot, readySnapshotSuffix)
 	complete := false
 	defer func() {
 		if !complete {
@@ -137,7 +139,9 @@ func (store *ImageStore) PromoteWarmSnapshot(ctx context.Context, promotion Warm
 	return artifacts, nil
 }
 
-// RemoveOtherWarmImages removes artifacts that do not match the desired key.
+// RemoveOtherWarmImages removes artifacts that do not match the desired key. An
+// empty key removes them all. The key covers the image content, the VM shape,
+// and the Firecracker build, so a change to any of those retires the old artifact.
 func (store *ImageStore) RemoveOtherWarmImages(ctx context.Context, imageReference, desiredKey string) error {
 	directory := filepath.Join(store.imageDirectory(imageReference), "warm")
 	entries, err := os.ReadDir(directory)
@@ -161,28 +165,34 @@ func (store *ImageStore) RemoveOtherWarmImages(ctx context.Context, imageReferen
 	return nil
 }
 
+// removeWarmImages removes every warm artifact of one image.
 func (store *ImageStore) removeWarmImages(ctx context.Context, imageReference string) error {
 	return store.RemoveOtherWarmImages(ctx, imageReference, "")
 }
 
+// warmImageArtifacts names the files and snapshot of one warm image key.
 func (store *ImageStore) warmImageArtifacts(imageReference, key string) WarmImageArtifacts {
 	directory := filepath.Join(store.imageDirectory(imageReference), "warm", key)
 	return WarmImageArtifacts{
 		Key:          key,
-		RootSnapshot: store.warmDataset(key) + "@ready",
+		RootSnapshot: store.warmDataset(key) + readySnapshotSuffix,
 		StateFile:    filepath.Join(directory, "state"),
 		MemoryFile:   filepath.Join(directory, "memory"),
 	}
 }
 
+// warmDataset holds the ready-to-boot disk of one warm image.
 func (store *ImageStore) warmDataset(key string) string {
 	return store.pool.name + "/warm/" + key
 }
 
+// copyReflink copies a file and shares blocks when the file system allows it.
 func copyReflink(ctx context.Context, source, destination string) error {
 	return platform.Run(ctx, "cp", "--reflink=auto", source, destination)
 }
 
+// sendSnapshot streams one snapshot into a new dataset with `zfs send | recv`.
+// Both stderr streams are captured, so a failure names the side that failed.
 func sendSnapshot(ctx context.Context, sourceSnapshot, destinationDataset string) error {
 	sendCommand := exec.CommandContext(ctx, "zfs", "send", sourceSnapshot)
 	receiveCommand := exec.CommandContext(ctx, "zfs", "recv", destinationDataset)

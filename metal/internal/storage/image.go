@@ -19,6 +19,21 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+const (
+	// rootFileSystemSlackMiB is added to the volume that receives an image, so a
+	// sparse write has room for file system overhead.
+	rootFileSystemSlackMiB = 64
+
+	// imageVolumeBlockSize matches the guest file system block size, so a write
+	// inside the guest does not turn into a read and rewrite on the host.
+	imageVolumeBlockSize = "16k"
+
+	// lastUsedFileName records when a VM last started from an image.
+	lastUsedFileName = "last-used"
+)
+
+// deleteImage removes one image and its warm artifacts. An image with a VM disk
+// cloned from it reports ErrInUse instead of being destroyed.
 func (store *ImageStore) deleteImage(ctx context.Context, imageReference string) error {
 	lock := store.imageLock(imageReference)
 	lock.Lock()
@@ -44,18 +59,8 @@ func (store *ImageStore) deleteImage(ctx context.Context, imageReference string)
 	return nil
 }
 
-func (store *ImageStore) removeIncompleteImage(ctx context.Context, imageReference string) {
-	_ = platform.Run(ctx, "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
-	_ = os.RemoveAll(store.imageDirectory(imageReference))
-}
-
-func ignoreNotFound(err error) error {
-	if errors.Is(err, ErrNotFound) {
-		return nil
-	}
-	return err
-}
-
+// imageManifest records the content an image reference is bound to. Local marks
+// an image built on this host, which has no URLs and no digests to verify.
 type imageManifest struct {
 	RootfsSHA256 string `json:"rootfs_sha256,omitempty"`
 	KernelSHA256 string `json:"kernel_sha256,omitempty"`
@@ -63,6 +68,9 @@ type imageManifest struct {
 	Local        bool   `json:"local,omitempty"`
 }
 
+// ensureImage makes one image present and verified. A reference is bound to its
+// content: the same name with different digests is a conflict, never an update.
+// A partial import is removed, so a later call starts clean rather than resuming.
 func (store *ImageStore) ensureImage(ctx context.Context, imageReference string, image vm.Image) error {
 	lock := store.imageLock(imageReference)
 	lock.Lock()
@@ -104,6 +112,7 @@ func (store *ImageStore) ensureImage(ctx context.Context, imageReference string,
 		return fmt.Errorf("%w: image reference %q has no manifest", ErrImageConflict, imageReference)
 	}
 
+	// An import that does not reach the manifest write leaves nothing behind.
 	completed := found
 	if !found {
 		defer func() {
@@ -136,11 +145,13 @@ func (store *ImageStore) ensureImage(ctx context.Context, imageReference string,
 	return nil
 }
 
+// hasImageSource reports whether a policy names remote image content.
 func hasImageSource(image vm.Image) bool {
 	return image.RootfsURL != "" || image.KernelURL != "" || image.RootfsSHA256 != "" ||
 		image.KernelSHA256 != "" || image.Architecture != ""
 }
 
+// manifestForImage builds and validates the manifest a policy asks for.
 func manifestForImage(image vm.Image) (imageManifest, error) {
 	if image.RootfsURL == "" || image.KernelURL == "" {
 		return imageManifest{}, fmt.Errorf("%w: image and kernel URLs are required", ErrImageIntegrity)
@@ -159,6 +170,7 @@ func manifestForImage(image vm.Image) (imageManifest, error) {
 	return manifest, nil
 }
 
+// validSHA256 reports whether value is a full hexadecimal SHA-256 digest.
 func validSHA256(value string) bool {
 	if len(value) != sha256.Size*2 {
 		return false
@@ -167,6 +179,7 @@ func validSHA256(value string) bool {
 	return err == nil
 }
 
+// imageArtifactsExist reports whether any artifact of an image is on the host.
 func (store *ImageStore) imageArtifactsExist(ctx context.Context, imageReference string) (bool, error) {
 	exists, err := datasetExists(ctx, store.pool.baseDataset(imageReference))
 	if err != nil || exists {
@@ -183,6 +196,7 @@ func (store *ImageStore) imageArtifactsExist(ctx context.Context, imageReference
 	return false, err
 }
 
+// localImageArtifactsExist reports whether a local image has every file it needs.
 func (store *ImageStore) localImageArtifactsExist(ctx context.Context, imageReference string) (bool, error) {
 	exists, err := datasetExists(ctx, store.pool.baseDataset(imageReference))
 	if err != nil || !exists {
@@ -204,6 +218,7 @@ func (store *ImageStore) localImageArtifactsExist(ctx context.Context, imageRefe
 	return true, nil
 }
 
+// loadImageManifest reads the stored manifest and reports whether one exists.
 func (store *ImageStore) loadImageManifest(imageReference string) (imageManifest, bool, error) {
 	data, err := os.ReadFile(store.manifestFile(imageReference))
 	if errors.Is(err, os.ErrNotExist) {
@@ -226,6 +241,7 @@ func (store *ImageStore) loadImageManifest(imageReference string) (imageManifest
 	return manifest, true, nil
 }
 
+// saveImageManifest publishes the manifest that marks an import complete.
 func (store *ImageStore) saveImageManifest(imageReference string, manifest imageManifest) error {
 	data, err := json.Marshal(manifest)
 	if err != nil {
@@ -236,6 +252,8 @@ func (store *ImageStore) saveImageManifest(imageReference string, manifest image
 	return platform.WriteFile(store.manifestFile(imageReference), data, 0o644)
 }
 
+// ensureKernel makes the image kernel present and verified. A stored kernel that
+// fails verification is an integrity error, not a reason to download again.
 func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kernelURL, expectedDigest string) error {
 	target := store.kernelFile(imageReference)
 	if _, err := os.Stat(target); err == nil {
@@ -261,6 +279,9 @@ func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kerne
 	return os.Chmod(target, 0o644)
 }
 
+// importRootFileSystem downloads the root file system into a new ZFS volume and
+// snapshots it. Every failure destroys the volume, so no half-written base
+// image can be cloned.
 func (store *ImageStore) importRootFileSystem(ctx context.Context, imageReference, rootfsURL, expectedDigest string) error {
 	rootfs, err := download(ctx, store.httpClient, store.directory, rootfsURL, expectedDigest, store.logger)
 	if err != nil {
@@ -268,12 +289,12 @@ func (store *ImageStore) importRootFileSystem(ctx context.Context, imageReferenc
 	}
 	defer os.Remove(rootfs)
 
-	info, err := os.Stat(rootfs)
+	information, err := os.Stat(rootfs)
 	if err != nil {
 		return err
 	}
-	sizeMiB := info.Size()>>20 + 64
-	if err := platform.Run(ctx, "zfs", "create", "-V", fmt.Sprintf("%dM", sizeMiB), "-o", "volblocksize=16k", store.pool.baseDataset(imageReference)); err != nil {
+	sizeMiB := information.Size()>>bytesToMiBShift + rootFileSystemSlackMiB
+	if err := platform.Run(ctx, "zfs", "create", "-V", fmt.Sprintf("%dM", sizeMiB), "-o", "volblocksize="+imageVolumeBlockSize, store.pool.baseDataset(imageReference)); err != nil {
 		return err
 	}
 	rollback := func() {
@@ -294,10 +315,12 @@ func (store *ImageStore) importRootFileSystem(ctx context.Context, imageReferenc
 	return nil
 }
 
+// baseImageDevicePath is the block device of one base image volume.
 func (store *ImageStore) baseImageDevicePath(imageReference string) string {
 	return "/dev/zvol/" + store.pool.baseDataset(imageReference)
 }
 
+// newImageHTTPClient returns a client with timeouts suited to large artifacts.
 func newImageHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
@@ -354,7 +377,7 @@ func (store *ImageStore) EnsureImage(ctx context.Context, image vm.Image) error 
 
 // RecordImageUse records a successful virtual machine start.
 func (store *ImageStore) RecordImageUse(imageReference string, now time.Time) error {
-	path := filepath.Join(store.imageDirectory(imageReference), "last-used")
+	path := filepath.Join(store.imageDirectory(imageReference), lastUsedFileName)
 	return writeJSONFile(path, now.UTC(), 0o640)
 }
 
@@ -383,6 +406,8 @@ func (store *ImageStore) PruneImages(ctx context.Context, policies []vm.Image, n
 	return nil
 }
 
+// pruneImage removes one image that has been idle for longer than maximumIdle.
+// An image still in use, or already gone, is left alone.
 func (store *ImageStore) pruneImage(ctx context.Context, imageReference string, now time.Time, maximumIdle time.Duration) error {
 	lastUsed, err := store.imageLastUsed(imageReference)
 	if err != nil {
@@ -399,8 +424,11 @@ func (store *ImageStore) pruneImage(ctx context.Context, imageReference string, 
 	return err
 }
 
+// imageLastUsed reports when an image was last started from. It falls back to
+// the manifest time, then the directory time, so an image with no recorded use
+// still ages out.
 func (store *ImageStore) imageLastUsed(imageReference string) (time.Time, error) {
-	data, err := os.ReadFile(filepath.Join(store.imageDirectory(imageReference), "last-used"))
+	data, err := os.ReadFile(filepath.Join(store.imageDirectory(imageReference), lastUsedFileName))
 	if err == nil {
 		var lastUsed time.Time
 		if json.Unmarshal(data, &lastUsed) == nil && !lastUsed.IsZero() {

@@ -13,6 +13,19 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
+const (
+	// defaultKernelArguments boot a Firecracker guest on the serial console.
+	defaultKernelArguments = "console=ttyS0 reboot=k panic=1 pci=off"
+
+	// bootArgumentsFileName lets one image override the kernel arguments.
+	bootArgumentsFileName = "boot-args"
+
+	// blockDeviceAttempts and blockDeviceRetryDelay bound the wait for udev to
+	// create a zvol device node, which does not appear when the dataset does.
+	blockDeviceAttempts   = 60
+	blockDeviceRetryDelay = 50 * time.Millisecond
+)
+
 // PrepareBoot prepares a disk and kernel for a cold boot.
 func (store *VirtualMachineStore) PrepareBoot(ctx context.Context, request VirtualMachineStorageRequest) (BootConfiguration, error) {
 	if err := os.MkdirAll(request.ChrootRoot, 0o755); err != nil {
@@ -44,6 +57,9 @@ func (store *VirtualMachineStore) PrepareRootFileSystem(ctx context.Context, req
 	return store.provisionDisk(ctx, request)
 }
 
+// provisionDisk clones the image, grows the disk, and exposes it in the chroot.
+// A disk this call created is released when a later step fails, so a failed boot
+// does not leave a half-prepared disk behind.
 func (store *VirtualMachineStore) provisionDisk(ctx context.Context, request VirtualMachineStorageRequest) error {
 	exists, err := datasetExists(ctx, store.pool.virtualMachineDataset(request.VirtualMachineID))
 	if err != nil {
@@ -90,18 +106,21 @@ func (store *VirtualMachineStore) provisionDisk(ctx context.Context, request Vir
 	return nil
 }
 
+// releaseCreatedDisk removes a disk only when this call created it.
 func (store *VirtualMachineStore) releaseCreatedDisk(ctx context.Context, virtualMachineID string, created bool) {
 	if created {
 		_ = store.Release(ctx, virtualMachineID)
 	}
 }
 
+// growDisk raises the volume size. A disk never shrinks, because the guest file
+// system inside it cannot be shrunk safely.
 func (store *VirtualMachineStore) growDisk(ctx context.Context, virtualMachineID string, diskMiB int) error {
 	if diskMiB <= 0 {
 		return nil
 	}
 
-	requestedSizeBytes := int64(diskMiB) << 20
+	requestedSizeBytes := int64(diskMiB) << bytesToMiBShift
 	currentSizeBytes, err := volumeSizeBytes(ctx, store.pool.virtualMachineDataset(virtualMachineID))
 	if err != nil {
 		return err
@@ -186,6 +205,7 @@ func parseCloneList(output string) []string {
 	return clones
 }
 
+// datasetExists reports whether one ZFS dataset is present.
 func datasetExists(ctx context.Context, name string) (bool, error) {
 	err := platform.Run(ctx, "zfs", "list", name)
 	if err == nil {
@@ -198,6 +218,7 @@ func datasetExists(ctx context.Context, name string) (bool, error) {
 	return false, fmt.Errorf("check ZFS dataset %s: %w", name, err)
 }
 
+// volumeSizeBytes reads the provisioned size of one volume.
 func volumeSizeBytes(ctx context.Context, dataset string) (int64, error) {
 	output, err := platform.Output(ctx, "zfs", "get", "-Hp", "-o", "value", "volsize", dataset)
 	if err != nil {
@@ -225,6 +246,7 @@ func (store *VirtualMachineStore) DiskUsage(ctx context.Context, virtualMachineI
 	return parseDiskUsage(output), nil
 }
 
+// parseDiskUsage reads volsize and used from `zfs get` property output.
 func parseDiskUsage(output string) Usage {
 	var usage Usage
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
@@ -236,16 +258,17 @@ func parseDiskUsage(output string) Usage {
 		valueBytes, _ := strconv.ParseInt(fields[1], 10, 64)
 		switch fields[0] {
 		case "volsize":
-			usage.SizeMiB = int(valueBytes >> 20)
+			usage.SizeMiB = int(valueBytes >> bytesToMiBShift)
 		case "used":
-			usage.UsedMiB = int(valueBytes >> 20)
+			usage.UsedMiB = int(valueBytes >> bytesToMiBShift)
 		}
 	}
 	return usage
 }
 
-const defaultKernelArguments = "console=ttyS0 reboot=k panic=1 pci=off"
-
+// createBlockDevice makes the VM disk reachable inside the jailer chroot. The
+// node is recreated from the zvol major and minor numbers, because the chroot
+// cannot follow a symlink out to /dev.
 func createBlockDevice(sourceDevice, destinationPath string, userID, groupID uint32) error {
 	deviceInformation, err := waitForBlockDevice(sourceDevice)
 	if err != nil {
@@ -263,24 +286,27 @@ func createBlockDevice(sourceDevice, destinationPath string, userID, groupID uin
 	return os.Chown(destinationPath, int(userID), int(groupID))
 }
 
+// waitForBlockDevice waits for udev to create a device node.
 func waitForBlockDevice(path string) (syscall.Stat_t, error) {
 	var deviceInformation syscall.Stat_t
-	for range 60 {
+	for range blockDeviceAttempts {
 		if err := syscall.Stat(path, &deviceInformation); err == nil {
 			return deviceInformation, nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(blockDeviceRetryDelay)
 	}
 
 	return deviceInformation, fmt.Errorf("device %s did not appear", path)
 }
 
+// replaceHardLink relinks destination to source, replacing any earlier link.
 func replaceHardLink(source, destination string) error {
 	_ = os.Remove(destination)
 	return os.Link(source, destination)
 }
 
-// LinkOrCopy shares data when possible and copies it when required.
+// LinkOrCopy shares data when possible and copies it when required. A hard link
+// is used first, and a reflink copy covers a destination on another file system.
 func LinkOrCopy(ctx context.Context, source, destination string) error {
 	_ = os.Remove(destination)
 	if err := os.Link(source, destination); err == nil {
@@ -290,8 +316,9 @@ func LinkOrCopy(ctx context.Context, source, destination string) error {
 	return platform.Run(ctx, "cp", "--reflink=auto", source, destination)
 }
 
+// kernelArguments returns the image override when present, or the defaults.
 func kernelArguments(imageDirectory string) string {
-	arguments, err := os.ReadFile(filepath.Join(imageDirectory, "boot-args"))
+	arguments, err := os.ReadFile(filepath.Join(imageDirectory, bootArgumentsFileName))
 	if err != nil {
 		return defaultKernelArguments
 	}

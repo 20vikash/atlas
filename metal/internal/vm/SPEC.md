@@ -4,43 +4,54 @@
 
 ## Purpose
 
-Package `vm` owns the desired state, the observed state, and VM reconciliation. It uses host services through small interfaces.
+A host operation is slow and can fail. Most VM lifecycle requests must not wait for one. So this package splits a VM in two: a desired record the controller writes, and an observed record the host writes. A lifecycle request stores intent and returns. Reconciliation makes the host agree with it, and retries until it does.
+
+Nothing outside this package writes either record.
+
+## Request flow
+
+```text
+API request ---> desired record ---> response returned
+                      |
+                 Wake  |                 the reconciler runs a pass
+                      v
+                 reconcile pass ---> Runtime, Network, Storage
+                      |
+                      v
+                 observed record ---> polled by the controller
+```
+
+The controller polls until the observed generations match the desired generations. Those generations are the completion signal for asynchronous changes, so every desired change must raise a generation.
 
 ## Types
 
-| Type | Role |
+| Type | Owns |
 |---|---|
-| `Manager` | Owns VM records, locks, operations, reconciliation, and cleanup. |
-| `DesiredRecord` | Stores the version, reservation, fingerprint, generations, state, and complete specification. |
-| `ObservedRecord` | Stores applied generations, state, phase, error, resource data, and cleanup progress. |
-| `Runtime` | Controls the VM process and guest operations. |
-| `Network` | Makes the complete host network agree with the desired state. |
-| `Storage` | Gives disk usage, disk growth, and disk release operations. |
-| `Snapshots` | Stages a root file system and a kernel. |
-| `Specification` | Contains compute, disk, image, network, and guest data. |
-| `Information` | Combines safe desired data and observed data for consumers. |
-| `WarmImageBuilder` | Creates optional warm artifacts through narrow capability interfaces. |
+| `Manager` | Both records, the per-VM locks, and every operation. One per daemon. |
+| `DesiredRecord` | What the controller asked for. |
+| `ObservedRecord` | What the host reached, plus cleanup progress and the last failure. |
+| `Information` | The safe view for consumers. Local error detail never reaches it. |
+| `WarmImageBuilder` | Warm artifact creation, through narrow capability interfaces. |
+| `Runtime`, `Network`, `Storage`, `Snapshots` | Host services, defined here and implemented elsewhere. |
 
-The daemon creates one `Manager`. Each operation uses a private handle for one identifier. The handle keeps no VM state of its own.
-
-`ManagerConfig.FastApplyTimeout` limits an immediate metadata operation. A guest that does not answer in time is not an error: the desired record is already stored, so the next pass applies it.
-
-`ManagerConfig.UserIDRange` sets the reserved host user IDs. The manager allocates the lowest free ID and uses it as the group ID.
+An operation binds the manager to one identifier for its duration. That handle keeps no VM state.
 
 ## Records
 
 ```text
-machines/<id>/config.json   desired state
-machines/<id>/status.json   observed state
+machines/<id>/config.json   desired
+machines/<id>/status.json   observed
 ```
 
-Both records use schema version `1`. The manager rejects unknown fields, extra JSON values, invalid states, and unsupported versions.
+Generations carry the meaning:
 
-The daemon does a check of all records during startup. It does not change or remove an incompatible record.
+- The desired generation rises only on a real change, so a repeated request does not make the reconciler redo work.
+- The restart generation rises per accepted restart, because a restart must happen again even when nothing else changed.
+- A pass copies desired generations into the observed record only after the matching work succeeds.
 
-The create fingerprint is a SHA-256 value. It does not include signed image URLs.
+The create fingerprint identifies the reservation a create request asked for. It excludes signed image URLs, so a retry with fresh URLs is recognized as the same request rather than a conflict.
 
-The desired generation increases only when desired data changes. The restart generation increases for each accepted restart request.
+The daemon validates every record at startup and refuses to run on one it cannot read. It never repairs or removes a record: losing desired state is worse than failing to start.
 
 ## Reconciliation
 
@@ -51,39 +62,22 @@ desired stopped   -> Stop
 desired destroyed -> Remove runtime -> Release network -> Release storage
 ```
 
-The manager stores the phase and operation ID before each host operation, so an interrupted pass leaves evidence of what was in flight. A failure record has a safe message for the controller and local detail that stays on the host.
+One pass holds the VM lock for its whole duration, and every operation that changes desired state takes the same lock. A mutation therefore never lands halfway through a pass.
 
-One VM reconciliation pass holds its lock for the whole pass. Operations that change desired state take the same lock, so a mutation never lands halfway through a pass.
+The phase and operation ID are written before each host call, so an interrupted pass leaves evidence of what was in flight. A failure stores a safe message for the controller and local detail that stays on the host.
 
-Runtime, network, and storage cleanup have separate progress values, so an interrupted destroy resumes instead of repeating released work. The manager removes the VM directory after all cleanup operations succeed.
+Destroy records progress per resource, so an interrupted destroy resumes instead of repeating released work. Records are removed only after every step succeeds.
 
-## Runtime boundary
+## Boundaries
 
-The `Runtime` interface has these operations:
+`Runtime`, `Network`, `Storage`, and `Snapshots` are declared here and implemented in other packages. The manager uses those interfaces for host operations and owns the records and reconciliation, not the host details. A runtime starts and inspects a guest. It owns no record, no network identity, no reconciliation, and no cleanup progress.
 
-```text
-Inspect
-Start
-Stop
-Pause
-Resume
-Remove
-RefreshMetadata
-RefreshDisk
-ConnectSSH
-```
-
-The runtime does not own VM records, network identities, reconciliation, or cleanup progress.
-
-## Warm-image boundary
-
-`WarmRuntime` supplies Firecracker compatibility and memory snapshot operations. `WarmImageStore` finds, promotes, and removes warm artifacts.
-
-`WarmImageBuilder` owns the orchestration. It asks `Manager` to run a temporary VM and then promotes the completed artifact.
+`WarmImageBuilder` orchestrates: it asks `Manager` for a temporary VM, `WarmRuntime` for the memory snapshot, and `WarmImageStore` to keep the result. A temporary VM has no records on disk and always attempts to release what it created.
 
 ## Related
 
-- [docs/vm.md](../../docs/vm.md) gives the VM lifecycle.
-- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) describes the Firecracker runtime.
-- [internal/storage/SPEC.md](../storage/SPEC.md) describes disks and snapshots.
-- [internal/network/SPEC.md](../network/SPEC.md) describes host networks.
+- [docs/vm.md](../../docs/vm.md) gives the lifecycle and the reasons behind this design.
+- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) implements `Runtime`.
+- [internal/storage/SPEC.md](../storage/SPEC.md) implements `Storage` and `Snapshots`.
+- [internal/network/SPEC.md](../network/SPEC.md) implements `Network`.
+- [internal/reconciler/SPEC.md](../reconciler/SPEC.md) drives the passes.

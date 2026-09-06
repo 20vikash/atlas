@@ -14,14 +14,24 @@ import (
 	"time"
 )
 
+// errRetryableDownload marks a failure that another attempt may recover from.
+// Digest and status failures are not marked, so a wrong artifact fails at once.
 var errRetryableDownload = errors.New("retryable download failure")
 
 const (
-	downloadAttempts  = 5
+	// downloadAttempts is how many times one artifact download is tried.
+	downloadAttempts = 5
+
+	// downloadBaseDelay is the first retry delay. Each later delay doubles it.
 	downloadBaseDelay = 2 * time.Second
-	downloadTimeout   = 30 * time.Minute
+
+	// downloadTimeout bounds one whole artifact download, which can be several GiB.
+	downloadTimeout = 30 * time.Minute
 )
 
+// download fetches one artifact into directory and returns its temporary path.
+// The caller renames or imports the file. Retries use exponential backoff, and
+// the URL is redacted in logs because it carries a signature.
 func download(ctx context.Context, client *http.Client, directory, source, expectedDigest string, loggers ...*slog.Logger) (string, error) {
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
@@ -35,11 +45,12 @@ func download(ctx context.Context, client *http.Client, directory, source, expec
 	}
 
 	redactedSource := redactURL(source)
-	var lastErr error
+
+	var lastError error
 	for attempt := 1; attempt <= downloadAttempts; attempt++ {
 		if attempt > 1 {
 			delay := downloadBaseDelay << (attempt - 2)
-			logger.Warn("image download failed, retrying", "source", redactedSource, "attempt", attempt-1, "maximum_attempts", downloadAttempts, "retry_after", delay, "error", lastErr)
+			logger.Warn("image download failed, retrying", "source", redactedSource, "attempt", attempt-1, "maximum_attempts", downloadAttempts, "retry_after", delay, "error", lastError)
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
@@ -53,11 +64,13 @@ func download(ctx context.Context, client *http.Client, directory, source, expec
 		if !errors.Is(err, errRetryableDownload) {
 			return "", fmt.Errorf("download %s: %w", redactedSource, err)
 		}
-		lastErr = err
+		lastError = err
 	}
-	return "", fmt.Errorf("download %s after %d attempts: %w", redactedSource, downloadAttempts, lastErr)
+	return "", fmt.Errorf("download %s after %d attempts: %w", redactedSource, downloadAttempts, lastError)
 }
 
+// downloadOnce makes one attempt and verifies the digest as it writes. A
+// truncated body or a wrong digest removes the file instead of keeping it.
 func downloadOnce(ctx context.Context, client *http.Client, directory, source, expectedDigest string) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
@@ -109,9 +122,11 @@ func downloadOnce(ctx context.Context, client *http.Client, directory, source, e
 		os.Remove(path)
 		return "", err
 	}
+
 	return path, nil
 }
 
+// verifyFileSHA256 rereads a stored file and compares its digest.
 func verifyFileSHA256(path, expectedDigest string) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -129,6 +144,7 @@ func verifyFileSHA256(path, expectedDigest string) error {
 	return nil
 }
 
+// parseImageURL accepts only an absolute http or https URL.
 func parseImageURL(source string) (*url.URL, error) {
 	parsed, err := url.ParseRequestURI(source)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -137,6 +153,8 @@ func parseImageURL(source string) (*url.URL, error) {
 	return parsed, nil
 }
 
+// redactURL removes the query, fragment, and credentials, so a signed image URL
+// can be logged without leaking the signature.
 func redactURL(source string) string {
 	parsed, err := url.Parse(source)
 	if err != nil {

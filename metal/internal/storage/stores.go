@@ -14,6 +14,20 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+var (
+	// ErrNotFound indicates that a disk, snapshot, or image does not exist.
+	ErrNotFound = errors.New("storage: not found")
+
+	// ErrInUse indicates that an image has dependent virtual machines.
+	ErrInUse = errors.New("storage: in use")
+
+	// ErrImageConflict indicates that an image reference has different content.
+	ErrImageConflict = errors.New("storage: image content conflict")
+
+	// ErrImageIntegrity indicates that image verification failed.
+	ErrImageIntegrity = errors.New("storage: image integrity check failed")
+)
+
 // ZFSPool manages datasets in one ZFS pool.
 type ZFSPool struct {
 	name string
@@ -53,7 +67,8 @@ type SnapshotStore struct {
 	logger           *slog.Logger
 }
 
-// Stores contains the host storage services.
+// Stores contains the host storage services. They share one pool and one image
+// store, so a disk clone and its base image always agree.
 type Stores struct {
 	Pool            *ZFSPool
 	VirtualMachines *VirtualMachineStore
@@ -116,32 +131,40 @@ func (store *SnapshotStore) Shutdown(shutdownContext context.Context) error {
 	}
 }
 
+// imageDirectory holds the kernel, manifest, and warm artifacts of one image.
 func (store *ImageStore) imageDirectory(imageReference string) string {
 	return filepath.Join(store.directory, imageReference)
 }
 
+// kernelFile is the uncompressed kernel of one image.
 func (store *ImageStore) kernelFile(imageReference string) string {
 	return filepath.Join(store.imageDirectory(imageReference), "vmlinux")
 }
 
+// manifestFile records the content one image reference is bound to.
 func (store *ImageStore) manifestFile(imageReference string) string {
 	return filepath.Join(store.imageDirectory(imageReference), "manifest.json")
 }
 
+// imageLock returns the lock that serializes work on one image reference.
 func (store *ImageStore) imageLock(imageReference string) *sync.Mutex {
 	lock, _ := store.imageLocks.LoadOrStore(imageReference, &sync.Mutex{})
 	return lock.(*sync.Mutex)
 }
 
+// snapshotLock serializes staging, upload, and delete of one snapshot.
 func (store *SnapshotStore) snapshotLock(snapshotID string) *sync.Mutex {
 	lock, _ := store.snapshotLocks.LoadOrStore(snapshotID, &sync.Mutex{})
 	return lock.(*sync.Mutex)
 }
 
+// snapshotDirectory holds the staged kernel and metadata of one snapshot.
 func (store *SnapshotStore) snapshotDirectory(snapshotID string) string {
 	return filepath.Join(store.directory, snapshotID)
 }
 
+// notFoundAware turns the ZFS "does not exist" message into ErrNotFound. ZFS
+// reports a missing dataset on stderr, not with a distinct exit code.
 func notFoundAware(err error) error {
 	if err != nil && strings.Contains(err.Error(), "does not exist") {
 		return ErrNotFound
@@ -149,18 +172,6 @@ func notFoundAware(err error) error {
 
 	return err
 }
-
-// ErrNotFound indicates that a disk, snapshot, or image does not exist.
-var ErrNotFound = errors.New("storage: not found")
-
-// ErrInUse indicates that an image has dependent virtual machines.
-var ErrInUse = errors.New("storage: in use")
-
-// ErrImageConflict indicates that an image reference has different content.
-var ErrImageConflict = errors.New("storage: image content conflict")
-
-// ErrImageIntegrity indicates that image verification failed.
-var ErrImageIntegrity = errors.New("storage: image integrity check failed")
 
 // VirtualMachineStorageRequest identifies the files and disk for one virtual machine.
 type VirtualMachineStorageRequest struct {

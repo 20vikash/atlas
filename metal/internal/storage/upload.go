@@ -13,9 +13,11 @@ import (
 	"time"
 )
 
-// SnapshotPartSizeBytes is the fixed multipart upload size.
+// SnapshotPartSizeBytes is the fixed multipart upload size. The controller signs
+// each part against this size, so it cannot change without breaking a signature.
 const SnapshotPartSizeBytes int64 = 2 << 30
 
+// SnapshotUploadPart is one presigned destination for a part of an artifact.
 type SnapshotUploadPart struct {
 	PartNumber int
 	URL        string
@@ -51,7 +53,7 @@ type SnapshotUploadResult struct {
 	Kernel UploadedArtifact `json:"kernel"`
 }
 
-// Snapshot upload states.
+// Snapshot upload states recorded in the staging metadata.
 const (
 	UploadStatePending   = "pending"
 	UploadStateUploading = "uploading"
@@ -68,11 +70,13 @@ type SnapshotUploadStatus struct {
 	Result        SnapshotUploadResult
 	Error         string
 }
+
+// snapshotUpload tracks one running upload goroutine, so a delete can cancel it
+// and wait for it to stop before it removes the staging data it reads.
 type snapshotUpload struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	uploaded atomic.Int64
-	total    int64
 }
 
 // StartUpload begins an asynchronous artifact upload and returns at once. It is
@@ -87,29 +91,33 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	rootContext := store.rootContext
 	store.lifecycleMutex.Unlock()
 
+	// Shutdown waits on this counter. Every path that does not hand the upload to
+	// a goroutine must release it here.
+	goroutineStarted := false
+	defer func() {
+		if !goroutineStarted {
+			store.uploadsWaitGroup.Done()
+		}
+	}()
+
 	lock := store.snapshotLock(snapshotID)
 	lock.Lock()
 	defer lock.Unlock()
 
 	metadata, found, err := store.loadStagedSnapshot(snapshotID)
 	if err != nil {
-		store.uploadsWaitGroup.Done()
 		return err
 	}
 	if !found {
-		store.uploadsWaitGroup.Done()
 		return ErrNotFound
 	}
 	if metadata.UploadState == UploadStateCompleted {
-		store.uploadsWaitGroup.Done()
 		return nil
 	}
 	if err := validateUploadParts(request.Rootfs.Parts, metadata.RootfsSizeBytes); err != nil {
-		store.uploadsWaitGroup.Done()
 		return fmt.Errorf("rootfs parts: %w", err)
 	}
 	if err := validateUploadParts(request.Kernel.Parts, metadata.KernelSizeBytes); err != nil {
-		store.uploadsWaitGroup.Done()
 		return fmt.Errorf("kernel parts: %w", err)
 	}
 
@@ -117,14 +125,12 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	upload := &snapshotUpload{
 		cancel: cancel,
 		done:   make(chan struct{}),
-		total:  metadata.RootfsSizeBytes + metadata.KernelSizeBytes,
 	}
 
 	store.uploadsMutex.Lock()
 	if _, running := store.uploads[snapshotID]; running {
 		store.uploadsMutex.Unlock()
 		cancel()
-		store.uploadsWaitGroup.Done()
 		return nil
 	}
 	store.uploads[snapshotID] = upload
@@ -137,14 +143,17 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 		cancel()
 		store.removeUpload(snapshotID, upload)
 		close(upload.done)
-		store.uploadsWaitGroup.Done()
 		return err
 	}
 
+	goroutineStarted = true
 	go store.runUpload(uploadContext, snapshotID, upload, metadata.RootfsSizeBytes, metadata.KernelSizeBytes, request)
+
 	return nil
 }
 
+// runUpload sends both artifacts and records the outcome. It always releases the
+// shutdown counter and signals waiters, whichever way it ends.
 func (store *SnapshotStore) runUpload(ctx context.Context, snapshotID string, upload *snapshotUpload, rootfsSize, kernelSize int64, request SnapshotUploadRequest) {
 	defer func() {
 		store.removeUpload(snapshotID, upload)
@@ -165,6 +174,7 @@ func (store *SnapshotStore) runUpload(ctx context.Context, snapshotID string, up
 	store.finishUpload(snapshotID, SnapshotUploadResult{Rootfs: rootfs, Kernel: kernel})
 }
 
+// finishUpload records a completed upload and its result.
 func (store *SnapshotStore) finishUpload(snapshotID string, result SnapshotUploadResult) {
 	store.updateUploadMetadata(snapshotID, func(metadata *stagedSnapshotMetadata) {
 		metadata.UploadState = UploadStateCompleted
@@ -173,6 +183,8 @@ func (store *SnapshotStore) finishUpload(snapshotID string, result SnapshotUploa
 	})
 }
 
+// failUpload records a failure. A canceled upload stays pending instead, so a
+// shutdown or a delete does not look like a real failure.
 func (store *SnapshotStore) failUpload(ctx context.Context, snapshotID string, cause error) {
 	// Keep canceled uploads pending for retry.
 	if ctx.Err() != nil {
@@ -184,6 +196,7 @@ func (store *SnapshotStore) failUpload(ctx context.Context, snapshotID string, c
 	})
 }
 
+// updateUploadMetadata applies one change to the staging record under its lock.
 func (store *SnapshotStore) updateUploadMetadata(snapshotID string, apply func(*stagedSnapshotMetadata)) {
 	lock := store.snapshotLock(snapshotID)
 	lock.Lock()
@@ -198,6 +211,7 @@ func (store *SnapshotStore) updateUploadMetadata(snapshotID string, apply func(*
 	_ = store.saveStagedSnapshot(metadata)
 }
 
+// removeUpload forgets an upload, unless a newer one already replaced it.
 func (store *SnapshotStore) removeUpload(snapshotID string, upload *snapshotUpload) {
 	store.uploadsMutex.Lock()
 	defer store.uploadsMutex.Unlock()
@@ -219,7 +233,9 @@ func (store *SnapshotStore) cancelAndWaitUpload(snapshotID string) {
 	<-upload.done
 }
 
-// SnapshotUploadStatus reports the current upload state of one staged snapshot.
+// UploadStatus reports the current upload state of one staged snapshot. An
+// upload recorded as running with no goroutine behind it did not survive a host
+// restart, so it is reported as pending for the controller to start again.
 func (store *SnapshotStore) UploadStatus(_ context.Context, snapshotID string) (SnapshotUploadStatus, error) {
 	lock := store.snapshotLock(snapshotID)
 	lock.Lock()
@@ -263,6 +279,8 @@ func (store *SnapshotStore) UploadStatus(_ context.Context, snapshotID string) (
 	return status, nil
 }
 
+// validateUploadParts checks that the parts cover the artifact exactly, are
+// numbered from 1 without gaps, and carry usable URLs.
 func validateUploadParts(parts []SnapshotUploadPart, sizeBytes int64) error {
 	if sizeBytes <= 0 {
 		return fmt.Errorf("artifact size must be positive")
@@ -282,6 +300,8 @@ func validateUploadParts(parts []SnapshotUploadPart, sizeBytes int64) error {
 	return nil
 }
 
+// uploadArtifact sends one artifact part by part and digests it as it reads, so
+// the file is read once for both the upload and the checksum.
 func (store *SnapshotStore) uploadArtifact(ctx context.Context, path string, sizeBytes int64, parts []SnapshotUploadPart, uploaded *atomic.Int64) (UploadedArtifact, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -311,6 +331,7 @@ func (store *SnapshotStore) uploadArtifact(ctx context.Context, path string, siz
 	}, nil
 }
 
+// uploadPart sends one part and returns the ETag the destination reports.
 func (store *SnapshotStore) uploadPart(ctx context.Context, part SnapshotUploadPart, body io.Reader, sizeBytes int64) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut, part.URL, body)
 	if err != nil {
@@ -337,5 +358,3 @@ func (store *SnapshotStore) uploadPart(ctx context.Context, part SnapshotUploadP
 	}
 	return etag, nil
 }
-
-// DeleteSnapshot removes staging before it releases the source disk snapshot.

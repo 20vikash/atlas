@@ -50,17 +50,11 @@ Metal sends Ctrl+Alt+Del and waits up to 30 seconds. It sends `SIGKILL` when the
 
 ## Cleanup
 
-Delete stores the desired `destroyed` state. Reconciliation records separate cleanup progress for the runtime, network, and storage.
-
-Metal removes the VM directory only after all cleanup steps succeed.
+Delete stores the desired `destroyed` state. Cleanup then runs as part of reconciliation and can resume after an interruption: [internal/vm/SPEC.md](../internal/vm/SPEC.md).
 
 ## Records
 
-`config.json` stores schema version `1`, the create fingerprint, desired generations, and the complete desired specification.
-
-`status.json` stores schema version `1`, applied generations, operation data, safe errors, local errors, and cleanup progress.
-
-Metal rejects unknown fields, extra JSON values, and unsupported record versions during daemon startup.
+Each VM keeps a desired record and an observed record on disk. Record contents, generation rules, and startup validation: [internal/vm/SPEC.md](../internal/vm/SPEC.md).
 
 ## Design notes
 
