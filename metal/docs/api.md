@@ -30,7 +30,7 @@ The controller API uses `/v1`. Metal does not provide unversioned controller rou
 | `GET` | `/v1/vms` | `200` | List VMs |
 | `GET` | `/v1/vms/{id}` | `200` | Get one VM |
 | `PUT` | `/v1/vms/{id}/power` | `202` | Set the power state |
-| `POST` | `/v1/vms/{id}/restarts` | `202` | Request a restart |
+| `POST` | `/v1/vms/{id}/restart` | `202` | Request a restart |
 | `PUT` | `/v1/vms/{id}/compute` | `202` | Set CPU and memory values |
 | `PUT` | `/v1/vms/{id}/disk` | `202` | Set disk size and rate limits |
 | `PUT` | `/v1/vms/{id}/network` | `202` | Set the complete network |

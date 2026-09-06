@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // @Summary	Set virtual machine disk resources
@@ -23,11 +25,6 @@ import (
 // @Failure	500		{object}	errorResponse
 // @Router		/v1/vms/{id}/disk [put]
 func (s *Server) setVirtualMachineDisk(c echo.Context) error {
-	virtualMachineID := c.Param("id")
-	if !validResourceID(virtualMachineID) {
-		return badRequest("invalid virtual machine identifier")
-	}
-
 	var request diskRequest
 	if err := decodeJSONRequest(c, &request); err != nil {
 		return err
@@ -35,15 +32,38 @@ func (s *Server) setVirtualMachineDisk(c echo.Context) error {
 	if err := request.validate(); err != nil {
 		return badRequest(err.Error())
 	}
+
+	virtualMachine, err := s.loadVirtualMachine(c)
+	if err != nil {
+		return err
+	}
+	if err := s.validateDiskCapacity(c, request, virtualMachine); err != nil {
+		return err
+	}
 	if err := s.virtualMachineManager.SetDisk(
 		c.Request().Context(),
-		virtualMachineID,
+		virtualMachine.ID,
 		request.SizeMiB,
-		request.spec(),
+		request.specification(),
 	); err != nil {
 		return err
 	}
 
 	s.wakeReconciler()
+
 	return s.respondWithCurrentVirtualMachine(c, http.StatusAccepted)
+}
+
+// validateDiskCapacity rejects growth the pool cannot hold. Only the increase is
+// checked, because the VM already holds what it reserves.
+func (s *Server) validateDiskCapacity(c echo.Context, request diskRequest, current vm.Information) error {
+	capacity, err := s.hostService.Capacity(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	if needsMoreThanAvailable(request.SizeMiB, current.DiskMiB, capacity.AvailableStorageMiB) {
+		return newAPIError(http.StatusConflict, "conflict", "not enough host storage capacity")
+	}
+
+	return nil
 }

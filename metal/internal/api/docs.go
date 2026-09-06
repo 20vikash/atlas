@@ -13,6 +13,7 @@ import (
 //go:embed swagger.json
 var specification []byte
 
+// docsPage renders the embedded specification with a browser API reference.
 const docsPage = `<!doctype html>
 <html lang="en">
 	<head>
@@ -35,10 +36,12 @@ const docsPage = `<!doctype html>
 </html>
 `
 
+// showDocumentation serves the API reference page.
 func (s *Server) showDocumentation(c echo.Context) error {
 	return c.HTML(http.StatusOK, docsPage)
 }
 
+// getOpenAPISpecification serves the embedded OpenAPI document.
 func (s *Server) getOpenAPISpecification(c echo.Context) error {
 	return c.JSONBlob(http.StatusOK, specification)
 }

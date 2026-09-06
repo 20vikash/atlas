@@ -36,14 +36,14 @@ type consoleControlMessage struct {
 // @Failure	500	{object}	errorResponse
 // @Router		/v1/vms/{id}/console [get]
 func (s *Server) getVirtualMachineConsole(c echo.Context) error {
-	id := c.Param("id")
-	if !validResourceID(id) {
-		return badRequest("invalid virtual machine identifier")
+	identifier, err := virtualMachineID(c)
+	if err != nil {
+		return err
 	}
 
 	// Default options reject cross-origin browsers.
-	connection, err := websocket.Accept(c.Response(), c.Request(), nil)
-	if err != nil {
+	connection, acceptError := websocket.Accept(c.Response(), c.Request(), nil)
+	if acceptError != nil {
 		return nil
 	}
 	defer connection.CloseNow()
@@ -52,9 +52,9 @@ func (s *Server) getVirtualMachineConsole(c echo.Context) error {
 	defer cancel()
 
 	if c.QueryParam("mode") == "ssh" {
-		s.streamSSHConsole(ctx, connection, id)
+		s.streamSSHConsole(ctx, connection, identifier)
 	} else {
-		s.streamTTYConsole(ctx, connection, id)
+		s.streamTTYConsole(ctx, connection, identifier)
 	}
 
 	return nil

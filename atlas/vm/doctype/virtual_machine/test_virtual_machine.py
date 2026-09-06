@@ -301,6 +301,7 @@ class TestMetalClient(UnitTestCase):
 
 		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
 			client.set_virtual_machine_power_state("VM-00001", "running")
+			client.request_virtual_machine_restart("VM-00001")
 			client.set_virtual_machine_disk("VM-00001", {"size_mib": 2048, "throughput_mibps": 0, "iops": 0})
 			client.set_virtual_machine_compute("VM-00001", 2, 2048)
 			client.delete_virtual_machine("VM-00001")
@@ -310,6 +311,7 @@ class TestMetalClient(UnitTestCase):
 			paths,
 			[
 				"http://10.0.0.2:9000/v1/vms/VM-00001/power",
+				"http://10.0.0.2:9000/v1/vms/VM-00001/restart",
 				"http://10.0.0.2:9000/v1/vms/VM-00001/disk",
 				"http://10.0.0.2:9000/v1/vms/VM-00001/compute",
 				"http://10.0.0.2:9000/v1/vms/VM-00001",

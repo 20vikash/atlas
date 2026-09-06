@@ -493,7 +493,7 @@ func TestMutationRequestsRejectUnknownAndTrailingJSON(t *testing.T) {
 }
 
 func TestCreateRejectsLongID(t *testing.T) {
-	id := strings.Repeat("a", maxResourceIDLength+1)
+	id := strings.Repeat("a", maximumResourceIDLength+1)
 	do(t, newTestServer(t), http.MethodPut, "/v1/vms/"+id, validCreateRequest, http.StatusBadRequest)
 }
 
@@ -645,14 +645,20 @@ func TestSetDiskAppliesCompleteSpecificationAndRejectsInvalidLimits(t *testing.T
 func TestSetDiskGrows(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-	rec := do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":2048,"throughput_mibps":0,"iops":0}`, http.StatusAccepted)
+	rec := do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":1500,"throughput_mibps":0,"iops":0}`, http.StatusAccepted)
 	var got virtualMachineResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Desired.Disk.SizeMiB != 2048 {
-		t.Fatalf("disk size = %d, want 2048", got.Desired.Disk.SizeMiB)
+	if got.Desired.Disk.SizeMiB != 1500 {
+		t.Fatalf("disk size = %d, want 1500", got.Desired.Disk.SizeMiB)
 	}
+}
+
+func TestSetDiskRejectsInsufficientCapacity(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":2048,"throughput_mibps":0,"iops":0}`, http.StatusConflict)
 }
 
 func TestSetDiskRejectsShrink(t *testing.T) {
@@ -682,6 +688,25 @@ func TestSetComputeChecksOnlyAdditionalCapacity(t *testing.T) {
 	}
 	if needsMoreThanAvailable(256, 512, 0) {
 		t.Fatal("resource reduction required free capacity")
+	}
+}
+
+func TestPublicAPIErrorMapsUploadAndShutdownErrors(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "invalid upload", err: storage.ErrInvalidUpload, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "shutdown", err: storage.ErrShuttingDown, status: http.StatusServiceUnavailable, code: "unavailable"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			apiError := publicAPIError(testCase.err)
+			if apiError.status != testCase.status || apiError.code != testCase.code {
+				t.Fatalf("api error = %d/%q, want %d/%q", apiError.status, apiError.code, testCase.status, testCase.code)
+			}
+		})
 	}
 }
 
@@ -871,7 +896,7 @@ func TestRestartAndDeleteReturnUpdatedResources(t *testing.T) {
 	server := newTestServer(t)
 	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	recorder := do(t, server, http.MethodPost, "/v1/vms/vm1/restarts", "", http.StatusAccepted)
+	recorder := do(t, server, http.MethodPost, "/v1/vms/vm1/restart", "", http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)

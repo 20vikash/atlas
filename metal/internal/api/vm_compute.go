@@ -53,6 +53,8 @@ func (s *Server) setVirtualMachineCompute(c echo.Context) error {
 	return s.respondWithCurrentVirtualMachine(c, http.StatusAccepted)
 }
 
+// validateComputeCapacity rejects a request the host cannot satisfy. Only the
+// increase is checked, because the VM already holds what it reserves.
 func (s *Server) validateComputeCapacity(c echo.Context, request computeRequest, current vm.Information) error {
 	capacity, err := s.hostService.Capacity(c.Request().Context())
 	if err != nil {
@@ -67,6 +69,7 @@ func (s *Server) validateComputeCapacity(c echo.Context, request computeRequest,
 	return nil
 }
 
+// needsMoreThanAvailable reports whether the increase exceeds free capacity.
 func needsMoreThanAvailable(requested, current, available int) bool {
 	return requested-current > available
 }

@@ -10,12 +10,15 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+// syncRequest carries the complete controller-owned host state. Every set is
+// complete: a missing field is rejected rather than read as an empty set.
 type syncRequest struct {
 	WireGuardPeers        []wireGuardPeerRequest `json:"wireguard_peers"`
 	Images                []imageRequest         `json:"images"`
 	PrivilegedVMAddresses []string               `json:"privileged_vm_addresses"`
 }
 
+// wireGuardPeerRequest is one desired WireGuard peer.
 type wireGuardPeerRequest struct {
 	Node      string `json:"node"`
 	NodeID    uint32 `json:"node_id"`
@@ -23,10 +26,12 @@ type wireGuardPeerRequest struct {
 	Address   string `json:"address"`
 }
 
+// syncResponse returns host capacity in the same exchange as the sync.
 type syncResponse struct {
 	Capacity capacityResponse `json:"capacity"`
 }
 
+// capacityResponse is what the controller needs to place the next VM.
 type capacityResponse struct {
 	TotalCPUCount       int `json:"total_cpu_count"`
 	AvailableCPUCount   int `json:"available_cpu_count"`
@@ -74,7 +79,7 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 	}
 
 	capacity, err := s.hostService.Synchronize(c.Request().Context(), host.DesiredState{
-		WireGuardPeers: request.toWireGuardPeers(), Images: request.imagePolicies(),
+		WireGuardPeers: request.wireGuardPeers(), Images: request.imagePolicies(),
 		PrivilegedVirtualMachineAddresses: request.PrivilegedVMAddresses,
 	})
 	if err != nil {
@@ -84,6 +89,7 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 	return c.JSON(http.StatusOK, syncResponse{Capacity: capacityResponseFromHost(capacity)})
 }
 
+// imagePolicies converts the requested images into image policies.
 func (request syncRequest) imagePolicies() []vm.Image {
 	images := make([]vm.Image, 0, len(request.Images))
 	for _, image := range request.Images {
@@ -92,7 +98,8 @@ func (request syncRequest) imagePolicies() []vm.Image {
 	return images
 }
 
-func (request syncRequest) toWireGuardPeers() []network.WireGuardPeer {
+// wireGuardPeers converts the requested peers into the network form.
+func (request syncRequest) wireGuardPeers() []network.WireGuardPeer {
 	peers := make([]network.WireGuardPeer, 0, len(request.WireGuardPeers))
 	for _, peer := range request.WireGuardPeers {
 		peers = append(peers, network.WireGuardPeer{
@@ -105,11 +112,15 @@ func (request syncRequest) toWireGuardPeers() []network.WireGuardPeer {
 	return peers
 }
 
+// capacityResponseFromHost converts host capacity into the response form.
 func capacityResponseFromHost(capacity host.Capacity) capacityResponse {
 	return capacityResponse{
-		TotalCPUCount: capacity.TotalCPUCount, AvailableCPUCount: capacity.AvailableCPUCount,
-		VirtualMachineCount: capacity.VirtualMachineCount, TotalMemoryMiB: capacity.TotalMemoryMiB,
-		AvailableMemoryMiB: capacity.AvailableMemoryMiB, TotalStorageMiB: capacity.TotalStorageMiB,
+		TotalCPUCount:       capacity.TotalCPUCount,
+		AvailableCPUCount:   capacity.AvailableCPUCount,
+		VirtualMachineCount: capacity.VirtualMachineCount,
+		TotalMemoryMiB:      capacity.TotalMemoryMiB,
+		AvailableMemoryMiB:  capacity.AvailableMemoryMiB,
+		TotalStorageMiB:     capacity.TotalStorageMiB,
 		AvailableStorageMiB: capacity.AvailableStorageMiB,
 	}
 }

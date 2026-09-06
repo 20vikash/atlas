@@ -91,7 +91,7 @@ class MetalClient:
 		"""Store a restart request for one VM."""
 		response = self._request(
 			"POST",
-			f"/v1/vms/{quote(virtual_machine_id, safe='')}/restarts",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/restart",
 			expected_status=202,
 			uncertain_on_failure=True,
 		)

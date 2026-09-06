@@ -2,6 +2,9 @@ package api
 
 import "github.com/labstack/echo/v4"
 
+// registerRoutes binds every handler. Routes that change desired state use PUT
+// and are idempotent. POST is used only where a request is an action or creates
+// an addressable resource.
 func (s *Server) registerRoutes(router *echo.Echo) {
 	router.GET("/health", s.checkHealth)
 	router.GET("/docs", s.showDocumentation)
@@ -15,7 +18,7 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	virtualMachineRoutes.PUT("/:id", s.createVirtualMachine)
 	virtualMachineRoutes.GET("/:id", s.getVirtualMachine)
 	virtualMachineRoutes.PUT("/:id/power", s.setVirtualMachinePowerState)
-	virtualMachineRoutes.POST("/:id/restarts", s.restartVirtualMachine)
+	virtualMachineRoutes.POST("/:id/restart", s.restartVirtualMachine)
 	virtualMachineRoutes.PUT("/:id/compute", s.setVirtualMachineCompute)
 	virtualMachineRoutes.PUT("/:id/disk", s.setVirtualMachineDisk)
 	virtualMachineRoutes.PUT("/:id/network", s.setVirtualMachineNetwork)

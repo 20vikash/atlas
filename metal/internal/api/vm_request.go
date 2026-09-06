@@ -10,18 +10,29 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+// Bounds on caller-supplied values.
 const (
-	maxResourceIDLength = 64
-	maximumMemoryMiB    = (math.MaxInt - 128) / 2
+	// maximumResourceIDLength keeps an identifier usable as a path segment, a ZFS
+	// dataset name, and a systemd unit instance name.
+	maximumResourceIDLength = 64
+
+	// maximumMemoryMiB is the largest request that cannot overflow the unit memory
+	// limit, which is twice the guest size plus overhead.
+	maximumMemoryMiB = (math.MaxInt - 128) / 2
 )
 
+// Patterns that keep caller-supplied values usable as host paths and names.
 var (
-	imageRefPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
-	resourceIDPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
-	sha256DigestPattern = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
+	imageReferencePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*$`)
+	resourceIDPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	sha256DigestPattern   = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
+
+	// wireGuardMeshPrefix is the only block a VM mesh address may fall in.
 	wireGuardMeshPrefix = netip.MustParsePrefix("fdaa::/16")
 )
 
+// createRequest is the complete desired specification of a new VM. Every group
+// is required, because a create stores state rather than merging into it.
 type createRequest struct {
 	Compute computeRequest `json:"compute"`
 	Disk    diskRequest    `json:"disk"`
@@ -30,11 +41,13 @@ type createRequest struct {
 	Guest   guestRequest   `json:"guest"`
 }
 
+// computeRequest is the complete CPU and memory shape.
 type computeRequest struct {
 	VirtualCPUCount int `json:"virtual_cpu_count" minimum:"1"`
 	MemoryMiB       int `json:"memory_mib" minimum:"1"`
 }
 
+// imageRequest identifies boot content and how the host should keep it.
 type imageRequest struct {
 	Ref                         string                              `json:"ref"`
 	Architecture                string                              `json:"architecture"`
@@ -45,23 +58,27 @@ type imageRequest struct {
 	MemorySnapshotConfiguration *memorySnapshotConfigurationRequest `json:"memory_snapshot_configuration,omitempty"`
 }
 
+// memorySnapshotConfigurationRequest is the exact VM shape a warm image serves.
 type memorySnapshotConfigurationRequest struct {
 	VirtualCPUCount int `json:"virtual_cpu_count"`
 	MemoryMiB       int `json:"memory_mib"`
 	DiskMiB         int `json:"disk_mib"`
 }
 
+// imageArtifactRequest is one downloadable artifact and its digest.
 type imageArtifactRequest struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
 }
 
+// diskRequest is the complete disk size and its rate limits.
 type diskRequest struct {
 	SizeMiB         int `json:"size_mib" minimum:"1"`
 	ThroughputMiBps int `json:"throughput_mibps"`
 	IOPS            int `json:"iops"`
 }
 
+// validate rejects a disk that is not usable.
 func (request diskRequest) validate() error {
 	if request.SizeMiB <= 0 {
 		return fmt.Errorf("disk.size_mib must be positive")
@@ -72,10 +89,12 @@ func (request diskRequest) validate() error {
 	return nil
 }
 
-func (request diskRequest) spec() vm.Disk {
+// specification converts the request into the domain disk limits.
+func (request diskRequest) specification() vm.Disk {
 	return vm.Disk{ThroughputMiBps: request.ThroughputMiBps, IOPS: request.IOPS}
 }
 
+// networkRequest is the complete desired VM network.
 type networkRequest struct {
 	PublicIPv4                    string `json:"public_ipv4"`
 	WireGuardMeshIPv6             string `json:"wireguard_mesh_ipv6"`
@@ -84,6 +103,7 @@ type networkRequest struct {
 	Egress                        string `json:"egress"`
 }
 
+// guestRequest carries the values published to the guest through MMDS.
 type guestRequest struct {
 	Hostname string            `json:"hostname"`
 	SSHKeys  []string          `json:"ssh_keys"`
@@ -91,10 +111,12 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
+// powerRequest is the desired power state.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
 }
 
+// validate checks every group and the guest values a create carries.
 func (request createRequest) validate() error {
 	if err := request.Compute.validate(); err != nil {
 		return err
@@ -115,14 +137,15 @@ func (request createRequest) validate() error {
 	return validateMetadata(request.Guest.Metadata)
 }
 
-func (request createRequest) spec() vm.Specification {
+// specification converts the request into the domain VM specification.
+func (request createRequest) specification() vm.Specification {
 	return vm.Specification{
 		VirtualCPUCount: request.Compute.VirtualCPUCount,
 		MemoryMiB:       request.Compute.MemoryMiB,
 		DiskMiB:         request.Disk.SizeMiB,
-		Disk:            request.Disk.spec(),
+		Disk:            request.Disk.specification(),
 		Image:           request.Image.specification(),
-		Network:         request.Network.spec(),
+		Network:         request.Network.specification(),
 		SSHKeys:         request.Guest.SSHKeys,
 		Hostname:        request.Guest.Hostname,
 		UserData:        request.Guest.UserData,
@@ -130,6 +153,7 @@ func (request createRequest) spec() vm.Specification {
 	}
 }
 
+// validate rejects a compute shape the host cannot represent.
 func (request computeRequest) validate() error {
 	if request.VirtualCPUCount <= 0 || request.MemoryMiB <= 0 {
 		return fmt.Errorf("compute values must be positive")
@@ -140,6 +164,7 @@ func (request computeRequest) validate() error {
 	return nil
 }
 
+// specification converts the request into the domain image.
 func (request imageRequest) specification() vm.Image {
 	return vm.Image{
 		Name:                        request.Ref,
@@ -154,8 +179,9 @@ func (request imageRequest) specification() vm.Image {
 	}
 }
 
+// validate rejects an image that cannot be fetched or verified.
 func (request imageRequest) validate() error {
-	if !validImageRef(request.Ref) {
+	if !validImageReference(request.Ref) {
 		return fmt.Errorf("image.ref must match [A-Za-z0-9._:-] and start alphanumeric")
 	}
 	if request.Architecture == "" {
@@ -177,6 +203,7 @@ func (request imageRequest) validate() error {
 	return nil
 }
 
+// specification converts the request into the domain warm image shape.
 func (request *memorySnapshotConfigurationRequest) specification() *vm.MemorySnapshotConfiguration {
 	if request == nil {
 		return nil
@@ -189,6 +216,7 @@ func (request *memorySnapshotConfigurationRequest) specification() *vm.MemorySna
 	}
 }
 
+// validate rejects a network the host cannot build.
 func (request networkRequest) validate() error {
 	if request.PrivateNetworkThroughputMiBps < 0 || request.PublicNetworkThroughputMiBps < 0 {
 		return fmt.Errorf("network throughput values must not be negative")
@@ -216,7 +244,8 @@ func (request networkRequest) validate() error {
 	return nil
 }
 
-func (request networkRequest) spec() vm.NetworkConfiguration {
+// specification converts the request into the domain network configuration.
+func (request networkRequest) specification() vm.NetworkConfiguration {
 	return vm.NetworkConfiguration{
 		PublicIPv4:                    request.PublicIPv4,
 		WireGuardMeshIPv6:             request.WireGuardMeshIPv6,
@@ -226,6 +255,7 @@ func (request networkRequest) spec() vm.NetworkConfiguration {
 	}
 }
 
+// state returns the requested power state, or an error for any other value.
 func (request powerRequest) state() (vm.State, error) {
 	state := vm.State(request.State)
 	if state != vm.StateRunning && state != vm.StateStopped && state != vm.StatePaused {
@@ -234,19 +264,24 @@ func (request powerRequest) state() (vm.State, error) {
 	return state, nil
 }
 
+// validHTTPURL reports whether value is an absolute http or https URL.
 func validHTTPURL(value string) bool {
 	parsed, err := url.ParseRequestURI(value)
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-func validImageRef(value string) bool {
-	return imageRefPattern.MatchString(value)
+// validImageReference reports whether value is usable as a directory and a
+// dataset name.
+func validImageReference(value string) bool {
+	return imageReferencePattern.MatchString(value)
 }
 
+// validResourceID reports whether value is usable as a VM or snapshot identifier.
 func validResourceID(value string) bool {
-	return len(value) <= maxResourceIDLength && resourceIDPattern.MatchString(value)
+	return len(value) <= maximumResourceIDLength && resourceIDPattern.MatchString(value)
 }
 
+// validSHA256Digest reports whether value is a full hexadecimal SHA-256 digest.
 func validSHA256Digest(value string) bool {
 	return sha256DigestPattern.MatchString(value)
 }

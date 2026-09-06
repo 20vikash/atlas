@@ -37,7 +37,7 @@ func (s *Server) createVirtualMachine(c echo.Context) error {
 		return badRequest(err.Error())
 	}
 
-	specification := request.spec()
+	specification := request.specification()
 	information, err := s.virtualMachineManager.Create(c.Request().Context(), identifier, specification)
 	if err != nil {
 		return err
@@ -93,6 +93,7 @@ func (s *Server) getVirtualMachine(c echo.Context) error {
 	return s.respondWithVirtualMachine(c, http.StatusOK, information)
 }
 
+// loadVirtualMachine reads the VM named in the request path.
 func (s *Server) loadVirtualMachine(c echo.Context) (vm.Information, error) {
 	identifier, err := virtualMachineID(c)
 	if err != nil {
@@ -101,14 +102,27 @@ func (s *Server) loadVirtualMachine(c echo.Context) (vm.Information, error) {
 	return s.virtualMachineManager.Information(c.Request().Context(), identifier)
 }
 
+// respondWithVirtualMachine writes one VM as the response body.
 func (s *Server) respondWithVirtualMachine(c echo.Context, status int, information vm.Information) error {
 	return c.JSON(status, toVirtualMachine(information))
 }
 
+// virtualMachineID reads and validates the VM identifier in the request path.
 func virtualMachineID(c echo.Context) (string, error) {
 	identifier := c.Param("id")
 	if !validResourceID(identifier) {
 		return "", badRequest("invalid virtual machine identifier")
 	}
+
+	return identifier, nil
+}
+
+// snapshotID reads and validates the snapshot identifier in the request path.
+func snapshotID(c echo.Context) (string, error) {
+	identifier := c.Param("id")
+	if !validResourceID(identifier) {
+		return "", badRequest("invalid snapshot identifier")
+	}
+
 	return identifier, nil
 }

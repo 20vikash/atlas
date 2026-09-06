@@ -85,7 +85,7 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	store.lifecycleMutex.Lock()
 	if store.closed {
 		store.lifecycleMutex.Unlock()
-		return fmt.Errorf("snapshot store is shutting down")
+		return ErrShuttingDown
 	}
 	store.uploadsWaitGroup.Add(1)
 	rootContext := store.rootContext
@@ -283,18 +283,18 @@ func (store *SnapshotStore) UploadStatus(_ context.Context, snapshotID string) (
 // numbered from 1 without gaps, and carry usable URLs.
 func validateUploadParts(parts []SnapshotUploadPart, sizeBytes int64) error {
 	if sizeBytes <= 0 {
-		return fmt.Errorf("artifact size must be positive")
+		return fmt.Errorf("%w: artifact size must be positive", ErrInvalidUpload)
 	}
 	expectedCount := int((sizeBytes + SnapshotPartSizeBytes - 1) / SnapshotPartSizeBytes)
 	if len(parts) != expectedCount {
-		return fmt.Errorf("expected %d parts", expectedCount)
+		return fmt.Errorf("%w: expected %d parts", ErrInvalidUpload, expectedCount)
 	}
 	for index, part := range parts {
 		if part.PartNumber != index+1 {
-			return fmt.Errorf("part numbers must be consecutive from 1")
+			return fmt.Errorf("%w: part numbers must be consecutive from 1", ErrInvalidUpload)
 		}
 		if _, err := parseImageURL(part.URL); err != nil {
-			return fmt.Errorf("part %d has an invalid URL", part.PartNumber)
+			return fmt.Errorf("%w: part %d has an invalid URL", ErrInvalidUpload, part.PartNumber)
 		}
 	}
 	return nil

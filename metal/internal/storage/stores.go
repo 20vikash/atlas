@@ -26,6 +26,14 @@ var (
 
 	// ErrImageIntegrity indicates that image verification failed.
 	ErrImageIntegrity = errors.New("storage: image integrity check failed")
+
+	// ErrInvalidUpload indicates that upload parts do not match the artifact.
+	// The caller sent a bad request, so it must not read as a host fault.
+	ErrInvalidUpload = errors.New("storage: invalid upload parts")
+
+	// ErrShuttingDown indicates that the store no longer accepts new work. The
+	// caller should try again against the restarted daemon.
+	ErrShuttingDown = errors.New("storage: shutting down")
 )
 
 // ZFSPool manages datasets in one ZFS pool.

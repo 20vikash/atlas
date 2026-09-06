@@ -19,7 +19,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// Config contains HTTP server configuration.
+// Config contains HTTP server configuration. Only the token hash is stored, so
+// the plain token never reaches this package.
 type Config struct {
 	AuthTokenHash string
 	Logger        *slog.Logger
@@ -102,25 +103,41 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	router := echo.New()
 	router.HideBanner = true
 	router.HTTPErrorHandler = errorHandler
+
+	// Correlation runs first, so every log line and error carries the same IDs.
 	router.Use(correlationMiddleware)
-	router.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			c.Set("logger", server.logger)
-			err := next(c)
-			status := c.Response().Status
-			if err != nil {
-				status = publicAPIError(err).status
-			}
-			server.logger.Info("API request", "method", c.Request().Method, "path", c.Path(), "status", status, "request_id", requestID(c.Request().Context()), "operation_id", operationID(c.Request().Context()))
-			return err
-		}
-	})
+	router.Use(server.logRequest)
 	router.Use(server.authenticate)
 	server.registerRoutes(router)
 
 	return router, nil
 }
 
+// logRequest records the outcome of every request. The status of a failed
+// request comes from the public error, because the handler returned before the
+// response was written.
+func (s *Server) logRequest(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		c.Set("logger", s.logger)
+
+		err := next(c)
+		status := c.Response().Status
+		if err != nil {
+			status = publicAPIError(err).status
+		}
+
+		s.logger.Info("API request",
+			"method", c.Request().Method, "path", c.Path(), "status", status,
+			"request_id", requestID(c.Request().Context()),
+			"operation_id", operationID(c.Request().Context()),
+		)
+
+		return err
+	}
+}
+
+// validateServerConfiguration rejects a server that cannot serve safely. The
+// token hash is required, so an unset token can never mean an open API.
 func validateServerConfiguration(configuration Config, dependencies Dependencies) error {
 	if len(configuration.AuthTokenHash) != sha256.Size*2 {
 		return fmt.Errorf("API authentication token SHA-256 hash is required")
@@ -134,6 +151,9 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	return nil
 }
 
+// authenticate accepts a bearer token whose SHA-256 digest matches the
+// configured hash. The comparison is constant time, so a wrong token reveals
+// nothing through timing.
 func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if isPublicPath(c.Path()) {
@@ -154,6 +174,10 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// isPublicPath reports whether a route serves without a token. Liveness must
+// answer a probe that holds no token, and the documentation page is opened in a
+// browser that cannot send one. Neither carries VM data, so both stay open and
+// metald is expected to listen on a private control network.
 func isPublicPath(path string) bool {
 	return path == "/health" || path == "/docs" || path == "/docs/swagger.json"
 }

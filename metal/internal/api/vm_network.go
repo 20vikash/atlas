@@ -34,7 +34,7 @@ func (s *Server) setVirtualMachineNetwork(c echo.Context) error {
 	if err := request.validate(); err != nil {
 		return badRequest(err.Error())
 	}
-	if err := s.virtualMachineManager.SetNetwork(c.Request().Context(), identifier, request.spec()); err != nil {
+	if err := s.virtualMachineManager.SetNetwork(c.Request().Context(), identifier, request.specification()); err != nil {
 		return err
 	}
 

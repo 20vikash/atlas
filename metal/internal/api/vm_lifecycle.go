@@ -56,7 +56,7 @@ func (s *Server) setVirtualMachinePowerState(c echo.Context) error {
 // @Failure	404	{object}	errorResponse
 // @Failure	409	{object}	errorResponse
 // @Failure	500	{object}	errorResponse
-// @Router		/v1/vms/{id}/restarts [post]
+// @Router		/v1/vms/{id}/restart [post]
 func (s *Server) restartVirtualMachine(c echo.Context) error {
 	identifier, err := virtualMachineID(c)
 	if err != nil {
@@ -96,6 +96,8 @@ func (s *Server) deleteVirtualMachine(c echo.Context) error {
 	return s.respondWithCurrentVirtualMachine(c, http.StatusAccepted)
 }
 
+// respondWithCurrentVirtualMachine rereads the VM and returns it, so a caller
+// sees the stored intent its request produced.
 func (s *Server) respondWithCurrentVirtualMachine(c echo.Context, status int) error {
 	virtualMachine, err := s.loadVirtualMachine(c)
 	if err != nil {

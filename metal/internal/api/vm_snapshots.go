@@ -8,41 +8,51 @@ import (
 	"github.com/frappe/atlas/metal/internal/storage"
 )
 
+// snapshotArtifactResponse is the exact size of one staged artifact. The
+// controller needs it to plan a multipart upload.
 type snapshotArtifactResponse struct {
 	SizeBytes int64 `json:"size_bytes"`
 }
 
+// snapshotCreatedResponse identifies a new staged snapshot and its artifacts.
 type snapshotCreatedResponse struct {
 	ID     string                   `json:"id"`
 	Rootfs snapshotArtifactResponse `json:"rootfs"`
 	Kernel snapshotArtifactResponse `json:"kernel"`
 }
 
+// snapshotUploadPartRequest is one presigned destination supplied by the controller.
 type snapshotUploadPartRequest struct {
 	PartNumber int    `json:"part_number"`
 	URL        string `json:"url"`
 }
 
+// snapshotArtifactUploadRequest carries every part of one artifact.
 type snapshotArtifactUploadRequest struct {
 	Parts []snapshotUploadPartRequest `json:"parts"`
 }
 
+// snapshotUploadRequest carries the parts of both artifacts.
 type snapshotUploadRequest struct {
 	Rootfs snapshotArtifactUploadRequest `json:"rootfs"`
 	Kernel snapshotArtifactUploadRequest `json:"kernel"`
 }
 
+// uploadedPartResponse is the ETag the destination returned for one part.
 type uploadedPartResponse struct {
 	PartNumber int    `json:"part_number"`
 	ETag       string `json:"etag"`
 }
 
+// uploadedArtifactResponse describes one finished artifact upload.
 type uploadedArtifactResponse struct {
 	SizeBytes int64                  `json:"size_bytes"`
 	SHA256    string                 `json:"sha256"`
 	Parts     []uploadedPartResponse `json:"parts"`
 }
 
+// snapshotStatusResponse reports upload progress. Artifact details appear only
+// after the upload completes.
 type snapshotStatusResponse struct {
 	ID              string                    `json:"id"`
 	State           string                    `json:"state"`
@@ -62,6 +72,7 @@ type snapshotStatusResponse struct {
 // @Security	BearerAuth
 // @Param		id			path		string	true	"Virtual machine identifier"
 // @Success	201	{object}	snapshotCreatedResponse
+// @Header		201	{string}	Location	"Path of the created snapshot"
 // @Failure	400	{object}	errorResponse
 // @Failure	401	{object}	errorResponse
 // @Failure	404	{object}	errorResponse
@@ -69,15 +80,17 @@ type snapshotStatusResponse struct {
 // @Failure	500	{object}	errorResponse
 // @Router		/v1/vms/{id}/snapshots [post]
 func (s *Server) createVirtualMachineSnapshot(c echo.Context) error {
-	virtualMachineID := c.Param("id")
-	if !validResourceID(virtualMachineID) {
-		return badRequest("invalid virtual machine identifier")
-	}
-
-	snapshot, err := s.virtualMachineManager.CreateSnapshot(c.Request().Context(), virtualMachineID)
+	identifier, err := virtualMachineID(c)
 	if err != nil {
 		return err
 	}
+
+	snapshot, err := s.virtualMachineManager.CreateSnapshot(c.Request().Context(), identifier)
+	if err != nil {
+		return err
+	}
+	c.Response().Header().Set(echo.HeaderLocation, "/v1/snapshots/"+snapshot.ID)
+
 	return c.JSON(http.StatusCreated, snapshotCreatedResponse{
 		ID:     snapshot.ID,
 		Rootfs: snapshotArtifactResponse{SizeBytes: snapshot.RootfsSizeBytes},
@@ -95,21 +108,22 @@ func (s *Server) createVirtualMachineSnapshot(c echo.Context) error {
 // @Param		request	body	snapshotUploadRequest	true	"Multipart upload URLs"
 // @Success	202		"Accepted"
 // @Failure	400		{object}	errorResponse
+// @Failure	503		{object}	errorResponse
 // @Failure	401		{object}	errorResponse
 // @Failure	404		{object}	errorResponse
 // @Failure	500		{object}	errorResponse
 // @Router		/v1/snapshots/{id}/upload [post]
 func (s *Server) uploadSnapshot(c echo.Context) error {
-	snapshotID := c.Param("id")
-	if !validResourceID(snapshotID) {
-		return badRequest("invalid snapshot identifier")
+	identifier, err := snapshotID(c)
+	if err != nil {
+		return err
 	}
 
 	var request snapshotUploadRequest
 	if err := decodeJSONRequest(c, &request); err != nil {
 		return err
 	}
-	if err := s.snapshotStore.StartUpload(c.Request().Context(), snapshotID, request.storageRequest()); err != nil {
+	if err := s.snapshotStore.StartUpload(c.Request().Context(), identifier, request.storageRequest()); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusAccepted)
@@ -129,11 +143,11 @@ func (s *Server) uploadSnapshot(c echo.Context) error {
 // @Failure	500	{object}	errorResponse
 // @Router		/v1/snapshots/{id} [get]
 func (s *Server) getSnapshot(c echo.Context) error {
-	snapshotID := c.Param("id")
-	if !validResourceID(snapshotID) {
-		return badRequest("invalid snapshot identifier")
+	identifier, err := snapshotID(c)
+	if err != nil {
+		return err
 	}
-	status, err := s.snapshotStore.UploadStatus(c.Request().Context(), snapshotID)
+	status, err := s.snapshotStore.UploadStatus(c.Request().Context(), identifier)
 	if err != nil {
 		return err
 	}
@@ -155,6 +169,8 @@ func (s *Server) getSnapshot(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
+// progressPercent reports upload progress, and clamps it so an over-count from a
+// retried part cannot exceed 100.
 func progressPercent(uploaded, total int64) int {
 	if total <= 0 {
 		return 0
@@ -177,16 +193,17 @@ func progressPercent(uploaded, total int64) int {
 // @Failure	500	{object}	errorResponse
 // @Router		/v1/snapshots/{id} [delete]
 func (s *Server) deleteSnapshot(c echo.Context) error {
-	snapshotID := c.Param("id")
-	if !validResourceID(snapshotID) {
-		return badRequest("invalid snapshot identifier")
+	identifier, err := snapshotID(c)
+	if err != nil {
+		return err
 	}
-	if err := s.snapshotStore.DeleteSnapshot(c.Request().Context(), snapshotID); err != nil {
+	if err := s.snapshotStore.DeleteSnapshot(c.Request().Context(), identifier); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
+// storageRequest converts the request into the storage form.
 func (request snapshotUploadRequest) storageRequest() storage.SnapshotUploadRequest {
 	return storage.SnapshotUploadRequest{
 		Rootfs: storage.SnapshotArtifactUpload{Parts: storageParts(request.Rootfs.Parts)},
@@ -194,6 +211,7 @@ func (request snapshotUploadRequest) storageRequest() storage.SnapshotUploadRequ
 	}
 }
 
+// storageParts converts the parts of one artifact into the storage form.
 func storageParts(parts []snapshotUploadPartRequest) []storage.SnapshotUploadPart {
 	result := make([]storage.SnapshotUploadPart, 0, len(parts))
 	for _, part := range parts {
@@ -202,6 +220,7 @@ func storageParts(parts []snapshotUploadPartRequest) []storage.SnapshotUploadPar
 	return result
 }
 
+// uploadedArtifact converts one finished artifact into the response form.
 func uploadedArtifact(artifact storage.UploadedArtifact) uploadedArtifactResponse {
 	parts := make([]uploadedPartResponse, 0, len(artifact.Parts))
 	for _, part := range artifact.Parts {

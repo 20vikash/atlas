@@ -33,7 +33,7 @@ Metal responses do not contain these values:
 | `GET` | `/v1/vms` | `200` |
 | `GET` | `/v1/vms/{id}` | `200` |
 | `PUT` | `/v1/vms/{id}/power` | `202` |
-| `POST` | `/v1/vms/{id}/restarts` | `202` |
+| `POST` | `/v1/vms/{id}/restart` | `202` |
 | `PUT` | `/v1/vms/{id}/compute` | `202` |
 | `PUT` | `/v1/vms/{id}/disk` | `202` |
 | `PUT` | `/v1/vms/{id}/network` | `202` |

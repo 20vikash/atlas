@@ -10,11 +10,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// SSH keys are published to the guest through MMDS, so their size is bounded.
 const (
 	maximumSSHKeyCount  = 100
 	maximumSSHKeyLength = 16 * 1024
 )
 
+// replaceVirtualMachineSSHKeysRequest carries the complete SSH key list.
 type replaceVirtualMachineSSHKeysRequest struct {
 	SSHKeys []string `json:"ssh_keys"`
 }
@@ -36,9 +38,9 @@ type replaceVirtualMachineSSHKeysRequest struct {
 // @Failure	500		{object}	errorResponse
 // @Router		/v1/vms/{id}/ssh-keys [put]
 func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
-	virtualMachineID := c.Param("id")
-	if !validResourceID(virtualMachineID) {
-		return badRequest("invalid virtual machine identifier")
+	identifier, err := virtualMachineID(c)
+	if err != nil {
+		return err
 	}
 
 	var request replaceVirtualMachineSSHKeysRequest
@@ -51,7 +53,7 @@ func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
 	}
 	applied, err := s.virtualMachineManager.ReplaceSSHKeys(
 		c.Request().Context(),
-		virtualMachineID,
+		identifier,
 		sshKeys,
 	)
 	if err != nil {
@@ -66,6 +68,8 @@ func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
 	return s.respondWithCurrentVirtualMachine(c, status)
 }
 
+// validateSSHKeys accepts a complete key list and rejects a duplicate. Keys are
+// compared by their parsed public key, so 2 spellings of one key still collide.
 func validateSSHKeys(values []string) ([]string, error) {
 	if values == nil {
 		return nil, fmt.Errorf("ssh_keys is required")
@@ -90,6 +94,8 @@ func validateSSHKeys(values []string) ([]string, error) {
 	return sshKeys, nil
 }
 
+// validateSSHKey parses one authorized key and returns it with its identity.
+// Trailing content is rejected, so a line cannot smuggle a second key.
 func validateSSHKey(value string) (string, string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

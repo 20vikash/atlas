@@ -6,12 +6,15 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+// virtualMachineResponse pairs what was asked for with what the host reached.
+// The controller compares the 2 generations to know when a change is applied.
 type virtualMachineResponse struct {
 	ID       string                         `json:"id"`
 	Desired  desiredVirtualMachineResponse  `json:"desired"`
 	Observed observedVirtualMachineResponse `json:"observed"`
 }
 
+// desiredVirtualMachineResponse is the stored controller intent.
 type desiredVirtualMachineResponse struct {
 	Generation        uint64                      `json:"generation"`
 	RestartGeneration uint64                      `json:"restart_generation"`
@@ -23,6 +26,8 @@ type desiredVirtualMachineResponse struct {
 	Guest             guestResponse               `json:"guest"`
 }
 
+// observedVirtualMachineResponse is what the host reached, and the operation
+// that is running when it has not.
 type observedVirtualMachineResponse struct {
 	Generation        uint64                  `json:"generation"`
 	RestartGeneration uint64                  `json:"restart_generation"`
@@ -36,17 +41,21 @@ type observedVirtualMachineResponse struct {
 	Error             *operationErrorResponse `json:"error"`
 }
 
+// computeResponse is the CPU and memory shape.
 type computeResponse struct {
 	VirtualCPUCount int `json:"virtual_cpu_count"`
 	MemoryMiB       int `json:"memory_mib"`
 }
 
+// guestResponse is the guest-facing configuration. User data is not returned.
 type guestResponse struct {
 	Hostname string            `json:"hostname"`
 	SSHKeys  []string          `json:"ssh_keys"`
 	Metadata map[string]string `json:"metadata"`
 }
 
+// virtualMachineImageResponse identifies boot content. Transport URLs are not
+// returned, because they are signed and short lived.
 type virtualMachineImageResponse struct {
 	Ref                         string                               `json:"ref"`
 	Architecture                string                               `json:"architecture"`
@@ -57,16 +66,19 @@ type virtualMachineImageResponse struct {
 	MemorySnapshotConfiguration *memorySnapshotConfigurationResponse `json:"memory_snapshot_configuration,omitempty"`
 }
 
+// memorySnapshotConfigurationResponse is the VM shape a warm image serves.
 type memorySnapshotConfigurationResponse struct {
 	VirtualCPUCount int `json:"virtual_cpu_count"`
 	MemoryMiB       int `json:"memory_mib"`
 	DiskMiB         int `json:"disk_mib"`
 }
 
+// imageArtifactResponse is one artifact digest.
 type imageArtifactResponse struct {
 	SHA256 string `json:"sha256"`
 }
 
+// networkResponse is the desired VM network.
 type networkResponse struct {
 	PublicIPv4                    string `json:"public_ipv4,omitempty"`
 	WireGuardMeshIPv6             string `json:"wireguard_mesh_ipv6"`
@@ -75,26 +87,32 @@ type networkResponse struct {
 	Egress                        string `json:"egress"`
 }
 
+// diskResponse is the desired disk size and rate limits.
 type diskResponse struct {
 	ThroughputMiBps int `json:"throughput_mibps"`
 	IOPS            int `json:"iops"`
 	SizeMiB         int `json:"size_mib"`
 }
 
+// observedDiskResponse is the disk the host actually provides.
 type observedDiskResponse struct {
 	UsedMiB int `json:"used_mib"`
 }
 
+// observedNetworkResponse is the network identity the host assigned.
 type observedNetworkResponse struct {
 	MAC string `json:"mac,omitempty"`
 }
 
+// operationErrorResponse is the safe part of a reconciliation failure. Local
+// detail stays on the host.
 type operationErrorResponse struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	UpdatedAt string `json:"updated_at"`
 }
 
+// toVirtualMachine converts VM information into the response form.
 func toVirtualMachine(information vm.Information) virtualMachineResponse {
 	return virtualMachineResponse{
 		ID: information.ID,
@@ -140,6 +158,7 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 	}
 }
 
+// cloneMetadata copies the map, so a response cannot alias stored state.
 func cloneMetadata(metadata map[string]string) map[string]string {
 	if metadata == nil {
 		return map[string]string{}
@@ -147,6 +166,7 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 	return maps.Clone(metadata)
 }
 
+// toOperationError converts a reconciliation failure into its safe form.
 func toOperationError(operationError *vm.PublicOperationError) *operationErrorResponse {
 	if operationError == nil {
 		return nil
@@ -158,6 +178,7 @@ func toOperationError(operationError *vm.PublicOperationError) *operationErrorRe
 	}
 }
 
+// toVirtualMachineImage converts an image into the response form.
 func toVirtualMachineImage(image vm.Image) virtualMachineImageResponse {
 	return virtualMachineImageResponse{
 		Ref:                         image.Name,
@@ -170,6 +191,7 @@ func toVirtualMachineImage(image vm.Image) virtualMachineImageResponse {
 	}
 }
 
+// toMemorySnapshotConfiguration converts a warm image shape into the response form.
 func toMemorySnapshotConfiguration(configuration *vm.MemorySnapshotConfiguration) *memorySnapshotConfigurationResponse {
 	if configuration == nil {
 		return nil

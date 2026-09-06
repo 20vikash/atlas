@@ -8,12 +8,14 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// Metadata is published to the guest through MMDS, so its size is bounded.
 const (
 	maximumMetadataCount       = 64
 	maximumMetadataKeyLength   = 128
 	maximumMetadataValueLength = 1024
 )
 
+// replaceVirtualMachineMetadataRequest carries the complete metadata map.
 type replaceVirtualMachineMetadataRequest struct {
 	Metadata map[string]string `json:"metadata"`
 }
@@ -35,9 +37,9 @@ type replaceVirtualMachineMetadataRequest struct {
 // @Failure	500		{object}	errorResponse
 // @Router		/v1/vms/{id}/metadata [put]
 func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
-	virtualMachineID := c.Param("id")
-	if !validResourceID(virtualMachineID) {
-		return badRequest("invalid virtual machine identifier")
+	identifier, err := virtualMachineID(c)
+	if err != nil {
+		return err
 	}
 
 	var request replaceVirtualMachineMetadataRequest
@@ -49,7 +51,7 @@ func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
 	}
 	applied, err := s.virtualMachineManager.ReplaceMetadata(
 		c.Request().Context(),
-		virtualMachineID,
+		identifier,
 		request.Metadata,
 	)
 	if err != nil {
