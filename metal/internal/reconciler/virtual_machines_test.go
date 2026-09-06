@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-type recordingTarget struct {
+type recordingManager struct {
 	ids     []string
 	listErr error
 
@@ -17,35 +17,35 @@ type recordingTarget struct {
 	done chan string
 }
 
-func newRecordingTarget(ids ...string) *recordingTarget {
-	return &recordingTarget{ids: ids, seen: map[string]int{}, done: make(chan string, 16)}
+func newRecordingManager(ids ...string) *recordingManager {
+	return &recordingManager{ids: ids, seen: map[string]int{}, done: make(chan string, 16)}
 }
 
-func (target *recordingTarget) ListIDs(context.Context) ([]string, error) {
-	target.mu.Lock()
-	defer target.mu.Unlock()
-	return target.ids, target.listErr
+func (manager *recordingManager) ListIDs(context.Context) ([]string, error) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	return manager.ids, manager.listErr
 }
 
-func (target *recordingTarget) Reconcile(_ context.Context, id string) error {
-	target.mu.Lock()
-	target.seen[id]++
-	target.mu.Unlock()
-	target.done <- id
+func (manager *recordingManager) Reconcile(_ context.Context, id string) error {
+	manager.mu.Lock()
+	manager.seen[id]++
+	manager.mu.Unlock()
+	manager.done <- id
 	return nil
 }
 
 func TestRunReconcilesEveryVirtualMachine(t *testing.T) {
-	target := newRecordingTarget("a", "b")
+	manager := newRecordingManager("a", "b")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go New(target, time.Hour, Config{}).Run(ctx)
+	go NewVirtualMachineReconciler(manager, time.Hour, VirtualMachineConfig{}).Run(ctx)
 
 	got := map[string]bool{}
-	for range target.ids {
+	for range manager.ids {
 		select {
-		case id := <-target.done:
+		case id := <-manager.done:
 			got[id] = true
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for the start pass")
@@ -57,43 +57,43 @@ func TestRunReconcilesEveryVirtualMachine(t *testing.T) {
 }
 
 func TestWakeRequestsReconciliation(t *testing.T) {
-	target := newRecordingTarget("a")
+	manager := newRecordingManager("a")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reconciler := New(target, time.Hour, Config{})
+	reconciler := NewVirtualMachineReconciler(manager, time.Hour, VirtualMachineConfig{})
 	go reconciler.Run(ctx)
 
-	<-target.done
+	<-manager.done
 	reconciler.Wake()
 	select {
-	case <-target.done:
+	case <-manager.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Wake did not trigger a pass")
 	}
 }
 
 func TestRunContinuesAfterListError(t *testing.T) {
-	target := newRecordingTarget("a")
-	target.listErr = errors.New("list failed")
+	manager := newRecordingManager("a")
+	manager.listErr = errors.New("list failed")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reconciler := New(target, time.Hour, Config{})
+	reconciler := NewVirtualMachineReconciler(manager, time.Hour, VirtualMachineConfig{})
 	go reconciler.Run(ctx)
 
-	target.mu.Lock()
-	target.listErr = nil
-	target.mu.Unlock()
+	manager.mu.Lock()
+	manager.listErr = nil
+	manager.mu.Unlock()
 	reconciler.Wake()
 	select {
-	case <-target.done:
+	case <-manager.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("loop stopped after a list error")
 	}
 }
 
-type concurrencyTarget struct {
+type concurrencyManager struct {
 	ids     []string
 	started chan string
 	release chan struct{}
@@ -103,35 +103,37 @@ type concurrencyTarget struct {
 	maximumObserved int
 }
 
-func (target *concurrencyTarget) ListIDs(context.Context) ([]string, error) { return target.ids, nil }
+func (manager *concurrencyManager) ListIDs(context.Context) ([]string, error) {
+	return manager.ids, nil
+}
 
-func (target *concurrencyTarget) Reconcile(ctx context.Context, id string) error {
-	target.mutex.Lock()
-	target.active++
-	if target.active > target.maximumObserved {
-		target.maximumObserved = target.active
+func (manager *concurrencyManager) Reconcile(ctx context.Context, id string) error {
+	manager.mutex.Lock()
+	manager.active++
+	if manager.active > manager.maximumObserved {
+		manager.maximumObserved = manager.active
 	}
-	target.mutex.Unlock()
+	manager.mutex.Unlock()
 
-	target.started <- id
+	manager.started <- id
 	select {
-	case <-target.release:
+	case <-manager.release:
 	case <-ctx.Done():
 	}
 
-	target.mutex.Lock()
-	target.active--
-	target.mutex.Unlock()
+	manager.mutex.Lock()
+	manager.active--
+	manager.mutex.Unlock()
 	return ctx.Err()
 }
 
 func TestReconcileAllLimitsConcurrentOperations(t *testing.T) {
-	target := &concurrencyTarget{
+	manager := &concurrencyManager{
 		ids:     []string{"a", "b", "c", "d"},
 		started: make(chan string, 4),
 		release: make(chan struct{}),
 	}
-	reconciler := New(target, time.Hour, Config{
+	reconciler := NewVirtualMachineReconciler(manager, time.Hour, VirtualMachineConfig{
 		MaxConcurrentOperations: 2,
 		OperationTimeout:        time.Second,
 	})
@@ -141,54 +143,54 @@ func TestReconcileAllLimitsConcurrentOperations(t *testing.T) {
 		close(done)
 	}()
 
-	<-target.started
-	<-target.started
+	<-manager.started
+	<-manager.started
 	select {
-	case id := <-target.started:
+	case id := <-manager.started:
 		t.Fatalf("operation %s started above the limit", id)
 	case <-time.After(20 * time.Millisecond):
 	}
 
 	for range 2 {
-		target.release <- struct{}{}
+		manager.release <- struct{}{}
 	}
-	<-target.started
-	<-target.started
+	<-manager.started
+	<-manager.started
 	for range 2 {
-		target.release <- struct{}{}
+		manager.release <- struct{}{}
 	}
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("reconcile pass did not finish")
 	}
-	if target.maximumObserved != 2 {
-		t.Fatalf("maximum concurrent operations = %d, want 2", target.maximumObserved)
+	if manager.maximumObserved != 2 {
+		t.Fatalf("maximum concurrent operations = %d, want 2", manager.maximumObserved)
 	}
 }
 
-type timeoutTarget struct {
+type timeoutManager struct {
 	timedOut chan struct{}
 }
 
-func (target *timeoutTarget) ListIDs(context.Context) ([]string, error) { return []string{"a"}, nil }
+func (manager *timeoutManager) ListIDs(context.Context) ([]string, error) { return []string{"a"}, nil }
 
-func (target *timeoutTarget) Reconcile(ctx context.Context, _ string) error {
+func (manager *timeoutManager) Reconcile(ctx context.Context, _ string) error {
 	<-ctx.Done()
-	close(target.timedOut)
+	close(manager.timedOut)
 	return ctx.Err()
 }
 
 func TestReconcileAllAppliesOperationTimeout(t *testing.T) {
-	target := &timeoutTarget{timedOut: make(chan struct{})}
-	reconciler := New(target, time.Hour, Config{
+	manager := &timeoutManager{timedOut: make(chan struct{})}
+	reconciler := NewVirtualMachineReconciler(manager, time.Hour, VirtualMachineConfig{
 		MaxConcurrentOperations: 1,
 		OperationTimeout:        20 * time.Millisecond,
 	})
 
 	reconciler.reconcileAll(context.Background())
 	select {
-	case <-target.timedOut:
+	case <-manager.timedOut:
 	default:
 		t.Fatal("reconcile operation did not time out")
 	}

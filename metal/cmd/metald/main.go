@@ -204,10 +204,10 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		stores.Images,
 	)
 
-	virtualMachineReconciler := reconciler.New(
+	virtualMachineReconciler := reconciler.NewVirtualMachineReconciler(
 		virtualMachineManager,
 		reconcileInterval,
-		reconciler.Config{Logger: logger},
+		reconciler.VirtualMachineConfig{Logger: logger},
 	)
 	imageReconciler := reconciler.NewImageReconciler(
 		stores.Images,

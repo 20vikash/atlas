@@ -8,19 +8,23 @@ import (
 	"time"
 )
 
-// Target lists and reconciles virtual machine records.
-type Target interface {
+const (
+	// defaultMaxConcurrentOperations limits active VM operations in one pass.
+	defaultMaxConcurrentOperations = 4
+
+	// defaultOperationTimeout bounds one list or reconcile operation. One
+	// reconcile can download and import an image, so the limit is generous.
+	defaultOperationTimeout = 35 * time.Minute
+)
+
+// VirtualMachineManager lists and reconciles virtual machine records.
+type VirtualMachineManager interface {
 	ListIDs(ctx context.Context) ([]string, error)
 	Reconcile(ctx context.Context, id string) error
 }
 
-const (
-	defaultMaxConcurrentOperations = 4
-	defaultOperationTimeout        = 35 * time.Minute
-)
-
-// Config controls reconciliation work within one pass.
-type Config struct {
+// VirtualMachineConfig controls reconciliation work within one pass.
+type VirtualMachineConfig struct {
 	// Logger receives reconciliation errors.
 	Logger *slog.Logger
 	// MaxConcurrentOperations limits active VM operations in one pass.
@@ -29,18 +33,22 @@ type Config struct {
 	OperationTimeout time.Duration
 }
 
-// Reconciler runs reconciliation at an interval and on demand.
-type Reconciler struct {
-	target                  Target
-	interval                time.Duration
-	wake                    chan struct{}
+// VirtualMachineReconciler drives every VM towards its desired record.
+type VirtualMachineReconciler struct {
+	passScheduler
+
+	manager                 VirtualMachineManager
 	maxConcurrentOperations int
 	operationTimeout        time.Duration
 	logger                  *slog.Logger
 }
 
-// New returns a Reconciler with the specified interval.
-func New(target Target, interval time.Duration, configuration Config) *Reconciler {
+// NewVirtualMachineReconciler returns a reconciler that runs at interval.
+func NewVirtualMachineReconciler(
+	manager VirtualMachineManager,
+	interval time.Duration,
+	configuration VirtualMachineConfig,
+) *VirtualMachineReconciler {
 	if configuration.MaxConcurrentOperations <= 0 {
 		configuration.MaxConcurrentOperations = defaultMaxConcurrentOperations
 	}
@@ -50,55 +58,38 @@ func New(target Target, interval time.Duration, configuration Config) *Reconcile
 	if configuration.Logger == nil {
 		configuration.Logger = slog.Default()
 	}
-	return &Reconciler{
-		target:                  target,
-		interval:                interval,
-		wake:                    make(chan struct{}, 1),
+
+	return &VirtualMachineReconciler{
+		passScheduler:           newPassScheduler(interval),
+		manager:                 manager,
 		maxConcurrentOperations: configuration.MaxConcurrentOperations,
 		operationTimeout:        configuration.OperationTimeout,
 		logger:                  configuration.Logger,
 	}
 }
 
-// Wake requests a reconcile pass without blocking the caller.
-func (r *Reconciler) Wake() {
-	select {
-	case r.wake <- struct{}{}:
-	default:
-	}
+// Run reconciles every VM until ctx is canceled.
+func (r *VirtualMachineReconciler) Run(ctx context.Context) {
+	r.run(ctx, r.reconcileAll)
 }
 
-// Run reconciles until the context is canceled.
-func (r *Reconciler) Run(ctx context.Context) {
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
-	for {
-		r.reconcileAll(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		case <-r.wake:
-		}
-	}
-}
-
-func (r *Reconciler) reconcileAll(ctx context.Context) {
+// reconcileAll reconciles every known VM with a bounded number of workers.
+func (r *VirtualMachineReconciler) reconcileAll(ctx context.Context) {
 	listContext, cancelList := context.WithTimeout(ctx, r.operationTimeout)
-	ids, err := r.target.ListIDs(listContext)
+	ids, err := r.manager.ListIDs(listContext)
 	cancelList()
+
 	if err != nil {
-		if ctx.Err() == nil {
-			r.logger.Error("reconciler list failed", "error", err)
-		}
+		r.logFailure(ctx, "reconciler list failed", err)
 		return
 	}
 	if len(ids) == 0 {
 		return
 	}
 
-	workerCount := min(len(ids), r.maxConcurrentOperations)
 	jobs := make(chan string)
+	workerCount := min(len(ids), r.maxConcurrentOperations)
+
 	var workers sync.WaitGroup
 	workers.Add(workerCount)
 	for range workerCount {
@@ -110,23 +101,36 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 		}()
 	}
 
+	defer func() {
+		close(jobs)
+		workers.Wait()
+	}()
+
 	for _, id := range ids {
 		select {
 		case jobs <- id:
 		case <-ctx.Done():
-			close(jobs)
-			workers.Wait()
 			return
 		}
 	}
-	close(jobs)
-	workers.Wait()
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, id string) {
+// reconcile applies one VM's desired record under the operation timeout.
+func (r *VirtualMachineReconciler) reconcile(ctx context.Context, id string) {
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
-	if err := r.target.Reconcile(operationContext, id); err != nil && ctx.Err() == nil {
-		r.logger.Error("virtual machine reconciliation failed", "virtual_machine_id", id, "error", err)
+
+	if err := r.manager.Reconcile(operationContext, id); err != nil {
+		r.logFailure(ctx, "virtual machine reconciliation failed", err, "virtual_machine_id", id)
 	}
+}
+
+// logFailure reports an error unless ctx ended, because a canceled pass fails
+// every operation still in flight and those errors say nothing about the host.
+func (r *VirtualMachineReconciler) logFailure(ctx context.Context, message string, err error, fields ...any) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	r.logger.Error(message, append([]any{"error", err}, fields...)...)
 }
