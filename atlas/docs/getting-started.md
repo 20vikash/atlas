@@ -87,8 +87,18 @@ Open **Virtual Machine** and click **Create Virtual Machine**. Select the new Vi
 
 Atlas places the virtual machine on the running Metal Server and sends the desired state to Metal. Keep the record if the first response is uncertain. Atlas reconciles it after Metal confirms the result.
 
+## 10. Create a proxy server
+
+Open **Atlas Settings**, select **Actions**, and click **Renew TLS certificate**. Wait for the wildcard certificate to appear in the Proxy tab.
+
+Open **Proxy Server** and create a record. Select the Ubuntu image and keep the default size.
+
+Atlas reserves a public IPv4 address, creates the virtual machine with your public SSH key, installs the HTTP proxy package, and pushes its configuration. Wait for the status to become `Active`. Open its linked **SSH Task** records to see the install output.
+
 ## Next steps
 
 - [Virtual machine control plane](vm-control-plane.md) explains placement and request recovery.
 - [Metal Server lifecycle](metal-server-lifecycle.md) explains host provisioning.
+- [Proxy Server](proxy-server.md) explains the proxy lifecycle and its configuration file.
+- [Wildcard TLS](wildcard-tls.md) explains certificate issuance and renewal.
 - [Atlas operations](operations.md) lists safe checks when setup or provisioning fails.

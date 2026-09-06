@@ -11,6 +11,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, convert_utc_to_system_timezone, get_datetime, now_datetime
 
+from atlas.service.core.configuration import push_configuration_to_active_proxies
+
 if TYPE_CHECKING:
 	from atlas.atlas.core.dns_providers.base import DnsProvider
 	from atlas.atlas.core.server_providers.base import ServerProvider
@@ -18,6 +20,13 @@ if TYPE_CHECKING:
 	from atlas.atlas.object_storage import ObjectStorageClient
 
 WILDCARD_TLS_RENEWAL_WINDOW_DAYS = 30
+# A change to one of these reaches every active proxy through its own job.
+PROXY_CONFIGURATION_FIELDS = (
+	"wildcard_tls_certificate",
+	"wildcard_tls_private_key",
+	"proxy_jwks_url",
+	"proxy_jwks_audience_id",
+)
 
 
 class AtlasSettings(Document):
@@ -50,6 +59,8 @@ class AtlasSettings(Document):
 		object_storage_secret_access_key: DF.Password | None
 		object_storage_signed_url_expiry: DF.Int
 		private_network_cidr: DF.Data
+		proxy_jwks_audience_id: DF.Data | None
+		proxy_jwks_url: DF.Data | None
 		private_network_mtu: DF.Int
 		public_ssh_key: DF.SmallText
 		region_id: DF.Int
@@ -184,6 +195,9 @@ class AtlasSettings(Document):
 
 		if any(self.has_value_changed(field) for field in self.dns_provider_controller.credential_fields):
 			self.dns_provider_controller.validate_credentials()
+
+		if any(self.has_value_changed(field) for field in PROXY_CONFIGURATION_FIELDS):
+			push_configuration_to_active_proxies()
 
 	def before_save(self) -> None:
 		"""Apply provider setup when the credentials change."""

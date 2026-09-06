@@ -14,6 +14,18 @@ The module owns the HTTP proxy package. Atlas creates an archive from `services/
 |---|---|
 | `http_proxy_package` | The HTTP proxy archive, its source digest, and its public File. |
 
+## Setup
+
+```text
+reserve an address -> create the VM -> wait for SSH -> install the package -> push the config
+```
+
+Every phase is safe to repeat and saves its progress. Atlas saves the VM name before it sends the create request to Metal. The draft reconciler settles an incomplete create request before a retry continues.
+
+Atlas connects over the public IPv4 address the proxy needs anyway, and puts its own public key into the machine at create time. The `SSH Task` holds no credential, so making the target reachable belongs to this module.
+
+The configuration push uses `SSHRunner` directly and not an `SSH Task`. The payload carries the wildcard private key and the control credential, and a task stores its script as plain text.
+
 ## Package
 
 ```text

@@ -45,6 +45,10 @@ Auto renew is a daily job. It queues an issuance when the certificate is absent 
 
 Use the staging environment while testing. A staging certificate is not trusted by a browser, and the staging directory has much higher rate limits than production.
 
+## Distribution
+
+A change to the certificate or its private key queues a configuration push to every Active Proxy Server. An automatic renewal and a certificate an operator pastes in both take that path, so no proxy keeps an expired certificate after Atlas replaces it. See [proxy-server.md](proxy-server.md).
+
 ## Related
 
 - [Atlas settings SPEC](../atlas/SPEC.md) owns the settings, the provider boundary, and the TLS types.
