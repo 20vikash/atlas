@@ -146,7 +146,7 @@ func (manager *Manager) Delete(ctx context.Context, identifier string) error {
 
 // ConnectSSH opens one guest SSH session.
 func (manager *Manager) ConnectSSH(ctx context.Context, identifier string) (SSHConnection, error) {
-	virtualMachine := manager.newMachine(identifier)
+	virtualMachine := manager.newVirtualMachine(identifier)
 	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return nil, err
@@ -238,7 +238,7 @@ func (manager *Manager) applyMetadata(ctx context.Context, identifier string) (b
 }
 
 func (manager *Manager) refreshMetadata(ctx context.Context, identifier string) error {
-	virtualMachine := manager.newMachine(identifier)
+	virtualMachine := manager.newVirtualMachine(identifier)
 	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return err
@@ -295,9 +295,9 @@ func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, 
 }
 
 func networkRequest(record DesiredRecord) NetworkRequest {
-	return (machine{identifier: record.ID}).networkRequest(record)
+	return (virtualMachine{identifier: record.ID}).networkRequest(record)
 }
 
 func runtimeMachine(record DesiredRecord, interfaceState NetworkInterface) RuntimeMachine {
-	return (machine{identifier: record.ID}).runtimeConfiguration(record, interfaceState)
+	return (virtualMachine{identifier: record.ID}).runtimeConfiguration(record, interfaceState)
 }

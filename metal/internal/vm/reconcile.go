@@ -26,7 +26,7 @@ const (
 
 // Reconcile moves observed VM state toward the latest desired record.
 func (manager *Manager) Reconcile(ctx context.Context, identifier string) error {
-	virtualMachine := manager.newMachine(identifier)
+	virtualMachine := manager.newVirtualMachine(identifier)
 	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return err

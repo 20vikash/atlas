@@ -18,7 +18,7 @@ Package `storage` imports images, creates fast VM disk clones, manages warm arti
 
 Consumers define the interfaces that they need. The storage package does not export one broad storage interface.
 
-The package files follow resource ownership. `pool.go`, `volume.go`, `image.go`, `download.go`, `warm.go`, `staging.go`, and `upload.go` contain focused behavior.
+The package files follow resource ownership. `zfs_pool.go`, `disk.go`, `image.go`, `download.go`, `warm_image.go`, `staging.go`, and `upload.go` contain focused behavior.
 
 ## Dataset layout
 

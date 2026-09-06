@@ -149,7 +149,7 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 
 // Information returns the persisted desired and observed VM state.
 func (manager *Manager) Information(ctx context.Context, identifier string) (Information, error) {
-	virtualMachine := manager.newMachine(identifier)
+	virtualMachine := manager.newVirtualMachine(identifier)
 	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return Information{}, err
