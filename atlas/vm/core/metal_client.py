@@ -4,9 +4,7 @@ import ipaddress
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-import frappe
 import requests
-from frappe import _
 from frappe.utils.password import get_decrypted_password
 
 from atlas.vm.core.metal_models import MetalVirtualMachine
@@ -325,8 +323,3 @@ class MetalClient:
 						retryable if isinstance(retryable, bool) else None,
 					)
 		return f"Metal returned HTTP {response.status_code}", None, None
-
-
-def throw_metal_error(error: MetalClientError) -> None:
-	"""Show a Metal request error to the current user."""
-	frappe.throw(_("Metal request failed: {0}").format(error))

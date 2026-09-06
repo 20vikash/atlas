@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any, cast
 import frappe
 from frappe.utils import now_datetime
 
+from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
-from atlas.vm.core.virtual_machine_manager import VirtualMachineManager
 
 if TYPE_CHECKING:
 	from atlas.server.doctype.server.server import Server
@@ -80,7 +80,7 @@ def get_privileged_vm_addresses() -> list[str]:
 	return [
 		address
 		for virtual_machine in virtual_machines
-		if (address := VirtualMachineManager.get_wireguard_mesh_ipv6(virtual_machine))
+		if (address := get_virtual_machine_mesh_address(virtual_machine))
 	]
 
 

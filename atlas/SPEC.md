@@ -33,7 +33,7 @@ The app stores Atlas settings, server catalogs, image metadata, and VM request m
 
 The Virtual Machine name is the Metal VM ID. Creation uses idempotent `PUT /v1/vms/{name}` and accepts HTTP `202`. Atlas uses `GET /v1/vms/{name}` after a lost response. Atlas keeps the draft if the result is uncertain.
 
-Atlas exchanges WireGuard peers, desired cached images, and host capacity with `POST /v1/sync`. Placement uses the latest capacity sample and the image architecture.
+Atlas exchanges WireGuard peers, desired cached images, and host capacity with `POST /v1/sync`. Placement uses a fresh capacity sample and the image architecture. It locks the candidate Server and subtracts requests that the sample does not include.
 
 Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [VM operations](vm/README.md).
 

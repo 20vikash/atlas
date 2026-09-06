@@ -14,6 +14,10 @@ If Atlas loses the response, it sends `GET /v1/vms/{name}`. Atlas finalizes a co
 
 Atlas uses the latest host capacity sample. The host and image architectures must match. The host must have enough CPU, memory, and storage.
 
+`PlacementService` accepts samples that are less than 2 minutes old. It subtracts all VM requests that are newer than each sample. It also subtracts every uncertain draft.
+
+Placement locks the selected Server row and checks its effective capacity again. The lock prevents concurrent requests from using the same reported capacity. The draft insert and commit release this lock before Atlas calls Metal.
+
 Atlas sends WireGuard peers and desired cached images with `POST /v1/sync`. It receives host capacity in the same exchange.
 
 ## Images

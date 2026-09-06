@@ -18,10 +18,17 @@ Metal owns mutable virtual machine desired state and observed state. Atlas keeps
 
 Virtual Machine properties read the typed response. Atlas does not copy this mutable state into stored DocType fields.
 
+`models.py` owns validated request values. `PlacementService` owns fresh capacity selection and Server row locks.
+
+`VirtualMachineService` owns cross-document operations, Metal mutations, uncertain draft recovery, and error translation. The Virtual Machine controller keeps permissions and local validation.
+
 ## Invariants
 
 - The Virtual Machine name is the Metal virtual machine ID.
 - Atlas commits a draft before a create request.
+- Placement subtracts every VM request that is newer than the selected capacity sample.
+- Placement counts every uncertain draft as a capacity reservation.
+- Placement locks and checks the candidate Server again before it inserts the draft.
 - Atlas keeps an uncertain draft until Metal confirms presence or absence.
 - Public IPv4 changes preserve the current intent version check.
 - The Virtual Machine schema remains unchanged during this refactor.
@@ -30,6 +37,8 @@ Virtual Machine properties read the typed response. Atlas does not copy this mut
 
 ```sh
 ruff check atlas
+bench --site TEST_SITE run-tests --module atlas.vm.core.test_placement
+bench --site TEST_SITE run-tests --module atlas.vm.core.test_virtual_machine_service
 bench --site TEST_SITE run-tests --module atlas.vm.doctype.virtual_machine.test_virtual_machine
 bench --site TEST_SITE run-tests --module atlas.vm.doctype.virtual_machine_image.test_virtual_machine_image
 ```

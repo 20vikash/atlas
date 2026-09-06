@@ -6,13 +6,11 @@ import frappe
 import requests
 from frappe.tests import UnitTestCase
 
+from atlas.vm.core import virtual_machine_service as virtual_machine_service_module
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.virtual_machine_manager import (
-	PlacementCapacity,
-	VirtualMachineCreateRequest,
-	VirtualMachineManager,
-)
+from atlas.vm.core.models import VirtualMachineCreateRequest
+from atlas.vm.core.virtual_machine_service import VirtualMachineService
 from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
 from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 
@@ -212,15 +210,8 @@ class TestVirtualMachineRequest(UnitTestCase):
 				}
 			)
 
-	def test_placement_checks_capacity_and_architecture(self) -> None:
-		request = VirtualMachineCreateRequest("image", 2, 2048, 10240, 7)
-		capacity = PlacementCapacity("node-1", "amd64", 4, 4096, 20480)
 
-		self.assertTrue(capacity.can_host(request, "amd64"))
-		self.assertFalse(capacity.can_host(request, "arm64"))
-
-
-class TestVirtualMachineManager(UnitTestCase):
+class TestVirtualMachineService(UnitTestCase):
 	def test_machine_image_uses_its_own_artifacts(self) -> None:
 		request = VirtualMachineCreateRequest("machine-image", 2, 2048, 10240, 7)
 		image_request = {
@@ -232,8 +223,10 @@ class TestVirtualMachineManager(UnitTestCase):
 		image = SimpleNamespace(get_metal_image_request=Mock(return_value=image_request))
 		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
 
-		with patch.object(VirtualMachineManager, "get_wireguard_mesh_ipv6", return_value="fdaa::1"):
-			metal_request = VirtualMachineManager().get_metal_request(request, image, virtual_machine, None)
+		with patch.object(
+			virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa::1"
+		):
+			metal_request = VirtualMachineService(virtual_machine).get_metal_request(request, image, None)
 
 		self.assertEqual(metal_request["image"], image_request)
 		image.get_metal_image_request.assert_called_once_with("")
@@ -251,8 +244,10 @@ class TestVirtualMachineManager(UnitTestCase):
 		image = SimpleNamespace(get_metal_image_request=Mock(return_value={}))
 		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
 
-		with patch.object(VirtualMachineManager, "get_wireguard_mesh_ipv6", return_value="fdaa::1"):
-			metal_request = VirtualMachineManager().get_metal_request(request, image, virtual_machine, None)
+		with patch.object(
+			virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa::1"
+		):
+			metal_request = VirtualMachineService(virtual_machine).get_metal_request(request, image, None)
 
 		self.assertEqual(
 			metal_request["compute"],
@@ -585,7 +580,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 
 	def patches(self, client: Mock, address_name: str | None) -> tuple[Any, ...]:
 		return (
-			patch.object(virtual_machine_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
 			patch.object(virtual_machine_module.frappe, "only_for"),
 			patch.object(
@@ -607,7 +602,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		)
 
 		with (
-			patch.object(virtual_machine_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
 		):
 			virtual_machine.update_network(public_network_throughput_mibps=25)
@@ -628,7 +623,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		client.get_virtual_machine.side_effect = MetalClientError("invalid response")
 
 		with (
-			patch.object(virtual_machine_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
 			self.assertRaises(frappe.ValidationError),
 		):
@@ -641,7 +636,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		virtual_machine.is_draft = 1
 
 		with (
-			patch.object(virtual_machine_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			self.assertRaises(frappe.ValidationError),
 		):
 			virtual_machine.update_network(public_network_throughput_mibps=25)
@@ -656,7 +651,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			get_doc,
 			only_for,
 			database,
-			patch.object(VirtualMachine, "assign_ip_address", return_value=address) as assign,
+			patch.object(VirtualMachineService, "assign_ip_address", return_value=address) as assign,
 		):
 			virtual_machine.attach_ip_address("203.0.113.10")
 
@@ -691,7 +686,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			only_for,
 			database,
 			patch.object(
-				VirtualMachine,
+				VirtualMachineService,
 				"release_ip_address",
 				side_effect=lambda self=None: calls.append("release"),
 			),
@@ -774,7 +769,7 @@ class TestReconcileTerminating(UnitTestCase):
 				"get_doc",
 				side_effect=[virtual_machine, Mock()],
 			),
-			patch.object(virtual_machine_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 		):
 			virtual_machine_module.reconcile_terminating_virtual_machine("VM-00001")
 		return virtual_machine

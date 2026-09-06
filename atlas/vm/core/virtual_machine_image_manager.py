@@ -7,7 +7,8 @@ import frappe
 from frappe import _
 
 from atlas.atlas.s3 import S3Client, S3Error
-from atlas.vm.core.metal_client import MetalClient, MetalClientError, throw_metal_error
+from atlas.vm.core.metal_client import MetalClient, MetalClientError
+from atlas.vm.core.virtual_machine_service import VirtualMachineService
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -54,8 +55,7 @@ class VirtualMachineImageManager:
 		try:
 			snapshot = metal_client.create_snapshot(cast(str, virtual_machine.name))
 		except MetalClientError as error:
-			throw_metal_error(error)
-			raise AssertionError from error
+			VirtualMachineService.raise_metal_error(error)
 
 		snapshot_id = self.get_snapshot_id(snapshot)
 		image = frappe.get_doc(

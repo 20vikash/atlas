@@ -1,0 +1,88 @@
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from frappe.tests import UnitTestCase
+
+from atlas.vm.core.metal_client import MetalClientError
+from atlas.vm.core.placement import PlacementService
+from atlas.vm.core.virtual_machine_service import VirtualMachineService
+
+
+class TestVirtualMachineCreation(UnitTestCase):
+	def test_creation_commits_the_draft_before_the_metal_request(self) -> None:
+		operations: list[str] = []
+		image = SimpleNamespace(
+			name="image-1",
+			platform="amd64",
+			enabled=1,
+			title="Ubuntu",
+			validate_compatibility=Mock(),
+		)
+		server = SimpleNamespace(name="server-1")
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			flags=SimpleNamespace(),
+			is_draft=1,
+			save=Mock(side_effect=lambda **arguments: operations.append("save")),
+		)
+		metal_client = Mock()
+		metal_client.put_virtual_machine.side_effect = lambda *arguments: operations.append("metal")
+
+		with (
+			patch.object(VirtualMachineService, "get_image", return_value=image),
+			patch.object(PlacementService, "select_server", return_value=server),
+			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
+			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
+			patch(
+				"atlas.vm.core.virtual_machine_service.frappe.db.commit",
+				side_effect=lambda: operations.append("commit"),
+			),
+			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+		):
+			result = VirtualMachineService.create(self.request())
+
+		self.assertEqual(result, {"name": "VM-00001", "is_draft": False})
+		self.assertEqual(operations, ["commit", "metal", "save"])
+		self.assertEqual(virtual_machine.is_draft, 0)
+
+	def test_uncertain_create_keeps_the_committed_draft(self) -> None:
+		image = SimpleNamespace(
+			name="image-1",
+			platform="amd64",
+			enabled=1,
+			title="Ubuntu",
+			validate_compatibility=Mock(),
+		)
+		server = SimpleNamespace(name="server-1")
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			flags=SimpleNamespace(),
+			is_draft=1,
+			save=Mock(),
+		)
+		metal_client = Mock()
+		metal_client.put_virtual_machine.side_effect = MetalClientError("lost", uncertain=True)
+
+		with (
+			patch.object(VirtualMachineService, "get_image", return_value=image),
+			patch.object(PlacementService, "select_server", return_value=server),
+			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
+			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
+			patch("atlas.vm.core.virtual_machine_service.frappe.db.commit") as commit,
+			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+		):
+			result = VirtualMachineService.create(self.request())
+
+		self.assertEqual(result, {"name": "VM-00001", "is_draft": True})
+		commit.assert_called_once()
+		virtual_machine.save.assert_not_called()
+
+	@staticmethod
+	def request() -> dict[str, int | str]:
+		return {
+			"virtual_machine_image": "image-1",
+			"vcpus": 2,
+			"memory_mib": 2048,
+			"disk_mib": 10240,
+			"tenant_id": 7,
+		}

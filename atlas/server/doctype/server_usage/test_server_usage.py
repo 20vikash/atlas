@@ -42,7 +42,7 @@ class TestServerUsage(UnitTestCase):
 		with (
 			patch("atlas.server.usage.frappe.get_all", return_value=rows) as get_all,
 			patch(
-				"atlas.server.usage.VirtualMachineManager.get_wireguard_mesh_ipv6",
+				"atlas.server.usage.get_virtual_machine_mesh_address",
 				return_value="fdaa:1:0:0::1",
 			),
 			patch("atlas.server.usage.frappe.get_doc") as get_doc,
