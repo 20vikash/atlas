@@ -4,15 +4,13 @@ Metal is the host daemon for Atlas virtual machines. The executable is `metald`.
 
 Metal owns desired state, observed state, reconciliation, host resources, and cleanup progress. Atlas owns provider resources and user actions.
 
-## Read first
+## Start here
 
-1. Read the [architecture](docs/architecture.md).
-2. Read the [virtual machine lifecycle](docs/vm.md).
-3. Read the [current HTTP API](docs/api.md).
-4. Read the [host layout](docs/host-layout.md).
-5. Read the [operations guide](docs/operations.md).
-6. Read the [development guide](docs/development.md).
-7. Read the [integration test guide](docs/testing.md).
+1. [Architecture](docs/architecture.md) explains what Metal is and how the parts fit.
+2. [Testing](docs/testing.md) brings up a development host and runs a VM.
+3. [Development](docs/development.md) lists the checks to run on a change.
+
+Package detail lives in each package's `SPEC.md`. Start at [`internal/SPEC.md`](internal/SPEC.md) for the package map.
 
 The [Metal `/v1` contract](../docs/metal-v1-contract.md) defines the controller API.
 
@@ -27,17 +25,10 @@ The [Metal `/v1` contract](../docs/metal-v1-contract.md) defines the controller 
 | `internal/network` | Own Linux network and WireGuard peer operations. |
 | `internal/storage` | Own ZFS images, disks, and snapshot staging. |
 | `internal/reconciler` | Apply current desired state. |
+| `internal/host` | Synchronize controller-owned state and report capacity. |
+| `internal/console` | Serve VM serial consoles. |
+| `internal/platform` | Host files, commands, and systemd. |
 
 ## Local checks
 
-Run these commands from `metal/`:
-
-```sh
-go test ./...
-go test -race ./...
-go vet ./...
-make openapi
-make build
-```
-
-Host tests need Linux, root access, KVM, ZFS, systemd, iptables, and Atlas WG Mesh.
+Run everything from `metal/`. The commands are in [development](docs/development.md). Host tests need Linux, root access, KVM, ZFS, systemd, iptables, and Atlas WG Mesh.

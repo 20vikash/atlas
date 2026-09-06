@@ -2,78 +2,42 @@
 
 [metal SPEC](../SPEC.md) · detail: [internal/storage/SPEC.md](../internal/storage/SPEC.md)
 
-Metal uses ZFS for image volumes and virtual machine disks. A VM disk is a copy-on-write clone of an image snapshot.
+Metal uses ZFS for image volumes and virtual machine disks. A VM disk is a copy-on-write clone of an image snapshot, so reserving a disk costs almost nothing.
 
-## Storage owners
+An image reference is bound to its content. The same name with different digests is a conflict, never an update.
 
-| Type | Responsibility |
-|---|---|
-| `ZFSPool` | Pool capacity and ZFS names. |
-| `VirtualMachineStore` | VM disk preparation, resize, usage, and release. |
-| `ImageStore` | Image import, policy, pruning, and warm artifacts. |
-| `SnapshotStore` | Image staging, upload, deletion, and cleanup. |
+Datasets, image import, disk lifecycle, pruning, and warm artifacts: [internal/storage/SPEC.md](../internal/storage/SPEC.md). Host paths: [host-layout.md](host-layout.md).
 
-`NewStores` creates these services with one shared `ZFSPool`.
+## Two kinds of snapshot
 
-Focused files own pool, volume, image, download, warm, staging, and upload behavior.
+Metal uses the word snapshot for two unrelated flows.
 
-## Image and clone model
+| | Machine image snapshot | Warm artifact |
+|---|---|---|
+| Contains | A disk and a kernel | A disk, guest memory, and Firecracker state |
+| Purpose | Transfer an image to Atlas | Skip boot on this host |
+| Leaves the host | Yes, by multipart upload | Never |
+| Restores its source VM | No | Not applicable |
 
-```text
-<pool>/images/<image>@ready
-              |
-              └─ zfs clone -> <pool>/vms/<vm-id>
-```
+A Machine image snapshot is not a rollback point. To use one, Atlas creates a VM from its image reference. Metal has no public restore or promote operation, because Atlas owns image records and object storage.
 
-Image import downloads and verifies the root file system and kernel. Metal stores an immutable manifest for the image reference.
+## Throughput and IOPS limits
 
-## Disk lifecycle
+The VM configuration can set `disk.throughput_mibps` and `disk.iops`. Each limit covers reads and writes together, and `0` means unlimited.
 
-VM disk preparation clones the image only when the VM disk is absent. Restarting a cold VM reuses its disk.
+Metal applies them as Firecracker drive rate limiters, one token bucket each, changed on a live VM without a restart.
 
-Disk growth is one-way. A running VM receives a Firecracker drive update after the ZFS volume grows.
-
-The destroyed state removes the VM dataset and its snapshots after process and network cleanup.
-
-## Image cache
-
-`POST /v1/sync` replaces the complete image policy set. Cached images for the host architecture download in the background.
-
-A successful VM start updates `last-used`. Metal prunes an image after 24 idle hours when policy does not retain it. A dependent VM disk prevents image deletion.
-
-## Chroot substrate
-
-Metal hard-links the kernel into the jail. It creates a block device node for the VM ZFS volume.
-
-`LinkOrCopy` uses a hard link when possible. Otherwise, it uses `cp --reflink=auto`.
-
-## Snapshots and images
-
-### Snapshot staging
-
-A public snapshot creates an immutable image transfer. It does not create a VM rollback point.
-
-The snapshot store creates a source disk snapshot, a read-only staging clone, a kernel file, and metadata. See [docs/snapshots.md](snapshots.md).
-
-### Warm artifacts
-
-Memory and Firecracker state stay on the host. They are stored by image reference and an exact compatibility key.
-
-Warm disk artifacts use `<pool>/warm/<key>@ready`. They are separate from imported image volumes.
+Metal does not use the cgroup IO controller. ZFS schedules its own IO through the ARC and the transaction group pipeline, so a block-level limit does not hold for a dataset.
 
 ## Design notes
 
 - ZFS clone creation keeps VM disk reservation fast.
 - Immutable manifests prevent one image reference from changing content.
-- Grow-only resize avoids host-side filesystem shrink risk.
+- Grow-only resize avoids host-side file system shrink risk.
 - Separate stores keep pool, VM disk, image, and staging state with one owner.
 - Image policy controls retention, not whether a VM can download an image.
-- Memory and Firecracker state stay on the host.
-
-## Throughput and IOPS limits
-
-The VM configuration can set `disk.throughput_mibps` and `disk.iops`. Each limit covers reads and writes together. A value of `0` does not apply a limit.
-
-Metal sets a Firecracker drive rate limiter. Each limit becomes one token bucket that refills every second. `PATCH /drives/{id}` changes the buckets on a running VM, so a limit change needs no restart.
-
-Metal does not use the cgroup IO controller. ZFS schedules its own IO through the ARC and the transaction group pipeline, so a block-level limit does not hold for a dataset.
+- Public snapshots create new immutable images instead of destructive rollback points.
+- Metal generates the snapshot ID, so Atlas and Metal share one transfer identity.
+- A read-only staging clone gives the uploader a stable root file system.
+- Upload activity extends staging life, so a transfer can be retried safely.
+- Guest memory stays on the host, which keeps transfers small and avoids an unsafe memory restore elsewhere.

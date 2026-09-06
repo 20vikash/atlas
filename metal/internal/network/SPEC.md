@@ -66,6 +66,8 @@ The VM is inside the namespace, so `egress` carries traffic away from it and mat
 
 Private filters take a lower `tc` priority than the public filter, which matches every IPv4 address. A private packet therefore stops at the private policer. One priority holds one protocol, so private IPv4 and IPv6 need separate priorities.
 
+Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, plus the IPv6 unique-local range `fc00::/7`, which contains every mesh prefix. Public traffic is every other IPv4 address.
+
 ## Atlas WG Mesh
 
 Atlas WG Mesh assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.

@@ -96,6 +96,5 @@ Metal links the kernel into the jailer chroot and creates a block node for the V
 ## Related
 
 - [docs/storage.md](../../docs/storage.md) gives the broad storage model.
-- [docs/snapshots.md](../../docs/snapshots.md) describes staging and warm artifacts.
 - [internal/vm/SPEC.md](../vm/SPEC.md) coordinates VM operations.
 - [docs/host-layout.md](../../docs/host-layout.md) lists files and datasets.

@@ -28,4 +28,4 @@ Atlas sends enabled Available images with `cache_image` during host synchronizat
 
 A memory snapshot is a host-local warm artifact. It contains disk, memory, and Firecracker state for one exact image and virtual machine shape. Metal never uploads this data to object storage. Cold boot remains the fallback.
 
-See [Metal snapshots](../../metal/docs/snapshots.md) for host staging and cleanup.
+See [Metal storage](../../metal/docs/storage.md) for host staging and cleanup.

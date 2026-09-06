@@ -2,9 +2,13 @@
 
 [metal SPEC](../SPEC.md) · packages: [internal SPEC](../internal/SPEC.md)
 
-Metal manages Firecracker virtual machines on one host. It stores host state on disk and keeps no VM registry in memory.
+Metal manages Firecracker virtual machines on one host. Read the [system architecture](../../docs/architecture.md) for the Atlas-to-Metal ownership boundary.
 
-Read the [system architecture](../../docs/architecture.md) for the Atlas-to-Metal ownership boundary.
+Two ideas explain the rest of the design.
+
+**Metal owns no process.** systemd runs each VM as a unit of the `metal-vm@` template. A metald restart does not stop a guest, and metald rediscovers state by asking systemd and reading disk, never by remembering.
+
+**Metal stores intent, not commands.** The controller writes what it wants. Metal reconciles until the host agrees, and retries until it does. Nothing is held in memory that a restart would lose.
 
 ## Components
 
@@ -24,64 +28,27 @@ api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> 
        └─ image cache and snapshot staging cleanup
 ```
 
-`cmd/metald` creates all concrete services. Consumer packages define the small interfaces that they use.
+`cmd/metald` creates every concrete service. Each consumer declares the small interface it needs, so no package depends on another's implementation. The package map and dependency graph live in [internal/SPEC.md](../internal/SPEC.md).
 
-## Layering
-
-`vm.Manager` owns records, operations, reconciliation, cleanup, and warm-image orchestration. `firecracker.Runtime` owns process and guest operations.
-
-`host.Service` owns controller synchronization and capacity calculation. The API only validates and maps the synchronization request.
-
-The storage, network, systemd, and Firecracker API packages own host integration. See [internal/SPEC.md](../internal/SPEC.md) for the package graph.
-
-## Stateless design
+## State on disk
 
 ```text
-machines/<id>/config.json   versioned reservation and desired state
-machines/<id>/status.json   versioned observed state, operation data, and cleanup progress
-systemd                     Firecracker process state
+machines/<id>/config.json   what the controller asked for
+machines/<id>/status.json   what the host reached, and cleanup progress
+systemd                     whether a VM process runs
 ZFS                         images, VM disks, staging, and warm disks
 ```
 
-A metald restart does not stop a VM. Startup rejects an incompatible or damaged VM record.
+Startup validates every record and refuses to run on one it cannot read, because losing desired state is worse than failing to start.
 
-## Request flow
+## Read next
 
-Create and lifecycle requests are asynchronous.
-
-```text
-HTTP request
-   -> save the desired state
-   -> wake the VM reconciler
-   -> return 202
-   -> reconcile host state
-```
-
-Poll `GET /v1/vms/{id}` until the desired and observed generations match. The first observed state can be `unknown`.
-
-## systemd unit model
-
-Systemd owns each `metal-vm@<id>.service` process. Metal controls the unit through D-Bus and uses the Firecracker Unix socket for guest operations.
-
-Metal dials a short socket link in `/run/metal`. This avoids the Unix socket path limit inside the jail.
-
-## Storage and warm boot
-
-Normal VM disks are ZFS clones of an image `@ready` snapshot. This keeps cold VM creation fast.
-
-The image reconciler calls `vm.WarmImageBuilder` for a cached image. Warm artifacts need an exact image, CPU, memory, disk, architecture, and Firecracker match.
-
-If warm boot fails, Metal removes the attempted VM disk and uses cold boot.
-
-## Network
-
-Each VM uses one Linux network namespace and one `tap0` device. `Network.Ensure` applies the complete desired network state.
-
-`POST /v1/sync` also applies the managed WireGuard peer set for the host.
-
-## API access
-
-All `/v1` routes require a bearer token. The configuration stores the lowercase SHA-256 digest of that token.
+- [vm.md](vm.md) the VM lifecycle.
+- [storage.md](storage.md) images, disks, and snapshots.
+- [networking.md](networking.md) namespaces, egress, and the mesh.
+- [api.md](api.md) the controller API.
+- [host-layout.md](host-layout.md) where everything lives on the host.
+- [testing.md](testing.md) how to bring up a development host.
 
 ## Design notes
 
@@ -93,27 +60,18 @@ All `/v1` routes require a bearer token. The configuration stores the lowercase 
 
 **Desired state**
 
-- HTTP handlers return quickly after they save desired state.
-- Reconciliation makes retries safe after daemon or host operation failures.
-- `status.json` keeps observed state separate from reservation metadata.
+- HTTP handlers return as soon as desired state is stored.
+- Reconciliation makes a retry safe after a daemon or host failure.
+- Observed state is kept apart from the reservation, because the two change at different times.
 
 **VM start**
 
 - ZFS clones keep disk creation fast.
-- Systemd owns each Firecracker process, so daemon restart does not stop guests.
+- systemd owns each Firecracker process, so a daemon restart does not stop guests.
 - Warm artifacts are optional. Cold boot remains the fallback.
 
 **Host safety**
 
 - Bearer authentication applies to TCP and Unix listeners.
-- The manager uses one operation lock for each VM.
-- Cleanup progress remains on disk until all owned resources are gone.
-
-## Read next
-
-- [docs/api.md](api.md) lists the HTTP API.
-- [docs/vm.md](vm.md) describes VM lifecycle behavior.
-- [docs/storage.md](storage.md) describes images and disks.
-- [docs/snapshots.md](snapshots.md) describes image staging and warm artifacts.
-- [docs/networking.md](networking.md) describes host networking.
-- [docs/host-layout.md](host-layout.md) lists host paths.
+- The manager holds one operation lock per VM.
+- Cleanup progress stays on disk until every owned resource is gone.
