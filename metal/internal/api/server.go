@@ -38,8 +38,8 @@ type HostService interface {
 	Capacity(context.Context) (host.Capacity, error)
 }
 
-// ConsoleBroker streams a virtual machine serial console to one viewer.
-type ConsoleBroker interface {
+// SerialBroker streams a virtual machine serial console to one viewer.
+type SerialBroker interface {
 	Attach(ctx context.Context, id string, client io.ReadWriter, resize <-chan console.Winsize) error
 }
 
@@ -66,7 +66,7 @@ type Dependencies struct {
 	SnapshotStore         SnapshotStore
 	WakeReconciler        func()
 	HostService           HostService
-	ConsoleBroker         ConsoleBroker
+	SerialBroker          SerialBroker
 }
 
 // Server owns the HTTP handlers and their dependencies.
@@ -75,7 +75,7 @@ type Server struct {
 	snapshotStore         SnapshotStore
 	wakeReconciler        func()
 	hostService           HostService
-	consoleBroker         ConsoleBroker
+	serialBroker          SerialBroker
 	authTokenHash         []byte
 	logger                *slog.Logger
 }
@@ -91,7 +91,7 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 		snapshotStore:         dependencies.SnapshotStore,
 		wakeReconciler:        dependencies.WakeReconciler,
 		hostService:           dependencies.HostService,
-		consoleBroker:         dependencies.ConsoleBroker,
+		serialBroker:          dependencies.SerialBroker,
 		authTokenHash:         []byte(configuration.AuthTokenHash),
 	}
 	if configuration.Logger == nil {
@@ -128,7 +128,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.ConsoleBroker == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil

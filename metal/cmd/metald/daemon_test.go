@@ -17,11 +17,11 @@ func (owner *fakeSnapshotUploadOwner) Shutdown(context.Context) error {
 	return nil
 }
 
-type fakeConsoleSessionOwner struct {
+type fakeSerialBroker struct {
 	shutdown bool
 }
 
-func (owner *fakeConsoleSessionOwner) Shutdown() {
+func (owner *fakeSerialBroker) Shutdown() {
 	owner.shutdown = true
 }
 
@@ -36,14 +36,14 @@ func (connection *fakeSystemdConnection) Close() {
 func TestDaemonShutdownOwnsBackgroundLifecycle(t *testing.T) {
 	daemonContext, cancelDaemon := context.WithCancel(t.Context())
 	snapshotUploads := &fakeSnapshotUploadOwner{}
-	consoleSessions := &fakeConsoleSessionOwner{}
+	serialBroker := &fakeSerialBroker{}
 	systemd := &fakeSystemdConnection{}
 	lifecycle := newDaemon(
 		daemonContext,
 		cancelDaemon,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		snapshotUploads,
-		consoleSessions,
+		serialBroker,
 		systemd,
 	)
 	workerStopped := make(chan struct{})
@@ -61,8 +61,8 @@ func TestDaemonShutdownOwnsBackgroundLifecycle(t *testing.T) {
 	default:
 		t.Fatal("background worker did not stop")
 	}
-	if !snapshotUploads.shutdown || !consoleSessions.shutdown || !systemd.closed {
-		t.Fatalf("owners were not stopped: uploads=%t consoles=%t systemd=%t", snapshotUploads.shutdown, consoleSessions.shutdown, systemd.closed)
+	if !snapshotUploads.shutdown || !serialBroker.shutdown || !systemd.closed {
+		t.Fatalf("owners were not stopped: uploads=%t consoles=%t systemd=%t", snapshotUploads.shutdown, serialBroker.shutdown, systemd.closed)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestDaemonShutdownWaitIsBounded(t *testing.T) {
 		cancelDaemon,
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		&fakeSnapshotUploadOwner{},
-		&fakeConsoleSessionOwner{},
+		&fakeSerialBroker{},
 		&fakeSystemdConnection{},
 	)
 	releaseWorker := make(chan struct{})

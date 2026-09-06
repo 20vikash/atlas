@@ -315,7 +315,7 @@ func newServerWithServices(
 		SnapshotStore:         services,
 		WakeReconciler:        func() {},
 		HostService:           hostService,
-		ConsoleBroker:         stubConsoleBroker{},
+		SerialBroker:          stubSerialBroker{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -341,9 +341,9 @@ func TestCorrelationHeadersAreGeneratedAndPreserveSafeValues(t *testing.T) {
 	}
 }
 
-type stubConsoleBroker struct{}
+type stubSerialBroker struct{}
 
-func (stubConsoleBroker) Attach(context.Context, string, io.ReadWriter, <-chan console.Winsize) error {
+func (stubSerialBroker) Attach(context.Context, string, io.ReadWriter, <-chan console.Winsize) error {
 	return console.ErrConsoleNotFound
 }
 

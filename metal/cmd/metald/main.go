@@ -161,8 +161,8 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 
 	daemonContext, cancelDaemon := context.WithCancel(context.Background())
 	stores := storage.NewStores(daemonContext, o.pool, o.imagesDir, logger)
-	consoleBroker := console.NewBroker(filepath.Join(o.cfg.SocketsDir, "consoles"))
-	daemon := newDaemon(daemonContext, cancelDaemon, logger, stores.Snapshots, consoleBroker, units)
+	serialBroker := console.NewSerialBroker(filepath.Join(o.cfg.SocketsDir, "consoles"))
+	daemon := newDaemon(daemonContext, cancelDaemon, logger, stores.Snapshots, serialBroker, units)
 	defer func() {
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 		defer cancelShutdown()
@@ -182,7 +182,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		units,
 		stores.VirtualMachines,
 		stores.Images,
-		consoleBroker,
+		serialBroker,
 		logger,
 	)
 	virtualMachineManager, err := vm.NewManager(
@@ -232,7 +232,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		SnapshotStore:         stores.Snapshots,
 		WakeReconciler:        wakeReconcilers,
 		HostService:           hostService,
-		ConsoleBroker:         consoleBroker,
+		SerialBroker:          serialBroker,
 	})
 	if err != nil {
 		return fmt.Errorf("configure API: %w", err)

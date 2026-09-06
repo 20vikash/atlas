@@ -7,15 +7,19 @@ type ringBuffer struct {
 	size  int
 }
 
+// newRingBuffer returns a buffer that holds up to capacity bytes.
 func newRingBuffer(capacity int) *ringBuffer {
 	if capacity <= 0 {
 		capacity = 1
 	}
+
 	return &ringBuffer{data: make([]byte, capacity)}
 }
 
+// write appends a chunk and discards the oldest bytes that no longer fit.
 func (r *ringBuffer) write(chunk []byte) {
 	capacity := len(r.data)
+
 	// Keep only the tail when the chunk exceeds capacity.
 	if len(chunk) >= capacity {
 		copy(r.data, chunk[len(chunk)-capacity:])
@@ -25,8 +29,8 @@ func (r *ringBuffer) write(chunk []byte) {
 	}
 
 	for _, value := range chunk {
-		end := (r.start + r.size) % capacity
-		r.data[end] = value
+		writeIndex := (r.start + r.size) % capacity
+		r.data[writeIndex] = value
 		if r.size < capacity {
 			r.size++
 		} else {
@@ -35,10 +39,12 @@ func (r *ringBuffer) write(chunk []byte) {
 	}
 }
 
+// snapshot returns the buffered bytes in order, oldest first.
 func (r *ringBuffer) snapshot() []byte {
-	result := make([]byte, r.size)
+	history := make([]byte, r.size)
 	for index := 0; index < r.size; index++ {
-		result[index] = r.data[(r.start+index)%len(r.data)]
+		history[index] = r.data[(r.start+index)%len(r.data)]
 	}
-	return result
+
+	return history
 }

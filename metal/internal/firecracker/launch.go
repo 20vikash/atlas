@@ -32,8 +32,8 @@ type imageStore interface {
 	RecordImageUse(imageReference string, usedAt time.Time) error
 }
 
-// consoleBroker manages each VM's serial console PTY.
-type consoleBroker interface {
+// serialBroker manages each VM's serial console PTY.
+type serialBroker interface {
 	Open(id string) error
 	Close(id string) error
 }
@@ -44,7 +44,7 @@ type Runtime struct {
 	units                 platform.UnitManager
 	virtualMachineStorage virtualMachineStorage
 	imageStore            imageStore
-	consoleBroker         consoleBroker
+	serialBroker          serialBroker
 	sshSlots              chan struct{}
 	logger                *slog.Logger
 }
@@ -58,7 +58,7 @@ func NewRuntime(
 	units platform.UnitManager,
 	virtualMachineStorage virtualMachineStorage,
 	imageStore imageStore,
-	consoleBroker consoleBroker,
+	serialBroker serialBroker,
 	logger *slog.Logger,
 ) *Runtime {
 	if logger == nil {
@@ -69,7 +69,7 @@ func NewRuntime(
 		units:                 units,
 		virtualMachineStorage: virtualMachineStorage,
 		imageStore:            imageStore,
-		consoleBroker:         consoleBroker,
+		serialBroker:          serialBroker,
 		sshSlots:              make(chan struct{}, maxConcurrentSSHSessions),
 		logger:                logger,
 	}
@@ -119,7 +119,7 @@ func (d *Runtime) prepareLaunch(ctx context.Context, configuration vm.RuntimeMac
 		return err
 	}
 	// Open the PTY before systemd starts the unit.
-	if err := d.consoleBroker.Open(configuration.ID); err != nil {
+	if err := d.serialBroker.Open(configuration.ID); err != nil {
 		return err
 	}
 	if err := d.units.Start(ctx, configuration.ID); err != nil {

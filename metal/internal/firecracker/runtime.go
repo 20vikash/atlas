@@ -211,7 +211,7 @@ func (m *machine) stopUnlocked(ctx context.Context) error {
 	if _, err := m.d.units.Wait(ctx, m.input.ID); err != nil {
 		return err
 	}
-	_ = m.d.consoleBroker.Close(m.input.ID)
+	_ = m.d.serialBroker.Close(m.input.ID)
 
 	// Clear the failed state after an intentional process stop.
 	return m.d.units.ResetFailed(ctx, m.input.ID)
@@ -224,7 +224,7 @@ func (m *machine) killUnlocked(ctx context.Context) error {
 	if _, err := m.d.units.Wait(ctx, m.input.ID); err != nil {
 		return err
 	}
-	_ = m.d.consoleBroker.Close(m.input.ID)
+	_ = m.d.serialBroker.Close(m.input.ID)
 	return m.d.units.ResetFailed(ctx, m.input.ID)
 }
 
@@ -246,7 +246,7 @@ func (m *machine) cleanupSystemd(ctx context.Context) error {
 	if err := m.d.units.Stop(ctx, m.input.ID); err != nil {
 		return fmt.Errorf("stop VM unit: %w", err)
 	}
-	_ = m.d.consoleBroker.Close(m.input.ID)
+	_ = m.d.serialBroker.Close(m.input.ID)
 	if err := m.d.units.ResetFailed(ctx, m.input.ID); err != nil {
 		return fmt.Errorf("reset VM unit: %w", err)
 	}

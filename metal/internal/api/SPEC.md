@@ -10,7 +10,7 @@ Package `api` validates HTTP requests and calls small service interfaces. Mutati
 
 `New(Config, Dependencies)` validates authentication and required services. It returns the configured Echo router or an error.
 
-`Dependencies` contains the VM manager, snapshot store, host service, wake function, and console broker.
+`Dependencies` contains the VM manager, snapshot store, host service, wake function, and serial broker.
 
 Request and response types are split by resource. VM files use the `vm_` prefix. `Server` owns the handlers and injected services.
 
@@ -49,7 +49,7 @@ POST   /v1/snapshots/:id/upload
 GET    /v1/snapshots/:id
 DELETE /v1/snapshots/:id
 
-GET    /v1/vms/:id/console
+GET    /v1/vms/:id/console        mode=tty (default) or mode=ssh
 GET    /docs
 GET    /docs/swagger.json
 ```

@@ -17,6 +17,7 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [firecracker/api](firecracker/api/SPEC.md) | Firecracker REST client over a Unix socket. |
 | [api](api/SPEC.md) | Authenticated HTTP API. |
 | `host` | Host synchronization and capacity. |
+| [console](console/SPEC.md) | VM serial consoles over PTYs. |
 | [reconciler](../docs/architecture.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
 | [network](network/SPEC.md) | VM namespaces and managed WireGuard peers. |
@@ -26,9 +27,9 @@ The `vm` package defines the contracts. The other packages implement or consume 
 
 ```text
 cmd/metald
-   ├─ api -> vm.Manager, host.Service
+   ├─ api -> vm.Manager, host.Service, console.SerialBroker
    ├─ reconciler -> vm.Manager
-   ├─ firecracker -> vm, storage, platform, firecracker/api
+   ├─ firecracker -> vm, storage, platform, console, firecracker/api
    ├─ storage -> vm, platform
    └─ network -> vm, platform
 ```

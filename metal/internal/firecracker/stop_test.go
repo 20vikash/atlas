@@ -27,10 +27,10 @@ type stubUnits struct {
 	waits  int
 }
 
-type stubConsoleBroker struct{}
+type stubSerialBroker struct{}
 
-func (*stubConsoleBroker) Open(string) error  { return nil }
-func (*stubConsoleBroker) Close(string) error { return nil }
+func (*stubSerialBroker) Open(string) error  { return nil }
+func (*stubSerialBroker) Close(string) error { return nil }
 
 func (s *stubUnits) shutdown() {
 	s.mu.Lock()
@@ -126,7 +126,7 @@ func fcSocket(t *testing.T, onRequest func()) string {
 
 func testMachine(units platform.UnitManager, sock string, timeout time.Duration) *machine {
 	return &machine{
-		d:           &Runtime{units: units, consoleBroker: &stubConsoleBroker{}},
+		d:           &Runtime{units: units, serialBroker: &stubSerialBroker{}},
 		input:       vm.RuntimeMachine{ID: "abc"},
 		api:         api.New(sock),
 		stopTimeout: timeout,

@@ -24,7 +24,7 @@ type snapshotUploadOwner interface {
 	Shutdown(context.Context) error
 }
 
-type consoleSessionOwner interface {
+type serialBroker interface {
 	Shutdown()
 }
 
@@ -37,7 +37,7 @@ type daemon struct {
 	cancel           context.CancelFunc
 	logger           *slog.Logger
 	snapshotUploads  snapshotUploadOwner
-	consoleSessions  consoleSessionOwner
+	serialBroker     serialBroker
 	systemd          systemdConnection
 	workers          sync.WaitGroup
 	httpServer       daemonHTTPServer
@@ -49,7 +49,7 @@ func newDaemon(
 	cancel context.CancelFunc,
 	logger *slog.Logger,
 	snapshotUploads snapshotUploadOwner,
-	consoleSessions consoleSessionOwner,
+	serialBroker serialBroker,
 	systemd systemdConnection,
 ) *daemon {
 	return &daemon{
@@ -57,7 +57,7 @@ func newDaemon(
 		cancel:          cancel,
 		logger:          logger,
 		snapshotUploads: snapshotUploads,
-		consoleSessions: consoleSessions,
+		serialBroker:    serialBroker,
 		systemd:         systemd,
 	}
 }
@@ -108,7 +108,7 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 	if err := daemon.snapshotUploads.Shutdown(shutdownContext); err != nil {
 		shutdownErrors = append(shutdownErrors, err)
 	}
-	daemon.consoleSessions.Shutdown()
+	daemon.serialBroker.Shutdown()
 	daemon.systemd.Close()
 
 	if daemon.httpServer != nil {

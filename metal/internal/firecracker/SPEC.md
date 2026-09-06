@@ -24,7 +24,7 @@ vm.Manager -> firecracker.Runtime -> systemd -> jailer -> Firecracker
                          |
                          +-> VM disk storage
                          +-> image storage
-                         +-> console broker
+                         +-> serial broker
 ```
 
 ## Launch

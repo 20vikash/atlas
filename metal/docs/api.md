@@ -41,7 +41,19 @@ The controller API uses `/v1`. Metal does not provide unversioned controller rou
 | `POST` | `/v1/snapshots/{id}/upload` | `202` | Start an artifact upload |
 | `GET` | `/v1/snapshots/{id}` | `200` | Get upload status |
 | `DELETE` | `/v1/snapshots/{id}` | `204` | Remove image staging |
-| `GET` | `/v1/vms/{id}/console` | `101` | Open a WebSocket console |
+| `GET` | `/v1/vms/{id}/console?mode=tty` | `101` | Attach to the shared serial console |
+| `GET` | `/v1/vms/{id}/console?mode=ssh` | `101` | Open a private SSH session |
+
+## Console modes
+
+One endpoint serves 2 modes. `mode=tty` is the default.
+
+| Mode | Session | History | Viewers |
+|---|---|---|---|
+| `tty` | The VM's serial console. It runs from VM start to VM stop. | Recent output replays on attach. | Many, capped. A viewer that stops reading is disconnected. |
+| `ssh` | An SSH session created for this connection and closed with it. | None. | One. |
+
+Both modes use the same framing. Binary frames carry terminal bytes in both directions. A text frame carries a control message, for example `{"resize":{"cols":120,"rows":40}}`. Full detail: [internal/console/SPEC.md](../internal/console/SPEC.md).
 
 ## Virtual machine state
 
