@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
+import binascii
 import json
 
 import frappe
@@ -12,12 +12,13 @@ import redis.asyncio as redis
 import websockets
 from frappe.realtime import Socket, realtime
 
-from atlas.vm.core.console_token import console_token_key
+from atlas.vm.core.console_token import ConsoleConnection, console_token_key, is_valid_console_token
 
 # Active bridges by socket ID.
 _sessions: dict[str, "ConsoleSession"] = {}
 
 _redis_client: redis.Redis | None = None
+MAXIMUM_CONSOLE_INPUT_BYTES = 64 * 1024
 
 
 def _cache() -> redis.Redis:
@@ -35,6 +36,7 @@ class ConsoleSession:
 	def __init__(self, socket: Socket, connection: websockets.ClientConnection):
 		self.socket = socket
 		self.connection = connection
+		self.is_closed = False
 		self.stream_task = asyncio.create_task(self.stream_output())
 
 	async def stream_output(self) -> None:
@@ -43,17 +45,15 @@ class ConsoleSession:
 			async for message in self.connection:
 				data = message if isinstance(message, bytes) else message.encode()
 				await self.socket.emit("atlas_console_output", base64.b64encode(data).decode())
-		except (websockets.WebSocketException, asyncio.CancelledError):
+		except websockets.WebSocketException, asyncio.CancelledError:
 			pass
+		except Exception:
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Console stream failed for socket {self.socket.sid}",
+			)
 		finally:
-			# The Metal side may close first, so remove this session here instead of
-			# relying only on the browser disconnect.
-			if _sessions.get(self.socket.sid) is self:
-				del _sessions[self.socket.sid]
-			with contextlib.suppress(Exception):
-				await self.connection.close()
-			with contextlib.suppress(Exception):
-				await self.socket.emit("atlas_console_closed")
+			await self.close()
 
 	async def send_input(self, data: bytes) -> None:
 		await self.connection.send(data)
@@ -62,8 +62,34 @@ class ConsoleSession:
 		await self.connection.send(json.dumps({"resize": {"cols": cols, "rows": rows}}))
 
 	async def close(self) -> None:
-		self.stream_task.cancel()
-		await self.connection.close()
+		"""Close this session once and remove it from the active session map."""
+		if self.is_closed:
+			return
+		self.is_closed = True
+		if _sessions.get(self.socket.sid) is self:
+			del _sessions[self.socket.sid]
+
+		if asyncio.current_task() is not self.stream_task:
+			self.stream_task.cancel()
+			try:
+				await self.stream_task
+			except asyncio.CancelledError:
+				pass
+
+		try:
+			await self.connection.close()
+		except OSError, websockets.WebSocketException:
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Could not close console connection for socket {self.socket.sid}",
+			)
+		try:
+			await self.socket.emit("atlas_console_closed")
+		except Exception:
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Could not notify console closure for socket {self.socket.sid}",
+			)
 
 
 @realtime.on("atlas_console_open", allow_guest=True)
@@ -71,20 +97,28 @@ async def atlas_console_open(socket: Socket, token: str) -> None:
 	"""Consume the token and open the console."""
 	if socket.sid in _sessions:
 		return
-
-	raw = await _cache().getdel(console_token_key(socket.site, token))
-	if not raw:
+	if not is_valid_console_token(token):
 		await socket.emit("atlas_console_error", "This console link is invalid or expired.")
 		return
 
-	connection = json.loads(raw)
+	serialized_connection = await _cache().getdel(console_token_key(socket.site, token))
+	if not serialized_connection:
+		await socket.emit("atlas_console_error", "This console link is invalid or expired.")
+		return
+
+	try:
+		connection = ConsoleConnection.from_json(serialized_connection)
+	except json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError:
+		frappe.log_error(title=f"Invalid console token payload for site {socket.site}")
+		await socket.emit("atlas_console_error", "This console link is invalid or expired.")
+		return
 	try:
 		metal_connection = await websockets.connect(
-			connection["url"],
-			additional_headers={"Authorization": connection["authorization"]},
+			connection.url,
+			additional_headers={"Authorization": connection.authorization},
 			max_size=None,
 		)
-	except (OSError, websockets.WebSocketException):
+	except OSError, websockets.WebSocketException:
 		await socket.emit("atlas_console_error", "Could not reach the virtual machine console.")
 		return
 
@@ -95,8 +129,20 @@ async def atlas_console_open(socket: Socket, token: str) -> None:
 @realtime.on("atlas_console_input", allow_guest=True)
 async def atlas_console_input(socket: Socket, data: str) -> None:
 	session = _sessions.get(socket.sid)
-	if session:
-		await session.send_input(base64.b64decode(data))
+	if not session:
+		return
+	if not isinstance(data, str):
+		await socket.emit("atlas_console_error", "Console input is invalid.")
+		return
+	try:
+		decoded_data = base64.b64decode(data, validate=True)
+	except binascii.Error, ValueError:
+		await socket.emit("atlas_console_error", "Console input is invalid.")
+		return
+	if len(decoded_data) > MAXIMUM_CONSOLE_INPUT_BYTES:
+		await socket.emit("atlas_console_error", "Console input is too large.")
+		return
+	await session.send_input(decoded_data)
 
 
 @realtime.on("atlas_console_resize", allow_guest=True)

@@ -8,6 +8,8 @@
 
 The Server module owns provider host records, setup, disk inventory, and capacity samples.
 
+Capacity synchronization logs transport and response faults separately. Server IP Address reconciliation logs the address, action, and intent version, then preserves the pending intent for a retry.
+
 ## Ownership
 
 `doctype/server/server.py` owns lifecycle hooks, permissions, and whitelisted methods.

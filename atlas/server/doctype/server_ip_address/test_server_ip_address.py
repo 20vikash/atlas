@@ -49,3 +49,28 @@ class TestServerIPAddress(UnitTestCase):
 
 		worker.apply_intent.assert_called_once_with(intent)
 		worker.complete_intent.assert_called_once_with(intent)
+
+	def test_reconcile_logs_the_resource_intent_and_version(self) -> None:
+		intent = IPAddressIntent(7, "Attaching", "provider-id", "node-1")
+		worker = SimpleNamespace(
+			doctype="Server IP Address",
+			name="203.0.113.10",
+			apply_intent=Mock(side_effect=RuntimeError("provider failed")),
+			complete_intent=Mock(),
+		)
+
+		with (
+			patch(
+				"atlas.server.doctype.server_ip_address.server_ip_address.frappe.get_doc",
+				return_value=SimpleNamespace(get_intent=Mock(return_value=intent)),
+			),
+			patch("atlas.server.doctype.server_ip_address.server_ip_address.frappe.log_error") as log_error,
+			self.assertRaisesRegex(RuntimeError, "provider failed"),
+		):
+			ServerIPAddress.reconcile(worker)
+
+		self.assertEqual(
+			log_error.call_args.kwargs["title"],
+			"Server IP Address 203.0.113.10 Attaching intent 7 failed",
+		)
+		worker.complete_intent.assert_not_called()

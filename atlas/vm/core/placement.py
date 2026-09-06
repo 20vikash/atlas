@@ -67,6 +67,8 @@ class PlacementService:
 
 		architecture_by_server = {server.name: server.architecture for server in servers}
 		capacities = self.get_latest_capacities(architecture_by_server)
+		if not capacities:
+			frappe.throw(_("No current Server capacity sample is available. Check Server synchronization."))
 		candidates = sorted(
 			(self.subtract_local_reservations(capacity) for capacity in capacities.values()),
 			key=lambda capacity: capacity.rank,

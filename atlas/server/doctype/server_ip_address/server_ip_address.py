@@ -96,8 +96,15 @@ class ServerIPAddress(Document):
 		if intent.status not in {"Attaching", "Detaching"}:
 			return
 
-		self.apply_intent(intent)
-		self.complete_intent(intent)
+		try:
+			self.apply_intent(intent)
+			self.complete_intent(intent)
+		except Exception:
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=(f"Server IP Address {self.name} {intent.status} intent {intent.version} failed"),
+			)
+			raise
 
 	def get_intent(self) -> IPAddressIntent:
 		return IPAddressIntent(

@@ -28,6 +28,16 @@ class TestPlacementCapacity(UnitTestCase):
 
 
 class TestPlacementService(UnitTestCase):
+	def test_selection_reports_a_missing_current_capacity_sample(self) -> None:
+		service = PlacementService()
+		service.get_ready_servers = Mock(
+			return_value=[SimpleNamespace(name="server-1", architecture="amd64")]
+		)
+		service.get_latest_capacities = Mock(return_value={})
+
+		with self.assertRaisesRegex(frappe.ValidationError, "capacity sample"):
+			service.select_server(VirtualMachineCreateRequest("image", 2, 2048, 10240, 7), "amd64")
+
 	def test_latest_capacities_use_only_fresh_samples(self) -> None:
 		current_time = datetime(2026, 9, 6, 8, 0)
 		latest_sample = SimpleNamespace(

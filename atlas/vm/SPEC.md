@@ -32,6 +32,8 @@ Virtual Machine properties read the typed response. Atlas does not copy this mut
 - Placement counts every uncertain draft as a capacity reservation.
 - Placement locks and checks the candidate Server again before it inserts the draft.
 - Atlas keeps an uncertain draft until Metal confirms presence or absence.
+- A Metal read fault is visible. Only an absent virtual machine has no Metal information.
+- Placement identifies a missing current capacity sample.
 - Public IPv4 changes preserve the current intent version check.
 - Image transfer failures keep the identifiers that a retry needs.
 - Atlas records an upload-start error on the image.
@@ -44,6 +46,7 @@ ruff check atlas
 pilot --site TEST_SITE run-tests --module atlas.vm.core.test_placement
 pilot --site TEST_SITE run-tests --module atlas.vm.core.test_virtual_machine_service
 pilot --site TEST_SITE run-tests --module atlas.vm.core.test_image_builder
+pilot --site TEST_SITE run-tests --module atlas.vm.core.test_console_token
 pilot --site TEST_SITE run-tests --module atlas.vm.doctype.virtual_machine.test_virtual_machine
 pilot --site TEST_SITE run-tests --module atlas.vm.doctype.virtual_machine_image.test_virtual_machine_image
 ```

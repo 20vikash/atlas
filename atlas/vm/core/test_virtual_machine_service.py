@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
@@ -86,3 +87,30 @@ class TestVirtualMachineCreation(UnitTestCase):
 			"disk_mib": 10240,
 			"tenant_id": 7,
 		}
+
+
+class TestVirtualMachineInformation(UnitTestCase):
+	def test_missing_virtual_machine_returns_no_information(self) -> None:
+		virtual_machine = SimpleNamespace(name="VM-00001", server="server-1")
+		metal_client = Mock()
+		metal_client.get_virtual_machine.side_effect = MetalClientError("not found", status=404)
+
+		with (
+			patch("atlas.vm.core.virtual_machine_service.frappe.get_doc", return_value=Mock()),
+			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+		):
+			information = VirtualMachineService(virtual_machine).get_information()
+
+		self.assertIsNone(information)
+
+	def test_metal_failure_is_visible_to_the_caller(self) -> None:
+		virtual_machine = SimpleNamespace(name="VM-00001", server="server-1")
+		metal_client = Mock()
+		metal_client.get_virtual_machine.side_effect = MetalClientError("connection refused")
+
+		with (
+			patch("atlas.vm.core.virtual_machine_service.frappe.get_doc", return_value=Mock()),
+			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+			self.assertRaisesRegex(frappe.ValidationError, "connection refused"),
+		):
+			VirtualMachineService(virtual_machine).get_information()

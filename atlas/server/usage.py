@@ -48,8 +48,17 @@ def sync_server(
 	try:
 		response = MetalClient(server).sync(wireguard_peers, get_desired_images(), privileged_vm_addresses)
 		values = get_usage_values(response.get("capacity"))
-	except MetalClientError, ValueError:
-		frappe.log_error(frappe.get_traceback(), f"Could not sync Server {server.name}")
+	except MetalClientError:
+		frappe.log_error(
+			frappe.get_traceback(),
+			f"Metal synchronization failed for Server {server.name}",
+		)
+		return
+	except ValueError:
+		frappe.log_error(
+			frappe.get_traceback(),
+			f"Invalid capacity response from Server {server.name}",
+		)
 		return
 
 	frappe.get_doc({"doctype": "Server Usage", "server": server.name, **values}).insert(

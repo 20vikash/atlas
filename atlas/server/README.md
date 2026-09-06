@@ -28,4 +28,6 @@ The controller keeps the Desk methods and permission checks. The `server/core/` 
 | `core/catalog_sync.py` | Provider catalog persistence. |
 | `usage.py` | Metal synchronization and capacity samples. |
 
+Server synchronization writes separate Error Logs for Metal connection faults and invalid capacity data. Public IPv4 reconciliation logs the address, intent action, and intent version before it retries.
+
 Read the [Server lifecycle](../docs/server-lifecycle.md) for retry and failure rules.

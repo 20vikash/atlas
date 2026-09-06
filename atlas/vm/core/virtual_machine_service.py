@@ -120,17 +120,14 @@ class VirtualMachineService:
 			},
 		}
 
-	def get_information(self, *, log_failure: bool = False) -> MetalVirtualMachine | None:
-		"""Return Metal state, or no value when Metal cannot supply it."""
+	def get_information(self) -> MetalVirtualMachine | None:
+		"""Return Metal state, or no value when the virtual machine is absent."""
 		try:
 			return self.metal_client.get_virtual_machine(cast(str, self.virtual_machine.name))
 		except MetalClientError as error:
-			if log_failure and not error.is_not_found:
-				frappe.log_error(
-					frappe.get_traceback(),
-					f"Could not get Virtual Machine {self.virtual_machine.name} from Metal",
-				)
-			return None
+			if error.is_not_found:
+				return None
+			self.raise_metal_error(error)
 
 	def validate_deletion(self) -> None:
 		"""Allow deletion only after Metal confirms absence."""
@@ -313,6 +310,10 @@ class VirtualMachineService:
 			service.metal_client.get_virtual_machine(name)
 		except MetalClientError as error:
 			if not error.is_not_found:
+				frappe.log_error(
+					message=frappe.get_traceback(),
+					title=f"Virtual Machine {name} draft reconciliation failed",
+				)
 				return
 			virtual_machine.flags.metal_absence_confirmed = True
 			virtual_machine.delete(ignore_permissions=True)
@@ -328,6 +329,10 @@ class VirtualMachineService:
 			service.metal_client.get_virtual_machine(name)
 		except MetalClientError as error:
 			if not error.is_not_found:
+				frappe.log_error(
+					message=frappe.get_traceback(),
+					title=f"Virtual Machine {name} termination reconciliation failed",
+				)
 				return
 			virtual_machine.flags.metal_absence_confirmed = True
 			virtual_machine.delete(ignore_permissions=True)

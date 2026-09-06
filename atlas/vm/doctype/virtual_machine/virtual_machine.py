@@ -41,7 +41,7 @@ class VirtualMachine(Document):
 
 	@request_cache
 	def get_metal_vm_info(self) -> MetalVirtualMachine | None:
-		return VirtualMachineService(self).get_information(log_failure=True)
+		return VirtualMachineService(self).get_information()
 
 	def before_insert(self) -> None:
 		if not getattr(self.flags, "created_by_virtual_machine_api", False):

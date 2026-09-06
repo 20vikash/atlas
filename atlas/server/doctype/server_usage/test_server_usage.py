@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from frappe.tests import UnitTestCase
@@ -11,9 +12,40 @@ from atlas.server.usage import (
 	get_usage_values,
 	sync_server,
 )
+from atlas.vm.core.metal_client import MetalClientError
 
 
 class TestServerUsage(UnitTestCase):
+	def test_sync_logs_a_metal_connection_failure(self) -> None:
+		server = SimpleNamespace(name="server-1")
+		client = Mock()
+		client.sync.side_effect = MetalClientError("connection refused")
+
+		with (
+			patch("atlas.server.usage.frappe.get_doc", return_value=server),
+			patch("atlas.server.usage.MetalClient", return_value=client),
+			patch("atlas.server.usage.get_desired_images", return_value=[]),
+			patch("atlas.server.usage.frappe.log_error") as log_error,
+		):
+			sync_server("server-1", [], [])
+
+		self.assertEqual(log_error.call_args.args[1], "Metal synchronization failed for Server server-1")
+
+	def test_sync_logs_an_invalid_capacity_response(self) -> None:
+		server = SimpleNamespace(name="server-1")
+		client = Mock()
+		client.sync.return_value = {"capacity": {}}
+
+		with (
+			patch("atlas.server.usage.frappe.get_doc", return_value=server),
+			patch("atlas.server.usage.MetalClient", return_value=client),
+			patch("atlas.server.usage.get_desired_images", return_value=[]),
+			patch("atlas.server.usage.frappe.log_error") as log_error,
+		):
+			sync_server("server-1", [], [])
+
+		self.assertEqual(log_error.call_args.args[1], "Invalid capacity response from Server server-1")
+
 	def test_enqueue_uses_one_exchange_per_server(self) -> None:
 		peers = [{"node": "server-1"}]
 		addresses = ["fdaa:1::1"]

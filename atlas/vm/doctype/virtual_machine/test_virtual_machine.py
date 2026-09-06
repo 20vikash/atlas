@@ -784,8 +784,14 @@ class TestReconcileTerminating(UnitTestCase):
 		virtual_machine.delete.assert_not_called()
 
 	def test_other_error_keeps_vm(self) -> None:
-		virtual_machine = self._run(MetalClientError("busy", status=503))
+		with patch.object(virtual_machine_service_module.frappe, "log_error") as log_error:
+			virtual_machine = self._run(MetalClientError("busy", status=503))
+
 		virtual_machine.delete.assert_not_called()
+		self.assertEqual(
+			log_error.call_args.kwargs["title"],
+			"Virtual Machine VM-00001 termination reconciliation failed",
+		)
 
 
 class TestVirtualMachinePrivilege(UnitTestCase):

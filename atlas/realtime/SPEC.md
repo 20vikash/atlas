@@ -12,9 +12,12 @@ The realtime module bridges an authenticated Atlas console session to Metal.
 
 Metal owns the serial console. Atlas owns the browser session and its token.
 
+`ConsoleSession.close` is the only session cleanup owner. A token is one use. The handler validates the stored connection, input encoding, input size, and terminal dimensions before it sends data to Metal.
+
 ## Tests
 
 ```sh
 ruff check atlas
-bench --site TEST_SITE run-tests --app atlas
+pilot --site TEST_SITE run-tests --module atlas.realtime.test_handlers
+pilot --site TEST_SITE run-tests --module atlas.vm.core.test_console_token
 ```
