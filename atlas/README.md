@@ -19,6 +19,7 @@ Atlas sends desired virtual machine state to Metal. Metal owns runtime state and
 
 ## Guides
 
+- [Getting started](docs/getting-started.md)
 - [Provider contract and extension guide](docs/providers.md)
 - [Metal Server lifecycle](docs/metal-server-lifecycle.md)
 - [Virtual machine control plane](docs/vm-control-plane.md)
