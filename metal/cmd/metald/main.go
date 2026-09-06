@@ -23,9 +23,9 @@ import (
 	"github.com/frappe/atlas/metal/internal/firecracker"
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/systemd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -154,7 +154,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if err := makeDirs(o); err != nil {
 		return err
 	}
-	units, err := systemd.Connect(context.Background())
+	units, err := platform.Connect(context.Background())
 	if err != nil {
 		return fmt.Errorf("connect systemd: %w", err)
 	}

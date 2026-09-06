@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/systemd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -41,7 +41,7 @@ type consoleBroker interface {
 // Runtime manages Firecracker virtual machines on one host.
 type Runtime struct {
 	configuration         Config
-	units                 systemd.Manager
+	units                 platform.Manager
 	virtualMachineStorage virtualMachineStorage
 	imageStore            imageStore
 	consoleBroker         consoleBroker
@@ -55,7 +55,7 @@ const maxConcurrentSSHSessions = 32
 // NewRuntime returns a Firecracker runtime.
 func NewRuntime(
 	configuration Config,
-	units systemd.Manager,
+	units platform.Manager,
 	virtualMachineStorage virtualMachineStorage,
 	imageStore imageStore,
 	consoleBroker consoleBroker,

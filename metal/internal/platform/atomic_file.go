@@ -1,5 +1,5 @@
-// Package atomicfile writes complete files and durable directory entries.
-package atomicfile
+// Package platform provides host integration primitives for Metal.
+package platform
 
 import (
 	"fmt"

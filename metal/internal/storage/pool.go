@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 // Capacity describes total and available pool space in MiB.
@@ -17,7 +17,7 @@ type Capacity struct {
 
 // Capacity returns the storage pool capacity.
 func (pool *ZFSPool) Capacity(ctx context.Context) (Capacity, error) {
-	output, err := hostcmd.Output(ctx, "zpool", "list", "-Hp", "-o", "size,free", pool.name)
+	output, err := platform.Output(ctx, "zpool", "list", "-Hp", "-o", "size,free", pool.name)
 	if err != nil {
 		return Capacity{}, fmt.Errorf("read storage pool capacity: %w", err)
 	}

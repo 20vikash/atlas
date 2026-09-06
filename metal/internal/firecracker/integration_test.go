@@ -21,8 +21,8 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/network"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/systemd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -71,7 +71,7 @@ func integrationMesh(t *testing.T) *network.Mesh {
 
 func newManager(t *testing.T) *vm.Manager {
 	t.Helper()
-	units, err := systemd.Connect(context.Background())
+	units, err := platform.Connect(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/frappe/atlas/metal/internal/atomicfile"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 func TestAtomicWriteFilePublishesCompleteContent(t *testing.T) {
@@ -22,7 +22,7 @@ func TestAtomicWriteFilePublishesCompleteContent(t *testing.T) {
 		writers.Add(1)
 		go func() {
 			defer writers.Done()
-			if err := atomicfile.Write(path, content, 0o640); err != nil {
+			if err := platform.Write(path, content, 0o640); err != nil {
 				t.Errorf("write config: %v", err)
 			}
 		}()

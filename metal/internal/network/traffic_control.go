@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -60,7 +60,7 @@ func configureTrafficControl(ctx context.Context, request trafficControlRequest)
 	}
 
 	for _, step := range trafficControlSteps(namespace, guestVirtualEthernet, request) {
-		if err := hostcmd.Run(ctx, step[0], step[1:]...); err != nil {
+		if err := platform.Run(ctx, step[0], step[1:]...); err != nil {
 			return err
 		}
 	}
@@ -70,7 +70,7 @@ func configureTrafficControl(ctx context.Context, request trafficControlRequest)
 func removeTrafficControl(ctx context.Context, namespace, interfaceName string) error {
 	prefix := namespaceCommandPrefix(namespace)
 	show := commandWithPrefix(prefix, "tc", "qdisc", "show", "dev", interfaceName)
-	output, err := hostcmd.Output(ctx, show[0], show[1:]...)
+	output, err := platform.Output(ctx, show[0], show[1:]...)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func removeTrafficControl(ctx context.Context, namespace, interfaceName string) 
 	}
 
 	remove := commandWithPrefix(prefix, "tc", "qdisc", "del", "dev", interfaceName, "clsact")
-	return hostcmd.Run(ctx, remove[0], remove[1:]...)
+	return platform.Run(ctx, remove[0], remove[1:]...)
 }
 
 // trafficControlSteps builds the tc commands for the namespace end of the veth.

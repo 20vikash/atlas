@@ -15,8 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/frappe/atlas/metal/internal/atomicfile"
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	"github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -28,7 +27,7 @@ func (store *ImageStore) deleteImage(ctx context.Context, imageReference string)
 	if err := store.removeWarmImages(ctx, imageReference); err != nil {
 		return err
 	}
-	err := hostcmd.Run(ctx, "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
+	err := platform.Run(ctx, "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
 	switch {
 	case err == nil:
 	case strings.Contains(err.Error(), "does not exist"):
@@ -46,7 +45,7 @@ func (store *ImageStore) deleteImage(ctx context.Context, imageReference string)
 }
 
 func (store *ImageStore) removeIncompleteImage(ctx context.Context, imageReference string) {
-	_ = hostcmd.Run(ctx, "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
+	_ = platform.Run(ctx, "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
 	_ = os.RemoveAll(store.imageDirectory(imageReference))
 }
 
@@ -112,7 +111,7 @@ func (store *ImageStore) ensureImage(ctx context.Context, imageReference string,
 				return
 			}
 			_ = os.RemoveAll(store.imageDirectory(imageReference))
-			_ = hostcmd.Run(context.Background(), "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
+			_ = platform.Run(context.Background(), "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
 		}()
 	}
 
@@ -234,7 +233,7 @@ func (store *ImageStore) saveImageManifest(imageReference string, manifest image
 	}
 	data = append(data, '\n')
 
-	return atomicfile.Write(store.manifestFile(imageReference), data, 0o644)
+	return platform.Write(store.manifestFile(imageReference), data, 0o644)
 }
 
 func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kernelURL, expectedDigest string) error {
@@ -274,21 +273,21 @@ func (store *ImageStore) importRootFileSystem(ctx context.Context, imageReferenc
 		return err
 	}
 	sizeMiB := info.Size()>>20 + 64
-	if err := hostcmd.Run(ctx, "zfs", "create", "-V", fmt.Sprintf("%dM", sizeMiB), "-o", "volblocksize=16k", store.pool.baseDataset(imageReference)); err != nil {
+	if err := platform.Run(ctx, "zfs", "create", "-V", fmt.Sprintf("%dM", sizeMiB), "-o", "volblocksize=16k", store.pool.baseDataset(imageReference)); err != nil {
 		return err
 	}
 	rollback := func() {
-		_ = hostcmd.Run(context.Background(), "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
+		_ = platform.Run(context.Background(), "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
 	}
 	if _, err := waitForBlockDevice(store.baseImageDevicePath(imageReference)); err != nil {
 		rollback()
 		return err
 	}
-	if err := hostcmd.Run(ctx, "dd", "if="+rootfs, "of="+store.baseImageDevicePath(imageReference), "bs=4M", "conv=sparse,fsync", "status=none"); err != nil {
+	if err := platform.Run(ctx, "dd", "if="+rootfs, "of="+store.baseImageDevicePath(imageReference), "bs=4M", "conv=sparse,fsync", "status=none"); err != nil {
 		rollback()
 		return err
 	}
-	if err := hostcmd.Run(ctx, "zfs", "snapshot", store.pool.baseSnapshot(imageReference)); err != nil {
+	if err := platform.Run(ctx, "zfs", "snapshot", store.pool.baseSnapshot(imageReference)); err != nil {
 		rollback()
 		return err
 	}

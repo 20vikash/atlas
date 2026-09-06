@@ -1,17 +1,19 @@
-# systemd: unit control over D-Bus
+# platform: host integration
 
 [internal SPEC](../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
 
 ## Purpose
 
-Package `systemd` is metald's thin client over systemd through D-Bus. Each virtual
-machine runs as the template instance `metal-vm@<id>.service`. metald talks to the
-system systemd, not the `systemctl` binary.
+Package `platform` provides atomic file replacement, host command execution, and
+systemd control through D-Bus. Each virtual machine runs as the template instance
+`metal-vm@<id>.service`. metald talks to the system systemd, not the `systemctl` binary.
 
 ## Types
 
 | Type | Role |
 |---|---|
+| `Write` | Publishes one complete file with an atomic rename. |
+| `Run` and `Output` | Run host commands with useful output in errors. |
 | `Manager` | Interface: `Start`, `Stop`, `Kill`, `ResetFailed`, `Status`, `Wait`, `List`, `SetLimits`. |
 | `DBus` | The implementation. Owns one system-bus connection (`conn`). |
 | `Status` | `PID`, `ActiveState`, `SubState`. |

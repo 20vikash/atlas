@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
-	"github.com/frappe/atlas/metal/internal/systemd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// stubUnits is a systemd.Manager whose unit stays active until it is stopped or
+// stubUnits is a platform.Manager whose unit stays active until it is stopped or
 // killed. Wait blocks while the unit is active, like the D-Bus manager does.
 // A killed unit reports "failed" until ResetFailed clears it, as systemd does.
 type stubUnits struct {
@@ -64,19 +64,19 @@ func (s *stubUnits) ResetFailed(context.Context, string) error {
 	return nil
 }
 
-func (s *stubUnits) Status(context.Context, string) (systemd.Status, error) {
+func (s *stubUnits) Status(context.Context, string) (platform.Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
 	case s.failed:
-		return systemd.Status{ActiveState: "failed"}, nil
+		return platform.Status{ActiveState: "failed"}, nil
 	case s.active:
-		return systemd.Status{ActiveState: "active"}, nil
+		return platform.Status{ActiveState: "active"}, nil
 	}
-	return systemd.Status{ActiveState: "inactive"}, nil
+	return platform.Status{ActiveState: "inactive"}, nil
 }
 
-func (s *stubUnits) Wait(ctx context.Context, _ string) (systemd.Result, error) {
+func (s *stubUnits) Wait(ctx context.Context, _ string) (platform.Result, error) {
 	s.mu.Lock()
 	s.waits++
 	s.mu.Unlock()
@@ -85,18 +85,18 @@ func (s *stubUnits) Wait(ctx context.Context, _ string) (systemd.Result, error) 
 		up := s.active
 		s.mu.Unlock()
 		if !up {
-			return systemd.Result{}, nil
+			return platform.Result{}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return systemd.Result{}, ctx.Err()
+			return platform.Result{}, ctx.Err()
 		case <-time.After(time.Millisecond):
 		}
 	}
 }
 
-func (s *stubUnits) List(context.Context) ([]string, error)                  { return nil, nil }
-func (s *stubUnits) SetLimits(context.Context, string, systemd.Limits) error { return nil }
+func (s *stubUnits) List(context.Context) ([]string, error)                   { return nil, nil }
+func (s *stubUnits) SetLimits(context.Context, string, platform.Limits) error { return nil }
 
 func (s *stubUnits) counts() (stops, kills, waits int) {
 	s.mu.Lock()
@@ -124,7 +124,7 @@ func fcSocket(t *testing.T, onRequest func()) string {
 	return sock
 }
 
-func testMachine(units systemd.Manager, sock string, timeout time.Duration) *machine {
+func testMachine(units platform.Manager, sock string, timeout time.Duration) *machine {
 	return &machine{
 		d:           &Runtime{units: units, consoleBroker: &stubConsoleBroker{}},
 		input:       vm.RuntimeMachine{ID: "abc"},

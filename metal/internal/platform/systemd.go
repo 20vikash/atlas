@@ -1,5 +1,4 @@
-// Package systemd controls virtual machine services through D-Bus.
-package systemd
+package platform
 
 import (
 	"context"

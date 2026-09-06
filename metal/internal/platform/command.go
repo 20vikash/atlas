@@ -1,7 +1,4 @@
-// Package hostcmd runs host commands and folds their output into errors. It is
-// shared by the drivers that shell out to host tools, such as storage (zfs) and
-// network (ip).
-package hostcmd
+package platform
 
 import (
 	"bytes"

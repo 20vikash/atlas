@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -81,7 +81,7 @@ func (store *ImageStore) WarmImage(ctx context.Context, image vm.Image, configur
 
 // CreateWarmSourceSnapshot captures a template disk at one point in time.
 func (store *ImageStore) CreateWarmSourceSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error {
-	return hostcmd.Run(ctx, "zfs", "snapshot", store.pool.snapshot(virtualMachineID, snapshotName))
+	return platform.Run(ctx, "zfs", "snapshot", store.pool.snapshot(virtualMachineID, snapshotName))
 }
 
 // DeleteWarmSourceSnapshot removes a template disk snapshot.
@@ -114,10 +114,10 @@ func (store *ImageStore) PromoteWarmSnapshot(ctx context.Context, promotion Warm
 	if err := sendSnapshot(ctx, sourceSnapshot, destinationDataset); err != nil {
 		return WarmImageArtifacts{}, err
 	}
-	if err := hostcmd.Run(ctx, "zfs", "destroy", destinationDataset+"@"+promotion.SourceSnapshotName); err != nil {
+	if err := platform.Run(ctx, "zfs", "destroy", destinationDataset+"@"+promotion.SourceSnapshotName); err != nil {
 		return WarmImageArtifacts{}, err
 	}
-	if err := hostcmd.Run(ctx, "zfs", "snapshot", artifacts.RootSnapshot); err != nil {
+	if err := platform.Run(ctx, "zfs", "snapshot", artifacts.RootSnapshot); err != nil {
 		return WarmImageArtifacts{}, err
 	}
 
@@ -185,7 +185,7 @@ func (store *ImageStore) warmDataset(key string) string {
 }
 
 func copyReflink(ctx context.Context, source, destination string) error {
-	return hostcmd.Run(ctx, "cp", "--reflink=auto", source, destination)
+	return platform.Run(ctx, "cp", "--reflink=auto", source, destination)
 }
 
 func sendSnapshot(ctx context.Context, sourceSnapshot, destinationDataset string) error {

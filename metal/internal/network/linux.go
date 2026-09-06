@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -107,7 +107,7 @@ func (allocator *LinuxAllocator) allocate(ctx context.Context, request request) 
 		return Interface{}, err
 	}
 	if !exists {
-		if err := hostcmd.Run(ctx, "ip", "netns", "add", namespaceName(request.VirtualMachineID)); err != nil {
+		if err := platform.Run(ctx, "ip", "netns", "add", namespaceName(request.VirtualMachineID)); err != nil {
 			return Interface{}, err
 		}
 	}
@@ -144,7 +144,7 @@ func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseReq
 	}
 	namespaceRulesError := removePublicIPv4NamespaceRules(ctx, virtualMachineID)
 
-	namespaceError := hostcmd.Run(ctx, "ip", "netns", "del", namespaceName(virtualMachineID))
+	namespaceError := platform.Run(ctx, "ip", "netns", "del", namespaceName(virtualMachineID))
 	return errors.Join(meshError, rulesError, namespaceRulesError, namespaceError)
 }
 

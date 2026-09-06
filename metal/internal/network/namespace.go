@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 func ensureNamespaceBase(ctx context.Context, request request) error {
 	namespace := namespaceName(request.VirtualMachineID)
-	if err := hostcmd.Run(ctx, "ip", "-n", namespace, "link", "set", "lo", "up"); err != nil {
+	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", "lo", "up"); err != nil {
 		return err
 	}
 	tapExists, err := namespaceLinkExists(ctx, namespace, tapName)
@@ -19,19 +19,19 @@ func ensureNamespaceBase(ctx context.Context, request request) error {
 	}
 	if !tapExists {
 		userID, groupID := fmt.Sprint(request.UserID), fmt.Sprint(request.GroupID)
-		if err := hostcmd.Run(ctx, "ip", "-n", namespace, "tuntap", "add", tapName, "mode", "tap", "user", userID, "group", groupID); err != nil {
+		if err := platform.Run(ctx, "ip", "-n", namespace, "tuntap", "add", tapName, "mode", "tap", "user", userID, "group", groupID); err != nil {
 			return err
 		}
 	}
 	gatewayCIDR := fmt.Sprintf("%s/%d", gatewayIPAddress, networkPrefixLength)
-	if err := hostcmd.Run(ctx, "ip", "-n", namespace, "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
+	if err := platform.Run(ctx, "ip", "-n", namespace, "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
 		return err
 	}
-	return hostcmd.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up")
+	return platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up")
 }
 
 func namespaceLinkExists(ctx context.Context, namespace, name string) (bool, error) {
-	output, err := hostcmd.Output(ctx, "ip", "-n", namespace, "-o", "link", "show")
+	output, err := platform.Output(ctx, "ip", "-n", namespace, "-o", "link", "show")
 	if err != nil {
 		return false, err
 	}
@@ -69,7 +69,7 @@ func setVirtualEthernet(ctx context.Context, virtualMachineID string, userID uin
 		return err
 	}
 	if !present {
-		return hostcmd.Run(ctx, "ip", "link", "del", hostVirtualEthernet)
+		return platform.Run(ctx, "ip", "link", "del", hostVirtualEthernet)
 	}
 
 	hostIPAddress, namespaceIPAddress := transitAddresses(userID)
@@ -78,7 +78,7 @@ func setVirtualEthernet(ctx context.Context, virtualMachineID string, userID uin
 
 // networkLinkExists reports whether one host network interface is present.
 func networkLinkExists(ctx context.Context, name string) (bool, error) {
-	output, err := hostcmd.Output(ctx, "ip", "-o", "link", "show")
+	output, err := platform.Output(ctx, "ip", "-o", "link", "show")
 	if err != nil {
 		return false, fmt.Errorf("list network links: %w", err)
 	}
@@ -101,7 +101,7 @@ func linkListContains(output, name string) bool {
 
 func runSteps(ctx context.Context, steps [][]string) error {
 	for _, step := range steps {
-		if err := hostcmd.Run(ctx, step[0], step[1:]...); err != nil {
+		if err := platform.Run(ctx, step[0], step[1:]...); err != nil {
 			return err
 		}
 	}
@@ -118,7 +118,7 @@ func addressString(value uint32) string {
 }
 
 func networkNamespaceExists(ctx context.Context, virtualMachineID string) (bool, error) {
-	output, err := hostcmd.Output(ctx, "ip", "netns", "list")
+	output, err := platform.Output(ctx, "ip", "netns", "list")
 	if err != nil {
 		return false, fmt.Errorf("list network namespaces: %w", err)
 	}

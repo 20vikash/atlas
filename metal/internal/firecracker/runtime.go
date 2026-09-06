@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
-	"github.com/frappe/atlas/metal/internal/systemd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -113,7 +113,7 @@ func (machine *machine) Resume(ctx context.Context) error {
 	return machine.api.Resume(ctx)
 }
 
-func (machine *machine) state(ctx context.Context, status systemd.Status) (vm.State, error) {
+func (machine *machine) state(ctx context.Context, status platform.Status) (vm.State, error) {
 	switch status.ActiveState {
 	case "failed":
 		return vm.StateFailed, nil

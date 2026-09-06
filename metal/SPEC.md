@@ -15,7 +15,7 @@ internal/firecracker/        Firecracker support
 internal/network/            Linux VM networking and WireGuard peer management
 internal/reconciler/         VM and image reconciliation
 internal/storage/            ZFS images, VM disks, and pool capacity
-internal/systemd/            systemd and dbus support
+internal/platform/           Host file, command, and systemd support
 internal/vm/                 VM domain logic
 scripts/                     host bootstrap scripts
 Makefile                     build metald into dist/

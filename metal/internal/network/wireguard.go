@@ -13,8 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/frappe/atlas/metal/internal/atomicfile"
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	"github.com/frappe/atlas/metal/internal/platform"
 )
 
 // ErrInvalidPeers reports an invalid desired WireGuard peer set.
@@ -234,7 +233,7 @@ func saveWireGuardPeers(path string, peers []WireGuardPeer) error {
 	}
 	data = append(data, '\n')
 
-	return atomicfile.Write(path, data, 0o600)
+	return platform.Write(path, data, 0o600)
 }
 
 // wireGuardCommands runs host network commands.
@@ -246,9 +245,9 @@ type wireGuardCommands interface {
 type hostWireGuardCommands struct{}
 
 func (hostWireGuardCommands) Run(ctx context.Context, name string, arguments ...string) error {
-	return hostcmd.Run(ctx, name, arguments...)
+	return platform.Run(ctx, name, arguments...)
 }
 
 func (hostWireGuardCommands) Output(ctx context.Context, name string, arguments ...string) (string, error) {
-	return hostcmd.Output(ctx, name, arguments...)
+	return platform.Output(ctx, name, arguments...)
 }

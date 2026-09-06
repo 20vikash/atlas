@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/frappe/atlas/metal/internal/atomicfile"
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	"github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 	"github.com/google/uuid"
 )
@@ -92,16 +91,16 @@ func (store *SnapshotStore) createStagedSnapshot(ctx context.Context, virtualMac
 	}
 	defer func() {
 		if resultError != nil {
-			_ = hostcmd.Run(context.Background(), "zfs", "destroy", "-r", stagingDataset)
-			_ = hostcmd.Run(context.Background(), "zfs", "destroy", sourceSnapshot)
+			_ = platform.Run(context.Background(), "zfs", "destroy", "-r", stagingDataset)
+			_ = platform.Run(context.Background(), "zfs", "destroy", sourceSnapshot)
 			_ = os.RemoveAll(directory)
 		}
 	}()
 
-	if err := hostcmd.Run(ctx, "zfs", "snapshot", sourceSnapshot); err != nil {
+	if err := platform.Run(ctx, "zfs", "snapshot", sourceSnapshot); err != nil {
 		return StagedSnapshot{}, fmt.Errorf("create source disk snapshot: %w", err)
 	}
-	if err := hostcmd.Run(ctx, "zfs", "clone", "-o", "readonly=on", sourceSnapshot, stagingDataset); err != nil {
+	if err := platform.Run(ctx, "zfs", "clone", "-o", "readonly=on", sourceSnapshot, stagingDataset); err != nil {
 		return StagedSnapshot{}, fmt.Errorf("create staging disk clone: %w", err)
 	}
 
@@ -185,7 +184,7 @@ func (store *SnapshotStore) deleteStagedSnapshot(
 }
 
 func destroyIfPresent(ctx context.Context, dataset string) error {
-	err := hostcmd.Run(ctx, "zfs", "destroy", "-r", dataset)
+	err := platform.Run(ctx, "zfs", "destroy", "-r", dataset)
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
 		return err
 	}
@@ -279,5 +278,5 @@ func writeJSONFile(path string, value any, mode os.FileMode) error {
 	}
 	data = append(data, '\n')
 
-	return atomicfile.Write(path, data, mode)
+	return platform.Write(path, data, mode)
 }

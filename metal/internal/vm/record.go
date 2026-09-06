@@ -14,7 +14,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/frappe/atlas/metal/internal/atomicfile"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 const recordSchemaVersion = 1
@@ -202,7 +202,7 @@ func writeRecord(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create record directory: %w", err)
 	}
-	if err := atomicfile.Write(path, data, 0o640); err != nil {
+	if err := platform.Write(path, data, 0o640); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

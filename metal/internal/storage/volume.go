@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 // PrepareBoot prepares a disk and kernel for a cold boot.
@@ -59,7 +59,7 @@ func (store *VirtualMachineStore) provisionDisk(ctx context.Context, request Vir
 		if sourceSnapshot == "" {
 			sourceSnapshot = store.pool.baseSnapshot(request.ImageReference)
 		}
-		if err := hostcmd.Run(
+		if err := platform.Run(
 			ctx,
 			"zfs",
 			"clone",
@@ -110,7 +110,7 @@ func (store *VirtualMachineStore) growDisk(ctx context.Context, virtualMachineID
 		return nil
 	}
 
-	return hostcmd.Run(
+	return platform.Run(
 		ctx,
 		"zfs",
 		"set",
@@ -132,7 +132,7 @@ func (store *VirtualMachineStore) Release(ctx context.Context, virtualMachineID 
 		return err
 	}
 
-	if err := hostcmd.Run(ctx, "zfs", "destroy", "-r", dataset); err != nil {
+	if err := platform.Run(ctx, "zfs", "destroy", "-r", dataset); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			return nil
 		}
@@ -145,7 +145,7 @@ func (store *VirtualMachineStore) Release(ctx context.Context, virtualMachineID 
 // destroyDependentClones removes the staging clones a snapshot upload leaves on
 // the VM snapshots. ZFS cannot destroy a snapshot while a clone of it exists.
 func (store *VirtualMachineStore) destroyDependentClones(ctx context.Context, dataset string) error {
-	output, err := hostcmd.Output(ctx,
+	output, err := platform.Output(ctx,
 		"zfs", "get", "-Hp", "-r", "-t", "snapshot", "-o", "value", "clones", dataset)
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
@@ -187,7 +187,7 @@ func parseCloneList(output string) []string {
 }
 
 func datasetExists(ctx context.Context, name string) (bool, error) {
-	err := hostcmd.Run(ctx, "zfs", "list", name)
+	err := platform.Run(ctx, "zfs", "list", name)
 	if err == nil {
 		return true, nil
 	}
@@ -199,7 +199,7 @@ func datasetExists(ctx context.Context, name string) (bool, error) {
 }
 
 func volumeSizeBytes(ctx context.Context, dataset string) (int64, error) {
-	output, err := hostcmd.Output(ctx, "zfs", "get", "-Hp", "-o", "value", "volsize", dataset)
+	output, err := platform.Output(ctx, "zfs", "get", "-Hp", "-o", "value", "volsize", dataset)
 	if err != nil {
 		return 0, err
 	}
@@ -209,7 +209,7 @@ func volumeSizeBytes(ctx context.Context, dataset string) (int64, error) {
 
 // DiskUsage reports disk size and allocated storage.
 func (store *VirtualMachineStore) DiskUsage(ctx context.Context, virtualMachineID string) (Usage, error) {
-	output, err := hostcmd.Output(
+	output, err := platform.Output(
 		ctx,
 		"zfs",
 		"get",
@@ -287,7 +287,7 @@ func LinkOrCopy(ctx context.Context, source, destination string) error {
 		return nil
 	}
 
-	return hostcmd.Run(ctx, "cp", "--reflink=auto", source, destination)
+	return platform.Run(ctx, "cp", "--reflink=auto", source, destination)
 }
 
 func kernelArguments(imageDirectory string) string {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
 	"github.com/frappe/atlas/metal/internal/network"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/systemd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -95,9 +95,9 @@ func bootArguments(bootConfiguration storage.BootConfiguration, networkInterface
 	return bootConfiguration.KernelArgs + " " + networkArgument
 }
 
-func resourceLimits(specification vm.Specification) systemd.Limits {
+func resourceLimits(specification vm.Specification) platform.Limits {
 	// A memory snapshot needs space for guest memory and its memory file.
-	return systemd.Limits{
+	return platform.Limits{
 		MemoryMaxBytes: (2*int64(specification.MemoryMiB) + 128) << 20,
 		CPUQuotaPct:    specification.VirtualCPUCount * 100,
 	}

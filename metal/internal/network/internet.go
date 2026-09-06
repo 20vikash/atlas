@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 // internetPathSteps builds the route out of the namespace. Only EgressUplink has it.
@@ -63,13 +63,13 @@ func setMasquerade(ctx context.Context, namespace, guestVirtualEthernet string, 
 		action = "-A"
 	}
 	command := commandWithPrefix(prefix, "iptables", append([]string{"-t", "nat", action}, rule...)...)
-	return hostcmd.Run(ctx, command[0], command[1:]...)
+	return platform.Run(ctx, command[0], command[1:]...)
 }
 
 // ruleExists runs an iptables check. Exit code 1 means absent. Any other failure
 // is an error, so a broken check does not read as absent.
 func ruleExists(ctx context.Context, check []string) (bool, error) {
-	err := hostcmd.Run(ctx, check[0], check[1:]...)
+	err := platform.Run(ctx, check[0], check[1:]...)
 	if err == nil {
 		return true, nil
 	}
@@ -83,14 +83,14 @@ func ruleExists(ctx context.Context, check []string) (bool, error) {
 
 // removeDefaultRoute removes the namespace default route when it is present.
 func removeDefaultRoute(ctx context.Context, namespace string) error {
-	output, err := hostcmd.Output(ctx, "ip", "-n", namespace, "route", "show", "default")
+	output, err := platform.Output(ctx, "ip", "-n", namespace, "route", "show", "default")
 	if err != nil {
 		return fmt.Errorf("show default route: %w", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		return nil
 	}
-	return hostcmd.Run(ctx, "ip", "-n", namespace, "route", "del", "default")
+	return platform.Run(ctx, "ip", "-n", namespace, "route", "del", "default")
 }
 
 func ensurePublicIPv4(ctx context.Context, virtualMachineID string, userID uint32, publicIPv4 string) error {
@@ -161,7 +161,7 @@ func removePublicIPv4RulesFrom(ctx context.Context, prefix []string, virtualMach
 	var cleanupErrors []error
 	for _, table := range []string{"nat", "filter"} {
 		arguments := commandWithPrefix(prefix, "iptables", "-t", table, "-S")
-		output, err := hostcmd.Output(ctx, arguments[0], arguments[1:]...)
+		output, err := platform.Output(ctx, arguments[0], arguments[1:]...)
 		if err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("list %s rules: %w", table, err))
 			continue
@@ -180,7 +180,7 @@ func removePublicIPv4RulesFrom(ctx context.Context, prefix []string, virtualMach
 			}
 			arguments = commandWithPrefix(prefix, "iptables", "-t", table)
 			arguments = append(arguments, ruleArguments...)
-			if err := hostcmd.Run(ctx, arguments[0], arguments[1:]...); err != nil {
+			if err := platform.Run(ctx, arguments[0], arguments[1:]...); err != nil {
 				cleanupErrors = append(cleanupErrors, fmt.Errorf("remove %s rule: %w", table, err))
 			}
 		}
