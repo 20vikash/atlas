@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Package `api` validates HTTP requests and calls small service interfaces. Lifecycle handlers store desired state and wake the reconciler.
+Package `api` validates HTTP requests and calls small service interfaces. Mutation handlers store desired state and wake the reconciler.
 
 ## Types
 
@@ -12,14 +12,14 @@ Package `api` validates HTTP requests and calls small service interfaces. Lifecy
 
 `Dependencies` contains the VM manager, snapshot store, image policy store, wake function, WireGuard manager, and capacity provider.
 
-Request and response types are split by resource. `Server` owns the handlers and injected services.
+Request and response types are split by resource. VM files use the `vm_` prefix. `Server` owns the handlers and injected services.
 
 Each request receives safe `X-Request-ID` and `X-Operation-ID` response headers. The server preserves valid incoming values and generates values for missing or invalid headers. JSON logs include both values.
 
 ## Request flow
 
 ```text
-HTTP -> validate -> call a service -> wake a reconciler when required -> JSON
+HTTP -> decode strict JSON -> validate -> call a service -> wake reconciler -> JSON
 ```
 
 Create and lifecycle handlers return before host reconciliation completes.
@@ -28,36 +28,37 @@ Create and lifecycle handlers return before host reconciliation completes.
 
 ```text
 GET    /health
-POST   /sync
+POST   /v1/sync
 
-PUT    /vms/:id
-GET    /vms
-GET    /vms/:id
-PUT    /vms/:id/ssh-keys
+PUT    /v1/vms/:id
+GET    /v1/vms
+GET    /v1/vms/:id
+PUT    /v1/vms/:id/power
+POST   /v1/vms/:id/restarts
+PUT    /v1/vms/:id/compute
+PUT    /v1/vms/:id/disk
+PUT    /v1/vms/:id/network
+PUT    /v1/vms/:id/ssh-keys
+PUT    /v1/vms/:id/metadata
+DELETE /v1/vms/:id
 
-POST   /vms/:id/actions/start
-POST   /vms/:id/actions/stop
-POST   /vms/:id/actions/pause
-POST   /vms/:id/actions/resume
-POST   /vms/:id/actions/terminate
+POST   /v1/vms/:id/snapshots
+POST   /v1/snapshots/:id/upload
+GET    /v1/snapshots/:id
+DELETE /v1/snapshots/:id
 
-POST   /vms/:id/resize/compute
-POST   /vms/:id/resize/disk
-
-POST   /vms/:id/snapshots
-POST   /snapshots/:id/upload
-DELETE /snapshots/:id
-
-GET    /vms/:id/console
+GET    /v1/vms/:id/console
 GET    /docs
 GET    /docs/swagger.json
 ```
 
-Create and lifecycle changes return `202`. Snapshot staging creation returns `201`. The console route returns `501`.
+Create and asynchronous mutations return `202`. Snapshot creation returns `201`.
+
+SSH key and metadata handlers use a 2-second immediate operation. They return `200` after success or `202` for reconciliation.
 
 ## Authentication
 
-All routes except `/docs` and `/docs/swagger.json` require a bearer token. Metal compares its SHA-256 digest with the configured digest.
+All `/v1` routes require a bearer token. Metal compares its SHA-256 digest with the configured digest.
 
 ## Error mapping
 
@@ -67,9 +68,9 @@ The server does not return host command output or signed URL query values.
 
 ## DTO layout
 
-Request and response objects have separate files. The VM response groups image artifacts and network data into nested objects.
+Request and response objects have separate files. The VM response has nested `desired` and `observed` objects.
 
-The VM response does not include transport URLs, the internal guest IPv4 address, or the Firecracker process ID.
+The VM response does not include transport URLs, user data, host paths, process IDs, or host user IDs.
 
 ## API specification
 

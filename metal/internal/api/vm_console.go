@@ -20,7 +20,19 @@ type consoleControlMessage struct {
 	} `json:"resize"`
 }
 
-// getVirtualMachineConsole upgrades to a websocket and streams a VM console.
+// @Summary	Open a virtual machine console
+// @Description	Upgrade the request to a WebSocket for the serial console or an SSH session.
+// @ID			getVirtualMachineConsole
+// @Tags		Virtual machines
+// @Security	BearerAuth
+// @Param		id		path	string	true	"Virtual machine identifier"
+// @Param		mode	query	string	false	"Console mode" Enums(tty, ssh) default(tty)
+// @Success	101	"Switching protocols"
+// @Failure	400	{object}	errorResponse
+// @Failure	401	{object}	errorResponse
+// @Failure	404	{object}	errorResponse
+// @Failure	500	{object}	errorResponse
+// @Router		/v1/vms/{id}/console [get]
 func (s *Server) getVirtualMachineConsole(c echo.Context) error {
 	id := c.Param("id")
 	if !validResourceID(id) {

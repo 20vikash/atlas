@@ -29,13 +29,13 @@ Image import downloads and verifies the root file system and kernel. Metal store
 
 VM disk preparation clones the image only when the VM disk is absent. Restarting a cold VM reuses its disk.
 
-Disk resize is grow-only. A running VM receives a Firecracker drive update after the ZFS volume grows.
+Disk growth is one-way. A running VM receives a Firecracker drive update after the ZFS volume grows.
 
-Terminate removes the VM dataset and its snapshots after process and network cleanup.
+The destroyed state removes the VM dataset and its snapshots after process and network cleanup.
 
 ## Image cache
 
-`POST /sync` replaces the complete image policy set. Cached images for the host architecture download in the background.
+`POST /v1/sync` replaces the complete image policy set. Cached images for the host architecture download in the background.
 
 A successful VM start updates `last-used`. Metal prunes an image after 24 idle hours when policy does not retain it. A dependent VM disk prevents image deletion.
 

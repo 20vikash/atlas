@@ -34,15 +34,24 @@ const (
 	imageReconcileInterval = time.Hour
 )
 
-//	@title			Metal HTTP application programming interface
+//	@title			Metal API
 //	@version		1.0
-//	@description	metald manages Firecracker micro virtual machines on one host.
+//	@description	Metal manages Firecracker virtual machines and host resources.
 //	@BasePath		/
+//
+//	@tag.name		Virtual machines
+//	@tag.description	Manage desired and observed virtual machine state.
+//	@tag.name		Snapshots
+//	@tag.description	Stage and upload virtual machine image artifacts.
+//	@tag.name		Host synchronization
+//	@tag.description	Replace controller-owned host state and get capacity.
+//	@tag.name		Health
+//	@tag.description	Check the Metal HTTP server.
 //
 //	@securityDefinitions.apikey	BearerAuth
 //	@in							header
 //	@name						Authorization
-//	@description				Type "Bearer" then a space and the API token.
+//	@description				Use "Bearer", one space, and the API token.
 
 // version is the build version set with -ldflags "-X main.version=...".
 var version = "dev"

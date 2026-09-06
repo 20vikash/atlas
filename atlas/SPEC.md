@@ -31,9 +31,9 @@ The app uses Python 3.14, Frappe, MariaDB, Redis, Node, and Yarn.
 
 The app stores Atlas settings, server catalogs, image metadata, and VM request metadata. Metal owns each VM runtime state and desired state. Atlas does not store a VM lifecycle state machine.
 
-The Virtual Machine name is the Metal VM ID. Creation uses idempotent `PUT /vms/{name}` and accepts HTTP `202`. Atlas uses `GET /vms/{name}` after a lost response. Atlas keeps the draft if the result is uncertain.
+The Virtual Machine name is the Metal VM ID. Creation uses idempotent `PUT /v1/vms/{name}` and accepts HTTP `202`. Atlas uses `GET /v1/vms/{name}` after a lost response. Atlas keeps the draft if the result is uncertain.
 
-Atlas exchanges WireGuard peers, desired cached images, and host capacity with `POST /sync`. Placement uses the latest capacity sample and the image architecture.
+Atlas exchanges WireGuard peers, desired cached images, and host capacity with `POST /v1/sync`. Placement uses the latest capacity sample and the image architecture.
 
 Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [VM operations](vm/README.md).
 

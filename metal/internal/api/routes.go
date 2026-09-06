@@ -4,38 +4,29 @@ import "github.com/labstack/echo/v4"
 
 func (s *Server) registerRoutes(router *echo.Echo) {
 	router.GET("/health", s.checkHealth)
-	router.POST("/sync", s.exchangeControllerState)
+	router.GET("/docs", s.showDocumentation)
+	router.GET("/docs/swagger.json", s.getOpenAPISpecification)
 
-	virtualMachineRoutes := router.Group("/vms")
+	versionOneRoutes := router.Group("/v1")
+	versionOneRoutes.POST("/sync", s.exchangeControllerState)
+
+	virtualMachineRoutes := versionOneRoutes.Group("/vms")
 	virtualMachineRoutes.GET("", s.listVirtualMachines)
 	virtualMachineRoutes.PUT("/:id", s.createVirtualMachine)
 	virtualMachineRoutes.GET("/:id", s.getVirtualMachine)
-	virtualMachineRoutes.PUT("/:id/network", s.updateVirtualMachineNetwork)
-	virtualMachineRoutes.PUT("/:id/disk", s.updateVirtualMachineDiskLimits)
+	virtualMachineRoutes.PUT("/:id/power", s.setVirtualMachinePowerState)
+	virtualMachineRoutes.POST("/:id/restarts", s.restartVirtualMachine)
+	virtualMachineRoutes.PUT("/:id/compute", s.setVirtualMachineCompute)
+	virtualMachineRoutes.PUT("/:id/disk", s.setVirtualMachineDisk)
+	virtualMachineRoutes.PUT("/:id/network", s.setVirtualMachineNetwork)
 	virtualMachineRoutes.PUT("/:id/ssh-keys", s.replaceVirtualMachineSSHKeys)
 	virtualMachineRoutes.PUT("/:id/metadata", s.replaceVirtualMachineMetadata)
-
-	actionRoutes := virtualMachineRoutes.Group("/:id/actions")
-	actionRoutes.POST("/start", s.startVirtualMachine)
-	actionRoutes.POST("/stop", s.stopVirtualMachine)
-	actionRoutes.POST("/pause", s.pauseVirtualMachine)
-	actionRoutes.POST("/resume", s.resumeVirtualMachine)
-	actionRoutes.POST("/reboot", s.rebootVirtualMachine)
-	actionRoutes.POST("/terminate", s.terminateVirtualMachine)
-
-	resizeRoutes := virtualMachineRoutes.Group("/:id/resize")
-	resizeRoutes.POST("/compute", s.resizeVirtualMachineCompute)
-	resizeRoutes.POST("/disk", s.growVirtualMachineDisk)
-
+	virtualMachineRoutes.DELETE("/:id", s.deleteVirtualMachine)
 	virtualMachineRoutes.POST("/:id/snapshots", s.createVirtualMachineSnapshot)
-
 	virtualMachineRoutes.GET("/:id/console", s.getVirtualMachineConsole)
 
-	snapshotRoutes := router.Group("/snapshots")
-	snapshotRoutes.POST("/:snapshot_id/upload", s.uploadSnapshot)
-	snapshotRoutes.GET("/:snapshot_id", s.getSnapshot)
-	snapshotRoutes.DELETE("/:snapshot_id", s.deleteSnapshot)
-
-	router.GET("/docs", s.showDocumentation)
-	router.GET("/docs/swagger.json", s.getOpenAPISpecification)
+	snapshotRoutes := versionOneRoutes.Group("/snapshots")
+	snapshotRoutes.POST("/:id/upload", s.uploadSnapshot)
+	snapshotRoutes.GET("/:id", s.getSnapshot)
+	snapshotRoutes.DELETE("/:id", s.deleteSnapshot)
 }

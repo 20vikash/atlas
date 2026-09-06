@@ -12,7 +12,7 @@ Metal owns desired state, observed state, reconciliation, host resources, and cl
 4. Read the [host layout](docs/host-layout.md).
 5. Read the [development and test guide](docs/testing.md).
 
-The [target `/v1` contract](../docs/metal-v1-contract.md) defines the atomic API change for Stage 4.
+The [Metal `/v1` contract](../docs/metal-v1-contract.md) defines the controller API.
 
 ## Main packages
 

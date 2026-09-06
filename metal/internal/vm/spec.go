@@ -55,14 +55,6 @@ type NetworkConfiguration struct {
 	Egress                        Egress
 }
 
-// NetworkUpdate contains mutable virtual machine network settings.
-type NetworkUpdate struct {
-	Egress                        Egress
-	PublicIPv4                    string
-	PrivateNetworkThroughputMiBps int
-	PublicNetworkThroughputMiBps  int
-}
-
 // SameReservation reports whether two specifications reserve the same VM.
 func (spec Spec) SameReservation(other Spec) bool {
 	return spec.VCPUs == other.VCPUs &&

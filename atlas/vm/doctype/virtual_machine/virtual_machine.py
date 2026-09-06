@@ -10,6 +10,7 @@ from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.parsing import strict_bool
 from atlas.vm.core.metal_client import MetalClient, MetalClientError, throw_metal_error
+from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.virtual_machine_manager import EGRESS_MODES, VirtualMachineManager
 
 if TYPE_CHECKING:
@@ -42,7 +43,7 @@ class VirtualMachine(Document):
 	# end: auto-generated types
 
 	@request_cache
-	def get_metal_vm_info(self) -> dict[str, Any]:
+	def get_metal_vm_info(self) -> MetalVirtualMachine | None:
 		try:
 			info = MetalClient(frappe.get_doc("Server", self.server)).get_virtual_machine(self.name)
 		except MetalClientError as error:
@@ -51,7 +52,7 @@ class VirtualMachine(Document):
 					frappe.get_traceback(),
 					f"Could not get Virtual Machine {self.name} from Metal",
 				)
-			info = {}
+			info = None
 		return info
 
 	def before_insert(self) -> None:
@@ -105,75 +106,89 @@ class VirtualMachine(Document):
 		if self.is_terminating:
 			return "terminating"
 
-		return self.get_metal_vm_info().get("state") or "unknown"
+		information = self.get_metal_vm_info()
+		return information.observed.state if information else "unknown"
 
 	@property
 	def desired_state(self) -> str | None:
-		return self.get_metal_vm_info().get("desired_state")
+		information = self.get_metal_vm_info()
+		return information.desired.state if information else None
 
 	@property
 	def error(self) -> str | None:
-		return self.get_metal_vm_info().get("error")
+		information = self.get_metal_vm_info()
+		return information.observed.error.message if information and information.observed.error else None
 
 	@property
 	def hostname(self) -> str | None:
-		return self.get_metal_vm_info().get("hostname")
+		information = self.get_metal_vm_info()
+		return information.desired.guest.hostname if information else None
 
 	@property
 	def mac(self) -> str | None:
-		return (self.get_metal_vm_info().get("network") or {}).get("mac")
+		information = self.get_metal_vm_info()
+		return information.observed.network.mac if information else None
 
 	@property
 	def egress(self) -> str | None:
-		return (self.get_metal_vm_info().get("network") or {}).get("egress")
+		information = self.get_metal_vm_info()
+		return information.desired.network.egress if information else None
 
 	@property
 	def wireguard_mesh_ipv6(self) -> str | None:
-		return (self.get_metal_vm_info().get("network") or {}).get("wireguard_mesh_ipv6")
+		information = self.get_metal_vm_info()
+		return information.desired.network.wireguard_mesh_ipv6 if information else None
 
 	@property
 	def public_ipv4(self) -> str | None:
-		return (self.get_metal_vm_info().get("network") or {}).get("public_ipv4")
+		information = self.get_metal_vm_info()
+		return information.desired.network.public_ipv4 if information else None
 
 	@property
 	def disk_throughput_mibps(self) -> int:
-		return (self.get_metal_vm_info().get("disk") or {}).get("throughput_mibps") or 0
+		information = self.get_metal_vm_info()
+		return information.desired.disk.throughput_mibps if information else 0
 
 	@property
 	def disk_iops(self) -> int:
-		return (self.get_metal_vm_info().get("disk") or {}).get("iops") or 0
+		information = self.get_metal_vm_info()
+		return information.desired.disk.iops if information else 0
 
 	@property
 	def private_network_throughput_mibps(self) -> int:
-		return (self.get_metal_vm_info().get("network") or {}).get("private_network_throughput_mibps") or 0
+		information = self.get_metal_vm_info()
+		return information.desired.network.private_network_throughput_mibps if information else 0
 
 	@property
 	def public_network_throughput_mibps(self) -> int:
-		return (self.get_metal_vm_info().get("network") or {}).get("public_network_throughput_mibps") or 0
+		information = self.get_metal_vm_info()
+		return information.desired.network.public_network_throughput_mibps if information else 0
 
 	@property
 	def ssh_keys(self) -> str:
-		return "\n".join(self.get_metal_vm_info().get("ssh_keys") or [])
+		information = self.get_metal_vm_info()
+		return "\n".join(information.desired.guest.ssh_keys) if information else ""
 
 	@property
 	def metadata(self) -> str:
-		return json.dumps(self.get_metal_vm_info().get("metadata") or {}, indent=2)
+		information = self.get_metal_vm_info()
+		return json.dumps(information.desired.guest.metadata if information else {}, indent=2)
 
 	@frappe.whitelist(methods=["POST"])
 	def start(self) -> None:
-		self.perform_action("start")
+		self.set_power_state("running")
 
 	@frappe.whitelist(methods=["POST"])
 	def stop(self) -> None:
-		self.perform_action("stop")
+		self.set_power_state("stopped")
 
 	@frappe.whitelist(methods=["POST"])
 	def pause(self) -> None:
-		self.perform_action("pause")
+		self.set_power_state("paused")
 
 	@frappe.whitelist(methods=["POST"])
 	def resume(self) -> None:
-		self.perform_action("resume")
+		self.set_power_state("running")
 
 	@frappe.whitelist(methods=["POST"])
 	def set_privileged(self, is_privileged: bool | int | str) -> None:
@@ -189,7 +204,7 @@ class VirtualMachine(Document):
 		"""Ask Metal to remove this VM and release its IP address."""
 		frappe.only_for("System Manager")
 		try:
-			MetalClient(frappe.get_doc("Server", self.server)).terminate_virtual_machine(self.name)
+			MetalClient(frappe.get_doc("Server", self.server)).delete_virtual_machine(self.name)
 		except MetalClientError as error:
 			if not error.is_not_found:
 				throw_metal_error(error)
@@ -230,9 +245,10 @@ class VirtualMachine(Document):
 			frappe.throw(_("SSH keys must be a list of strings."))
 
 		try:
-			return MetalClient(frappe.get_doc("Server", self.server)).replace_virtual_machine_ssh_keys(
+			information = MetalClient(frappe.get_doc("Server", self.server)).replace_virtual_machine_ssh_keys(
 				self.name, values
 			)
+			return information.as_dict()
 		except MetalClientError as error:
 			throw_metal_error(error)
 			raise AssertionError from error
@@ -247,9 +263,10 @@ class VirtualMachine(Document):
 			frappe.throw(_("Metadata must be a string-to-string map."))
 
 		try:
-			return MetalClient(frappe.get_doc("Server", self.server)).replace_virtual_machine_metadata(
+			information = MetalClient(frappe.get_doc("Server", self.server)).replace_virtual_machine_metadata(
 				self.name, metadata
 			)
+			return information.as_dict()
 		except MetalClientError as error:
 			throw_metal_error(error)
 			raise AssertionError from error
@@ -304,14 +321,15 @@ class VirtualMachine(Document):
 		if self.is_draft:
 			frappe.throw(_("Wait for Virtual Machine creation before a disk change."))
 
-		disk = {
-			"throughput_mibps": self.parse_throughput(disk_throughput_mibps),
-			"iops": self.parse_throughput(disk_iops),
-		}
 		try:
-			return MetalClient(frappe.get_doc("Server", self.server)).update_virtual_machine_disk(
-				self.name, disk
-			)
+			client = MetalClient(frappe.get_doc("Server", self.server))
+			current_disk = client.get_virtual_machine(self.name).desired.disk
+			disk = {
+				"size_mib": current_disk.size_mib,
+				"throughput_mibps": self.parse_throughput(disk_throughput_mibps),
+				"iops": self.parse_throughput(disk_iops),
+			}
+			return client.set_virtual_machine_disk(self.name, disk).as_dict()
 		except MetalClientError as error:
 			throw_metal_error(error)
 			raise AssertionError from error
@@ -340,17 +358,16 @@ class VirtualMachine(Document):
 
 		try:
 			client = MetalClient(frappe.get_doc("Server", self.server))
-			network = client.get_virtual_machine(self.name).get("network") or {}
-			if not network.get("egress"):
-				frappe.throw(_("Metal did not report the current network settings."))
+			network = client.get_virtual_machine(self.name).desired.network
 			request = {
-				"egress": network["egress"],
-				"public_ipv4": network.get("public_ipv4") or "",
-				"private_network_throughput_mibps": network.get("private_network_throughput_mibps") or 0,
-				"public_network_throughput_mibps": network.get("public_network_throughput_mibps") or 0,
+				"egress": network.egress,
+				"public_ipv4": network.public_ipv4,
+				"wireguard_mesh_ipv6": network.wireguard_mesh_ipv6,
+				"private_network_throughput_mibps": network.private_network_throughput_mibps,
+				"public_network_throughput_mibps": network.public_network_throughput_mibps,
 				**changes,
 			}
-			return client.update_virtual_machine_network(self.name, request)
+			return client.set_virtual_machine_network(self.name, request).as_dict()
 		except MetalClientError as error:
 			throw_metal_error(error)
 			raise AssertionError from error
@@ -361,8 +378,15 @@ class VirtualMachine(Document):
 		frappe.only_for("System Manager")
 		disk_mib = int(disk_mib)
 		try:
-			MetalClient(frappe.get_doc("Server", self.server)).resize_virtual_machine_disk(
-				self.name, disk_mib
+			client = MetalClient(frappe.get_doc("Server", self.server))
+			current_disk = client.get_virtual_machine(self.name).desired.disk
+			client.set_virtual_machine_disk(
+				self.name,
+				{
+					"size_mib": disk_mib,
+					"throughput_mibps": current_disk.throughput_mibps,
+					"iops": current_disk.iops,
+				},
 			)
 		except MetalClientError as error:
 			throw_metal_error(error)
@@ -375,18 +399,20 @@ class VirtualMachine(Document):
 		vcpus = int(vcpus)
 		memory_mib = int(memory_mib)
 		try:
-			MetalClient(frappe.get_doc("Server", self.server)).resize_virtual_machine_compute(
+			MetalClient(frappe.get_doc("Server", self.server)).set_virtual_machine_compute(
 				self.name, vcpus, memory_mib
 			)
 		except MetalClientError as error:
 			throw_metal_error(error)
 		self.db_set({"vcpus": vcpus, "memory_mib": memory_mib})
 
-	def perform_action(self, action: str) -> None:
-		"""Ask Metal to apply one power action."""
+	def set_power_state(self, state: str) -> None:
+		"""Ask Metal to store one desired power state."""
 		frappe.only_for("System Manager")
 		try:
-			MetalClient(frappe.get_doc("Server", self.server)).perform_action(self.name, action)
+			MetalClient(frappe.get_doc("Server", self.server)).set_virtual_machine_power_state(
+				self.name, state
+			)
 		except MetalClientError as error:
 			throw_metal_error(error)
 
@@ -395,7 +421,7 @@ class VirtualMachine(Document):
 		"""Request an in-place VM restart."""
 		frappe.only_for("System Manager")
 		try:
-			MetalClient(frappe.get_doc("Server", self.server)).reboot_virtual_machine(self.name)
+			MetalClient(frappe.get_doc("Server", self.server)).request_virtual_machine_restart(self.name)
 		except MetalClientError as error:
 			throw_metal_error(error)
 

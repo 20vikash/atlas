@@ -18,20 +18,18 @@ runtime error -> failed
 
 Create reserves the supplied VM ID and sets the desired state to `running`. It does not wait for Firecracker to start.
 
-Start, stop, pause, resume, and terminate return `202`. Poll the VM until `state` matches `desired_state`.
+Power, restart, compute, disk, network, and delete requests return `202`. Poll until the desired and observed generations match.
 
 ## Operations
 
 | Operation | Effect |
 |---|---|
 | Create | Store a VM reservation and request `running`. |
-| Start | Request `running`. |
-| Stop | Request `stopped`. Keep the VM disk and network reservation. |
-| Pause | Request `paused`. |
-| Resume | Request `running`. |
-| Terminate | Request cleanup of all VM resources. |
-| Compute resize | Change CPU and memory while stopped, then request `running`. |
-| Disk resize | Grow the VM disk. |
+| Set power | Request `running`, `stopped`, or `paused`. |
+| Delete | Request cleanup of all VM resources. |
+| Set compute | Replace CPU and memory while stopped, then request `running`. |
+| Set disk | Replace the size and rate limits. The size cannot decrease. |
+| Set network | Replace the complete desired network. |
 | SSH key replacement | Replace all keys and refresh MMDS when active. |
 | Snapshot | Create rootfs and kernel image staging. |
 | Restart | Increase the restart generation. Keep the request after daemon restart. |
@@ -50,7 +48,7 @@ Metal sends Ctrl+Alt+Del and waits up to 30 seconds. It sends `SIGKILL` when the
 
 ## Cleanup
 
-Terminate stores the desired `destroyed` state. Reconciliation records separate cleanup progress for the runtime, network, and storage.
+Delete stores the desired `destroyed` state. Reconciliation records separate cleanup progress for the runtime, network, and storage.
 
 Metal removes the VM directory only after all cleanup steps succeed.
 
@@ -67,6 +65,6 @@ Metal rejects unknown fields, extra JSON values, and unsupported record versions
 - The controller supplies the VM ID, so reservation retries use one stable resource.
 - Desired state keeps API requests fast and lets reconciliation retry host operations.
 - Observed state remains separate because process changes are asynchronous.
-- Stop keeps the disk for restart. Terminate removes all owned resources.
-- Compute and disk resize use separate endpoints because their safety rules differ.
+- The stopped state keeps the disk for a new start. The destroyed state removes all owned resources.
+- Compute and disk changes use separate endpoints because their safety rules differ.
 - Warm boot is an optimization. Cold boot remains the reliable path.

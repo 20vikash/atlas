@@ -1,6 +1,6 @@
 # Metal `/v1` controller contract
 
-This reference defines the target Atlas-to-Metal contract. Stage 4 will replace the current unversioned controller routes as one atomic change.
+This reference defines the released Atlas-to-Metal contract. The release replaced all unversioned controller routes in one change.
 
 The health and documentation routes stay unversioned. All controller operations use `/v1`.
 
@@ -145,12 +145,15 @@ Create, read, and mutation routes return the same nested resource shape.
     "operation_started_at": "2026-09-05T10:00:00Z",
     "updated_at": "2026-09-05T10:00:02Z",
     "disk": {"used_mib": 4096},
+    "network": {"mac": "06:00:00:00:00:01"},
     "error": null
   }
 }
 ```
 
 The list route returns an array of these resources. Atlas compares the desired and observed generations to show progress.
+
+The observed network object contains host-derived values. The desired network object contains controller intent.
 
 ## Mutation requests
 
@@ -229,7 +232,8 @@ Every HTTP error uses one safe object:
   "error": {
     "code": "conflict",
     "message": "the virtual machine specification conflicts with the first request",
-    "retryable": false
+    "retryable": false,
+    "request_id": "request-123"
   }
 }
 ```
@@ -245,4 +249,6 @@ Every HTTP error uses one safe object:
 | `500` | `internal_error` | Metal failed and did not expose a host error. |
 | `501` | `not_implemented` | The runtime does not implement the operation. |
 
-Atlas uses the HTTP status, `code`, and `retryable` value at its Frappe boundary. A transport failure after a write can also mark an Atlas request as uncertain.
+The `request_id` identifies the matching Metal log entry. Atlas keeps the HTTP status, code, and retryable value at its Frappe boundary.
+
+A transport failure after a write can also mark an Atlas request as uncertain.

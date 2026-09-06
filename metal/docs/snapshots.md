@@ -13,7 +13,7 @@ An internal warm snapshot contains a disk, guest memory, and Firecracker state. 
 ## Machine image staging
 
 ```text
-POST /vms/{id}/snapshots
+POST /v1/vms/{id}/snapshots
    -> generate UUIDv7
    -> pause the VM when it is running
    -> snapshot the VM disk
@@ -41,7 +41,7 @@ An image policy can request a local warm artifact. Metal creates it for one exac
 ## Multipart upload
 
 ```text
-POST /snapshots/{id}/upload
+POST /v1/snapshots/{id}/upload
    -> validate each HTTP or HTTPS part URL
    -> stream rootfs from the staging ZFS volume
    -> stream the staged kernel
@@ -51,7 +51,7 @@ POST /snapshots/{id}/upload
 
 Each part is 2 GiB, except the final part. Part numbers must start at 1 and remain consecutive.
 
-`DELETE /snapshots/{id}` removes the staging clone, source disk snapshot, and staging files. The operation is idempotent.
+`DELETE /v1/snapshots/{id}` removes the staging clone, source disk snapshot, and staging files. The operation is idempotent.
 
 Metal updates activity when upload starts and after upload succeeds. The image reconciler removes staging after 48 hours without activity.
 

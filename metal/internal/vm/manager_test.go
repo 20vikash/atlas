@@ -183,10 +183,10 @@ func TestMutationGenerationChangesOnlyForNewValues(t *testing.T) {
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.SetDesiredState(context.Background(), "machine-1", StateStopped); err != nil {
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateStopped); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.SetDesiredState(context.Background(), "machine-1", StateStopped); err != nil {
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateStopped); err != nil {
 		t.Fatal(err)
 	}
 	record, err := manager.store.readDesired("machine-1")
@@ -198,18 +198,18 @@ func TestMutationGenerationChangesOnlyForNewValues(t *testing.T) {
 	}
 }
 
-func TestResizeComputeRequestsRunningState(t *testing.T) {
+func TestSetComputeRequestsRunningState(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.SetDesiredState(context.Background(), "machine-1", StateStopped); err != nil {
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateStopped); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.ResizeCompute(context.Background(), "machine-1", 4, 4096); err != nil {
+	if err := manager.SetCompute(context.Background(), "machine-1", 4, 4096); err != nil {
 		t.Fatal(err)
 	}
 	record, err := manager.store.readDesired("machine-1")
@@ -350,8 +350,8 @@ func TestInspectFailureStoresSafeAndLocalErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if information.Error != observed.Error.Message {
-		t.Fatalf("public error = %q", information.Error)
+	if information.Error == nil || information.Error.Message != observed.Error.Message {
+		t.Fatalf("public error = %+v", information.Error)
 	}
 }
 

@@ -14,6 +14,10 @@ Keep DocType methods as permission and lifecycle boundaries. Keep cross-document
 
 Metal owns mutable virtual machine desired state and observed state. Atlas keeps only virtual views of this state.
 
+`MetalClient` owns `/v1` HTTP transport. `metal_models.py` validates nested desired and observed VM responses.
+
+Virtual Machine properties read the typed response. Atlas does not copy this mutable state into stored DocType fields.
+
 ## Invariants
 
 - The Virtual Machine name is the Metal virtual machine ID.

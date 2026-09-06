@@ -95,11 +95,11 @@ The MTU is 1380 on `vh-<user-id>` and `vg-<user-id>`. A mesh packet gains a 40-b
 
 `egress: none` removes the veth pair, so it also removes the mesh registration.
 
-Tenant 0 is the privileged tenant. A tenant-0 VM crosses tenants only when its address is in the Atlas WG Mesh whitelist. `POST /sync` carries the complete whitelist in `privileged_vm_addresses`, and Metal applies the difference on the host.
+Tenant 0 is the privileged tenant. A tenant-0 VM crosses tenants only when its address is in the Atlas WG Mesh whitelist. `POST /v1/sync` carries the complete whitelist in `privileged_vm_addresses`, and Metal applies the difference on the host.
 
 ## WireGuard peers
 
-`POST /sync` supplies the complete managed WireGuard peer set. Metal applies the set to `wg0` and stores it in `wireguard-peers.json`.
+`POST /v1/sync` supplies the complete managed WireGuard peer set. Metal applies the set to `wg0` and stores it in `wireguard-peers.json`.
 
 The VM specification stores `wireguard_mesh_ipv6`. Metal validates it, registers it with Atlas WG Mesh, and publishes it to the guest through MMDS.
 
@@ -107,7 +107,7 @@ The VM specification stores `wireguard_mesh_ipv6`. Metal validates it, registers
 
 Firecracker serves MMDS at `169.254.169.254`. The payload contains the instance ID, SSH keys, hostname, mesh address, and optional user data.
 
-`PUT /vms/{id}/ssh-keys` replaces all SSH keys. Active VMs receive the new MMDS payload immediately.
+`PUT /v1/vms/{id}/ssh-keys` replaces all SSH keys. Active VMs receive the new MMDS payload immediately.
 
 ## Design notes
 
@@ -124,4 +124,4 @@ Firecracker serves MMDS at `169.254.169.254`. The payload contains the instance 
 - The guest reads MMDS on a timer, because a warm snapshot resumes with new MMDS content.
 - Nothing per-VM is baked into the image, so one image serves a cold VM and a warm VM.
 - Tagged public IPv4 rules permit exact cleanup for one VM.
-- `/sync` replaces the complete managed WireGuard peer set.
+- `/v1/sync` replaces the complete managed WireGuard peer set.

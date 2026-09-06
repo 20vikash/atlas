@@ -245,9 +245,13 @@ func cloneSpecification(specification Spec) Spec {
 }
 
 func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Info {
-	errorDetail := ""
+	var errorDetail *PublicOperationError
 	if observed.Error != nil {
-		errorDetail = observed.Error.Message
+		errorDetail = &PublicOperationError{
+			Code:      observed.Error.Code,
+			Message:   observed.Error.Message,
+			UpdatedAt: observed.Error.UpdatedAt,
+		}
 	}
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB

@@ -23,16 +23,16 @@ var (
 )
 
 type createRequest struct {
-	VCPUs     int               `json:"vcpus"`
-	MemoryMiB int               `json:"memory_mib"`
-	DiskMiB   int               `json:"disk_mib"`
-	Disk      diskRequest       `json:"disk"`
-	Image     imageRequest      `json:"image"`
-	Network   networkRequest    `json:"network"`
-	SSHKeys   []string          `json:"ssh_keys"`
-	Hostname  string            `json:"hostname"`
-	UserData  string            `json:"user_data"`
-	Metadata  map[string]string `json:"metadata"`
+	Compute computeRequest `json:"compute"`
+	Disk    diskRequest    `json:"disk"`
+	Image   imageRequest   `json:"image"`
+	Network networkRequest `json:"network"`
+	Guest   guestRequest   `json:"guest"`
+}
+
+type computeRequest struct {
+	VirtualCPUCount int `json:"virtual_cpu_count" minimum:"1"`
+	MemoryMiB       int `json:"memory_mib" minimum:"1"`
 }
 
 type imageRequest struct {
@@ -57,13 +57,17 @@ type imageArtifactRequest struct {
 }
 
 type diskRequest struct {
+	SizeMiB         int `json:"size_mib" minimum:"1"`
 	ThroughputMiBps int `json:"throughput_mibps"`
 	IOPS            int `json:"iops"`
 }
 
 func (request diskRequest) validate() error {
+	if request.SizeMiB <= 0 {
+		return fmt.Errorf("disk.size_mib must be positive")
+	}
 	if request.ThroughputMiBps < 0 || request.IOPS < 0 {
-		return fmt.Errorf("disk limits must not be negative")
+		return fmt.Errorf("disk rate limits must not be negative")
 	}
 	return nil
 }
@@ -80,24 +84,23 @@ type networkRequest struct {
 	Egress                        string `json:"egress"`
 }
 
-type computeResizeRequest struct {
-	VCPUs     int `json:"vcpus"`
-	MemoryMiB int `json:"memory_mib"`
+type guestRequest struct {
+	Hostname string            `json:"hostname"`
+	SSHKeys  []string          `json:"ssh_keys"`
+	Metadata map[string]string `json:"metadata"`
+	UserData string            `json:"user_data"`
 }
 
-type diskResizeRequest struct {
-	DiskMiB int `json:"disk_mib"`
+type powerRequest struct {
+	State string `json:"state" enums:"running,stopped,paused"`
 }
 
 func (request createRequest) validate() error {
-	if err := request.Disk.validate(); err != nil {
+	if err := request.Compute.validate(); err != nil {
 		return err
 	}
-	if request.VCPUs <= 0 || request.MemoryMiB <= 0 || request.DiskMiB <= 0 {
-		return fmt.Errorf("vcpus, memory_mib, and disk_mib must be positive")
-	}
-	if request.MemoryMiB > maximumMemoryMiB {
-		return fmt.Errorf("memory_mib is too large")
+	if err := request.Disk.validate(); err != nil {
+		return err
 	}
 	if err := request.Image.validate(); err != nil {
 		return err
@@ -106,22 +109,35 @@ func (request createRequest) validate() error {
 		return err
 	}
 
-	return validateMetadata(request.Metadata)
+	if _, err := validateSSHKeys(request.Guest.SSHKeys); err != nil {
+		return err
+	}
+	return validateMetadata(request.Guest.Metadata)
 }
 
 func (request createRequest) spec() vm.Spec {
 	return vm.Spec{
-		VCPUs:     request.VCPUs,
-		MemoryMiB: request.MemoryMiB,
-		DiskMiB:   request.DiskMiB,
+		VCPUs:     request.Compute.VirtualCPUCount,
+		MemoryMiB: request.Compute.MemoryMiB,
+		DiskMiB:   request.Disk.SizeMiB,
 		Disk:      request.Disk.spec(),
 		Image:     request.Image.specification(),
 		Network:   request.Network.spec(),
-		SSHKeys:   request.SSHKeys,
-		Hostname:  request.Hostname,
-		UserData:  request.UserData,
-		Metadata:  request.Metadata,
+		SSHKeys:   request.Guest.SSHKeys,
+		Hostname:  request.Guest.Hostname,
+		UserData:  request.Guest.UserData,
+		Metadata:  request.Guest.Metadata,
 	}
+}
+
+func (request computeRequest) validate() error {
+	if request.VirtualCPUCount <= 0 || request.MemoryMiB <= 0 {
+		return fmt.Errorf("compute values must be positive")
+	}
+	if request.MemoryMiB > maximumMemoryMiB {
+		return fmt.Errorf("compute.memory_mib is too large")
+	}
+	return nil
 }
 
 func (request imageRequest) specification() vm.ImageRef {
@@ -208,6 +224,14 @@ func (request networkRequest) spec() vm.NetworkConfiguration {
 		PublicNetworkThroughputMiBps:  request.PublicNetworkThroughputMiBps,
 		Egress:                        vm.Egress(request.Egress),
 	}
+}
+
+func (request powerRequest) state() (vm.State, error) {
+	state := vm.State(request.State)
+	if state != vm.StateRunning && state != vm.StateStopped && state != vm.StatePaused {
+		return "", fmt.Errorf("state must be running, stopped, or paused")
+	}
+	return state, nil
 }
 
 func validHTTPURL(value string) bool {

@@ -45,17 +45,24 @@ type capacityResponse struct {
 }
 
 // @Summary	Exchange controller and host state
-// @Tags		sync
+// @Description	Replace the controller-owned host sets and return current host capacity.
+// @ID			synchronizeHost
+// @Tags		Host synchronization
 // @Accept		json
 // @Produce	json
-// @Param		body	body		syncRequest	true	"Controller state"
+// @Security	BearerAuth
+// @Param		request	body		syncRequest	true	"Complete controller state"
 // @Success	200		{object}	syncResponse
 // @Failure	400		{object}	errorResponse
-// @Router		/sync [post]
+// @Failure	401		{object}	errorResponse
+// @Failure	409		{object}	errorResponse
+// @Failure	422		{object}	errorResponse
+// @Failure	500		{object}	errorResponse
+// @Router		/v1/sync [post]
 func (s *Server) exchangeControllerState(c echo.Context) error {
 	var request syncRequest
-	if err := c.Bind(&request); err != nil {
-		return badRequest("invalid JSON request")
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
 	}
 	if request.WireGuardPeers == nil {
 		return badRequest("wireguard_peers is required")

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -19,15 +20,21 @@ type replaceVirtualMachineMetadataRequest struct {
 }
 
 // @Summary	Replace virtual machine metadata
-// @Tags		vms
+// @Description	Store the complete metadata map. Return 200 after immediate apply or 202 when reconciliation must continue.
+// @ID			replaceVirtualMachineMetadata
+// @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
+// @Security	BearerAuth
 // @Param		id		path		string									true	"Virtual machine identifier"
-// @Param		body	body		replaceVirtualMachineMetadataRequest	true	"Complete metadata map"
+// @Param		request	body		replaceVirtualMachineMetadataRequest	true	"Complete metadata map"
 // @Success	200		{object}	virtualMachineResponse
+// @Success	202		{object}	virtualMachineResponse
 // @Failure	400		{object}	errorResponse
+// @Failure	401		{object}	errorResponse
 // @Failure	404		{object}	errorResponse
-// @Router		/vms/{id}/metadata [put]
+// @Failure	500		{object}	errorResponse
+// @Router		/v1/vms/{id}/metadata [put]
 func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
 	virtualMachineID := c.Param("id")
 	if !validResourceID(virtualMachineID) {
@@ -35,30 +42,32 @@ func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
 	}
 
 	var request replaceVirtualMachineMetadataRequest
-	if err := c.Bind(&request); err != nil {
-		return badRequest("invalid JSON request")
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
 	}
 	if err := validateMetadata(request.Metadata); err != nil {
 		return badRequest(err.Error())
 	}
-	if err := s.virtualMachineManager.ReplaceMetadata(
-		c.Request().Context(),
+	operationContext, cancelOperation := context.WithTimeout(c.Request().Context(), immediateApplyTimeout)
+	defer cancelOperation()
+	applied, err := s.virtualMachineManager.ReplaceMetadata(
+		operationContext,
 		virtualMachineID,
 		request.Metadata,
-	); err != nil {
+	)
+	if err != nil {
 		return err
 	}
 	s.wakeReconciler()
 
-	virtualMachine, err := s.loadVirtualMachine(c)
-	if err != nil {
-		return err
+	status := http.StatusAccepted
+	if applied {
+		status = http.StatusOK
 	}
-	return s.respondWithVirtualMachine(c, http.StatusOK, virtualMachine)
+	return s.respondWithCurrentVirtualMachine(c, status)
 }
 
-// validateMetadata checks a plain string-to-string metadata map. An empty or nil
-// map is valid and means no metadata.
+// validateMetadata accepts an empty map to remove all metadata.
 func validateMetadata(metadata map[string]string) error {
 	if len(metadata) > maximumMetadataCount {
 		return fmt.Errorf("metadata cannot contain more than %d entries", maximumMetadataCount)

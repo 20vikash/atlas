@@ -6,21 +6,21 @@ Atlas stores VM request metadata. Metal stores VM runtime state and desired stat
 
 Atlas creates and commits a draft to reserve a stable VM name. This name is the Metal VM ID.
 
-Atlas signs image URLs and sends one idempotent `PUT /vms/{name}` request. The request contains one image object. Both System images and Machine images use their own rootfs and kernel objects. Metal stores the intent and returns HTTP `202`. Atlas does not wait for startup.
+Atlas signs image URLs and sends one idempotent `PUT /v1/vms/{name}` request. The request contains one image object. Both System images and Machine images use their own rootfs and kernel objects. Metal stores the intent and returns HTTP `202`. Atlas does not wait for startup.
 
-If Atlas loses the response, it sends `GET /vms/{name}`. Atlas finalizes a confirmed VM and keeps an uncertain draft. Atlas deletes a draft only after Metal returns HTTP `404`.
+If Atlas loses the response, it sends `GET /v1/vms/{name}`. Atlas finalizes a confirmed VM and keeps an uncertain draft. Atlas deletes a draft only after Metal returns HTTP `404`.
 
 ## Placement
 
 Atlas uses the latest host capacity sample. The host and image architectures must match. The host must have enough CPU, memory, and storage.
 
-Atlas sends WireGuard peers and desired cached images with `POST /sync`. It receives host capacity in the same exchange.
+Atlas sends WireGuard peers and desired cached images with `POST /v1/sync`. It receives host capacity in the same exchange.
 
 ## Images
 
 Virtual Machine Image is the durable boot artifact. `image_type` is `System` or `Machine`. Each image has its own rootfs and kernel object key, exact byte size, and SHA-256 value. The immutable reference uses the architecture and both artifact hashes.
 
-Only enabled, Available images can create VMs. Atlas sends enabled, Available images with `cache_image` to each host through `POST /sync`. Signed URLs are valid for 24 hours.
+Only enabled, Available images can create VMs. Atlas sends enabled, Available images with `cache_image` to each host through `POST /v1/sync`. Signed URLs are valid for 24 hours.
 
 The policy is:
 
@@ -35,11 +35,11 @@ Atlas never uploads memory or Firecracker state to S3. A memory snapshot needs a
 
 ## Machine image transfer
 
-The Create Machine Image action calls `POST /vms/{id}/snapshots`. Metal returns a UUIDv7 for local staging. Atlas uses it as the Virtual Machine Image name. A background job then:
+The Create Machine Image action calls `POST /v1/vms/{id}/snapshots`. Metal returns a UUIDv7 for local staging. Atlas uses it as the Virtual Machine Image name. A background job then:
 
 1. Creates separate S3 multipart uploads for `images/{image-id}/rootfs.img` and `images/{image-id}/kernel`.
 2. Signs 2 GiB upload parts for 24 hours.
-3. Calls `POST /snapshots/{snapshot_id}/upload`.
+3. Calls `POST /v1/snapshots/{snapshot_id}/upload`.
 4. Verifies the sizes, SHA-256 values, part numbers, ETags, and final S3 object sizes.
 5. Completes both uploads and deletes the local staging data.
 
@@ -63,7 +63,7 @@ Atlas can replace the complete VM SSH key list without storing it in the Virtual
 
 Atlas WG Mesh reserves tenant 0 for the privileged tenant. A privileged VM crosses tenants, so `before_insert` refuses a privileged VM on another tenant.
 
-The whitelist is host state that every host shares. `atlas.server.usage` sends the complete set of live privileged VM addresses to each host with `POST /sync`.
+The whitelist is host state that every host shares. `atlas.server.usage` sends the complete set of live privileged VM addresses to each host with `POST /v1/sync`.
 
 Use `Grant Privilege` and `Revoke Privilege` under `Dangerous Actions` to change the flag. Each host applies the change on its next sync, so it takes up to 30 seconds.
 
@@ -87,7 +87,7 @@ Atlas derives the Atlas WG Mesh address for a VM from the region ID, the tenant 
 
 ## Network changes
 
-Metal owns the VM network state. Atlas reads it, changes one setting, and sends all mutable settings with `PUT /vms/{name}/network`. It stops if Metal does not return the current state.
+Metal owns the VM network state. Atlas reads the typed desired state and changes one value. Atlas then sends the complete network object.
 
 | Action | Behavior |
 |---|---|
@@ -114,8 +114,8 @@ Active connections can stop when the public IPv4 address or the egress mode chan
 
 The VM configuration can set `disk_throughput_mibps` and `disk_iops`. Each limit covers reads and writes together. A value of `0` does not apply a limit.
 
-The Edit Disk Limits action sends both values with `PUT /vms/{name}/disk`. Metal sets a Firecracker drive rate limiter, so a change needs no VM restart.
+The Edit Disk Limits action sends the size and both limits with `PUT /v1/vms/{name}/disk`. Metal applies the change through reconciliation.
 
 ## Termination and deletion
 
-The Terminate action asks Metal to remove the VM. Atlas keeps the request metadata. Delete the document only after Metal confirms that the VM is absent.
+The Terminate action sends `DELETE /v1/vms/{name}`. Atlas keeps the request metadata. Delete the document after Metal confirms that the VM is absent.

@@ -7,7 +7,7 @@ type Info struct {
 	ID                            string
 	State                         State
 	DesiredState                  State
-	Error                         string
+	Error                         *PublicOperationError
 	VCPUs                         int
 	MemoryMiB                     int
 	DiskMiB                       int
@@ -32,4 +32,11 @@ type Info struct {
 	OperationID                   string
 	OperationStartedAt            time.Time
 	UpdatedAt                     time.Time
+}
+
+// PublicOperationError contains safe reconciliation error data.
+type PublicOperationError struct {
+	Code      string
+	Message   string
+	UpdatedAt time.Time
 }

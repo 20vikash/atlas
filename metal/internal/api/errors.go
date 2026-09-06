@@ -16,6 +16,7 @@ import (
 type errorBody struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
 	RequestID string `json:"request_id,omitempty"`
 }
 
@@ -54,6 +55,7 @@ func errorHandler(err error, c echo.Context) {
 	_ = c.JSON(publicError.status, errorResponse{Error: errorBody{
 		Code:      publicError.code,
 		Message:   publicError.message,
+		Retryable: isRetryableStatus(publicError.status),
 		RequestID: requestID,
 	}})
 }
@@ -103,6 +105,12 @@ func statusCode(status int) string {
 	default:
 		return fmt.Sprintf("http_%d", status)
 	}
+}
+
+func isRetryableStatus(status int) bool {
+	return status == http.StatusRequestTimeout ||
+		status == http.StatusTooManyRequests ||
+		(status >= http.StatusInternalServerError && status != http.StatusNotImplemented)
 }
 
 func badRequest(message string) error {

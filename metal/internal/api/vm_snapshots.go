@@ -55,14 +55,19 @@ type snapshotStatusResponse struct {
 }
 
 // @Summary	Create an image staging snapshot
-// @Tags		snapshots
+// @Description	Create local root file system and kernel artifacts from one virtual machine.
+// @ID			createVirtualMachineSnapshot
+// @Tags		Snapshots
 // @Produce	json
+// @Security	BearerAuth
 // @Param		id			path		string	true	"Virtual machine identifier"
 // @Success	201	{object}	snapshotCreatedResponse
 // @Failure	400	{object}	errorResponse
+// @Failure	401	{object}	errorResponse
 // @Failure	404	{object}	errorResponse
 // @Failure	409	{object}	errorResponse
-// @Router		/vms/{id}/snapshots [post]
+// @Failure	500	{object}	errorResponse
+// @Router		/v1/vms/{id}/snapshots [post]
 func (s *Server) createVirtualMachineSnapshot(c echo.Context) error {
 	virtualMachineID := c.Param("id")
 	if !validResourceID(virtualMachineID) {
@@ -81,23 +86,28 @@ func (s *Server) createVirtualMachineSnapshot(c echo.Context) error {
 }
 
 // @Summary	Start an image staging snapshot upload
-// @Tags		snapshots
+// @Description	Start asynchronous multipart uploads for the staged root file system and kernel.
+// @ID			uploadSnapshot
+// @Tags		Snapshots
 // @Accept		json
-// @Param		snapshot_id	path		string				true	"Snapshot identifier"
-// @Param		body		body		snapshotUploadRequest	true	"Multipart upload URLs"
-// @Success	202			"Accepted"
-// @Failure	400			{object}	errorResponse
-// @Failure	404			{object}	errorResponse
-// @Router		/snapshots/{snapshot_id}/upload [post]
+// @Security	BearerAuth
+// @Param		id		path	string				true	"Snapshot identifier"
+// @Param		request	body	snapshotUploadRequest	true	"Multipart upload URLs"
+// @Success	202		"Accepted"
+// @Failure	400		{object}	errorResponse
+// @Failure	401		{object}	errorResponse
+// @Failure	404		{object}	errorResponse
+// @Failure	500		{object}	errorResponse
+// @Router		/v1/snapshots/{id}/upload [post]
 func (s *Server) uploadSnapshot(c echo.Context) error {
-	snapshotID := c.Param("snapshot_id")
+	snapshotID := c.Param("id")
 	if !validResourceID(snapshotID) {
 		return badRequest("invalid snapshot identifier")
 	}
 
 	var request snapshotUploadRequest
-	if err := c.Bind(&request); err != nil {
-		return badRequest("invalid JSON request")
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
 	}
 	if err := s.snapshotStore.StartUpload(c.Request().Context(), snapshotID, request.storageRequest()); err != nil {
 		return err
@@ -106,15 +116,20 @@ func (s *Server) uploadSnapshot(c echo.Context) error {
 }
 
 // @Summary	Get an image staging snapshot upload status
-// @Tags		snapshots
+// @Description	Return upload progress or the completed artifact details for one snapshot.
+// @ID			getSnapshot
+// @Tags		Snapshots
 // @Produce	json
-// @Param		snapshot_id	path		string	true	"Snapshot identifier"
-// @Success	200			{object}	snapshotStatusResponse
-// @Failure	400			{object}	errorResponse
-// @Failure	404			{object}	errorResponse
-// @Router		/snapshots/{snapshot_id} [get]
+// @Security	BearerAuth
+// @Param		id	path		string	true	"Snapshot identifier"
+// @Success	200	{object}	snapshotStatusResponse
+// @Failure	400	{object}	errorResponse
+// @Failure	401	{object}	errorResponse
+// @Failure	404	{object}	errorResponse
+// @Failure	500	{object}	errorResponse
+// @Router		/v1/snapshots/{id} [get]
 func (s *Server) getSnapshot(c echo.Context) error {
-	snapshotID := c.Param("snapshot_id")
+	snapshotID := c.Param("id")
 	if !validResourceID(snapshotID) {
 		return badRequest("invalid snapshot identifier")
 	}
@@ -151,13 +166,18 @@ func progressPercent(uploaded, total int64) int {
 }
 
 // @Summary	Delete an image staging snapshot
-// @Tags		snapshots
-// @Param		snapshot_id	path	string	true	"Snapshot identifier"
-// @Success	204			"No content"
-// @Failure	400			{object}	errorResponse
-// @Router		/snapshots/{snapshot_id} [delete]
+// @Description	Remove local staging data for one snapshot.
+// @ID			deleteSnapshot
+// @Tags		Snapshots
+// @Security	BearerAuth
+// @Param		id	path	string	true	"Snapshot identifier"
+// @Success	204	"No content"
+// @Failure	400	{object}	errorResponse
+// @Failure	401	{object}	errorResponse
+// @Failure	500	{object}	errorResponse
+// @Router		/v1/snapshots/{id} [delete]
 func (s *Server) deleteSnapshot(c echo.Context) error {
-	snapshotID := c.Param("snapshot_id")
+	snapshotID := c.Param("id")
 	if !validResourceID(snapshotID) {
 		return badRequest("invalid snapshot identifier")
 	}

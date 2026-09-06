@@ -2,17 +2,20 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	maximumSSHKeyCount  = 100
-	maximumSSHKeyLength = 16 * 1024
+	maximumSSHKeyCount    = 100
+	maximumSSHKeyLength   = 16 * 1024
+	immediateApplyTimeout = 2 * time.Second
 )
 
 type replaceVirtualMachineSSHKeysRequest struct {
@@ -20,15 +23,21 @@ type replaceVirtualMachineSSHKeysRequest struct {
 }
 
 // @Summary	Replace virtual machine SSH keys
-// @Tags		vms
+// @Description	Store the complete SSH key list. Return 200 after immediate apply or 202 when reconciliation must continue.
+// @ID			replaceVirtualMachineSSHKeys
+// @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
+// @Security	BearerAuth
 // @Param		id		path		string									true	"Virtual machine identifier"
-// @Param		body	body		replaceVirtualMachineSSHKeysRequest	true	"Complete SSH key list"
+// @Param		request	body		replaceVirtualMachineSSHKeysRequest	true	"Complete SSH key list"
 // @Success	200		{object}	virtualMachineResponse
+// @Success	202		{object}	virtualMachineResponse
 // @Failure	400		{object}	errorResponse
+// @Failure	401		{object}	errorResponse
 // @Failure	404		{object}	errorResponse
-// @Router		/vms/{id}/ssh-keys [put]
+// @Failure	500		{object}	errorResponse
+// @Router		/v1/vms/{id}/ssh-keys [put]
 func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
 	virtualMachineID := c.Param("id")
 	if !validResourceID(virtualMachineID) {
@@ -36,27 +45,30 @@ func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
 	}
 
 	var request replaceVirtualMachineSSHKeysRequest
-	if err := c.Bind(&request); err != nil {
-		return badRequest("invalid JSON request")
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
 	}
 	sshKeys, err := validateSSHKeys(request.SSHKeys)
 	if err != nil {
 		return badRequest(err.Error())
 	}
-	if err := s.virtualMachineManager.ReplaceSSHKeys(
-		c.Request().Context(),
+	operationContext, cancelOperation := context.WithTimeout(c.Request().Context(), immediateApplyTimeout)
+	defer cancelOperation()
+	applied, err := s.virtualMachineManager.ReplaceSSHKeys(
+		operationContext,
 		virtualMachineID,
 		sshKeys,
-	); err != nil {
+	)
+	if err != nil {
 		return err
 	}
 	s.wakeReconciler()
 
-	virtualMachine, err := s.loadVirtualMachine(c)
-	if err != nil {
-		return err
+	status := http.StatusAccepted
+	if applied {
+		status = http.StatusOK
 	}
-	return s.respondWithVirtualMachine(c, http.StatusOK, virtualMachine)
+	return s.respondWithCurrentVirtualMachine(c, status)
 }
 
 func validateSSHKeys(values []string) ([]string, error) {

@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// SetDesiredState stores a requested lifecycle state.
-func (manager *Manager) SetDesiredState(ctx context.Context, identifier string, state State) error {
-	if !IsDesiredState(state) {
+// SetPowerState stores a requested power state.
+func (manager *Manager) SetPowerState(ctx context.Context, identifier string, state State) error {
+	if state != StateRunning && state != StateStopped && state != StatePaused {
 		return ErrConflict
 	}
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
@@ -40,8 +40,8 @@ func (manager *Manager) RequestRestart(ctx context.Context, identifier string) e
 	return manager.store.writeDesired(record)
 }
 
-// ResizeCompute stores a requested CPU and memory shape.
-func (manager *Manager) ResizeCompute(ctx context.Context, identifier string, virtualCPUCount, memoryMiB int) error {
+// SetCompute stores the complete requested CPU and memory shape.
+func (manager *Manager) SetCompute(ctx context.Context, identifier string, virtualCPUCount, memoryMiB int) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
 		observed, err := manager.store.readObserved(identifier)
 		if err != nil {
@@ -62,34 +62,23 @@ func (manager *Manager) ResizeCompute(ctx context.Context, identifier string, vi
 	})
 }
 
-// ResizeDisk stores a larger requested disk size.
-func (manager *Manager) ResizeDisk(ctx context.Context, identifier string, diskMiB int) error {
+// SetDisk stores the complete requested disk configuration.
+func (manager *Manager) SetDisk(ctx context.Context, identifier string, diskMiB int, limits Disk) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		switch {
-		case diskMiB < record.Specification.DiskMiB:
+		if diskMiB < record.Specification.DiskMiB {
 			return false, ErrConflict
-		case diskMiB == record.Specification.DiskMiB:
-			return false, nil
-		default:
-			record.Specification.DiskMiB = diskMiB
-			return true, nil
 		}
-	})
-}
-
-// UpdateDiskLimits stores complete disk rate limits.
-func (manager *Manager) UpdateDiskLimits(ctx context.Context, identifier string, limits Disk) error {
-	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		if record.Specification.Disk == limits {
+		if diskMiB == record.Specification.DiskMiB && limits == record.Specification.Disk {
 			return false, nil
 		}
+		record.Specification.DiskMiB = diskMiB
 		record.Specification.Disk = limits
 		return true, nil
 	})
 }
 
-// UpdateNetwork stores mutable network settings.
-func (manager *Manager) UpdateNetwork(ctx context.Context, identifier string, update NetworkUpdate) error {
+// SetNetwork stores the complete requested network configuration.
+func (manager *Manager) SetNetwork(ctx context.Context, identifier string, configuration NetworkConfiguration) error {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
 	if err != nil {
 		return err
@@ -101,57 +90,58 @@ func (manager *Manager) UpdateNetwork(ctx context.Context, identifier string, up
 	if err != nil {
 		return err
 	}
-	desired := record.Specification.Network
-	desired.Egress = update.Egress
-	desired.PublicIPv4 = update.PublicIPv4
-	desired.PrivateNetworkThroughputMiBps = update.PrivateNetworkThroughputMiBps
-	desired.PublicNetworkThroughputMiBps = update.PublicNetworkThroughputMiBps
-	if desired == record.Specification.Network {
+	if configuration == record.Specification.Network {
 		return nil
 	}
-	if inUse, err := manager.publicIPv4InUse(identifier, desired.PublicIPv4); err != nil {
+	if inUse, err := manager.publicIPv4InUse(identifier, configuration.PublicIPv4); err != nil {
 		return err
 	} else if inUse {
 		return ErrConflict
 	}
-	record.Specification.Network = desired
+	record.Specification.Network = configuration
 	record.Generation++
 	return manager.store.writeDesired(record)
 }
 
 // ReplaceSSHKeys stores the complete desired SSH key list.
-func (manager *Manager) ReplaceSSHKeys(ctx context.Context, identifier string, sshKeys []string) error {
-	changed, err := manager.mutateAndReport(ctx, identifier, func(record *DesiredRecord) (bool, error) {
+func (manager *Manager) ReplaceSSHKeys(ctx context.Context, identifier string, sshKeys []string) (bool, error) {
+	_, err := manager.mutateAndReport(ctx, identifier, func(record *DesiredRecord) (bool, error) {
 		if slices.Equal(record.Specification.SSHKeys, sshKeys) {
 			return false, nil
 		}
 		record.Specification.SSHKeys = slices.Clone(sshKeys)
 		return true, nil
 	})
-	if err != nil || !changed {
-		return err
+	if err != nil {
+		return false, err
 	}
-	return manager.refreshMetadata(ctx, identifier)
+	return manager.applyMetadata(ctx, identifier)
 }
 
 // ReplaceMetadata stores the complete desired guest metadata map.
-func (manager *Manager) ReplaceMetadata(ctx context.Context, identifier string, metadata map[string]string) error {
-	changed, err := manager.mutateAndReport(ctx, identifier, func(record *DesiredRecord) (bool, error) {
+func (manager *Manager) ReplaceMetadata(ctx context.Context, identifier string, metadata map[string]string) (bool, error) {
+	_, err := manager.mutateAndReport(ctx, identifier, func(record *DesiredRecord) (bool, error) {
 		if maps.Equal(record.Specification.Metadata, metadata) {
 			return false, nil
 		}
 		record.Specification.Metadata = maps.Clone(metadata)
 		return true, nil
 	})
-	if err != nil || !changed {
-		return err
+	if err != nil {
+		return false, err
 	}
-	return manager.refreshMetadata(ctx, identifier)
+	return manager.applyMetadata(ctx, identifier)
 }
 
 // Delete stores desired destruction.
 func (manager *Manager) Delete(ctx context.Context, identifier string) error {
-	return manager.SetDesiredState(ctx, identifier, StateDestroyed)
+	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
+		if record.State == StateDestroyed {
+			return false, nil
+		}
+		record.State = StateDestroyed
+		return true, nil
+	})
 }
 
 // ConnectSSH opens one guest SSH session.
@@ -232,6 +222,13 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 	return snapshot, nil
 }
 
+func (manager *Manager) applyMetadata(ctx context.Context, identifier string) (bool, error) {
+	if err := manager.refreshMetadata(ctx, identifier); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (manager *Manager) refreshMetadata(ctx context.Context, identifier string) error {
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
@@ -241,11 +238,7 @@ func (manager *Manager) refreshMetadata(ctx context.Context, identifier string) 
 	if err != nil {
 		return err
 	}
-	err = manager.runtime.RefreshMetadata(ctx, runtimeMachine(desired, interfaceState))
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
+	return manager.runtime.RefreshMetadata(ctx, runtimeMachine(desired, interfaceState))
 }
 
 func (manager *Manager) mutate(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) error {

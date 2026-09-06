@@ -64,4 +64,4 @@ A VM disk keeps the VM ID. The paths `machines/<id>` and `vms/<id>` identify the
 
 The storage stores own image import, local warm artifacts, image staging, VM disks, and pool capacity. metald does not create the pool or select its device. Host setup creates the pool before metald starts, and `zfs.pool` names it. Each imported image has an immutable manifest. Metal rejects a request that reuses an image reference with different digests or architecture.
 
-Memory snapshots stay on the host. Atlas sends cached-image policy through `/sync`. Metal builds a memory snapshot only for an exact CPU, memory, and disk configuration. A VM cold-boots when compatible warm artifacts are not ready.
+Memory snapshots stay on the host. Atlas sends cached-image policy through `/v1/sync`. Metal builds a memory snapshot only for an exact CPU, memory, and disk configuration. A VM cold-boots when compatible warm artifacts are not ready.

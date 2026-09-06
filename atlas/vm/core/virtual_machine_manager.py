@@ -266,24 +266,28 @@ class VirtualMachineManager:
 		server_ip_address: "ServerIPAddress | None",
 	) -> dict[str, Any]:
 		return {
-			"vcpus": request.vcpus,
-			"memory_mib": request.memory_mib,
-			"disk_mib": request.disk_mib,
-			"image": image.get_metal_image_request(request.user_data),
-			"hostname": request.hostname,
-			"ssh_keys": list(request.ssh_keys),
-			"user_data": request.user_data,
-			"metadata": dict(request.metadata),
+			"compute": {
+				"virtual_cpu_count": request.vcpus,
+				"memory_mib": request.memory_mib,
+			},
 			"disk": {
+				"size_mib": request.disk_mib,
 				"throughput_mibps": request.disk_throughput_mibps,
 				"iops": request.disk_iops,
 			},
+			"image": image.get_metal_image_request(request.user_data),
 			"network": {
-				"public_ipv4": server_ip_address.address if server_ip_address else None,
+				"public_ipv4": server_ip_address.address if server_ip_address else "",
 				"wireguard_mesh_ipv6": self.get_wireguard_mesh_ipv6(virtual_machine),
 				"private_network_throughput_mibps": request.private_network_throughput_mibps,
 				"public_network_throughput_mibps": request.public_network_throughput_mibps,
 				"egress": request.egress,
+			},
+			"guest": {
+				"hostname": request.hostname,
+				"ssh_keys": list(request.ssh_keys),
+				"metadata": dict(request.metadata),
+				"user_data": request.user_data,
 			},
 		}
 

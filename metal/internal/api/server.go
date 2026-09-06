@@ -62,14 +62,14 @@ type VirtualMachineManager interface {
 	Create(context.Context, string, vm.Spec) (vm.Info, error)
 	Information(context.Context, string) (vm.Info, error)
 	List(context.Context) ([]vm.Info, error)
-	SetDesiredState(context.Context, string, vm.State) error
+	SetPowerState(context.Context, string, vm.State) error
 	RequestRestart(context.Context, string) error
-	ResizeCompute(context.Context, string, int, int) error
-	ResizeDisk(context.Context, string, int) error
-	UpdateDiskLimits(context.Context, string, vm.Disk) error
-	UpdateNetwork(context.Context, string, vm.NetworkUpdate) error
-	ReplaceSSHKeys(context.Context, string, []string) error
-	ReplaceMetadata(context.Context, string, map[string]string) error
+	SetCompute(context.Context, string, int, int) error
+	SetDisk(context.Context, string, int, vm.Disk) error
+	SetNetwork(context.Context, string, vm.NetworkConfiguration) error
+	ReplaceSSHKeys(context.Context, string, []string) (bool, error)
+	ReplaceMetadata(context.Context, string, map[string]string) (bool, error)
+	Delete(context.Context, string) error
 	CreateSnapshot(context.Context, string) (vm.StagedSnapshot, error)
 	ConnectSSH(context.Context, string) (vm.SSHConn, error)
 }
@@ -178,5 +178,5 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 func isPublicPath(path string) bool {
-	return path == "/docs" || path == "/docs/swagger.json"
+	return path == "/health" || path == "/docs" || path == "/docs/swagger.json"
 }

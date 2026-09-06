@@ -54,7 +54,7 @@ HTTP request
    -> reconcile host state
 ```
 
-Poll `GET /vms/{id}` until `state` equals `desired_state`. The first create response can contain `state: "unknown"`.
+Poll `GET /v1/vms/{id}` until the desired and observed generations match. The first observed state can be `unknown`.
 
 ## systemd unit model
 
@@ -74,11 +74,11 @@ If warm boot fails, Metal removes the attempted VM disk and uses cold boot.
 
 Each VM uses one Linux network namespace and one `tap0` device. `Network.Ensure` applies the complete desired network state.
 
-`POST /sync` also applies the managed WireGuard peer set for the host.
+`POST /v1/sync` also applies the managed WireGuard peer set for the host.
 
 ## API access
 
-All routes except the documentation routes require a bearer token. The configuration stores the lowercase SHA-256 digest of that token.
+All `/v1` routes require a bearer token. The configuration stores the lowercase SHA-256 digest of that token.
 
 ## Design notes
 
