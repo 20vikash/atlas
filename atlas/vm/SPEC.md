@@ -44,7 +44,7 @@ Virtual Machine properties read the typed response. Atlas does not copy this mut
 ```sh
 ruff check atlas
 pilot --site TEST_SITE run-tests --module atlas.vm.core.test_placement
-pilot --site TEST_SITE run-tests --module atlas.vm.core.test_virtual_machine_service
+pilot --site TEST_SITE run-tests --module atlas.vm.core.test_vm_service
 pilot --site TEST_SITE run-tests --module atlas.vm.core.test_image_builder
 pilot --site TEST_SITE run-tests --module atlas.vm.core.test_console_token
 pilot --site TEST_SITE run-tests --module atlas.vm.doctype.virtual_machine.test_virtual_machine

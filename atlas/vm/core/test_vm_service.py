@@ -6,7 +6,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.placement import PlacementService
-from atlas.vm.core.virtual_machine_service import VirtualMachineService
+from atlas.vm.core.vm_service import VirtualMachineService
 
 
 class TestVirtualMachineCreation(UnitTestCase):
@@ -35,10 +35,10 @@ class TestVirtualMachineCreation(UnitTestCase):
 			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
 			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
 			patch(
-				"atlas.vm.core.virtual_machine_service.frappe.db.commit",
+				"atlas.vm.core.vm_service.frappe.db.commit",
 				side_effect=lambda: operations.append("commit"),
 			),
-			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
 		):
 			result = VirtualMachineService.create(self.request())
 
@@ -69,8 +69,8 @@ class TestVirtualMachineCreation(UnitTestCase):
 			patch.object(PlacementService, "select_server", return_value=server),
 			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
 			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
-			patch("atlas.vm.core.virtual_machine_service.frappe.db.commit") as commit,
-			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_service.frappe.db.commit") as commit,
+			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
 		):
 			result = VirtualMachineService.create(self.request())
 
@@ -96,8 +96,8 @@ class TestVirtualMachineInformation(UnitTestCase):
 		metal_client.get_virtual_machine.side_effect = MetalClientError("not found", status=404)
 
 		with (
-			patch("atlas.vm.core.virtual_machine_service.frappe.get_doc", return_value=Mock()),
-			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=Mock()),
+			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
 		):
 			information = VirtualMachineService(virtual_machine).get_information()
 
@@ -109,8 +109,8 @@ class TestVirtualMachineInformation(UnitTestCase):
 		metal_client.get_virtual_machine.side_effect = MetalClientError("connection refused")
 
 		with (
-			patch("atlas.vm.core.virtual_machine_service.frappe.get_doc", return_value=Mock()),
-			patch("atlas.vm.core.virtual_machine_service.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=Mock()),
+			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
 			self.assertRaisesRegex(frappe.ValidationError, "connection refused"),
 		):
 			VirtualMachineService(virtual_machine).get_information()

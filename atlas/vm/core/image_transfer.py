@@ -7,7 +7,7 @@ import frappe
 from atlas.atlas.s3 import S3Error
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.multipart_upload import MultipartUploadError, MultipartUploadService, bytes_to_mib
-from atlas.vm.core.virtual_machine_service import VirtualMachineService
+from atlas.vm.core.vm_service import VirtualMachineService
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings

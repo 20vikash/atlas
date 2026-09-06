@@ -6,11 +6,11 @@ import frappe
 import requests
 from frappe.tests import UnitTestCase
 
-from atlas.vm.core import virtual_machine_service as virtual_machine_service_module
+from atlas.vm.core import vm_service as virtual_machine_service_module
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.virtual_machine_service import VirtualMachineService
+from atlas.vm.core.vm_service import VirtualMachineService
 from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
 from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 

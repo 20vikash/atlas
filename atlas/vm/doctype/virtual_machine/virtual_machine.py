@@ -11,7 +11,7 @@ from frappe.utils import add_to_date, cint, now_datetime
 from atlas.atlas.core.parsing import strict_bool
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import EGRESS_MODES
-from atlas.vm.core.virtual_machine_service import VirtualMachineService
+from atlas.vm.core.vm_service import VirtualMachineService
 
 DRAFT_EXPIRY_MINUTES = 2
 # Atlas WG Mesh reserves tenant 0 for the privileged tenant.
