@@ -1,0 +1,147 @@
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from frappe.tests import UnitTestCase
+
+from atlas.metal_server.usage import (
+	delete_old_usage_samples,
+	enqueue_server_syncs,
+	get_desired_images,
+	get_privileged_vm_addresses,
+	get_usage_values,
+	sync_server,
+)
+from atlas.vm.core.metal_client import MetalClientError
+
+
+class TestServerUsage(UnitTestCase):
+	def test_sync_logs_a_metal_connection_failure(self) -> None:
+		server = SimpleNamespace(name="server-1")
+		client = Mock()
+		client.sync.side_effect = MetalClientError("connection refused")
+
+		with (
+			patch("atlas.metal_server.usage.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.usage.MetalClient", return_value=client),
+			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
+			patch("atlas.metal_server.usage.frappe.log_error") as log_error,
+		):
+			sync_server("server-1", [], [])
+
+		self.assertEqual(log_error.call_args.args[1], "Metal synchronization failed for Server server-1")
+
+	def test_sync_logs_an_invalid_capacity_response(self) -> None:
+		server = SimpleNamespace(name="server-1")
+		client = Mock()
+		client.sync.return_value = {"capacity": {}}
+
+		with (
+			patch("atlas.metal_server.usage.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.usage.MetalClient", return_value=client),
+			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
+			patch("atlas.metal_server.usage.frappe.log_error") as log_error,
+		):
+			sync_server("server-1", [], [])
+
+		self.assertEqual(log_error.call_args.args[1], "Invalid capacity response from Server server-1")
+
+	def test_enqueue_uses_one_exchange_per_server(self) -> None:
+		peers = [{"node": "server-1"}]
+		addresses = ["fdaa:1::1"]
+		with (
+			patch("atlas.metal_server.usage.frappe.get_all", return_value=["server-1"]),
+			patch("atlas.metal_server.usage.get_wireguard_peers", return_value=peers),
+			patch("atlas.metal_server.usage.get_privileged_vm_addresses", return_value=addresses),
+			patch("atlas.metal_server.usage.frappe.enqueue") as enqueue,
+		):
+			enqueue_server_syncs()
+
+		enqueue.assert_called_once_with(
+			sync_server,
+			queue="default",
+			timeout=30,
+			server_name="server-1",
+			wireguard_peers=peers,
+			privileged_vm_addresses=addresses,
+			job_id="atlas||server-sync||server-1",
+			deduplicate=True,
+		)
+
+	def test_privileged_addresses_select_live_privileged_vms(self) -> None:
+		"""Every host holds the same whitelist, so one region-wide set goes out."""
+		rows = [{"name": "vm-00001", "tenant_id": 0}]
+		with (
+			patch("atlas.metal_server.usage.frappe.get_all", return_value=rows) as get_all,
+			patch(
+				"atlas.metal_server.usage.get_virtual_machine_mesh_address",
+				return_value="fdaa:1:0:0::1",
+			),
+			patch("atlas.metal_server.usage.frappe.get_doc") as get_doc,
+		):
+			addresses = get_privileged_vm_addresses()
+
+		self.assertEqual(addresses, ["fdaa:1:0:0::1"])
+		self.assertEqual(
+			get_all.call_args.kwargs["filters"],
+			{"is_privileged": 1, "is_draft": 0, "is_terminating": 0},
+		)
+		# One query, so the address list does not scale its queries with the VMs.
+		self.assertEqual(get_all.call_args.kwargs["fields"], ["name", "tenant_id"])
+		get_doc.assert_not_called()
+
+	def test_desired_images_only_select_available_cached_images(self) -> None:
+		image = Mock()
+		image.get_desired_image.return_value = {"ref": "sha256:image", "cache_image": True}
+		with (
+			patch("atlas.metal_server.usage.frappe.get_all", return_value=["image-1"]) as get_all,
+			patch("atlas.metal_server.usage.frappe.get_doc", return_value=image),
+		):
+			images = get_desired_images()
+
+		self.assertEqual(images, [{"ref": "sha256:image", "cache_image": True}])
+		self.assertEqual(
+			get_all.call_args.kwargs["filters"],
+			{"enabled": 1, "status": "Available", "cache_image": 1},
+		)
+
+	def test_capacity_parses_the_metal_response(self) -> None:
+		capacity = {
+			"total_cpu_count": 8,
+			"available_cpu_count": 6,
+			"virtual_machine_count": 1,
+			"total_memory_mib": 16384,
+			"available_memory_mib": 12288,
+			"total_storage_mib": 100000,
+			"available_storage_mib": 80000,
+		}
+
+		self.assertEqual(get_usage_values(capacity)["available_cpu_count"], 6)
+
+	def test_capacity_rejects_boolean_values(self) -> None:
+		capacity = {
+			"total_cpu_count": 8,
+			"available_cpu_count": True,
+			"virtual_machine_count": 1,
+			"total_memory_mib": 16384,
+			"available_memory_mib": 12288,
+			"total_storage_mib": 100000,
+			"available_storage_mib": 80000,
+		}
+
+		with self.assertRaises(ValueError):
+			get_usage_values(capacity)
+
+	def test_cleanup_deletes_samples_older_than_three_hours(self) -> None:
+		current_time = datetime(2026, 9, 3, 12)
+
+		with (
+			patch("atlas.metal_server.usage.now_datetime", return_value=current_time),
+			patch("atlas.metal_server.usage.frappe.db.delete") as delete,
+		):
+			delete_old_usage_samples()
+
+		delete.assert_called_once_with(
+			"Metal Server Usage",
+			{"creation": ["<", current_time - timedelta(hours=3)]},
+		)

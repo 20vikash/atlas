@@ -34,7 +34,7 @@ ServerProvider  (typed create, result, catalog, power, address, and error values
 
 A provider component never saves a Frappe document. It returns typed values, and the caller decides what to record. That keeps provider code testable without a database and keeps persistence in one place.
 
-Server Size stores disk capacity in GiB and price in integer USD cents. The provider fills a missing billing period from the price it does report.
+Metal Server Size stores disk capacity in GiB and price in integer USD cents. The provider fills a missing billing period from the price it does report.
 
 ## Host binaries
 
@@ -44,4 +44,4 @@ A build runs only when its source hash changes. The result is published as a pub
 
 - [docs/providers.md](../docs/providers.md) describes the provider contract and how to add a provider.
 - [docs/development.md](../docs/development.md) lists the build tools and manual build commands.
-- [server SPEC](../server/SPEC.md) describes the provider interface consumer.
+- [server SPEC](../metal_server/SPEC.md) describes the provider interface consumer.

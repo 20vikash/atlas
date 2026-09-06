@@ -11,7 +11,7 @@ from frappe.utils import now_datetime
 from atlas.vm.core.models import VirtualMachineCreateRequest
 
 if TYPE_CHECKING:
-	from atlas.server.doctype.server.server import Server
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 CAPACITY_MAXIMUM_AGE = timedelta(minutes=2)
 
@@ -59,16 +59,18 @@ class PlacementCapacity:
 class PlacementService:
 	"""Select and lock one Server with current effective capacity."""
 
-	def select_server(self, request: VirtualMachineCreateRequest, architecture: str) -> Server:
+	def select_server(self, request: VirtualMachineCreateRequest, architecture: str) -> MetalServer:
 		"""Return one locked Server that can hold the request."""
 		servers = self.get_ready_servers()
 		if not servers:
-			frappe.throw(_("No running Server is ready for Virtual Machines."))
+			frappe.throw(_("No running Metal Server is ready for Virtual Machines."))
 
 		architecture_by_server = {server.name: server.architecture for server in servers}
 		capacities = self.get_latest_capacities(architecture_by_server)
 		if not capacities:
-			frappe.throw(_("No current Server capacity sample is available. Check Server synchronization."))
+			frappe.throw(
+				_("No current Metal Server capacity sample is available. Check Server synchronization.")
+			)
 		candidates = sorted(
 			(self.subtract_local_reservations(capacity) for capacity in capacities.values()),
 			key=lambda capacity: capacity.rank,
@@ -91,13 +93,13 @@ class PlacementService:
 			if current_capacity.can_host(request, architecture):
 				return server
 
-		frappe.throw(_("No Server has current capacity for this Virtual Machine."))
+		frappe.throw(_("No Metal Server has current capacity for this Virtual Machine."))
 		raise AssertionError
 
 	def get_ready_servers(self) -> list[frappe._dict]:
 		"""Return Servers that are ready to host virtual machines."""
 		return frappe.get_all(
-			"Server",
+			"Metal Server",
 			filters={"status": "Running", "is_provisioning_completed": 1},
 			fields=["name", "architecture"],
 		)
@@ -109,7 +111,7 @@ class PlacementService:
 
 		freshness_cutoff = now_datetime() - CAPACITY_MAXIMUM_AGE
 		usage_rows = frappe.get_all(
-			"Server Usage",
+			"Metal Server Usage",
 			filters={
 				"server": ["in", list(architecture_by_server)],
 				"creation": [">=", freshness_cutoff],
@@ -157,12 +159,12 @@ class PlacementService:
 			)
 		return capacity
 
-	def lock_server(self, server_name: str) -> Server:
+	def lock_server(self, server_name: str) -> MetalServer:
 		"""Lock one Server row for the current database transaction."""
-		return cast("Server", frappe.get_doc("Server", server_name, for_update=True))
+		return cast("MetalServer", frappe.get_doc("Metal Server", server_name, for_update=True))
 
 	@staticmethod
-	def is_ready_server(server: Server, architecture: str) -> bool:
+	def is_ready_server(server: MetalServer, architecture: str) -> bool:
 		"""Return whether the locked Server is still an eligible host."""
 		return (
 			server.status == "Running"

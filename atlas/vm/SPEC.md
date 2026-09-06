@@ -28,7 +28,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 
 ```text
 validate request
-  -> select and lock a Server        capacity sample minus local reservations
+  -> select and lock a Metal Server        capacity sample minus local reservations
   -> insert draft, COMMIT            the draft reserves capacity and fixes the name
   -> PUT /v1/vms/{name}              idempotent on the name
   -> clear draft
@@ -40,9 +40,9 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
 ## Placement
 
-Capacity comes from a Server Usage sample, which Metal produced at some earlier moment. Placement subtracts every VM created after that sample and every uncertain draft, so a burst of requests cannot spend the same reported capacity twice.
+Capacity comes from a Metal Server Usage sample, which Metal produced at some earlier moment. Placement subtracts every VM created after that sample and every uncertain draft, so a burst of requests cannot spend the same reported capacity twice.
 
-The chosen Server row is locked and its capacity rechecked before the draft is inserted. The lock is released by the commit, before Atlas calls Metal, so a slow host never holds a row.
+The chosen Metal Server row is locked and its capacity rechecked before the draft is inserted. The lock is released by the commit, before Atlas calls Metal, so a slow host never holds a row.
 
 A sample older than the freshness limit is not used. Placement reports a synchronization fault instead of guessing.
 

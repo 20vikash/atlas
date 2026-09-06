@@ -17,7 +17,7 @@ Use the [glossary](docs/glossary.md) when a term is not clear.
 
 | Component  | Purpose                                                 | First document                              |
 | ---------- | ------------------------------------------------------- | ------------------------------------------- |
-| Atlas app  | Provider, Server, placement, image, and user operations | [Atlas app](atlas/README.md)                |
+| Atlas app  | Provider integration, Metal Servers, VM placement, images, and user actions | [Atlas app](atlas/README.md)                |
 | Metal      | Virtual machine state and host resources                | [Metal](metal/README.md)                    |
 | HTTP proxy | Regional HTTP and TLS routing                           | [HTTP proxy](services/http-proxy/README.md) |
 | WG Mesh    | Private virtual machine network                         | [WG Mesh](services/wg-mesh/README.md)       |

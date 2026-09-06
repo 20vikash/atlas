@@ -1,6 +1,6 @@
 # Atlas app
 
-The Atlas Frappe app owns provider integration, Server records, placement, images, and user actions.
+The Atlas Frappe app owns provider integration, Metal Server records, placement, images, and user actions.
 
 Atlas sends desired virtual machine state to Metal. Metal owns runtime state and host resources.
 
@@ -13,14 +13,14 @@ Atlas sends desired virtual machine state to Metal. Metal owns runtime state and
 | Area | Purpose | Start here |
 |---|---|---|
 | Atlas settings | Provider selection, credentials, region data, and host binaries | [Atlas module](atlas/SPEC.md) |
-| Servers | Provider hosts and Metal installation | [Server module](server/SPEC.md) |
+| Metal Servers | Provider hosts, Metal installation, and capacity | [Metal Server module](metal_server/SPEC.md) |
 | Virtual machines | Placement, Metal requests, images, and user workflows | [Virtual machine module](vm/SPEC.md) |
 | Realtime | Console WebSocket bridge | [Realtime specification](realtime/SPEC.md) |
 
 ## Guides
 
 - [Provider contract and extension guide](docs/providers.md)
-- [Server lifecycle](docs/server-lifecycle.md)
+- [Metal Server lifecycle](docs/metal-server-lifecycle.md)
 - [Virtual machine control plane](docs/vm-control-plane.md)
 - [Image lifecycle](docs/images.md)
 - [Atlas operations](docs/operations.md)
@@ -32,6 +32,6 @@ Atlas sends desired virtual machine state to Metal. Metal owns runtime state and
 
 Keep DocType methods as permission and API boundaries. Put provider behavior in `atlas/core/server_providers/`.
 
-Put server setup behavior in `server/core/`. Put virtual machine orchestration in `vm/core/`.
+Put Metal Server setup behavior in `metal_server/core/`. Put virtual machine orchestration in `vm/core/`.
 
 Do not store mutable Metal runtime state in DocType fields.

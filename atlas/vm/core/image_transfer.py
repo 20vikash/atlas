@@ -11,7 +11,7 @@ from atlas.vm.core.vm_service import VirtualMachineService
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
-	from atlas.server.doctype.server.server import Server
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
@@ -44,7 +44,7 @@ class MachineImageTransferService:
 			"VirtualMachineImage",
 			frappe.get_doc("Virtual Machine Image", virtual_machine.virtual_machine_image),
 		)
-		server = cast("Server", frappe.get_doc("Server", virtual_machine.server))
+		server = cast("MetalServer", frappe.get_doc("Metal Server", virtual_machine.server))
 		metal_client = MetalClient(server)
 		try:
 			snapshot = metal_client.create_snapshot(cast(str, virtual_machine.name))
@@ -119,8 +119,8 @@ class MachineImageTransferService:
 	def advance(self, image: VirtualMachineImage) -> None:
 		"""Move one Machine image transfer forward by one step."""
 		server = cast(
-			"Server",
-			frappe.get_doc("Server", self.require_value(image.source_server, "source server")),
+			"Metal Server",
+			frappe.get_doc("Metal Server", self.require_value(image.source_server, "source server")),
 		)
 		metal_client = MetalClient(server)
 		object_storage_client = cast(

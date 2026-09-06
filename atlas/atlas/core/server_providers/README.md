@@ -1,4 +1,4 @@
-# Server provider package
+# Metal Server provider package
 
 This package defines the `ServerProvider` contract and registry. Provider packages implement remote resource operations.
 

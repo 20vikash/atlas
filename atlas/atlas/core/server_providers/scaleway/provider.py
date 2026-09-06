@@ -29,7 +29,7 @@ from atlas.atlas.core.server_providers.scaleway.servers import ScalewayServers
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
-	from atlas.server.doctype.server.server import Server
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 PollResult = TypeVar("PollResult")
 
@@ -121,14 +121,14 @@ class ScalewayProvider(ServerProvider):
 		return self.servers.ensure(request)
 
 	@override
-	def prepare_server(self, server: "Server") -> None:
+	def prepare_server(self, server: "MetalServer") -> None:
 		"""Prepare the Scaleway server before Secure Shell access."""
 		self.attach_private_network(server)
 		self.wait_for_private_network(server)
 		self.wait_for_server_ready(server)
 
 	@override
-	def configure_server_network(self, server: "Server") -> None:
+	def configure_server_network(self, server: "MetalServer") -> None:
 		"""Configure and check the private network through Secure Shell."""
 		parent_interface = server.public_network_interface
 		device = server.private_network_interface
@@ -149,7 +149,7 @@ class ScalewayProvider(ServerProvider):
 		self.wait_for_private_address(server)
 
 	@override
-	def get_storage_pool_device(self, server: "Server") -> str:
+	def get_storage_pool_device(self, server: "MetalServer") -> str:
 		"""Return the raw device for the virtual machine storage pool."""
 		return self.partitioning.storage_array
 
@@ -174,7 +174,7 @@ class ScalewayProvider(ServerProvider):
 		self.ip_addresses.delete(provider_resource_id)
 
 	@override
-	def attach_public_ipv4_address(self, provider_resource_id: str, server: "Server") -> None:
+	def attach_public_ipv4_address(self, provider_resource_id: str, server: "MetalServer") -> None:
 		"""Attach a reserved address to a server."""
 		if not server.provider_server_id:
 			raise ScalewayError("Atlas server has no Scaleway server ID")
@@ -185,7 +185,7 @@ class ScalewayProvider(ServerProvider):
 		"""Detach an address from a server."""
 		self.ip_addresses.detach(provider_resource_id)
 
-	def attach_private_network(self, server: "Server") -> None:
+	def attach_private_network(self, server: "MetalServer") -> None:
 		"""Attach the Atlas private network to one Scaleway server."""
 		if not server.provider_server_id:
 			raise ScalewayError("Atlas server has no Scaleway server ID")
@@ -202,7 +202,7 @@ class ScalewayProvider(ServerProvider):
 		server.private_ipv4_address = self.servers.private_ipv4_address(private_network_interface_id)
 		self.update_provider_metadata(server, private_network=private_network)
 
-	def wait_for_private_network(self, server: "Server") -> None:
+	def wait_for_private_network(self, server: "MetalServer") -> None:
 		"""Wait until Scaleway attaches the private network."""
 		if not server.provider_server_id:
 			raise ScalewayError("Atlas server has no Scaleway server ID")
@@ -224,7 +224,7 @@ class ScalewayProvider(ServerProvider):
 			description="the Scaleway private network attachment",
 		)
 
-	def wait_for_server_ready(self, server: "Server") -> None:
+	def wait_for_server_ready(self, server: "MetalServer") -> None:
 		"""Wait for the provider server and operating system installation."""
 		if not server.provider_server_id:
 			raise ScalewayError("Atlas server has no Scaleway server ID")
@@ -248,13 +248,13 @@ class ScalewayProvider(ServerProvider):
 			description="the Scaleway server installation",
 		)
 
-	def promote_ssh_user(self, server: "Server", user: str) -> None:
+	def promote_ssh_user(self, server: "MetalServer", user: str) -> None:
 		"""Promote the Ubuntu Secure Shell user to root access."""
 		if user != "ubuntu":
 			raise ScalewayError(f"Scaleway cannot promote Secure Shell user {user}")
 		self.run_setup_script(server, "scaleway/promote-ubuntu-user.sh", ssh_user=user)
 
-	def wait_for_private_address(self, server: "Server") -> None:
+	def wait_for_private_address(self, server: "MetalServer") -> None:
 		"""Wait until the configured private address is available."""
 		from atlas.atlas.core.ssh import SSHRunner
 
@@ -285,7 +285,7 @@ class ScalewayProvider(ServerProvider):
 
 	def run_setup_script(
 		self,
-		server: "Server",
+		server: "Metal Server",
 		script: str,
 		*,
 		ssh_user: str = "root",
@@ -293,9 +293,9 @@ class ScalewayProvider(ServerProvider):
 		timeout_seconds: int = 120,
 	) -> None:
 		"""Run one packaged setup script through Secure Shell."""
-		from atlas.server.doctype.server_ssh_task.server_ssh_task import ServerSSHTask
+		from atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task import MetalServerSSHTask
 
-		task = ServerSSHTask.create_for_script_file(
+		task = MetalServerSSHTask.create_for_script_file(
 			server=server.name,
 			script_path=script,
 			ssh_user=ssh_user,
@@ -330,7 +330,7 @@ class ScalewayProvider(ServerProvider):
 		return ipaddress.ip_network(self.settings.private_network_cidr, strict=False).prefixlen
 
 	@staticmethod
-	def private_network_vlan(server: "Server") -> int:
+	def private_network_vlan(server: "MetalServer") -> int:
 		"""Return the VLAN ID that Scaleway assigned to the private network."""
 		metadata = frappe.parse_json(server.provider_metadata or "{}")
 		private_network = metadata.get("private_network") if isinstance(metadata, Mapping) else None
@@ -340,7 +340,7 @@ class ScalewayProvider(ServerProvider):
 		return vlan
 
 	@staticmethod
-	def apply_provider_server(server: "Server", provider_server: ProviderServer) -> None:
+	def apply_provider_server(server: "MetalServer", provider_server: ProviderServer) -> None:
 		"""Apply provider-owned values to an Atlas Server."""
 		server.provider_server_id = provider_server.provider_server_id
 		if provider_server.status:
@@ -349,7 +349,7 @@ class ScalewayProvider(ServerProvider):
 		ScalewayProvider.update_provider_metadata(server, **provider_server.provider_metadata)
 
 	@staticmethod
-	def update_provider_metadata(document: "Server", **updates: object) -> None:
+	def update_provider_metadata(document: "MetalServer", **updates: object) -> None:
 		"""Merge provider values into the Server metadata."""
 		metadata = frappe.parse_json(document.provider_metadata or "{}")
 		if not isinstance(metadata, dict):

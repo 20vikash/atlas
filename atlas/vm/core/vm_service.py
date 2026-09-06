@@ -13,8 +13,10 @@ from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementService
 
 if TYPE_CHECKING:
-	from atlas.server.doctype.server.server import Server
-	from atlas.server.doctype.server_ip_address.server_ip_address import ServerIPAddress
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
+	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
+		MetalServerIPAddress,
+	)
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
@@ -91,7 +93,7 @@ class VirtualMachineService:
 		self,
 		request: VirtualMachineCreateRequest,
 		image: VirtualMachineImage,
-		server_ip_address: ServerIPAddress | None,
+		server_ip_address: MetalServerIPAddress | None,
 	) -> dict[str, Any]:
 		"""Return the complete Metal create request."""
 		return {
@@ -251,11 +253,11 @@ class VirtualMachineService:
 		self.release_ip_address()
 		return information
 
-	def assign_ip_address(self, server_ip_address: str) -> ServerIPAddress:
+	def assign_ip_address(self, server_ip_address: str) -> MetalServerIPAddress:
 		"""Set an attach intent for one reserved public address."""
 		address = cast(
-			"ServerIPAddress",
-			frappe.get_doc("Server IP Address", server_ip_address, for_update=True),
+			"MetalServerIPAddress",
+			frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True),
 		)
 		address.begin_assignment(self.virtual_machine.server, self.virtual_machine.name)
 		return address
@@ -263,10 +265,10 @@ class VirtualMachineService:
 	def release_ip_address(self) -> None:
 		"""Set a release intent for the assigned public address."""
 		address_name = frappe.db.get_value(
-			"Server IP Address", {"virtual_machine": self.virtual_machine.name}
+			"Metal Server IP Address", {"virtual_machine": self.virtual_machine.name}
 		)
 		if address_name:
-			frappe.get_doc("Server IP Address", address_name).release()
+			frappe.get_doc("Metal Server IP Address", address_name).release()
 
 	def require_information(self) -> MetalVirtualMachine:
 		"""Return Metal state or raise a Frappe error."""
@@ -292,7 +294,7 @@ class VirtualMachineService:
 	@property
 	def metal_client(self) -> MetalClient:
 		"""Return a Metal client for the assigned Server."""
-		server = cast("Server", frappe.get_doc("Server", self.virtual_machine.server))
+		server = cast("MetalServer", frappe.get_doc("Metal Server", self.virtual_machine.server))
 		return MetalClient(server)
 
 	@staticmethod

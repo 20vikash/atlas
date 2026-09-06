@@ -163,7 +163,7 @@ class AtlasSettings(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_sizes(self) -> None:
-		"""Refresh the Server Size catalog from the provider."""
+		"""Refresh the Metal Server Size catalog from the provider."""
 		frappe.only_for("System Manager")
 		if not self.is_setup_completed:
 			frappe.throw(_("Atlas Settings must be fully set up before syncing server sizes."))
@@ -177,16 +177,16 @@ class AtlasSettings(Document):
 			deduplicate=True,
 			enqueue_after_commit=True,
 		)
-		frappe.msgprint(_("Server sizes sync has been queued. Please check after some time."))
+		frappe.msgprint(_("Metal Server sizes sync has been queued. Please check after some time."))
 
 	def _sync_server_sizes(self) -> None:
-		from atlas.server.core.catalog_sync import CatalogSynchronizer
+		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
 
 		CatalogSynchronizer(self.server_provider_controller).sync_server_sizes()
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_images(self) -> None:
-		"""Refresh the Server Image catalog from the provider."""
+		"""Refresh the Metal Server Image catalog from the provider."""
 		frappe.only_for("System Manager")
 		if not self.is_setup_completed:
 			frappe.throw(_("Atlas Settings must be fully set up before syncing server images."))
@@ -200,9 +200,9 @@ class AtlasSettings(Document):
 			deduplicate=True,
 			enqueue_after_commit=True,
 		)
-		frappe.msgprint(_("Server images sync has been queued. Please check after some time."))
+		frappe.msgprint(_("Metal Server images sync has been queued. Please check after some time."))
 
 	def _sync_server_images(self) -> None:
-		from atlas.server.core.catalog_sync import CatalogSynchronizer
+		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
 
 		CatalogSynchronizer(self.server_provider_controller).sync_server_images()

@@ -50,7 +50,9 @@ class ScalewayCatalog:
 		"""Return the offer ID for one catalog offer."""
 		offer_id = offer.get("monthly_offer_id") if subscription_period == "monthly" else offer.get("id")
 		if not isinstance(offer_id, str):
-			raise ScalewayError(f"Server Size {size_name} has no {subscription_period} Scaleway offer ID")
+			raise ScalewayError(
+				f"Metal Server Size {size_name} has no {subscription_period} Scaleway offer ID"
+			)
 		return offer_id
 
 	def get_private_network_option_id(self, size_document: object, subscription_period: str) -> str:
@@ -76,7 +78,7 @@ class ScalewayCatalog:
 				and isinstance(option.get("id"), str)
 			):
 				return option["id"]
-		raise ScalewayError(f"Server Size {size_name} has no Private Network option")
+		raise ScalewayError(f"Metal Server Size {size_name} has no Private Network option")
 
 	def _merge_offer(self, size: ServerSizeData | None, offer: Mapping) -> ServerSizeData:
 		metadata = dict(size.provider_metadata) if size else {}
@@ -106,7 +108,7 @@ class ScalewayCatalog:
 		"""Return one offer from provider size metadata."""
 		offer = metadata.get(subscription_period) if isinstance(metadata, Mapping) else None
 		if not isinstance(offer, Mapping):
-			raise ScalewayError(f"Server Size {size_name} has no {subscription_period} Scaleway offer")
+			raise ScalewayError(f"Metal Server Size {size_name} has no {subscription_period} Scaleway offer")
 		return offer
 
 	@staticmethod

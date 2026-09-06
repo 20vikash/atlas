@@ -1,0 +1,685 @@
+from __future__ import annotations
+
+import json
+from hashlib import sha256
+from types import MethodType, SimpleNamespace
+from unittest.mock import Mock, patch
+
+import frappe
+from frappe.tests import UnitTestCase
+
+from atlas.atlas.core.server_providers.base import ProviderServer, ServerPowerAction
+from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
+
+
+def _disk(device: str) -> dict:
+	"""Return one disk from the test RAID layout."""
+	return {
+		"name": f"/dev/{device}",
+		"uuid": None,
+		"size": 953 * 1024**3,
+		"mountpoint": None,
+		"children": [
+			{"name": f"/dev/{device}1", "uuid": None, "size": 1024**3 // 2, "mountpoint": None},
+			{
+				"name": f"/dev/{device}2",
+				"uuid": "boot-member-uuid",
+				"size": 1024**3,
+				"mountpoint": None,
+				"children": [
+					{"name": "/dev/md0", "uuid": "boot-uuid", "size": 1024**3, "mountpoint": "/boot"}
+				],
+			},
+			{
+				"name": f"/dev/{device}3",
+				"uuid": "root-member-uuid",
+				"size": 64 * 1024**3,
+				"mountpoint": None,
+				"children": [
+					{"name": "/dev/md1", "uuid": "root-uuid", "size": 64 * 1024**3, "mountpoint": "/"}
+				],
+			},
+			{
+				"name": f"/dev/{device}4",
+				"uuid": "data-member-uuid",
+				"size": 888 * 1024**3,
+				"mountpoint": None,
+				"children": [{"name": "/dev/md2", "uuid": None, "size": 888 * 1024**3, "mountpoint": None}],
+			},
+		],
+	}
+
+
+_LSBLK_OUTPUT = json.dumps({"blockdevices": [_disk("sda"), _disk("sdb")]})
+
+
+class TestServer(UnitTestCase):
+	def test_before_validate_creates_the_named_server(self) -> None:
+		provider = SimpleNamespace(
+			validate_settings=Mock(),
+			ensure_server=Mock(
+				return_value=ProviderServer(
+					provider_server_id="server-id",
+					status="Installing",
+					public_ipv4_address="203.0.113.1",
+					provider_metadata={"server": {"id": "server-id"}},
+					was_created=True,
+				)
+			),
+		)
+		server = SimpleNamespace(
+			name="node-test-00007",
+			provider_server_id=None,
+			server_size="Scaleway/size",
+			server_image="Scaleway/image",
+			status="Pending",
+			flags=SimpleNamespace(),
+			settings=SimpleNamespace(server_provider_controller=provider),
+			_validate_provider_catalog=Mock(),
+			_provider_metadata=MetalServer._provider_metadata,
+		)
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
+			return_value=SimpleNamespace(provider_metadata="{}"),
+		):
+			MetalServer.before_validate(server)
+
+		self.assertEqual(provider.ensure_server.call_args.args[0].name, "node-test-00007")
+		provider.validate_settings.assert_called_once_with()
+		self.assertEqual(server.provider_server_id, "server-id")
+		self.assertTrue(server.flags.provider_server_created)
+
+	def test_failed_insert_cleanup_deletes_only_a_new_provider_server(self) -> None:
+		server = self._server(status="Pending")
+		server.flags.provider_server_created = True
+
+		MetalServer._cleanup_provider_server_after_failed_insert(server)
+
+		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id")
+		self.assertFalse(server.flags.provider_server_created)
+
+	def test_failed_insert_cleanup_keeps_a_reused_provider_server(self) -> None:
+		server = self._server(status="Pending")
+
+		MetalServer._cleanup_provider_server_after_failed_insert(server)
+
+		server.settings.server_provider_controller.delete_server.assert_not_called()
+
+	def test_validate_checks_the_provider_catalog(self) -> None:
+		server = self._server(status="Pending")
+		server._validate_provider_catalog = Mock()
+		server._sync_disks_if_running = Mock()
+
+		MetalServer.validate(server)
+
+		server._validate_provider_catalog.assert_called_once()
+
+	def test_setup_server_queues_when_no_setup_job_runs(self) -> None:
+		server = self._server(status="Failed")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			MetalServer.setup_server(server)
+
+		server.db_set.assert_called_once_with("status", "Pending")
+		server._enqueue_setup_server.assert_called_once()
+
+	def test_setup_server_rejects_a_running_setup_job(self) -> None:
+		server = self._server(status="Installing")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.setup_server(server)
+
+	def test_setup_server_skips_a_completed_server(self) -> None:
+		server = self._server(status="Running")
+		server.is_provisioning_completed = True
+
+		with patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"):
+			MetalServer.setup_server(server)
+
+		server._enqueue_setup_server.assert_not_called()
+
+	def test_ping_server_creates_a_ping_script_log(self) -> None:
+		server = self._server(status="Running")
+		log = SimpleNamespace(name="SSH-00001")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.MetalServerSSHTask.create_for_script_file",
+				return_value=log,
+			) as create_for_script_file,
+		):
+			log_name = MetalServer.ping_server(server)
+
+		self.assertEqual(log_name, "SSH-00001")
+		create_for_script_file.assert_called_once_with(server=server.name, script_path="ping-server.sh")
+
+	def test_ping_server_rejects_a_server_that_is_not_running(self) -> None:
+		server = self._server(status="Stopped")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.MetalServerSSHTask.create_for_script_file"
+			) as create_for_script_file,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.ping_server(server)
+
+		create_for_script_file.assert_not_called()
+
+	def test_sync_disks_stores_the_mounted_devices_and_the_storage_pool(self) -> None:
+		server = self._server(status="Running")
+		task = SimpleNamespace(result=SimpleNamespace(output=_LSBLK_OUTPUT, is_success=True))
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command",
+				return_value=task,
+			) as create_for_command,
+		):
+			MetalServer.sync_disks(server)
+
+		self.assertFalse(create_for_command.call_args.kwargs["run_in_background"])
+		server.set.assert_called_once_with(
+			"disks",
+			[
+				{
+					"device": "/dev/md0",
+					"uuid": "boot-uuid",
+					"mount_point": "/boot",
+					"size_gb": "1.00",
+				},
+				{"device": "/dev/md1", "uuid": "root-uuid", "mount_point": "/", "size_gb": "64.00"},
+				{"device": "/dev/md2", "uuid": "", "mount_point": "", "size_gb": "888.00"},
+			],
+		)
+		server.save.assert_called_once()
+
+	def test_sync_disks_reports_a_raid_array_once_for_both_members(self) -> None:
+		server = self._server(status="Running")
+		task = SimpleNamespace(result=SimpleNamespace(output=_LSBLK_OUTPUT, is_success=True))
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command",
+				return_value=task,
+			),
+		):
+			MetalServer.sync_disks(server)
+
+		devices = [disk["device"] for disk in server.set.call_args.args[1]]
+		self.assertEqual(len(devices), len(set(devices)))
+
+	def test_sync_disks_rejects_a_failed_lsblk_run(self) -> None:
+		server = self._server(status="Running")
+		task = SimpleNamespace(result=SimpleNamespace(output="lsblk: not found", is_success=False))
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command",
+				return_value=task,
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.sync_disks(server)
+
+		server.save.assert_not_called()
+
+	def test_sync_disks_rejects_a_server_that_is_not_running(self) -> None:
+		server = self._server(status="Stopped")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command"
+			) as create_for_command,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.sync_disks(server)
+
+		create_for_command.assert_not_called()
+
+	def test_install_metald_queues_the_install_job(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			MetalServer.install_metald(server)
+
+		enqueue_doc.assert_called_once_with(
+			"Metal Server",
+			"node-test-00007",
+			"_install_metald",
+			queue="long",
+			timeout=1200,
+			job_id="atlas||server||install-metald||node-test-00007",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	def test_install_metald_rejects_a_missing_binary(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+			) as create_for_script_file,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._install_metald(server)
+
+		create_for_script_file.assert_not_called()
+
+	def test_install_metald_rejects_a_server_that_is_not_running(self) -> None:
+		server = self._server(status="Stopped")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+			) as create_for_script_file,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.install_metald(server)
+
+		create_for_script_file.assert_not_called()
+
+	def test_install_metald_worker_passes_the_pool_device(self) -> None:
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		task = SimpleNamespace(result=SimpleNamespace(is_success=True))
+		file_urls = {
+			"metald-file": "https://atlas.test/files/metald-linux-amd64",
+			"wg-mesh-file": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
+		}
+
+		with (
+			patch(
+				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.get_binary_download_url",
+				side_effect=lambda file_name: file_urls[file_name],
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+				return_value=task,
+			) as create_for_script_file,
+		):
+			MetalServer._install_metald(server)
+
+		arguments = create_for_script_file.call_args.kwargs
+		self.assertEqual(arguments["script_path"], "install-metald.sh")
+		self.assertEqual(
+			arguments["environment"],
+			{
+				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
+				"WG_MESH_DOWNLOAD_URL": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
+				"METALD_AUTH_TOKEN_HASH": sha256(b"test-token").hexdigest(),
+				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"STORAGE_POOL_DEVICE": "/dev/md2",
+				"MESH_UPLINK_INTERFACE": "eno1.1878",
+			},
+		)
+
+	def test_install_metald_worker_needs_a_private_network_interface(self) -> None:
+		"""Atlas WG Mesh hooks this interface, so metald cannot guess it."""
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.private_network_interface = None
+
+		with (
+			patch(
+				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+			) as create_for_script_file,
+			self.assertRaises(frappe.ValidationError),
+		):
+			MetalServer._install_metald(server)
+
+		create_for_script_file.assert_not_called()
+
+	def test_get_wireguard_ip_address_uses_the_node_number(self) -> None:
+		server = self._server(status="Running")
+
+		self.assertEqual(MetalServer._get_wireguard_ip_address(server), "fdab:1::7")
+
+	def test_get_wireguard_ip_address_writes_hexadecimal_fields(self) -> None:
+		"""An IPv6 field is hexadecimal, so node 16 is 10 and region 26 is 1a."""
+		server = self._server(status="Running")
+		server.name = "node-test-00016"
+		server.settings.region_id = 26
+
+		self.assertEqual(MetalServer._get_wireguard_ip_address(server), "fdab:1a::10")
+
+	def test_get_wireguard_ip_address_carries_a_large_node_number(self) -> None:
+		"""One IPv6 field holds 65535, and the name series runs to 99999."""
+		server = self._server(status="Running")
+		for node_number, want in (
+			("01000", "fdab:1::3e8"),
+			("65535", "fdab:1::ffff"),
+			("99999", "fdab:1::1:869f"),
+		):
+			with self.subTest(node_number=node_number):
+				server.name = f"node-test-{node_number}"
+				self.assertEqual(MetalServer._get_wireguard_ip_address(server), want)
+
+	def test_get_wireguard_ip_address_rejects_an_oversized_region(self) -> None:
+		server = self._server(status="Running")
+		server.settings.region_id = 0x10000
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._get_wireguard_ip_address(server)
+
+	def test_get_wireguard_ip_address_rejects_a_name_without_a_node_number(self) -> None:
+		server = self._server(status="Running")
+		server.name = "node-test-main"
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._get_wireguard_ip_address(server)
+
+	def test_configure_wireguard_queues_the_job(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			MetalServer.configure_wireguard(server)
+
+		self.assertEqual(enqueue_doc.call_args.args[2], "_configure_wireguard")
+
+	def test_configure_wireguard_rejects_a_running_job(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.configure_wireguard(server)
+
+		enqueue_doc.assert_not_called()
+
+	def test_configure_wireguard_job_stores_the_address_and_public_key(self) -> None:
+		server = self._server(status="Running")
+		output = (
+			"==> packages\n==> interface (wg0)\n"
+			"===PUBLIC_KEY_START===\nSGVsbG9XaXJlR3VhcmRQdWJsaWNLZXlIZXJlPQ=\n===PUBLIC_KEY_END===\n"
+		)
+		task = SimpleNamespace(result=SimpleNamespace(output=output, is_success=True))
+
+		with patch(
+			"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+			return_value=task,
+		) as create_for_script_file:
+			MetalServer._configure_wireguard(server)
+
+		arguments = create_for_script_file.call_args.kwargs
+		self.assertEqual(
+			arguments["environment"],
+			{
+				"WIREGUARD_ADDRESS": "fdab:1::7",
+				"WIREGUARD_LISTEN_PORT": 51820,
+				"WIREGUARD_MTU": 1440,
+			},
+		)
+		self.assertFalse(arguments["run_in_background"])
+		server.db_set.assert_any_call("wireguard_ip_address", "fdab:1::7")
+		server.db_set.assert_called_with("wireguard_public_key", "SGVsbG9XaXJlR3VhcmRQdWJsaWNLZXlIZXJlPQ=")
+
+	def test_configure_wireguard_job_rejects_output_without_a_public_key(self) -> None:
+		"""A successful run that prints no key must not store a marker as the key."""
+		server = self._server(status="Running")
+		task = SimpleNamespace(result=SimpleNamespace(output="==> packages\n", is_success=True))
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+				return_value=task,
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._configure_wireguard(server)
+
+	def test_configure_wireguard_job_rejects_a_failed_run(self) -> None:
+		server = self._server(status="Running")
+		task = SimpleNamespace(result=SimpleNamespace(output="wg: command not found", is_success=False))
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+				return_value=task,
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._configure_wireguard(server)
+
+	def test_configure_wireguard_rejects_a_server_that_is_not_running(self) -> None:
+		server = self._server(status="Stopped")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+			) as create_for_script_file,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.configure_wireguard(server)
+
+		create_for_script_file.assert_not_called()
+
+	def test_poweroff_server_marks_the_server_stopped(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			MetalServer.poweroff_server(server)
+
+		server.settings.server_provider_controller.set_power_state.assert_called_once_with(
+			"server-id", ServerPowerAction.STOP
+		)
+		server.db_set.assert_called_once_with("status", "Stopped")
+
+	def test_poweron_server_marks_a_provisioned_server_running(self) -> None:
+		server = self._server(status="Stopped")
+		server.is_provisioning_completed = True
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			MetalServer.poweron_server(server)
+
+		server.db_set.assert_called_once_with("status", "Running")
+
+	def test_poweron_server_keeps_the_status_while_provisioning(self) -> None:
+		server = self._server(status="Failed")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			MetalServer.poweron_server(server)
+
+		server.settings.server_provider_controller.set_power_state.assert_called_once_with(
+			"server-id", ServerPowerAction.START
+		)
+		server.db_set.assert_not_called()
+
+	def test_reboot_server_keeps_the_status(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			MetalServer.reboot_server(server)
+
+		server.settings.server_provider_controller.set_power_state.assert_called_once_with(
+			"server-id", ServerPowerAction.REBOOT
+		)
+		server.db_set.assert_not_called()
+
+	def test_power_action_rejects_a_deleted_server(self) -> None:
+		server = self._server(status="Deleted")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.reboot_server(server)
+
+	def test_power_action_rejects_a_running_setup_job(self) -> None:
+		server = self._server(status="Installing")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.poweroff_server(server)
+
+	def test_archive_server_deletes_the_provider_server(self) -> None:
+		server = self._server(status="Failed")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			MetalServer.archive_server(server)
+
+		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id")
+		server.db_set.assert_called_once_with({"status": "Deleted", "is_provisioning_completed": 0})
+
+	def test_archive_server_skips_a_deleted_server(self) -> None:
+		server = self._server(status="Deleted")
+
+		with patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"):
+			MetalServer.archive_server(server)
+
+		server.settings.server_provider_controller.delete_server.assert_not_called()
+		server.db_set.assert_not_called()
+
+	def test_archive_server_rejects_a_running_setup_job(self) -> None:
+		server = self._server(status="Installing")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.archive_server(server)
+
+	@staticmethod
+	def _server(*, status: str) -> SimpleNamespace:
+		server = SimpleNamespace(
+			doctype="Metal Server",
+			name="node-test-00007",
+			status=status,
+			provider_server_id="server-id",
+			flags=SimpleNamespace(provider_server_created=False),
+			is_provisioning_completed=False,
+			setup_job_id="atlas||server-provision||node-test-00007",
+			wireguard_job_id="atlas||server-wireguard||node-test-00007",
+			wireguard_ip_address=None,
+			private_ipv4_address="10.0.0.7",
+			private_network_interface="eno1.1878",
+			port=51820,
+			settings=SimpleNamespace(
+				server_provider_controller=SimpleNamespace(
+					delete_server=Mock(),
+					set_power_state=Mock(),
+					get_storage_pool_device=Mock(return_value="/dev/md2"),
+				),
+				metald_binary_x86_64_file=None,
+				wg_mesh_binary_x86_64_file="wg-mesh-file",
+				region_id=1,
+				private_network_mtu=1500,
+			),
+			set=Mock(),
+			save=Mock(),
+			_enqueue_setup_server=Mock(),
+		)
+
+		def db_set(fieldname, value=None, **_options) -> None:
+			"""Write the fields on the fake document, as Document.db_set does."""
+			values = fieldname if isinstance(fieldname, dict) else {fieldname: value}
+			for name, field_value in values.items():
+				setattr(server, name, field_value)
+
+		server.db_set = Mock(side_effect=db_set)
+		server._parse_disks = MethodType(MetalServer._parse_disks, server)
+		server._get_wireguard_ip_address = MethodType(MetalServer._get_wireguard_ip_address, server)
+		server._set_wireguard_ip_address_if_not_set = MethodType(
+			MetalServer._set_wireguard_ip_address_if_not_set, server
+		)
+		server._validate_power_action = MethodType(MetalServer._validate_power_action, server)
+		server._provider_server_id = MethodType(MetalServer._provider_server_id, server)
+		return server

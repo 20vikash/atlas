@@ -5,7 +5,7 @@ Atlas owns the user request, placement, and related provider intent. Metal owns 
 ## Create sequence
 
 ```text
-request -> validate image and values -> select and lock Server
+request -> validate image and values -> select and lock Metal Server
         -> insert and commit draft -> PUT /v1/vms/{name}
         -> Metal saves desired state -> Metal reconciles host resources
         -> Atlas clears the draft after confirmation
@@ -17,7 +17,7 @@ The Atlas document name is the Metal virtual machine ID. The committed draft mak
 
 Placement uses a capacity sample that is less than 2 minutes old. It matches the image architecture and subtracts requests that the sample cannot include. Every uncertain draft remains a reservation.
 
-Atlas locks the candidate Server row and checks capacity again. It commits the selected draft before it sends the Metal request.
+Atlas locks the candidate Metal Server row and checks capacity again. It commits the selected draft before it sends the Metal request.
 
 ## Desired and observed state
 
@@ -37,7 +37,7 @@ This check prevents an old job from replacing a newer attach or detach request. 
 
 - Provider and Metal calls must be safe to repeat.
 - Atlas commits a virtual machine draft before its external create request.
-- Server provisioning commits after each safe step.
+- Metal Server provisioning commits after each safe step.
 - Background reconciliation keeps durable intent when an external operation fails.
 - A retry reads current durable state. It does not depend on worker memory.
 

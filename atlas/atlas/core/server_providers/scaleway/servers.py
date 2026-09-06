@@ -173,7 +173,9 @@ class ScalewayServers:
 		"""Return the operating system installation configuration."""
 		operating_system_id = request.image_provider_metadata.get("id")
 		if not isinstance(operating_system_id, str):
-			raise ScalewayError(f"Server Image {request.server_image} has no Scaleway operating system ID")
+			raise ScalewayError(
+				f"Metal Server Image {request.server_image} has no Scaleway operating system ID"
+			)
 
 		configuration = {
 			"os_id": operating_system_id,

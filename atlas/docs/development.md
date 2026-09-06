@@ -23,7 +23,7 @@ The CI workflow installs Atlas, builds assets, and runs the complete app test su
 
 ## Host integration needs
 
-Atlas unit and Frappe tests do not prove provider or host integration. A full Server check needs these external resources:
+Atlas unit and Frappe tests do not prove provider or host integration. A full Metal Server check needs these external resources:
 
 - Valid provider credentials and quota.
 - A provider private network.

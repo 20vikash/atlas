@@ -9,7 +9,7 @@ API and Desk
       |
       v
 Atlas app
-  provider resources, Server records, placement, images, user actions
+  provider resources, Metal Server records, placement, images, user actions
       |
       | Metal HTTP API
       v
@@ -22,7 +22,7 @@ Firecracker, systemd, Linux network, ZFS
 
 | Owner | Mutable state |
 |---|---|
-| Atlas | Provider resources, Server records, placement requests, image records, public IPv4 intent |
+| Atlas | Provider resources, Metal Server records, placement requests, image records, public IPv4 intent |
 | Metal | Virtual machine desired state, observed state, host resources, cleanup progress |
 | systemd | Each Firecracker process |
 | Firecracker runtime | Runtime files, sockets, machine configuration, metadata, and console connections |
@@ -34,7 +34,7 @@ Atlas does not copy the Metal lifecycle state into durable DocType fields. Atlas
 ## Virtual machine creation
 
 ```text
-Atlas selects and locks a Server
+Atlas selects and locks a Metal Server
   -> Atlas commits a draft with a stable VM ID
   -> Atlas sends one idempotent create request
   -> Metal stores desired state
@@ -45,20 +45,20 @@ Atlas selects and locks a Server
 
 Atlas keeps a draft when a create result is uncertain. Atlas removes the draft only after Metal confirms that the VM is absent.
 
-## Server creation and provisioning
+## Metal Server creation and provisioning
 
 ```text
-Server.before_validate
+Metal Server.before_validate
   -> validate Atlas Settings and provider catalog records
-  -> ensure the named provider server
-  -> apply provider values to the Server document
-  -> insert the Server document
+  -> ensure the named provider host
+  -> apply provider values to the Metal Server document
+  -> insert the Metal Server document
   -> queue ServerProvisioner
 ```
 
 `ServerProvisioner` prepares provider resources, waits for root Secure Shell access, and configures the provider network. It then configures WireGuard and installs Metal. Each step stores useful progress.
 
-The insert path deletes a remote server only when the current request created it. A retry reuses the provider server by its stable Atlas identity.
+The insert path deletes a remote host only when the current request created it. A retry reuses the provider host by its stable Atlas identity.
 
 ## Capacity synchronization
 
@@ -79,7 +79,7 @@ Warm Firecracker state stays on one host. Atlas never uploads guest memory or Fi
 
 ## Failure boundaries
 
-- A provider failure affects Server creation or provider resources. It does not change Metal state.
+- A provider failure affects Metal Server creation or provider resources. It does not change Metal state.
 - An Atlas-to-Metal failure can make a request uncertain. Atlas keeps its draft or intent until a read resolves it.
 - A Metal runtime failure keeps desired state and error data for reconciliation.
 - A host resource cleanup failure keeps independent cleanup progress until all owners report success.
@@ -90,4 +90,4 @@ Warm Firecracker state stays on one host. Atlas never uploads guest memory or Fi
 
 - [Metal API contract](metal-v1-contract.md)
 - [Atlas provider contract](../atlas/docs/providers.md)
-- [Server lifecycle](../atlas/docs/server-lifecycle.md)
+- [Metal Server lifecycle](../atlas/docs/metal-server-lifecycle.md)

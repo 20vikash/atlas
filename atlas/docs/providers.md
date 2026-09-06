@@ -1,10 +1,10 @@
-# Server providers
+# Metal Server providers
 
 Atlas uses `ServerProvider` as the server provider extension point. The registry maps one stable provider type to one provider class.
 
 ## Ownership
 
-Atlas owns provider selection, credentials, catalog records, and Server documents. A provider owns remote resource operations.
+Atlas owns provider selection, credentials, catalog records, and Metal Server documents. A provider owns remote resource operations.
 
 Low-level provider components return values. They do not save Frappe documents or commit database transactions.
 
@@ -15,11 +15,11 @@ The provider contract includes these operations:
 - Validate settings and credentials.
 - Set up named provider infrastructure.
 - Return server sizes and images.
-- Ensure one named provider server.
+- Ensure one named provider host.
 - Prepare provider resources before Secure Shell access.
 - Configure the provider network after Secure Shell access.
 - Apply one explicit power action.
-- Delete one provider server safely.
+- Delete one provider host safely.
 - Return the storage pool device.
 - Optionally reserve, attach, detach, and delete public IPv4 addresses.
 
@@ -38,9 +38,9 @@ Creation uses `ServerCreateRequest` and returns `ProviderServer`. Catalog operat
 7. Add the provider option and fields to Atlas Settings.
 8. Update this guide and the related specification.
 
-Use one stable remote identity for `ensure_server`. A retry must return the same provider server.
+Use one stable remote identity for `ensure_server`. A retry must return the same provider host.
 
-Do not delete a reused provider server during local compensation. Delete only a provider server that the current request created.
+Do not delete a reused provider host during local compensation. Delete only a provider host that the current request created.
 
 ## Scaleway structure
 

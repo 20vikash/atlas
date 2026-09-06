@@ -241,7 +241,7 @@ class VirtualMachine(Document):
 		"""Attach one reserved public IPv4 address without a VM restart."""
 		frappe.only_for("System Manager")
 		self.validate_network_change()
-		if frappe.db.exists("Server IP Address", {"virtual_machine": self.name}):
+		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
 			frappe.throw(_("Detach the current public IPv4 address first."))
 
 		return VirtualMachineService(self).attach_ip_address(server_ip_address)
@@ -251,7 +251,7 @@ class VirtualMachine(Document):
 		"""Remove the public IPv4 address without a VM restart."""
 		frappe.only_for("System Manager")
 		self.validate_network_change()
-		if not frappe.db.exists("Server IP Address", {"virtual_machine": self.name}):
+		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
 			frappe.throw(_("This Virtual Machine has no public IPv4 address."))
 
 		return VirtualMachineService(self).detach_ip_address()
@@ -262,7 +262,7 @@ class VirtualMachine(Document):
 		frappe.only_for("System Manager")
 		if egress not in EGRESS_MODES:
 			frappe.throw(_("Egress must be uplink, mesh, or none."))
-		if egress != "uplink" and frappe.db.exists("Server IP Address", {"virtual_machine": self.name}):
+		if egress != "uplink" and frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
 			frappe.throw(_("Detach the public IPv4 address before you remove the internet path."))
 
 		return self.update_network(egress=egress)

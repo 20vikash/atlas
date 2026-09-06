@@ -10,7 +10,7 @@ from frappe.utils.password import get_decrypted_password
 from atlas.vm.core.metal_models import MetalVirtualMachine
 
 if TYPE_CHECKING:
-	from atlas.server.doctype.server.server import Server
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 
 class MetalClientError(Exception):
@@ -45,14 +45,14 @@ class MetalClient:
 	status_timeout_seconds = (5, 30)
 	snapshot_timeout_seconds = (5, 3600)
 
-	def __init__(self, server: "Server") -> None:
+	def __init__(self, server: "MetalServer") -> None:
 		if not server.public_ipv4_address:
 			raise MetalClientError(f"Server {server.name} has no public IPv4 address")
 		try:
 			public_ipv4_address = ipaddress.IPv4Address(server.public_ipv4_address)
 		except (ipaddress.AddressValueError, TypeError) as error:
 			raise MetalClientError(f"Server {server.name} has an invalid public IPv4 address") from error
-		token = get_decrypted_password("Server", server.name, "metald_api_token", raise_exception=False)
+		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
 		if not token:
 			raise MetalClientError(f"Server {server.name} has no Metal API token")
 

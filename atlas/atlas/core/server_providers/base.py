@@ -11,7 +11,7 @@ import frappe
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
-	from atlas.server.doctype.server.server import Server
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,17 +143,17 @@ class ServerProvider(ABC):
 		...
 
 	@abstractmethod
-	def prepare_server(self, server: "Server") -> None:
+	def prepare_server(self, server: "MetalServer") -> None:
 		"""Prepare provider resources before Atlas connects with Secure Shell."""
 		...
 
 	@abstractmethod
-	def configure_server_network(self, server: "Server") -> None:
+	def configure_server_network(self, server: "MetalServer") -> None:
 		"""Configure the provider network after Secure Shell access is ready."""
 		...
 
 	@abstractmethod
-	def get_storage_pool_device(self, server: "Server") -> str:
+	def get_storage_pool_device(self, server: "MetalServer") -> str:
 		"""Return the raw block device for the virtual machine storage pool."""
 		...
 
@@ -175,7 +175,7 @@ class ServerProvider(ABC):
 		"""Delete one public IPv4 address."""
 		raise UnsupportedProviderOperation("public IPv4 address deletion")
 
-	def attach_public_ipv4_address(self, provider_resource_id: str, server: "Server") -> None:
+	def attach_public_ipv4_address(self, provider_resource_id: str, server: "MetalServer") -> None:
 		"""Attach one public IPv4 address to a provider server."""
 		raise UnsupportedProviderOperation("public IPv4 address attachment")
 
@@ -183,6 +183,6 @@ class ServerProvider(ABC):
 		"""Detach one public IPv4 address from its provider server."""
 		raise UnsupportedProviderOperation("public IPv4 address detachment")
 
-	def promote_ssh_user(self, server: "Server", user: str) -> None:
+	def promote_ssh_user(self, server: "MetalServer", user: str) -> None:
 		"""Promote a provider Secure Shell user to root access."""
 		raise ProviderOperationError(f"The provider cannot promote Secure Shell user {user}")
