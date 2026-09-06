@@ -56,31 +56,34 @@ type NetworkConfiguration struct {
 	Egress                        Egress `json:"egress"`
 }
 
-// SameReservation reports whether two specifications reserve the same VM.
-func (spec Specification) SameReservation(other Specification) bool {
-	return spec.VirtualCPUCount == other.VirtualCPUCount &&
-		spec.MemoryMiB == other.MemoryMiB &&
-		spec.DiskMiB == other.DiskMiB &&
-		spec.Disk == other.Disk &&
-		spec.Image.Name == other.Image.Name &&
-		strings.EqualFold(spec.Image.RootfsSHA256, other.Image.RootfsSHA256) &&
-		strings.EqualFold(spec.Image.KernelSHA256, other.Image.KernelSHA256) &&
-		spec.Image.Architecture == other.Image.Architecture &&
-		spec.Network == other.Network &&
-		slices.Equal(spec.SSHKeys, other.SSHKeys) &&
-		spec.Hostname == other.Hostname &&
-		spec.UserData == other.UserData &&
-		maps.Equal(spec.Metadata, other.Metadata)
+// SameReservation reports whether two specifications reserve the same VM. It
+// ignores image transport URLs, because those are signed and rotate on their own.
+func (specification Specification) SameReservation(other Specification) bool {
+	return specification.VirtualCPUCount == other.VirtualCPUCount &&
+		specification.MemoryMiB == other.MemoryMiB &&
+		specification.DiskMiB == other.DiskMiB &&
+		specification.Disk == other.Disk &&
+		specification.Image.Name == other.Image.Name &&
+		strings.EqualFold(specification.Image.RootfsSHA256, other.Image.RootfsSHA256) &&
+		strings.EqualFold(specification.Image.KernelSHA256, other.Image.KernelSHA256) &&
+		specification.Image.Architecture == other.Image.Architecture &&
+		specification.Network == other.Network &&
+		slices.Equal(specification.SSHKeys, other.SSHKeys) &&
+		specification.Hostname == other.Hostname &&
+		specification.UserData == other.UserData &&
+		maps.Equal(specification.Metadata, other.Metadata)
 }
 
-// RefreshImageSource replaces expired image transport URLs.
-func (spec Specification) RefreshImageSource(other Specification) Specification {
-	spec.Image.RootfsURL = other.Image.RootfsURL
-	spec.Image.KernelURL = other.Image.KernelURL
-	spec.Image.CacheImage = other.Image.CacheImage
-	spec.Image.MemorySnapshot = other.Image.MemorySnapshot
-	spec.Image.MemorySnapshotConfiguration = other.Image.MemorySnapshotConfiguration
-	return spec
+// RefreshImageSource replaces expired image transport URLs and caching intent,
+// so a repeated create request can carry fresh signed URLs without changing the
+// reservation.
+func (specification Specification) RefreshImageSource(other Specification) Specification {
+	specification.Image.RootfsURL = other.Image.RootfsURL
+	specification.Image.KernelURL = other.Image.KernelURL
+	specification.Image.CacheImage = other.Image.CacheImage
+	specification.Image.MemorySnapshot = other.Image.MemorySnapshot
+	specification.Image.MemorySnapshotConfiguration = other.Image.MemorySnapshotConfiguration
+	return specification
 }
 
 // Egress controls internet reachability for a VM. It does not control mesh
@@ -121,12 +124,19 @@ func (egress Egress) HasInternetPath() bool {
 type State string
 
 const (
-	StateUnknown   State = "unknown"
-	StateCreated   State = "created"
-	StateRunning   State = "running"
-	StatePaused    State = "paused"
-	StateStopped   State = "stopped"
-	StateFailed    State = "failed"
+	// StateUnknown means the runtime has not been inspected yet.
+	StateUnknown State = "unknown"
+	// StateCreated means the guest exists but has not started.
+	StateCreated State = "created"
+	// StateRunning means the guest is executing.
+	StateRunning State = "running"
+	// StatePaused means the guest is resident but not executing.
+	StatePaused State = "paused"
+	// StateStopped means the guest is not running and can start again.
+	StateStopped State = "stopped"
+	// StateFailed means the runtime stopped the guest unexpectedly.
+	StateFailed State = "failed"
+	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"
 )
 
@@ -140,6 +150,7 @@ func IsDesiredState(state State) bool {
 	}
 }
 
+// isObservedState reports whether state is one a runtime can report.
 func isObservedState(state State) bool {
 	switch state {
 	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateDestroyed:

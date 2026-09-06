@@ -21,9 +21,10 @@ Package `vm` owns the desired state, the observed state, and VM reconciliation. 
 | `Information` | Combines safe desired data and observed data for consumers. |
 | `WarmImageBuilder` | Creates optional warm artifacts through narrow capability interfaces. |
 
-The daemon creates one `Manager`. A temporary `machine` value does not keep a record or an API client.
+The daemon creates one `Manager`. Each operation uses a private handle for one identifier. The handle keeps no VM state of its own.
 
-`ManagerConfig.FastApplyTimeout` limits an immediate metadata operation. The default value is 2 seconds.
+`ManagerConfig.FastApplyTimeout` limits an immediate metadata operation. A guest that does not answer in time is not an error: the desired record is already stored, so the next pass applies it.
+
 `ManagerConfig.UserIDRange` sets the reserved host user IDs. The manager allocates the lowest free ID and uses it as the group ID.
 
 ## Records
@@ -50,9 +51,11 @@ desired stopped   -> Stop
 desired destroyed -> Remove runtime -> Release network -> Release storage
 ```
 
-The manager stores the phase and operation ID before each host operation. A failure record has a safe message and local detail.
+The manager stores the phase and operation ID before each host operation, so an interrupted pass leaves evidence of what was in flight. A failure record has a safe message for the controller and local detail that stays on the host.
 
-Runtime, network, and storage cleanup have separate progress values. The manager removes the VM directory after all cleanup operations succeed.
+One VM reconciliation pass holds its lock for the whole pass. Operations that change desired state take the same lock, so a mutation never lands halfway through a pass.
+
+Runtime, network, and storage cleanup have separate progress values, so an interrupted destroy resumes instead of repeating released work. The manager removes the VM directory after all cleanup operations succeed.
 
 ## Runtime boundary
 

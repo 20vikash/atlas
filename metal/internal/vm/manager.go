@@ -18,6 +18,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// defaultFastApplyTimeout bounds an immediate guest update made during an API
+// request. The reconciler retries anything that does not finish in time.
+const defaultFastApplyTimeout = 2 * time.Second
+
 // ManagerConfig contains persistent VM manager settings.
 type ManagerConfig struct {
 	MachinesDirectory string
@@ -37,7 +41,7 @@ type ManagerDependencies struct {
 // Manager owns virtual machine desired state and reconciliation.
 type Manager struct {
 	configuration        ManagerConfig
-	store                *machineStore
+	store                *recordStore
 	runtime              Runtime
 	network              Network
 	storage              Storage
@@ -58,7 +62,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 		configuration.UserIDRange = DefaultUserIDRange
 	}
 	if configuration.FastApplyTimeout <= 0 {
-		configuration.FastApplyTimeout = 2 * time.Second
+		configuration.FastApplyTimeout = defaultFastApplyTimeout
 	}
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
@@ -68,7 +72,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	}
 	manager := &Manager{
 		configuration:        configuration,
-		store:                newMachineStore(configuration.MachinesDirectory),
+		store:                newRecordStore(configuration.MachinesDirectory),
 		runtime:              dependencies.Runtime,
 		network:              dependencies.Network,
 		storage:              dependencies.Storage,
@@ -83,7 +87,9 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	return manager, nil
 }
 
-// Create reserves a VM or accepts a retry of the first request.
+// Create reserves a VM or accepts a retry of the first request. A retry is
+// recognized by its fingerprint, so a repeated call refreshes image URLs instead
+// of reserving a second VM.
 func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification) (Information, error) {
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
@@ -180,6 +186,8 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 	return manager.store.listIDs()
 }
 
+// information reads both records without taking the VM lock. Callers that are
+// not already holding the lock use Information instead.
 func (manager *Manager) information(identifier string) (Information, error) {
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
@@ -192,6 +200,7 @@ func (manager *Manager) information(identifier string) (Information, error) {
 	return informationFromRecords(desired, observed, observed.Disk), nil
 }
 
+// allocateUserID returns a host user ID that no stored or temporary VM holds.
 func (manager *Manager) allocateUserID() (uint32, error) {
 	identifiers, err := manager.store.listIDs()
 	if err != nil {
@@ -211,6 +220,7 @@ func (manager *Manager) allocateUserID() (uint32, error) {
 	return manager.configuration.UserIDRange.allocate(used)
 }
 
+// publicIPv4InUse reports whether another live VM already reserves address.
 func (manager *Manager) publicIPv4InUse(identifier, address string) (bool, error) {
 	if address == "" {
 		return false, nil
@@ -234,10 +244,13 @@ func (manager *Manager) publicIPv4InUse(identifier, address string) (bool, error
 	return false, nil
 }
 
+// validIdentifier rejects an identifier that would escape the machines directory.
 func validIdentifier(identifier string) bool {
 	return identifier != "" && identifier != "." && filepath.Base(identifier) == identifier
 }
 
+// createFingerprint identifies the reservation a create request asks for. Image
+// transport URLs are excluded, because they are signed and rotate on their own.
 func createFingerprint(specification Specification) (string, error) {
 	normalized := cloneSpecification(specification)
 	normalized.Image.RootfsURL = ""
@@ -250,6 +263,8 @@ func createFingerprint(specification Specification) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
+// cloneSpecification deep copies the reference fields, so a stored record and a
+// runtime input cannot share mutable state.
 func cloneSpecification(specification Specification) Specification {
 	specification.SSHKeys = slices.Clone(specification.SSHKeys)
 	specification.Metadata = maps.Clone(specification.Metadata)
@@ -260,6 +275,8 @@ func cloneSpecification(specification Specification) Specification {
 	return specification
 }
 
+// informationFromRecords combines both records into the view consumers receive.
+// Local error detail is dropped here, so only safe data leaves the package.
 func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Information {
 	var errorDetail *PublicOperationError
 	if observed.Error != nil {
@@ -269,6 +286,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 			UpdatedAt: observed.Error.UpdatedAt,
 		}
 	}
+	// A VM with no disk usage yet reports its requested size.
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB
 	}
@@ -304,6 +322,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	}
 }
 
+// newOperationID returns a sortable correlation ID for one reconcile pass.
 func newOperationID() string {
 	identifier, err := uuid.NewV7()
 	if err != nil {

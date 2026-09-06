@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// Phase names the host operation a reconcile pass is running. It is stored in
+// the observed record, so an operator can see where a stuck pass is waiting.
 const (
 	phaseInspect        = "inspect"
 	phaseNetwork        = "network"
@@ -37,29 +39,34 @@ func (manager *Manager) Reconcile(ctx context.Context, identifier string) error 
 		return err
 	}
 	operationID := newOperationID()
+
 	if desired.State == StateDestroyed {
 		return manager.reconcileDestroyed(ctx, desired, observed, operationID)
 	}
+
 	return manager.reconcileActive(ctx, desired, observed, operationID)
 }
 
+// reconcileActive brings a live VM to its desired record: network first, then
+// restart intent, power state, specification changes, and finally disk usage.
 func (manager *Manager) reconcileActive(
 	ctx context.Context,
 	desired DesiredRecord,
 	observed ObservedRecord,
 	operationID string,
 ) error {
-	var interfaceState NetworkInterface
+	var networkInterface NetworkInterface
 	err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseNetwork, func() error {
 		var ensureError error
-		interfaceState, ensureError = manager.network.Ensure(ctx, networkRequest(desired))
+		networkInterface, ensureError = manager.network.Ensure(ctx, networkRequest(desired))
 		return ensureError
 	})
 	if err != nil {
 		return err
 	}
-	observed.NetworkInterface = interfaceState
-	machine := runtimeMachine(desired, interfaceState)
+
+	observed.NetworkInterface = networkInterface
+	machine := runtimeMachine(desired, networkInterface)
 	status, err := manager.inspect(ctx, desired.ID, machine, &observed, operationID)
 	if err != nil {
 		return err
@@ -91,14 +98,13 @@ func (manager *Manager) reconcileActive(
 	}
 
 	observed.State = status.State
-	observed.Phase = ""
-	observed.OperationID = ""
-	observed.OperationStartedAt = time.Time{}
-	observed.Error = nil
-	observed.UpdatedAt = time.Now().UTC()
+	observed.completeOperation()
+
 	return manager.store.writeObserved(desired.ID, observed)
 }
 
+// inspect reads runtime state. A failed inspect stores StateUnknown, because a
+// host that cannot be asked must not keep reporting a stale state.
 func (manager *Manager) inspect(
 	ctx context.Context,
 	identifier string,
@@ -119,6 +125,8 @@ func (manager *Manager) inspect(
 	return status, err
 }
 
+// applyRestart stops and starts a VM that carries newer restart intent. A VM
+// that is not running has nothing to restart.
 func (manager *Manager) applyRestart(
 	ctx context.Context,
 	identifier string,
@@ -142,6 +150,8 @@ func (manager *Manager) applyRestart(
 	return RuntimeStatus{State: StateRunning}, nil
 }
 
+// applyDesiredState moves the runtime to the requested power state. Reaching
+// paused from a stopped VM needs a start first.
 func (manager *Manager) applyDesiredState(
 	ctx context.Context,
 	identifier string,
@@ -179,6 +189,7 @@ func (manager *Manager) applyDesiredState(
 	return status, nil
 }
 
+// runRuntimeTransition runs one runtime call and reports the state it produces.
 func (manager *Manager) runRuntimeTransition(
 	ctx context.Context,
 	identifier string,
@@ -186,15 +197,17 @@ func (manager *Manager) runRuntimeTransition(
 	observed *ObservedRecord,
 	operationID string,
 	phase string,
-	result State,
+	resultState State,
 	operation func(context.Context, RuntimeMachine) error,
 ) (RuntimeStatus, error) {
 	err := manager.runOperation(ctx, identifier, observed, operationID, phase, func() error {
 		return operation(ctx, machine)
 	})
-	return RuntimeStatus{State: result}, err
+	return RuntimeStatus{State: resultState}, err
 }
 
+// applyDesiredSpecification applies specification changes. Disk always grows on
+// the host. A live guest is also told about its new disk and metadata.
 func (manager *Manager) applyDesiredSpecification(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -223,6 +236,9 @@ func (manager *Manager) applyDesiredSpecification(
 	return nil
 }
 
+// reconcileDestroyed releases host resources in order and records each step, so
+// an interrupted destroy resumes instead of repeating work. Records are removed
+// only after every step succeeds.
 func (manager *Manager) reconcileDestroyed(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -264,6 +280,8 @@ func (manager *Manager) reconcileDestroyed(
 	return nil
 }
 
+// runOperation stores the phase before one host operation and records failures.
+// The caller records the successful state after the operation completes.
 func (manager *Manager) runOperation(
 	ctx context.Context,
 	identifier string,
@@ -305,6 +323,7 @@ func (manager *Manager) runOperation(
 	return nil
 }
 
+// logOperationFailure reports a failed host operation with its correlation data.
 func (manager *Manager) logOperationFailure(
 	ctx context.Context,
 	identifier string,

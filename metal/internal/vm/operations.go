@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maps"
 	"slices"
-	"time"
 )
 
 // SetPowerState stores a requested power state.
@@ -156,11 +155,11 @@ func (manager *Manager) ConnectSSH(ctx context.Context, identifier string) (SSHC
 	if err != nil {
 		return nil, err
 	}
-	interfaceState, err := manager.network.Ensure(ctx, virtualMachine.networkRequest(desired))
+	networkInterface, err := manager.network.Ensure(ctx, networkRequest(desired))
 	if err != nil {
 		return nil, err
 	}
-	return manager.runtime.ConnectSSH(ctx, virtualMachine.runtimeConfiguration(desired, interfaceState))
+	return manager.runtime.ConnectSSH(ctx, runtimeMachine(desired, networkInterface))
 }
 
 // CreateSnapshot stages one machine image snapshot.
@@ -186,14 +185,11 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 	}
 	if status.State != StateRunning && status.State != StatePaused && status.State != StateStopped {
 		observed.State = status.State
-		observed.Phase = ""
-		observed.OperationID = ""
-		observed.OperationStartedAt = time.Time{}
-		observed.Error = nil
-		observed.UpdatedAt = time.Now().UTC()
+		observed.completeOperation()
 		if err := manager.store.writeObserved(identifier, observed); err != nil {
 			return StagedSnapshot{}, err
 		}
+
 		return StagedSnapshot{}, ErrConflict
 	}
 	var snapshot StagedSnapshot
@@ -217,26 +213,30 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 		return StagedSnapshot{}, err
 	}
 	observed.State = status.State
-	observed.Phase = ""
-	observed.OperationID = ""
-	observed.OperationStartedAt = time.Time{}
-	observed.Error = nil
-	observed.UpdatedAt = time.Now().UTC()
+	observed.completeOperation()
 	if err := manager.store.writeObserved(identifier, observed); err != nil {
 		return StagedSnapshot{}, err
 	}
+
 	return snapshot, nil
 }
 
+// applyMetadata pushes new guest metadata immediately and reports whether the
+// guest took it. A failure is not an error: the desired record is already
+// stored, so the next reconcile pass applies it. The short timeout keeps an
+// unreachable guest from holding up the API response.
 func (manager *Manager) applyMetadata(ctx context.Context, identifier string) (bool, error) {
 	operationContext, cancel := context.WithTimeout(ctx, manager.configuration.FastApplyTimeout)
 	defer cancel()
+
 	if err := manager.refreshMetadata(operationContext, identifier); err != nil {
 		return false, nil
 	}
+
 	return true, nil
 }
 
+// refreshMetadata sends the stored specification to the running guest.
 func (manager *Manager) refreshMetadata(ctx context.Context, identifier string) error {
 	virtualMachine := manager.newVirtualMachine(identifier)
 	unlock, err := virtualMachine.lock(ctx)
@@ -249,55 +249,50 @@ func (manager *Manager) refreshMetadata(ctx context.Context, identifier string) 
 		return err
 	}
 	operationID := newOperationID()
-	runtimeConfiguration := virtualMachine.runtimeConfiguration(desired, observed.NetworkInterface)
+	machine := runtimeMachine(desired, observed.NetworkInterface)
 	if err := manager.runOperation(ctx, identifier, &observed, operationID, phaseMetadata, func() error {
-		return manager.runtime.RefreshMetadata(ctx, runtimeConfiguration)
+		return manager.runtime.RefreshMetadata(ctx, machine)
 	}); err != nil {
 		return err
 	}
-	observed.Phase = ""
-	observed.OperationID = ""
-	observed.OperationStartedAt = time.Time{}
-	observed.Error = nil
-	observed.UpdatedAt = time.Now().UTC()
+	observed.completeOperation()
+
 	return manager.store.writeObserved(identifier, observed)
 }
 
+// mutate applies one change to the desired record and discards the changed flag.
 func (manager *Manager) mutate(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) error {
 	_, err := manager.mutateAndReport(ctx, identifier, change)
 	return err
 }
 
+// mutateAndReport applies one change under the VM lock and reports whether the
+// record changed. The generation increases only on a real change, so a repeated
+// request does not make the reconciler redo work.
 func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) (bool, error) {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
 	if err != nil {
 		return false, err
 	}
 	defer unlock()
+
 	record, err := manager.store.readDesired(identifier)
 	if err != nil {
 		return false, err
 	}
+
 	changed, err := change(&record)
 	if err != nil {
 		return false, err
 	}
-	if changed {
-		record.Generation++
-	}
 	if !changed {
 		return false, nil
 	}
+
+	record.Generation++
 	if err := manager.store.writeDesired(record); err != nil {
 		return false, err
 	}
-	return changed, nil
-}
 
-func networkRequest(record DesiredRecord) NetworkRequest {
-	return (virtualMachine{identifier: record.ID}).networkRequest(record)
-}
-
-func runtimeMachine(record DesiredRecord, interfaceState NetworkInterface) RuntimeMachine {
-	return (virtualMachine{identifier: record.ID}).runtimeConfiguration(record, interfaceState)
+	return true, nil
 }

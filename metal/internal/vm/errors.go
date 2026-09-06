@@ -17,6 +17,7 @@ type TransitionError struct {
 	ObservedState State
 }
 
+// Error names the transition that the state machine does not define.
 func (e *TransitionError) Error() string {
 	return fmt.Sprintf("vm: no transition from %s to %s", e.ObservedState, e.DesiredState)
 }

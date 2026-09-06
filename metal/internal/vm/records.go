@@ -17,7 +17,14 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
-const recordSchemaVersion = 1
+const (
+	// recordSchemaVersion is the on-disk format both records use. A record with
+	// any other version is rejected, never migrated in place.
+	recordSchemaVersion = 1
+
+	desiredFileName  = "config.json"
+	observedFileName = "status.json"
+)
 
 // DesiredRecord stores the complete desired state of one virtual machine.
 type DesiredRecord struct {
@@ -50,7 +57,8 @@ type ObservedRecord struct {
 	Disk                   DiskUsage        `json:"disk,omitempty"`
 }
 
-// OperationError stores safe and local reconciliation error details.
+// OperationError stores safe and local reconciliation error details. Message is
+// returned to the controller. LocalDetail stays on the host.
 type OperationError struct {
 	Code        string    `json:"code"`
 	Message     string    `json:"message"`
@@ -58,15 +66,30 @@ type OperationError struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-type machineStore struct {
+// completeOperation clears in-flight fields after the caller finishes an
+// operation sequence. The caller sets State first when the sequence observed one.
+func (record *ObservedRecord) completeOperation() {
+	record.Phase = ""
+	record.OperationID = ""
+	record.OperationStartedAt = time.Time{}
+	record.Error = nil
+	record.UpdatedAt = time.Now().UTC()
+}
+
+// recordStore reads and writes the two record files of every virtual machine.
+type recordStore struct {
 	directory string
 }
 
-func newMachineStore(directory string) *machineStore {
-	return &machineStore{directory: directory}
+// newRecordStore returns a store rooted at the machines directory.
+func newRecordStore(directory string) *recordStore {
+	return &recordStore{directory: directory}
 }
 
-func (store *machineStore) validateAll() error {
+// validateAll rejects a machines directory that no longer makes sense, so the
+// daemon fails at startup instead of reconciling from corrupt state. It reports
+// but never repairs, because losing desired state is worse than refusing to run.
+func (store *recordStore) validateAll() error {
 	identifiers, err := store.listIDs()
 	if err != nil {
 		return err
@@ -81,13 +104,14 @@ func (store *machineStore) validateAll() error {
 			return err
 		}
 		if observed.Generation > desired.Generation || observed.RestartGeneration > desired.RestartGeneration {
-			return fmt.Errorf("validate %s: observed generation is ahead of desired generation", store.machineDirectory(identifier))
+			return fmt.Errorf("validate %s: observed generation is ahead of desired generation", store.virtualMachineDirectory(identifier))
 		}
 	}
 	return nil
 }
 
-func (store *machineStore) listIDs() ([]string, error) {
+// listIDs returns every reserved identifier in sorted order.
+func (store *recordStore) listIDs() ([]string, error) {
 	entries, err := os.ReadDir(store.directory)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -105,7 +129,8 @@ func (store *machineStore) listIDs() ([]string, error) {
 	return identifiers, nil
 }
 
-func (store *machineStore) readDesired(identifier string) (DesiredRecord, error) {
+// readDesired reads and validates one desired record.
+func (store *recordStore) readDesired(identifier string) (DesiredRecord, error) {
 	var record DesiredRecord
 	if err := readRecord(store.desiredPath(identifier), &record); err != nil {
 		return DesiredRecord{}, err
@@ -123,7 +148,8 @@ func (store *machineStore) readDesired(identifier string) (DesiredRecord, error)
 	return record, nil
 }
 
-func (store *machineStore) readObserved(identifier string) (ObservedRecord, error) {
+// readObserved reads and validates one observed record.
+func (store *recordStore) readObserved(identifier string) (ObservedRecord, error) {
 	var record ObservedRecord
 	if err := readRecord(store.observedPath(identifier), &record); err != nil {
 		return ObservedRecord{}, err
@@ -137,32 +163,40 @@ func (store *machineStore) readObserved(identifier string) (ObservedRecord, erro
 	return record, nil
 }
 
-func (store *machineStore) writeDesired(record DesiredRecord) error {
+// writeDesired stamps the schema version and replaces the desired record.
+func (store *recordStore) writeDesired(record DesiredRecord) error {
 	record.SchemaVersion = recordSchemaVersion
 	return writeRecord(store.desiredPath(record.ID), record)
 }
 
-func (store *machineStore) writeObserved(identifier string, record ObservedRecord) error {
+// writeObserved stamps the schema version and replaces the observed record.
+func (store *recordStore) writeObserved(identifier string, record ObservedRecord) error {
 	record.SchemaVersion = recordSchemaVersion
 	return writeRecord(store.observedPath(identifier), record)
 }
 
-func (store *machineStore) remove(identifier string) error {
-	return os.RemoveAll(store.machineDirectory(identifier))
+// remove deletes every record of one virtual machine.
+func (store *recordStore) remove(identifier string) error {
+	return os.RemoveAll(store.virtualMachineDirectory(identifier))
 }
 
-func (store *machineStore) machineDirectory(identifier string) string {
+// virtualMachineDirectory is where one virtual machine keeps its records.
+func (store *recordStore) virtualMachineDirectory(identifier string) string {
 	return filepath.Join(store.directory, identifier)
 }
 
-func (store *machineStore) desiredPath(identifier string) string {
-	return filepath.Join(store.machineDirectory(identifier), "config.json")
+// desiredPath is the desired record file of one virtual machine.
+func (store *recordStore) desiredPath(identifier string) string {
+	return filepath.Join(store.virtualMachineDirectory(identifier), desiredFileName)
 }
 
-func (store *machineStore) observedPath(identifier string) string {
-	return filepath.Join(store.machineDirectory(identifier), "status.json")
+// observedPath is the observed record file of one virtual machine.
+func (store *recordStore) observedPath(identifier string) string {
+	return filepath.Join(store.virtualMachineDirectory(identifier), observedFileName)
 }
 
+// readRecord decodes one record file. Unknown fields and trailing values are
+// rejected, so a record written by a newer or broken build never loads silently.
 func readRecord(path string, value any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -182,6 +216,7 @@ func readRecord(path string, value any) error {
 	return nil
 }
 
+// rejectTrailingJSON reports a second JSON value after the record.
 func rejectTrailingJSON(decoder *json.Decoder) error {
 	var trailing any
 	err := decoder.Decode(&trailing)
@@ -194,6 +229,7 @@ func rejectTrailingJSON(decoder *json.Decoder) error {
 	return err
 }
 
+// writeRecord publishes one record with an atomic rename.
 func writeRecord(path string, value any) error {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

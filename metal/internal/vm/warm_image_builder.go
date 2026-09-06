@@ -11,7 +11,16 @@ import (
 	"time"
 )
 
-const warmImageDelay = 5 * time.Minute
+const (
+	// warmImageDelay is how long a warm VM runs before its memory is captured.
+	// The guest must finish booting and settle, or the snapshot restores into
+	// work that is still in progress.
+	warmImageDelay = 5 * time.Minute
+
+	// warmIdentifierKeyLength is how much of the warm key names the temporary VM.
+	// A fixed digest prefix keeps the identifier deterministic and bounded.
+	warmIdentifierKeyLength = 32
+)
 
 // WarmRuntime provides optional Firecracker warm-image operations.
 type WarmRuntime interface {
@@ -66,12 +75,13 @@ func (builder *WarmImageBuilder) EnsureMemorySnapshot(ctx context.Context, image
 		return err
 	}
 
-	identifier := "warm-" + key[:32]
+	identifier := "warm-" + key[:warmIdentifierKeyLength]
 	return builder.manager.RunTemporary(ctx, identifier, warmupSpecification(image, *configuration), func(machine RuntimeMachine) error {
 		return builder.capture(ctx, machine, image, *configuration, compatibility)
 	})
 }
 
+// capture waits for the guest to settle, pauses it, and promotes the snapshot.
 func (builder *WarmImageBuilder) capture(
 	ctx context.Context,
 	machine RuntimeMachine,
@@ -117,6 +127,8 @@ func WarmImageKey(image Image, configuration MemorySnapshotConfiguration, compat
 	return hex.EncodeToString(digest[:])
 }
 
+// warmupSpecification is the throwaway VM that produces a warm image. It has no
+// network, and it never asks for a warm image of its own.
 func warmupSpecification(image Image, configuration MemorySnapshotConfiguration) Specification {
 	image.MemorySnapshot = false
 	image.MemorySnapshotConfiguration = nil
@@ -129,6 +141,7 @@ func warmupSpecification(image Image, configuration MemorySnapshotConfiguration)
 	}
 }
 
+// waitForWarmImage sleeps for delay unless ctx ends first.
 func waitForWarmImage(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -141,6 +154,8 @@ func waitForWarmImage(ctx context.Context, delay time.Duration) error {
 }
 
 // RunTemporary runs an operation on a manager-owned temporary virtual machine.
+// The VM has no records on disk, and cleanup always attempts to release its
+// runtime, network, and storage. Cleanup errors are returned to the caller.
 func (manager *Manager) RunTemporary(
 	ctx context.Context,
 	identifier string,
@@ -150,34 +165,15 @@ func (manager *Manager) RunTemporary(
 	if !validIdentifier(identifier) {
 		return ErrConflict
 	}
-	manager.allocationMutex.Lock()
-	if manager.temporaryIdentifiers[identifier] {
-		manager.allocationMutex.Unlock()
-		return ErrConflict
-	}
-	if _, err := manager.store.readDesired(identifier); err == nil {
-		manager.allocationMutex.Unlock()
-		return ErrConflict
-	} else if !errors.Is(err, ErrNotFound) {
-		manager.allocationMutex.Unlock()
-		return err
-	}
-	userID, err := manager.allocateUserID()
+
+	userID, err := manager.reserveTemporary(identifier)
 	if err != nil {
-		manager.allocationMutex.Unlock()
 		return err
 	}
-	manager.temporaryUserIDs[userID] = true
-	manager.temporaryIdentifiers[identifier] = true
-	manager.allocationMutex.Unlock()
-	defer func() {
-		manager.allocationMutex.Lock()
-		delete(manager.temporaryUserIDs, userID)
-		delete(manager.temporaryIdentifiers, identifier)
-		manager.allocationMutex.Unlock()
-	}()
+	defer manager.releaseTemporary(identifier, userID)
+
 	desired := DesiredRecord{ID: identifier, UserID: userID, GroupID: userID, Specification: cloneSpecification(specification)}
-	interfaceState, err := manager.network.Ensure(ctx, networkRequest(desired))
+	networkInterface, err := manager.network.Ensure(ctx, networkRequest(desired))
 	if err != nil {
 		_ = manager.network.Release(context.WithoutCancel(ctx), NetworkReleaseRequest{
 			VirtualMachineID: identifier, UserID: userID,
@@ -185,7 +181,7 @@ func (manager *Manager) RunTemporary(
 		})
 		return fmt.Errorf("ensure temporary VM network: %w", err)
 	}
-	machine := runtimeMachine(desired, interfaceState)
+	machine := runtimeMachine(desired, networkInterface)
 	defer func() {
 		cleanupContext := context.WithoutCancel(ctx)
 		operationError = errors.Join(
@@ -202,4 +198,39 @@ func (manager *Manager) RunTemporary(
 		return fmt.Errorf("start temporary VM: %w", err)
 	}
 	return operation(machine)
+}
+
+// reserveTemporary claims an identifier and a host user ID for a temporary VM.
+// The claim is held in memory only, so it never collides with a stored record
+// and never survives a restart.
+func (manager *Manager) reserveTemporary(identifier string) (uint32, error) {
+	manager.allocationMutex.Lock()
+	defer manager.allocationMutex.Unlock()
+
+	if manager.temporaryIdentifiers[identifier] {
+		return 0, ErrConflict
+	}
+	if _, err := manager.store.readDesired(identifier); err == nil {
+		return 0, ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
+		return 0, err
+	}
+
+	userID, err := manager.allocateUserID()
+	if err != nil {
+		return 0, err
+	}
+	manager.temporaryUserIDs[userID] = true
+	manager.temporaryIdentifiers[identifier] = true
+
+	return userID, nil
+}
+
+// releaseTemporary drops the in-memory claim on an identifier and user ID.
+func (manager *Manager) releaseTemporary(identifier string, userID uint32) {
+	manager.allocationMutex.Lock()
+	defer manager.allocationMutex.Unlock()
+
+	delete(manager.temporaryUserIDs, userID)
+	delete(manager.temporaryIdentifiers, identifier)
 }
