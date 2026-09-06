@@ -41,7 +41,7 @@ type consoleBroker interface {
 // Runtime manages Firecracker virtual machines on one host.
 type Runtime struct {
 	configuration         Config
-	units                 platform.Manager
+	units                 platform.UnitManager
 	virtualMachineStorage virtualMachineStorage
 	imageStore            imageStore
 	consoleBroker         consoleBroker
@@ -55,7 +55,7 @@ const maxConcurrentSSHSessions = 32
 // NewRuntime returns a Firecracker runtime.
 func NewRuntime(
 	configuration Config,
-	units platform.Manager,
+	units platform.UnitManager,
 	virtualMachineStorage virtualMachineStorage,
 	imageStore imageStore,
 	consoleBroker consoleBroker,

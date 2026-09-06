@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestWritePublishesCompleteContent(t *testing.T) {
+func TestWriteFilePublishesCompleteContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "state.json")
 	content := []byte(`{"state":"running"}`)
 
-	if err := Write(path, content, 0o640); err != nil {
+	if err := WriteFile(path, content, 0o640); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -24,7 +24,7 @@ func TestWritePublishesCompleteContent(t *testing.T) {
 	}
 }
 
-func TestWritePublishesCompleteContentDuringConcurrentWrites(t *testing.T) {
+func TestWriteFilePublishesCompleteContentDuringConcurrentWrites(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "config.json")
 	contents := [][]byte{
@@ -37,7 +37,7 @@ func TestWritePublishesCompleteContentDuringConcurrentWrites(t *testing.T) {
 		writers.Add(1)
 		go func() {
 			defer writers.Done()
-			if err := Write(path, content, 0o640); err != nil {
+			if err := WriteFile(path, content, 0o640); err != nil {
 				t.Errorf("write: %v", err)
 			}
 		}()

@@ -233,7 +233,7 @@ func saveWireGuardPeers(path string, peers []WireGuardPeer) error {
 	}
 	data = append(data, '\n')
 
-	return platform.Write(path, data, 0o600)
+	return platform.WriteFile(path, data, 0o600)
 }
 
 // wireGuardCommands runs host network commands.

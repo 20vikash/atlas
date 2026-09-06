@@ -25,6 +25,7 @@ code. This file governs the docs.
 - No em dashes. Use a colon, or split into two sentences.
 - Spell out "virtual machine" on first mention in a file's Purpose. "VM" is fine
   after that, and in tables, diagrams, and headings.
+- Keep prose paragraphs flowing. Do not add line breaks only to wrap Markdown at an arbitrary column. Start a new line for a new paragraph, list item, or structured block.
 - Gloss a non-obvious external term, flag, or mode in one line on first use, for example a systemd job mode or a ZFS property. Do not assume the reader knows it.
 - Use binary units for every size and rate: MiB and MiB/s. Do not mix in MB, Mbps, or megabits. Name a field for its unit, such as `disk_mib` and `throughput_mibps`.
 

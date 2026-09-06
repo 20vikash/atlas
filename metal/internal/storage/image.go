@@ -233,7 +233,7 @@ func (store *ImageStore) saveImageManifest(imageReference string, manifest image
 	}
 	data = append(data, '\n')
 
-	return platform.Write(store.manifestFile(imageReference), data, 0o644)
+	return platform.WriteFile(store.manifestFile(imageReference), data, 0o644)
 }
 
 func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kernelURL, expectedDigest string) error {

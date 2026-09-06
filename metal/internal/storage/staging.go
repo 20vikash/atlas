@@ -278,5 +278,5 @@ func writeJSONFile(path string, value any, mode os.FileMode) error {
 	}
 	data = append(data, '\n')
 
-	return platform.Write(path, data, mode)
+	return platform.WriteFile(path, data, mode)
 }

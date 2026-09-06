@@ -4,65 +4,48 @@
 
 ## Purpose
 
-Package `platform` provides atomic file replacement, host command execution, and
-systemd control through D-Bus. Each virtual machine runs as the template instance
-`metal-vm@<id>.service`. metald talks to the system systemd, not the `systemctl` binary.
+Package `platform` is Metal's boundary to host files, commands, and systemd. It keeps host integration details out of domain packages.
+
+Metal talks to systemd through D-Bus. It does not call the `systemctl` command.
 
 ## Types
 
-| Type | Role |
+| Type | Responsibility |
 |---|---|
-| `Write` | Publishes one complete file with an atomic rename. |
-| `Run` and `Output` | Run host commands with useful output in errors. |
-| `Manager` | Interface: `Start`, `Stop`, `Kill`, `ResetFailed`, `Status`, `Wait`, `List`, `SetLimits`. |
-| `DBus` | The implementation. Owns one system-bus connection (`conn`). |
-| `Status` | `PID`, `ActiveState`, `SubState`. |
-| `Result` | `Code` and `Signal` from `Wait`. |
-| `Limits` | `MemoryMaxBytes`, `CPUQuotaPct`. |
+| `UnitManager` | Defines the systemd operations needed by a VM runtime. |
+| `DBus` | Implements `UnitManager` and owns the system-bus connection. |
+| `Status`, `Result`, and `Limits` | Carry systemd state across the platform boundary. |
 
-## Unit model
+## Host commands
 
-One template unit backs every VM. `Connect` opens the system bus. `Close` shuts it.
+`Run` is for commands where the caller only needs success or failure. `Output` is for commands where the caller needs stdout. Both preserve command diagnostics in errors and accept a context that can stop a running command.
 
-```text
-template:   metal-vm@.service
-per VM:     metal-vm@<id>.service        ID comes from the controller
+## Systemd units
 
-metald --D-Bus--> system systemd --> jailer --> firecracker
-```
-
-## Operations
-
-`Start` and `Stop` submit a job with mode `replace`, then wait for the job result
-on a channel. A result other than `done` is an error. The context cancels the wait.
-Mode `replace` cancels any conflicting job already queued for the unit, so a
-control command always wins.
+One template unit runs each virtual machine:
 
 ```text
-Start        StartUnit(replace) -> job "done"    => activating -> active
-Stop         StopUnit(replace)  -> job "done"    => deactivating -> inactive
-Kill(sig)    KillUnit(All, sig)                  signal to the unit's processes
-ResetFailed  clears failed                       failed -> inactive
-Status       -> {PID = MainPID, ActiveState, SubState}
-List         ListUnitsByPatterns("metal-vm@*.service") -> ids
-SetLimits    MemoryMax (bytes) and CPUQuotaPerSecUSec (pct x 10000 us), runtime
+template: metal-vm@.service
+instance: metal-vm@<id>.service
 
-Wait: poll ActiveState every 500 ms
-   active, activating -> keep waiting
-   inactive, failed   -> result:
-        ExecMainCode == 1 (CLD_EXITED) -> Result{Code = ExecMainStatus}
-        else                           -> Result{Signal = <signal name>}
+Metal --D-Bus--> systemd --> jailer --> Firecracker
 ```
 
-## State mapping
+`Connect` opens one system-bus connection and `Close` releases it. The runtime receives `UnitManager`, so it does not depend on D-Bus details.
 
-The runtime derives the VM state from `ActiveState`. `failed` maps to VM `failed`,
-`inactive` and `deactivating` map to VM `stopped`, and an active unit is queried
-over the firecracker API for `created`, `paused`, or `running`. Full mapping:
-[internal/firecracker/SPEC.md](../firecracker/SPEC.md).
+| Operation | Behavior |
+|---|---|
+| Start and stop | Submit the requested transition and wait for systemd to finish it. A replace operation makes the newest request win. |
+| Kill | Sends a signal to the unit's processes. |
+| Reset failed | Clears a failed unit. An absent unit is ignored. |
+| Status and list | Report units in terms the VM runtime can use. |
+| Wait | Waits for a unit to stop and reports an exit code or signal. |
+| Set limits | Applies the requested runtime resource limits. |
+
+The context cancels systemd waits and polling. The VM runtime maps the returned unit state to VM state; that mapping belongs in the `firecracker` package.
 
 ## Related
 
-- [docs/vm.md](../../docs/vm.md) the VM state machine that `ActiveState` feeds.
-- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) owns the unit's `ExecStart` and maps state.
-- [docs/host-layout.md](../../docs/host-layout.md) where the unit files live on disk.
+- [docs/vm.md](../../docs/vm.md) describes the VM state machine.
+- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) describes the unit's `ExecStart` and runtime state mapping.
+- [docs/host-layout.md](../../docs/host-layout.md) lists host unit files and paths.

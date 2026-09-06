@@ -15,7 +15,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// stubUnits is a platform.Manager whose unit stays active until it is stopped or
+// stubUnits is a platform.UnitManager whose unit stays active until it is stopped or
 // killed. Wait blocks while the unit is active, like the D-Bus manager does.
 // A killed unit reports "failed" until ResetFailed clears it, as systemd does.
 type stubUnits struct {
@@ -124,7 +124,7 @@ func fcSocket(t *testing.T, onRequest func()) string {
 	return sock
 }
 
-func testMachine(units platform.Manager, sock string, timeout time.Duration) *machine {
+func testMachine(units platform.UnitManager, sock string, timeout time.Duration) *machine {
 	return &machine{
 		d:           &Runtime{units: units, consoleBroker: &stubConsoleBroker{}},
 		input:       vm.RuntimeMachine{ID: "abc"},

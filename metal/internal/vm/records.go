@@ -202,7 +202,7 @@ func writeRecord(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create record directory: %w", err)
 	}
-	if err := platform.Write(path, data, 0o640); err != nil {
+	if err := platform.WriteFile(path, data, 0o640); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

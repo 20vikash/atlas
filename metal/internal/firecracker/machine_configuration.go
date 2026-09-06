@@ -98,8 +98,8 @@ func bootArguments(bootConfiguration storage.BootConfiguration, networkInterface
 func resourceLimits(specification vm.Specification) platform.Limits {
 	// A memory snapshot needs space for guest memory and its memory file.
 	return platform.Limits{
-		MemoryMaxBytes: (2*int64(specification.MemoryMiB) + 128) << 20,
-		CPUQuotaPct:    specification.VirtualCPUCount * 100,
+		MemoryMaxBytes:  (2*int64(specification.MemoryMiB) + 128) << 20,
+		CPUQuotaPercent: specification.VirtualCPUCount * 100,
 	}
 }
 

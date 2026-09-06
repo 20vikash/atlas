@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 )
 
-// Write publishes data with an atomic rename and syncs the file and directory.
-func Write(path string, data []byte, mode fs.FileMode) error {
+// WriteFile creates parent directories and publishes one complete file at path.
+// It sets mode and syncs the file and its directory before it returns.
+func WriteFile(path string, data []byte, mode fs.FileMode) error {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return fmt.Errorf("create parent directory: %w", err)
@@ -37,17 +38,21 @@ func Write(path string, data []byte, mode fs.FileMode) error {
 	if err := temporaryFile.Close(); err != nil {
 		return fmt.Errorf("close temporary file: %w", err)
 	}
+
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("publish file: %w", err)
 	}
 
+	// The rename is durable only after the parent directory entry is synced.
 	directoryFile, err := os.Open(directory)
 	if err != nil {
 		return fmt.Errorf("open parent directory: %w", err)
 	}
 	defer directoryFile.Close()
+
 	if err := directoryFile.Sync(); err != nil {
 		return fmt.Errorf("sync parent directory: %w", err)
 	}
+
 	return nil
 }

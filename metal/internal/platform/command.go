@@ -8,24 +8,27 @@ import (
 	"strings"
 )
 
-// Run executes a command and folds its combined output into the error, so a
-// failure carries the tool's own message.
+// Run executes a host command and includes its output when the command fails.
 func Run(ctx context.Context, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	command := exec.CommandContext(ctx, name, args...)
+
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(output)))
 	}
+
 	return nil
 }
 
-// Output runs a command and returns its stdout. The error carries stderr, so the
-// caller can classify the failure.
+// Output runs a host command and returns stdout. A failure includes stderr.
 func Output(ctx context.Context, name string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+
+	command := exec.CommandContext(ctx, name, args...)
+	command.Stdout, command.Stderr = &stdout, &stderr
+
+	if err := command.Run(); err != nil {
 		return "", fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(stderr.String()))
 	}
+
 	return stdout.String(), nil
 }
