@@ -53,6 +53,7 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 | Variable | Default | Meaning |
 |---|---|---|
 | `METALD_BULK_DIR` | `/tmp/metald` | Directory for the ZFS pool file. |
+| `METALD_WORKDIR` | `/tmp/metald` | Directory for runtime files, images, keys, and configuration. |
 | `METALD_POOL_SIZE` | 8 GiB to 30 GiB | ZFS pool file size. |
 | `METALD_FC_VERSION` | `v1.16.1` | Firecracker release. |
 | `METALD_POOL` | `metal` | ZFS pool name. |

@@ -85,5 +85,5 @@ for _ in $(seq 1 30); do
 	fi
 	sleep 2
 done
-echo "FAILED: could not ssh into VM $id" >&2
+echo "FAILED: could not ssh into VM $virtual_machine_id" >&2
 exit 1

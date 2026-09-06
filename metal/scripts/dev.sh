@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Keep external settings in the environment.
-WORKDIR=/tmp/metald
+WORKDIR=${METALD_WORKDIR:-/tmp/metald}
 BULK=${METALD_BULK_DIR:-$WORKDIR}
 POOL=${METALD_POOL:-metal}
 FC_VER=${METALD_FC_VERSION:-v1.16.1}
