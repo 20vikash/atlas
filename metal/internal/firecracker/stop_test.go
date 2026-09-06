@@ -126,7 +126,7 @@ func fcSocket(t *testing.T, onRequest func()) string {
 
 func testMachine(units platform.UnitManager, sock string, timeout time.Duration) *machine {
 	return &machine{
-		d:           &Runtime{units: units, serialBroker: &stubSerialBroker{}},
+		runtime:     &Runtime{units: units, serialBroker: &stubSerialBroker{}},
 		input:       vm.RuntimeMachine{ID: "abc"},
 		api:         api.New(sock),
 		stopTimeout: timeout,
@@ -169,7 +169,7 @@ func TestKillTerminates(t *testing.T) {
 	units := &stubUnits{active: true}
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	if err := m.killUnlocked(context.Background()); err != nil {
+	if err := m.kill(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stops, kills, waits := units.counts()

@@ -17,7 +17,7 @@ func (runtime *Runtime) RefreshMetadata(ctx context.Context, input vm.RuntimeMac
 	if status.State != vm.StateRunning && status.State != vm.StatePaused {
 		return nil
 	}
-	return api.New(runtime.configuration.sockPath(input.ID)).PutMMDS(ctx, metadataServiceData(
+	return api.New(runtime.configuration.socketPath(input.ID)).PutMMDS(ctx, metadataServiceData(
 		input.ID,
 		input.NetworkInterface.GuestIPAddress,
 		input.NetworkInterface.MACAddress,
@@ -25,6 +25,9 @@ func (runtime *Runtime) RefreshMetadata(ctx context.Context, input vm.RuntimeMac
 	))
 }
 
+// metadataServiceData builds the MMDS document the guest reads. Only values the
+// guest needs are included, and nothing per VM is baked into the image, so one
+// image serves every VM.
 func metadataServiceData(virtualMachineID, ipAddress, macAddress string, specification vm.Specification) map[string]any {
 	publicKeys := make(map[string]any, len(specification.SSHKeys))
 	for keyIndex, sshKey := range specification.SSHKeys {

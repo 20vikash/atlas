@@ -1,90 +1,28 @@
-// Package firecracker controls Firecracker virtual machines.
 package firecracker
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
-	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-type virtualMachineStorage interface {
-	PrepareBoot(ctx context.Context, request storage.VirtualMachineStorageRequest) (storage.BootConfiguration, error)
-	PrepareRootFileSystem(ctx context.Context, request storage.VirtualMachineStorageRequest) error
-	Release(ctx context.Context, virtualMachineID string) error
-}
-
-type imageStore interface {
-	EnsureImage(ctx context.Context, image vm.Image) error
-	WarmImage(
-		ctx context.Context,
-		image vm.Image,
-		configuration vm.MemorySnapshotConfiguration,
-		firecrackerCompatibility string,
-	) (storage.WarmImageArtifacts, bool, error)
-	RecordImageUse(imageReference string, usedAt time.Time) error
-}
-
-// serialBroker manages each VM's serial console PTY.
-type serialBroker interface {
-	Open(id string) error
-	Close(id string) error
-}
-
-// Runtime manages Firecracker virtual machines on one host.
-type Runtime struct {
-	configuration         Config
-	units                 platform.UnitManager
-	virtualMachineStorage virtualMachineStorage
-	imageStore            imageStore
-	serialBroker          serialBroker
-	sshSlots              chan struct{}
-	logger                *slog.Logger
-}
-
-// maxConcurrentSSHSessions limits host-wide SSH console sessions.
-const maxConcurrentSSHSessions = 32
-
-// NewRuntime returns a Firecracker runtime.
-func NewRuntime(
-	configuration Config,
-	units platform.UnitManager,
-	virtualMachineStorage virtualMachineStorage,
-	imageStore imageStore,
-	serialBroker serialBroker,
-	logger *slog.Logger,
-) *Runtime {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &Runtime{
-		configuration:         configuration,
-		units:                 units,
-		virtualMachineStorage: virtualMachineStorage,
-		imageStore:            imageStore,
-		serialBroker:          serialBroker,
-		sshSlots:              make(chan struct{}, maxConcurrentSSHSessions),
-		logger:                logger,
-	}
-}
-
-func (d *Runtime) prepareBoot(ctx context.Context, configuration vm.RuntimeMachine) error {
-	if err := d.prepareLaunch(ctx, configuration); err != nil {
+// prepareBoot starts a jailed Firecracker process and configures it for a cold
+// boot: machine shape, kernel, drives, network, and the metadata service.
+func (runtime *Runtime) prepareBoot(ctx context.Context, configuration vm.RuntimeMachine) error {
+	if err := runtime.prepareLaunch(ctx, configuration); err != nil {
 		return err
 	}
 
-	bootConfiguration, err := d.virtualMachineStorage.PrepareBoot(ctx, storage.VirtualMachineStorageRequest{
+	bootConfiguration, err := runtime.virtualMachineStorage.PrepareBoot(ctx, storage.VirtualMachineStorageRequest{
 		VirtualMachineID: configuration.ID,
 		ImageReference:   configuration.Specification.Image.Name,
 		Image:            configuration.Specification.Image,
-		ChrootRoot:       d.configuration.chrootRoot(configuration.ID),
+		ChrootRoot:       runtime.configuration.chrootRoot(configuration.ID),
 		UserID:           configuration.UserID,
 		GroupID:          configuration.GroupID,
 		DiskMiB:          configuration.Specification.DiskMiB,
@@ -92,10 +30,10 @@ func (d *Runtime) prepareBoot(ctx context.Context, configuration vm.RuntimeMachi
 	if err != nil {
 		return err
 	}
-	d.logger.Debug("configured Firecracker VM", "virtual_machine_id", configuration.ID, "kernel", bootConfiguration.Kernel, "cmdline", bootArguments(bootConfiguration, configuration.NetworkInterface))
+	runtime.logger.Debug("configured Firecracker VM", "virtual_machine_id", configuration.ID, "kernel", bootConfiguration.Kernel, "cmdline", bootArguments(bootConfiguration, configuration.NetworkInterface))
 	return configure(
 		ctx,
-		api.New(d.configuration.sockPath(configuration.ID)),
+		api.New(runtime.configuration.socketPath(configuration.ID)),
 		configuration.ID,
 		configuration.Specification,
 		bootConfiguration,
@@ -103,10 +41,12 @@ func (d *Runtime) prepareBoot(ctx context.Context, configuration vm.RuntimeMachi
 	)
 }
 
-func (d *Runtime) prepareLaunch(ctx context.Context, configuration vm.RuntimeMachine) error {
-	if err := d.configuration.writeJailerEnv(
+// prepareLaunch puts the jail in place and starts the unit. The console PTY is
+// opened before the unit starts, so no guest output is lost.
+func (runtime *Runtime) prepareLaunch(ctx context.Context, configuration vm.RuntimeMachine) error {
+	if err := runtime.configuration.writeJailerEnv(
 		configuration.ID,
-		d.configuration.jailerArgs(
+		runtime.configuration.jailerArgs(
 			configuration.ID,
 			configuration.UserID,
 			configuration.GroupID,
@@ -115,33 +55,38 @@ func (d *Runtime) prepareLaunch(ctx context.Context, configuration vm.RuntimeMac
 	); err != nil {
 		return err
 	}
-	if err := d.configuration.linkSocket(configuration.ID); err != nil {
+	if err := runtime.configuration.linkSocket(configuration.ID); err != nil {
 		return err
 	}
 	// Open the PTY before systemd starts the unit.
-	if err := d.serialBroker.Open(configuration.ID); err != nil {
+	if err := runtime.serialBroker.Open(configuration.ID); err != nil {
 		return err
 	}
-	if err := d.units.Start(ctx, configuration.ID); err != nil {
+	if err := runtime.units.Start(ctx, configuration.ID); err != nil {
 		return err
 	}
-	if err := d.units.SetLimits(ctx, configuration.ID, resourceLimits(configuration.Specification)); err != nil {
+	if err := runtime.units.SetLimits(ctx, configuration.ID, resourceLimits(configuration.Specification)); err != nil {
 		return err
 	}
-	if err := waitSocket(ctx, d.configuration.sockPath(configuration.ID)); err != nil {
+	if err := waitSocket(ctx, runtime.configuration.socketPath(configuration.ID)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (d *Runtime) relaunch(ctx context.Context, configuration vm.RuntimeMachine) error {
-	_ = d.units.Stop(ctx, configuration.ID)
-	_ = os.RemoveAll(filepath.Dir(d.configuration.chrootRoot(configuration.ID)))
-	return d.prepareBoot(ctx, configuration)
+// relaunch discards the previous jail and boots from a clean one. A jail is
+// never reused, because leftover state is harder to reason about than a rebuild.
+func (runtime *Runtime) relaunch(ctx context.Context, configuration vm.RuntimeMachine) error {
+	_ = runtime.units.Stop(ctx, configuration.ID)
+	_ = os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(configuration.ID)))
+	return runtime.prepareBoot(ctx, configuration)
 }
 
-func (d *Runtime) launchSnapshot(
+// launchSnapshot restores a guest from a memory snapshot instead of booting it.
+// The guest is resumed only after the metadata is replaced, so it never reads the
+// values of the VM the snapshot came from.
+func (runtime *Runtime) launchSnapshot(
 	ctx context.Context,
 	configuration vm.RuntimeMachine,
 	rootSnapshot string,
@@ -149,18 +94,18 @@ func (d *Runtime) launchSnapshot(
 	memoryFile string,
 	metadata map[string]any,
 ) error {
-	_ = d.units.Stop(ctx, configuration.ID)
-	_ = os.RemoveAll(filepath.Dir(d.configuration.chrootRoot(configuration.ID)))
+	_ = runtime.units.Stop(ctx, configuration.ID)
+	_ = os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(configuration.ID)))
 
-	if err := d.prepareLaunch(ctx, configuration); err != nil {
+	if err := runtime.prepareLaunch(ctx, configuration); err != nil {
 		return err
 	}
 
-	if err := d.virtualMachineStorage.PrepareRootFileSystem(ctx, storage.VirtualMachineStorageRequest{
+	if err := runtime.virtualMachineStorage.PrepareRootFileSystem(ctx, storage.VirtualMachineStorageRequest{
 		VirtualMachineID: configuration.ID,
 		ImageReference:   configuration.Specification.Image.Name,
 		Image:            configuration.Specification.Image,
-		ChrootRoot:       d.configuration.chrootRoot(configuration.ID),
+		ChrootRoot:       runtime.configuration.chrootRoot(configuration.ID),
 		UserID:           configuration.UserID,
 		GroupID:          configuration.GroupID,
 		DiskMiB:          configuration.Specification.DiskMiB,
@@ -169,7 +114,7 @@ func (d *Runtime) launchSnapshot(
 		return err
 	}
 
-	stage := filepath.Join(d.configuration.chrootRoot(configuration.ID), "snap")
+	stage := filepath.Join(runtime.configuration.chrootRoot(configuration.ID), "snap")
 	if err := mkdirChown(stage, configuration.UserID, configuration.GroupID); err != nil {
 		return err
 	}
@@ -192,7 +137,7 @@ func (d *Runtime) launchSnapshot(
 		return err
 	}
 
-	client := api.New(d.configuration.sockPath(configuration.ID))
+	client := api.New(runtime.configuration.socketPath(configuration.ID))
 	if err := client.LoadSnapshot(ctx, api.LoadSnapshotRequest{
 		SnapshotPath: "snap/state",
 		Memory:       api.MemoryBackend{Path: "snap/mem", Type: "File"},
@@ -202,23 +147,25 @@ func (d *Runtime) launchSnapshot(
 	}
 	if metadata != nil {
 		if err := client.PutMMDS(ctx, metadata); err != nil {
-			d.logger.Error("MMDS refresh failed", "virtual_machine_id", configuration.ID, "error", err)
+			runtime.logger.Error("MMDS refresh failed", "virtual_machine_id", configuration.ID, "error", err)
 		}
 	}
 	return client.Resume(ctx)
 }
 
-func (d *Runtime) launchWarmImage(ctx context.Context, configuration vm.RuntimeMachine, ref string) error {
+// launchWarmImage restores the warm image of this exact image and VM shape.
+// A missing or mismatched artifact reports ErrNotFound, which asks for a cold boot.
+func (runtime *Runtime) launchWarmImage(ctx context.Context, configuration vm.RuntimeMachine, imageReference string) error {
 	memorySnapshotConfiguration := configuration.Specification.Image.MemorySnapshotConfiguration
-	if memorySnapshotConfiguration == nil || configuration.Specification.Image.Name != ref {
+	if memorySnapshotConfiguration == nil || configuration.Specification.Image.Name != imageReference {
 		return vm.ErrNotFound
 	}
 
-	artifacts, found, err := d.imageStore.WarmImage(
+	artifacts, found, err := runtime.imageStore.WarmImage(
 		ctx,
 		configuration.Specification.Image,
 		*memorySnapshotConfiguration,
-		d.firecrackerCompatibility(),
+		runtime.firecrackerCompatibility(),
 	)
 	if err != nil {
 		return err
@@ -230,7 +177,7 @@ func (d *Runtime) launchWarmImage(ctx context.Context, configuration vm.RuntimeM
 	metadata := metadataServiceData(
 		configuration.ID, configuration.NetworkInterface.GuestIPAddress, configuration.NetworkInterface.MACAddress, configuration.Specification,
 	)
-	return d.launchSnapshot(
+	return runtime.launchSnapshot(
 		ctx,
 		configuration,
 		artifacts.RootSnapshot,
@@ -240,29 +187,35 @@ func (d *Runtime) launchWarmImage(ctx context.Context, configuration vm.RuntimeM
 	)
 }
 
-func (d *Runtime) firecrackerCompatibility() string {
-	information, err := os.Stat(d.configuration.FirecrackerBin)
+// firecrackerCompatibility identifies the Firecracker build. A memory snapshot
+// restores only into the build that wrote it, so the size and modification time
+// stand in for a version the binary does not report.
+func (runtime *Runtime) firecrackerCompatibility() string {
+	information, err := os.Stat(runtime.configuration.FirecrackerBin)
 	if err != nil {
-		return d.configuration.FirecrackerBin
+		return runtime.configuration.FirecrackerBin
 	}
 	return fmt.Sprintf(
 		"%s:%d:%d",
-		d.configuration.FirecrackerBin,
+		runtime.configuration.FirecrackerBin,
 		information.Size(),
 		information.ModTime().UnixNano(),
 	)
 }
 
-func (d *Runtime) hasMatchingMemorySnapshot(spec vm.Specification) bool {
-	configuration := spec.Image.MemorySnapshotConfiguration
-	return spec.Image.CacheImage &&
-		spec.Image.MemorySnapshot &&
+// hasMatchingMemorySnapshot reports whether a warm image could exist for this
+// VM. The shape must match exactly, because a snapshot fixes CPU, memory, and disk.
+func (runtime *Runtime) hasMatchingMemorySnapshot(specification vm.Specification) bool {
+	configuration := specification.Image.MemorySnapshotConfiguration
+	return specification.Image.CacheImage &&
+		specification.Image.MemorySnapshot &&
 		configuration != nil &&
-		configuration.VirtualCPUCount == spec.VirtualCPUCount &&
-		configuration.MemoryMiB == spec.MemoryMiB &&
-		configuration.DiskMiB == spec.DiskMiB
+		configuration.VirtualCPUCount == specification.VirtualCPUCount &&
+		configuration.MemoryMiB == specification.MemoryMiB &&
+		configuration.DiskMiB == specification.DiskMiB
 }
 
+// mkdirChown creates a directory the jailed process can write to.
 func mkdirChown(path string, userID, groupID uint32) error {
 	if err := os.MkdirAll(path, 0o750); err != nil {
 		return err
@@ -270,6 +223,7 @@ func mkdirChown(path string, userID, groupID uint32) error {
 	return os.Chown(path, int(userID), int(groupID))
 }
 
+// copyChown places a file inside the jail and gives it to the VM user.
 func copyChown(
 	ctx context.Context,
 	source string,

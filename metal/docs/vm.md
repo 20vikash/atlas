@@ -46,7 +46,7 @@ Warm boot loads host-local disk, state, and memory artifacts for an exact image 
 
 ## Stop escalation
 
-Metal sends Ctrl+Alt+Del and waits up to 30 seconds. It sends `SIGKILL` when the guest does not stop.
+Metal asks the guest to power off and kills it when it does not answer within a timeout: [internal/firecracker/SPEC.md](../internal/firecracker/SPEC.md).
 
 ## Cleanup
 

@@ -22,8 +22,8 @@ func TestLayout(t *testing.T) {
 		t.Errorf("chrootRoot = %q", got)
 	}
 	want := "/var/lib/metal/machines/abc/firecracker/abc/root/run/firecracker.socket"
-	if got := c.chrootSockPath("abc"); got != want {
-		t.Errorf("chrootSockPath = %q", got)
+	if got := c.chrootSocketPath("abc"); got != want {
+		t.Errorf("chrootSocketPath = %q", got)
 	}
 	if !strings.HasPrefix(c.chrootRoot("abc"), c.vmDir("abc")+"/") {
 		t.Error("the chroot is outside the VM directory")
@@ -32,10 +32,10 @@ func TestLayout(t *testing.T) {
 
 func TestSockPathFitsSunPath(t *testing.T) {
 	id := uuid.Must(uuid.NewV7()).String()
-	if got := len(DefaultConfig().sockPath(id)); got > 108 {
-		t.Errorf("sockPath is %d bytes, over the 108 byte limit", got)
+	if got := len(DefaultConfig().socketPath(id)); got > 108 {
+		t.Errorf("socketPath is %d bytes, over the 108 byte limit", got)
 	}
-	if len(DefaultConfig().chrootSockPath(id)) <= 108 {
+	if len(DefaultConfig().chrootSocketPath(id)) <= 108 {
 		t.Log("the chroot path fits today, but the link is what keeps it safe")
 	}
 }
@@ -48,11 +48,11 @@ func TestLinkSocket(t *testing.T) {
 	if err := c.linkSocket("abc"); err != nil {
 		t.Fatalf("linkSocket is not repeatable: %v", err)
 	}
-	got, err := os.Readlink(c.sockPath("abc"))
+	got, err := os.Readlink(c.socketPath("abc"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != c.chrootSockPath("abc") {
+	if got != c.chrootSocketPath("abc") {
 		t.Errorf("link points at %q", got)
 	}
 }

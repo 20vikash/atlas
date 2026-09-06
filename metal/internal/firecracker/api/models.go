@@ -36,7 +36,8 @@ type RateLimiter struct {
 	Ops       *TokenBucket `json:"ops,omitempty"`
 }
 
-// TokenBucket refills Size tokens every RefillTime milliseconds.
+// TokenBucket refills Size tokens every RefillTime milliseconds. Bandwidth
+// tokens are bytes, and operation tokens are requests.
 type TokenBucket struct {
 	Size         int64 `json:"size"`
 	OneTimeBurst int64 `json:"one_time_burst,omitempty"`
@@ -50,6 +51,7 @@ type NetworkInterface struct {
 	GuestMAC    string `json:"guest_mac,omitempty"`
 }
 
+// action is the body of a /actions request.
 type action struct {
 	ActionType string `json:"action_type"`
 }
@@ -68,11 +70,13 @@ type InstanceInfo struct {
 	State string `json:"state"`
 }
 
+// virtualMachineState is the body that pauses or resumes a guest.
 type virtualMachineState struct {
 	State string `json:"state"`
 }
 
-// CreateSnapshotRequest contains paths for a new snapshot.
+// CreateSnapshotRequest contains paths for a new snapshot. Paths are relative to
+// the jail chroot, because Firecracker resolves them inside it.
 type CreateSnapshotRequest struct {
 	SnapshotType string `json:"snapshot_type"`
 	SnapshotPath string `json:"snapshot_path"`
@@ -86,7 +90,8 @@ type MemoryBackend struct {
 	Type string `json:"backend_type"`
 }
 
-// LoadSnapshotRequest contains files for snapshot restore.
+// LoadSnapshotRequest contains files for snapshot restore. Resume false leaves
+// the guest paused, so the caller can replace its metadata before it runs.
 type LoadSnapshotRequest struct {
 	SnapshotPath string        `json:"snapshot_path"`
 	Memory       MemoryBackend `json:"mem_backend"`

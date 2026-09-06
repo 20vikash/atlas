@@ -20,4 +20,8 @@ func DefaultConfig() Config {
 	}
 }
 
-func (c Config) vmDir(id string) string { return filepath.Join(c.MachinesDir, id) }
+// vmDir holds everything one VM owns on the host, so removing it removes the
+// jail, the chroot, and the jailer environment together.
+func (configuration Config) vmDir(id string) string {
+	return filepath.Join(configuration.MachinesDir, id)
+}

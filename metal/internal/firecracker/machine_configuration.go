@@ -20,8 +20,21 @@ const (
 	metadataServiceVersion = "V2"
 	rootDriveIdentifier    = "drive0"
 	rootDrivePath          = "/rootfs.img"
+
+	// guestNetworkMask is the guest network size. Every guest is alone in its
+	// namespace, so one fixed mask serves them all.
+	guestNetworkMask = "255.255.255.0"
+
+	// memorySnapshotOverheadMiB covers Firecracker itself on top of guest memory.
+	memorySnapshotOverheadMiB = 128
+
+	// socketPollInterval is how often the jailed API socket is checked for.
+	socketPollInterval = 50 * time.Millisecond
 )
 
+// configure applies the complete boot configuration to a started Firecracker
+// process. The metadata service is configured before its data is written,
+// because Firecracker rejects data for an unconfigured service.
 func configure(
 	operationContext context.Context,
 	client *api.Client,
@@ -86,23 +99,28 @@ func configure(
 	))
 }
 
+// bootArguments appends the guest network to the image kernel arguments, so the
+// guest is addressable before any userspace network configuration runs.
 func bootArguments(bootConfiguration storage.BootConfiguration, networkInterface network.Interface) string {
 	networkArgument := fmt.Sprintf(
-		"ip=%s::%s:255.255.255.0::eth0:off",
+		"ip=%s::%s:"+guestNetworkMask+"::eth0:off",
 		networkInterface.GuestIPAddress,
 		networkInterface.GatewayIPAddress,
 	)
 	return bootConfiguration.KernelArgs + " " + networkArgument
 }
 
+// resourceLimits caps the unit. Memory is twice the guest size plus overhead,
+// because a memory snapshot holds guest memory and its memory file at once.
 func resourceLimits(specification vm.Specification) platform.Limits {
-	// A memory snapshot needs space for guest memory and its memory file.
 	return platform.Limits{
-		MemoryMaxBytes:  (2*int64(specification.MemoryMiB) + 128) << 20,
+		MemoryMaxBytes:  (2*int64(specification.MemoryMiB) + memorySnapshotOverheadMiB) << 20,
 		CPUQuotaPercent: specification.VirtualCPUCount * 100,
 	}
 }
 
+// waitSocket waits for Firecracker to create its API socket. The process is
+// started by systemd, so there is nothing to wait on except the socket.
 func waitSocket(operationContext context.Context, path string) error {
 	for {
 		if _, err := os.Stat(path); err == nil {
@@ -112,7 +130,7 @@ func waitSocket(operationContext context.Context, path string) error {
 		select {
 		case <-operationContext.Done():
 			return operationContext.Err()
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(socketPollInterval):
 		}
 	}
 }
