@@ -44,7 +44,7 @@
   "scaleway_ssh_key_id",
   "scaleway_vpc_id",
   "scaleway_private_network_id",
-  "dns_tab",
+  "proxy_tab",
   "dns_provider",
   "column_break_caqd",
   "wildcard_domain",
@@ -53,6 +53,17 @@
   "route53_dns_zone_id",
   "column_break_bbav",
   "route53_access_key_secret",
+  "letsencrypt_section",
+  "letsencrypt_email",
+  "letsencrypt_config_directory",
+  "column_break_lenc",
+  "is_letsencrypt_staging",
+  "is_wildcard_tls_auto_renew_enabled",
+  "wildcard_tls_section",
+  "wildcard_tls_certificate",
+  "wildcard_tls_private_key",
+  "column_break_wtls",
+  "wildcard_tls_expires_on",
   "storage_tab",
   "object_storage_section",
   "object_storage_bucket",
@@ -195,11 +206,6 @@
    "options": "Scaleway",
    "read_only_depends_on": "eval: doc.is_server_provider_setup_completed",
    "reqd": 1
-  },
-  {
-   "fieldname": "dns_tab",
-   "fieldtype": "Tab Break",
-   "label": "DNS"
   },
   {
    "fieldname": "dns_provider",
@@ -379,14 +385,82 @@
   {
    "fieldname": "column_break_bgjv",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "proxy_tab",
+   "fieldtype": "Tab Break",
+   "label": "Proxy"
+  },
+  {
+   "fieldname": "letsencrypt_section",
+   "fieldtype": "Section Break",
+   "label": "Let's Encrypt"
+  },
+  {
+   "description": "Let's Encrypt sends certificate expiry notices to this address.",
+   "fieldname": "letsencrypt_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email",
+   "reqd": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "description": "Holds the ACME account key. Leave blank to use the letsencrypt folder of the site.",
+   "fieldname": "letsencrypt_config_directory",
+   "fieldtype": "Data",
+   "label": "Config Directory",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "column_break_lenc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_letsencrypt_staging",
+   "fieldtype": "Check",
+   "label": "Use Staging Environment"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_wildcard_tls_auto_renew_enabled",
+   "fieldtype": "Check",
+   "label": "Auto Renew",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "wildcard_tls_section",
+   "fieldtype": "Section Break",
+   "label": "Wildcard TLS Certificate"
+  },
+  {
+   "fieldname": "wildcard_tls_certificate",
+   "fieldtype": "Password",
+   "label": "Certificate Chain"
+  },
+  {
+   "fieldname": "wildcard_tls_private_key",
+   "fieldtype": "Password",
+   "label": "Private Key"
+  },
+  {
+   "fieldname": "column_break_wtls",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "wildcard_tls_expires_on",
+   "fieldtype": "Datetime",
+   "label": "Expires On",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-05 17:28:42.151965",
- "modified_by": "test@gmail.com",
+ "modified": "2026-09-06 19:35:42.727092",
+ "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",
  "owner": "Administrator",

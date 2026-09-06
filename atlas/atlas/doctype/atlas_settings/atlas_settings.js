@@ -22,6 +22,12 @@ frappe.ui.form.on("Atlas Settings", {
 			],
 			[__("Sync server sizes"), "sync_server_sizes", frm.doc.is_setup_completed, true],
 			[__("Sync server images"), "sync_server_images", frm.doc.is_setup_completed, true],
+			[
+				__("Renew TLS certificate"),
+				"renew_wildcard_certificate",
+				frm.doc.is_dns_setup_completed,
+				true,
+			],
 		].forEach(([label, method, condition, grouped]) => {
 			if (condition) {
 				frm.add_custom_button(

@@ -11,8 +11,8 @@ The Atlas app uses Frappe to manage provider hosts, virtual machines, images, an
 ## Layout
 
 ```text
-atlas/                         Site settings, provider behavior, and host binary builds
-  core/                        Provider clients and the host binary builder
+atlas/                         Site settings, provider behavior, TLS, and host binary builds
+  core/                        Provider clients, TLS issuance, and the host binary builder
   doctype/                     Atlas Settings
 metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
@@ -38,6 +38,8 @@ Atlas exchanges WireGuard peers, desired cached images, and host capacity with `
 
 Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [the VM module SPEC](vm/SPEC.md).
 
+Atlas holds one wildcard TLS certificate for the region. A wildcard name can only be proved through DNS, so issuance uses the ACME dns-01 challenge and the configured DNS provider. See [the wildcard TLS guide](docs/wildcard-tls.md).
+
 Use [the virtual machine control-plane guide](docs/vm-control-plane.md) for request and retry boundaries. Use [the image guide](docs/images.md) for System and Machine image lifecycles. Use [Atlas operations](docs/operations.md) for fault recovery.
 
 ## Validation
@@ -54,6 +56,8 @@ See [docs/development.md](docs/development.md) for the commands to run.
 ## Ownership
 
 Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
+
+Keep certificate issuance in `atlas/core/tls/`.
 
 Keep Metal Server orchestration in `metal_server/core/`. Keep DocType controllers as lifecycle and API boundaries.
 

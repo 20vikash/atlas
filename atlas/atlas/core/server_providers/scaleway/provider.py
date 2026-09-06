@@ -285,7 +285,7 @@ class ScalewayProvider(ServerProvider):
 
 	def run_setup_script(
 		self,
-		server: "Metal Server",
+		server: MetalServer,
 		script: str,
 		*,
 		ssh_user: str = "root",

@@ -191,6 +191,7 @@ scheduler_events = {
 		],
 	},
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],
+	"daily": ["atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate"],
 }
 
 # Testing
