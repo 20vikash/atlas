@@ -10,7 +10,9 @@ Metal owns desired state, observed state, reconciliation, host resources, and cl
 2. Read the [virtual machine lifecycle](docs/vm.md).
 3. Read the [current HTTP API](docs/api.md).
 4. Read the [host layout](docs/host-layout.md).
-5. Read the [development and test guide](docs/testing.md).
+5. Read the [operations guide](docs/operations.md).
+6. Read the [development guide](docs/development.md).
+7. Read the [integration test guide](docs/testing.md).
 
 The [Metal `/v1` contract](../docs/metal-v1-contract.md) defines the controller API.
 

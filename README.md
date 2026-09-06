@@ -18,6 +18,7 @@ This is a monorepo and contains the controller (atlas), the host daemon (metal),
 
 Read the [architecture](docs/architecture.md) for ownership and system flows.
 Read the [glossary](docs/glossary.md) for stable resource and state terms.
+Use [Atlas operations](atlas/docs/operations.md) and [Metal operations](metal/docs/operations.md) during fault recovery.
 
 ## Development
 

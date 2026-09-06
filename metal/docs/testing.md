@@ -1,5 +1,7 @@
 # Integration testing
 
+Use [Metal development](development.md) for normal package checks. Use [Metal operations](operations.md) for fault recovery.
+
 Metal integration tests need a Linux host with root access, KVM, ZFS, iptables, `curl`, `jq`, and `sha256sum`.
 
 ## Prepare the host

@@ -17,9 +17,12 @@ Atlas sends desired virtual machine state to Metal. Metal owns runtime state and
 
 - [Provider contract and extension guide](docs/providers.md)
 - [Server lifecycle](docs/server-lifecycle.md)
+- [Virtual machine control plane](docs/vm-control-plane.md)
+- [Image lifecycle](docs/images.md)
+- [Atlas operations](docs/operations.md)
 - [Development and tests](docs/development.md)
 - [System architecture](../docs/architecture.md)
-- [Target Metal `/v1` contract](../docs/metal-v1-contract.md)
+- [Metal `/v1` contract](../docs/metal-v1-contract.md)
 
 ## Boundaries
 

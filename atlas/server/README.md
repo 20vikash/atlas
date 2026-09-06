@@ -31,3 +31,4 @@ The controller keeps the Desk methods and permission checks. The `server/core/` 
 Server synchronization writes separate Error Logs for Metal connection faults and invalid capacity data. Public IPv4 reconciliation logs the address, intent action, and intent version before it retries.
 
 Read the [Server lifecycle](../docs/server-lifecycle.md) for retry and failure rules.
+Use [Atlas operations](../docs/operations.md) when setup, capacity, or address intent does not converge.

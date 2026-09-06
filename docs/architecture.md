@@ -88,6 +88,6 @@ Warm Firecracker state stays on one host. Atlas never uploads guest memory or Fi
 
 ## Contracts
 
-- [Metal target API contract](metal-v1-contract.md)
+- [Metal API contract](metal-v1-contract.md)
 - [Atlas provider contract](../atlas/docs/providers.md)
 - [Server lifecycle](../atlas/docs/server-lifecycle.md)

@@ -2,6 +2,8 @@
 
 Atlas stores VM request metadata. Metal stores VM runtime state and desired state.
 
+Read the [control-plane guide](../docs/vm-control-plane.md) for ownership and retry boundaries. Read the [image guide](../docs/images.md) for image movement. Use [Atlas operations](../docs/operations.md) for fault recovery.
+
 ## Creation
 
 Atlas creates and commits a draft to reserve a stable VM name. This name is the Metal VM ID.

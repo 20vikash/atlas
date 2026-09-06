@@ -37,6 +37,8 @@ Atlas exchanges WireGuard peers, desired cached images, and host capacity with `
 
 Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [VM operations](vm/README.md).
 
+Use [the virtual machine control-plane guide](docs/vm-control-plane.md) for request and retry boundaries. Use [the image guide](docs/images.md) for System and Machine image lifecycles. Use [Atlas operations](docs/operations.md) for fault recovery.
+
 ## Host binaries
 
 Atlas builds `metald` and the Atlas WG Mesh CLI after installation and migration. A build occurs only when its source changes.

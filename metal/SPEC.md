@@ -55,6 +55,8 @@ Concept overviews:
 - [`docs/storage.md`](docs/storage.md) ZFS disks, images, and local artifacts.
 - [`docs/networking.md`](docs/networking.md) VM namespaces, public IPv4, and WireGuard peers.
 - [`docs/snapshots.md`](docs/snapshots.md) image staging and local warm artifacts.
+- [`docs/operations.md`](docs/operations.md) safe fault checks and recovery.
+- [`docs/development.md`](docs/development.md) local development and validation.
 
 References:
 

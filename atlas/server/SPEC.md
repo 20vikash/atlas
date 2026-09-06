@@ -30,6 +30,8 @@ Capacity synchronization logs transport and response faults separately. Server I
 
 ```sh
 ruff check atlas
-bench --site TEST_SITE run-tests --module atlas.server.doctype.server.test_server
-bench --site TEST_SITE run-tests --module atlas.server.core.test_provisioning
+pilot --site TEST_SITE run-tests --module atlas.server.doctype.server.test_server
+pilot --site TEST_SITE run-tests --module atlas.server.core.test_provisioning
+pilot --site TEST_SITE run-tests --module atlas.server.doctype.server_ip_address.test_server_ip_address
+pilot --site TEST_SITE run-tests --module atlas.server.doctype.server_usage.test_server_usage
 ```
