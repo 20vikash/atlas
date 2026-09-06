@@ -1,15 +1,28 @@
 package storage
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
+func TestSnapshotStoreShutdownRejectsNewUploads(t *testing.T) {
+	store := NewStores(t.Context(), "test", filepath.Join(t.TempDir(), "images"), nil).Snapshots
+	shutdownContext, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	if err := store.Shutdown(shutdownContext); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if err := store.StartUpload(t.Context(), "snapshot-1", SnapshotUploadRequest{}); err == nil {
+		t.Fatal("upload started after shutdown")
+	}
+}
+
 func TestPruneStagedSnapshotsRechecksActivityAfterLockWait(t *testing.T) {
 	imagesDirectory := filepath.Join(t.TempDir(), "images")
-	store := NewStores("test", imagesDirectory).Snapshots
+	store := NewStores(t.Context(), "test", imagesDirectory, nil).Snapshots
 	now := time.Now().UTC()
 	metadata := stagedSnapshotMetadata{
 		ID:                     "snapshot-1",
@@ -47,7 +60,7 @@ func TestPruneStagedSnapshotsRechecksActivityAfterLockWait(t *testing.T) {
 }
 
 func TestUploadStatusReportsPersistedState(t *testing.T) {
-	store := NewStores("test", filepath.Join(t.TempDir(), "images")).Snapshots
+	store := NewStores(t.Context(), "test", filepath.Join(t.TempDir(), "images"), nil).Snapshots
 
 	if _, err := store.UploadStatus(t.Context(), "missing"); err != ErrNotFound {
 		t.Fatalf("missing snapshot: got %v, want ErrNotFound", err)

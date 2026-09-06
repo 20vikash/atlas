@@ -12,51 +12,33 @@ import (
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/console"
+	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 type fakeVM struct {
-	info    vm.Info
-	started bool
+	info vm.Information
 }
 
-func (f *fakeVM) ID() string { return f.info.ID }
-func (f *fakeVM) Start(context.Context) error {
-	f.started = true
-	f.info.State = vm.StateRunning
-	return nil
-}
-func (f *fakeVM) Stop(context.Context) error                  { f.info.State = vm.StateStopped; return nil }
-func (f *fakeVM) Destroy(context.Context) error               { return nil }
-func (f *fakeVM) Wait(context.Context) (vm.ExitStatus, error) { return vm.ExitStatus{}, nil }
-func (f *fakeVM) Info(context.Context) (vm.Info, error)       { return f.info, nil }
-func (f *fakeVM) Pause(context.Context) error                 { f.info.State = vm.StatePaused; return nil }
-func (f *fakeVM) Resume(context.Context) error                { f.info.State = vm.StateRunning; return nil }
-func (f *fakeVM) ResizeDisk(_ context.Context, diskMiB int) error {
-	if diskMiB < f.info.DiskMiB {
-		return vm.ErrConflict
-	}
-	f.info.DiskMiB = diskMiB
-	return nil
-}
-
-type fakeVirtualMachineDriver struct {
+type fakeVirtualMachineManager struct {
 	virtualMachines map[string]*fakeVM
 	listError       error
+	services        *fakeRuntimeServices
+	deferMetadata   bool
 }
 
-func (driver *fakeVirtualMachineDriver) Create(_ context.Context, id string, specification vm.Spec) (vm.VM, error) {
-	if existing, found := driver.virtualMachines[id]; found {
-		return existing, nil
+func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification) (vm.Information, error) {
+	if existing, found := manager.virtualMachines[id]; found {
+		return existing.info, nil
 	}
 
-	virtualMachine := &fakeVM{info: vm.Info{
+	virtualMachine := &fakeVM{info: vm.Information{
 		ID:                            id,
 		State:                         vm.StateUnknown,
 		DesiredState:                  vm.StateRunning,
-		VCPUs:                         specification.VCPUs,
+		VirtualCPUCount:               specification.VirtualCPUCount,
 		MemoryMiB:                     specification.MemoryMiB,
 		DiskMiB:                       specification.DiskMiB,
 		Image:                         specification.Image,
@@ -67,90 +49,105 @@ func (driver *fakeVirtualMachineDriver) Create(_ context.Context, id string, spe
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
+		DesiredGeneration:             1,
 	}}
-	driver.virtualMachines[id] = virtualMachine
+	manager.virtualMachines[id] = virtualMachine
 
-	return virtualMachine, nil
+	return virtualMachine.info, nil
 }
 
-func (driver *fakeVirtualMachineDriver) Load(_ context.Context, id string) (vm.VM, error) {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) Information(_ context.Context, id string) (vm.Information, error) {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
-		return nil, vm.ErrNotFound
+		return vm.Information{}, vm.ErrNotFound
 	}
 
-	return virtualMachine, nil
+	return virtualMachine.info, nil
 }
 
-func (driver *fakeVirtualMachineDriver) List(context.Context) ([]vm.VM, error) {
-	if driver.listError != nil {
-		return nil, driver.listError
+func (manager *fakeVirtualMachineManager) List(context.Context) ([]vm.Information, error) {
+	if manager.listError != nil {
+		return nil, manager.listError
 	}
 
-	virtualMachines := make([]vm.VM, 0, len(driver.virtualMachines))
-	for _, virtualMachine := range driver.virtualMachines {
-		virtualMachines = append(virtualMachines, virtualMachine)
+	virtualMachines := make([]vm.Information, 0, len(manager.virtualMachines))
+	for _, virtualMachine := range manager.virtualMachines {
+		virtualMachines = append(virtualMachines, virtualMachine.info)
 	}
 
 	return virtualMachines, nil
 }
 
-func (driver *fakeVirtualMachineDriver) SetDesiredState(_ context.Context, id string, state vm.State) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) SetPowerState(_ context.Context, id string, state vm.State) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
 
 	virtualMachine.info.DesiredState = state
+	virtualMachine.info.DesiredGeneration++
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) ReplaceSSHKeys(
+func (manager *fakeVirtualMachineManager) ReplaceSSHKeys(
 	_ context.Context,
 	id string,
 	sshKeys []string,
-) error {
-	virtualMachine, found := driver.virtualMachines[id]
+) (bool, error) {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
-		return vm.ErrNotFound
+		return false, vm.ErrNotFound
 	}
 	virtualMachine.info.SSHKeys = append([]string(nil), sshKeys...)
-	return nil
+	virtualMachine.info.DesiredGeneration++
+	return !manager.deferMetadata, nil
 }
 
-func (driver *fakeVirtualMachineDriver) ReplaceMetadata(
+func (manager *fakeVirtualMachineManager) ReplaceMetadata(
 	_ context.Context,
 	id string,
 	metadata map[string]string,
-) error {
-	virtualMachine, found := driver.virtualMachines[id]
+) (bool, error) {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
-		return vm.ErrNotFound
+		return false, vm.ErrNotFound
 	}
 	virtualMachine.info.Metadata = maps.Clone(metadata)
-	return nil
+	virtualMachine.info.DesiredGeneration++
+	return !manager.deferMetadata, nil
 }
 
-func (driver *fakeVirtualMachineDriver) UpdateNetwork(_ context.Context, id string, update vm.NetworkUpdate) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) SetNetwork(_ context.Context, id string, configuration vm.NetworkConfiguration) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
-	virtualMachine.info.Egress = update.Egress
-	virtualMachine.info.PublicIPv4 = update.PublicIPv4
-	virtualMachine.info.PrivateNetworkThroughputMiBps = update.PrivateNetworkThroughputMiBps
-	virtualMachine.info.PublicNetworkThroughputMiBps = update.PublicNetworkThroughputMiBps
+	virtualMachine.info.Egress = configuration.Egress
+	virtualMachine.info.PublicIPv4 = configuration.PublicIPv4
+	virtualMachine.info.WireGuardMeshIPv6 = configuration.WireGuardMeshIPv6
+	virtualMachine.info.PrivateNetworkThroughputMiBps = configuration.PrivateNetworkThroughputMiBps
+	virtualMachine.info.PublicNetworkThroughputMiBps = configuration.PublicNetworkThroughputMiBps
+	virtualMachine.info.DesiredGeneration++
 	return nil
 }
 
-func (virtualMachine *fakeVM) UpdateDiskLimits(_ context.Context, limits vm.Disk) error {
+func (manager *fakeVirtualMachineManager) SetDisk(_ context.Context, id string, diskMiB int, limits vm.Disk) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
 	virtualMachine.info.DiskThroughputMiBps = limits.ThroughputMiBps
 	virtualMachine.info.DiskIOPS = limits.IOPS
+	if diskMiB < virtualMachine.info.DiskMiB {
+		return vm.ErrConflict
+	}
+	virtualMachine.info.DiskMiB = diskMiB
+	virtualMachine.info.DesiredGeneration++
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) ResizeCompute(_ context.Context, id string, virtualCPUCount, memoryMiB int) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id string, virtualCPUCount, memoryMiB int) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -158,14 +155,15 @@ func (driver *fakeVirtualMachineDriver) ResizeCompute(_ context.Context, id stri
 		return vm.ErrConflict
 	}
 
-	virtualMachine.info.VCPUs = virtualCPUCount
+	virtualMachine.info.VirtualCPUCount = virtualCPUCount
 	virtualMachine.info.MemoryMiB = memoryMiB
 	virtualMachine.info.DesiredState = vm.StateRunning
+	virtualMachine.info.DesiredGeneration++
 	return nil
 }
 
-func (driver *fakeVirtualMachineDriver) Reboot(_ context.Context, id string) error {
-	virtualMachine, found := driver.virtualMachines[id]
+func (manager *fakeVirtualMachineManager) RequestRestart(_ context.Context, id string) error {
+	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
@@ -173,11 +171,35 @@ func (driver *fakeVirtualMachineDriver) Reboot(_ context.Context, id string) err
 		return vm.ErrConflict
 	}
 	virtualMachine.info.State = vm.StateRunning
+	virtualMachine.info.DesiredRestartGeneration++
 	return nil
 }
 
+func (manager *fakeVirtualMachineManager) Delete(_ context.Context, id string) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
+	virtualMachine.info.DesiredState = vm.StateDestroyed
+	virtualMachine.info.DesiredGeneration++
+	return nil
+}
+
+func (manager *fakeVirtualMachineManager) CreateSnapshot(_ context.Context, id string) (vm.StagedSnapshot, error) {
+	snapshotID := "01900000-0000-7000-8000-000000000001"
+	manager.services.snapshots[snapshotID] = storage.StagedSnapshot{
+		ID: snapshotID, SourceVirtualMachineID: id,
+		Rootfs: storage.ArtifactSize{SizeBytes: 1024}, Kernel: storage.ArtifactSize{SizeBytes: 512},
+	}
+	return vm.StagedSnapshot{ID: snapshotID, SourceVirtualMachineID: id, RootfsSizeBytes: 1024, KernelSizeBytes: 512}, nil
+}
+
+func (manager *fakeVirtualMachineManager) ConnectSSH(context.Context, string) (vm.SSHConnection, error) {
+	return nil, errors.New("ssh unavailable")
+}
+
 type fakeRuntimeServices struct {
-	policies   []vm.ImageRef
+	policies   []vm.Image
 	privileged []string
 	snapshots  map[string]storage.StagedSnapshot
 }
@@ -235,8 +257,8 @@ func (services *fakeRuntimeServices) DeleteSnapshot(_ context.Context, snapshotI
 	return nil
 }
 
-func (services *fakeRuntimeServices) SetImagePolicies(_ context.Context, images []vm.ImageRef) error {
-	services.policies = append([]vm.ImageRef(nil), images...)
+func (services *fakeRuntimeServices) SetImagePolicies(_ context.Context, images []vm.Image) error {
+	services.policies = append([]vm.Image(nil), images...)
 	return nil
 }
 
@@ -262,33 +284,38 @@ const (
 
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
-	return newServer(t, &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}})
+	return newServer(t, &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}})
 }
 
-func newServer(t *testing.T, virtualMachineDriver vm.Driver) http.Handler {
+func newServer(t *testing.T, virtualMachineManager VirtualMachineManager) http.Handler {
 	t.Helper()
-	return newServerWithServices(t, virtualMachineDriver, newFakeRuntimeServices(), &fakeWireGuardManager{})
+	return newServerWithServices(t, virtualMachineManager, newFakeRuntimeServices(), &fakeWireGuardManager{})
 }
 
 func newServerWithServices(
 	t *testing.T,
-	virtualMachineDriver vm.Driver,
+	virtualMachineManager VirtualMachineManager,
 	services *fakeRuntimeServices,
 	wireGuardManager *fakeWireGuardManager,
 ) http.Handler {
 	t.Helper()
 
+	if manager, ok := virtualMachineManager.(*fakeVirtualMachineManager); ok {
+		manager.services = services
+	}
+	hostService, err := host.NewService(host.Dependencies{
+		Mesh: services, WireGuard: wireGuardManager, Images: services,
+		VirtualMachines: virtualMachineManager, Storage: fakeCapacityProvider{}, Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
-		VirtualMachineDriver: virtualMachineDriver,
-		SnapshotCreator:      services,
-		SnapshotStore:        services,
-		ImagePolicyStore:     services,
-		WakeReconciler:       func() {},
-		WireGuardManager:     wireGuardManager,
-		Mesh:                 services,
-		Storage:              fakeCapacityProvider{},
-		ConsoleBroker:        stubConsoleBroker{},
-		SSHConnector:         stubSSHConnector{},
+		VirtualMachineManager: virtualMachineManager,
+		SnapshotStore:         services,
+		WakeReconciler:        func() {},
+		HostService:           hostService,
+		SerialBroker:          stubSerialBroker{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -297,83 +324,106 @@ func newServerWithServices(
 	return server
 }
 
-type stubSSHConnector struct{}
+func TestCorrelationHeadersAreGeneratedAndPreserveSafeValues(t *testing.T) {
+	server := newTestServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request.Header.Set("X-Request-ID", "request-123")
+	request.Header.Set("X-Operation-ID", "operation-456")
+	recorder := httptest.NewRecorder()
 
-func (stubSSHConnector) DialSSH(context.Context, string) (vm.SSHConn, error) {
-	return nil, errors.New("ssh unavailable")
+	server.ServeHTTP(recorder, request)
+
+	if got := recorder.Header().Get("X-Request-ID"); got != "request-123" {
+		t.Fatalf("request ID: got %q", got)
+	}
+	if got := recorder.Header().Get("X-Operation-ID"); got != "operation-456" {
+		t.Fatalf("operation ID: got %q", got)
+	}
 }
 
-type stubConsoleBroker struct{}
+type stubSerialBroker struct{}
 
-func (stubConsoleBroker) Attach(context.Context, string, io.ReadWriter, <-chan console.Winsize) error {
+func (stubSerialBroker) Attach(context.Context, string, io.ReadWriter, <-chan console.Winsize) error {
 	return console.ErrConsoleNotFound
 }
 
 const (
-	validCreateRequest = `{"vcpus":1,"memory_mib":512,"disk_mib":1024,"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink"}}`
+	validCreateRequest = `{"compute":{"virtual_cpu_count":1,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink"},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
 	validSSHKey        = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA user@example"
 )
 
 func TestReplaceSSHKeysReturnsUpdatedVirtualMachine(t *testing.T) {
 	server := newTestServer(t)
-	do(t, server, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
 	body := `{"ssh_keys":["` + validSSHKey + `"]}`
-	recorder := do(t, server, http.MethodPut, "/vms/vm1/ssh-keys", body, http.StatusOK)
+	recorder := do(t, server, http.MethodPut, "/v1/vms/vm1/ssh-keys", body, http.StatusOK)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.SSHKeys) != 1 || response.SSHKeys[0] != validSSHKey {
-		t.Fatalf("ssh keys = %v", response.SSHKeys)
+	if len(response.Desired.Guest.SSHKeys) != 1 || response.Desired.Guest.SSHKeys[0] != validSSHKey {
+		t.Fatalf("ssh keys = %v", response.Desired.Guest.SSHKeys)
 	}
 
-	recorder = do(t, server, http.MethodGet, "/vms/vm1", "", http.StatusOK)
+	recorder = do(t, server, http.MethodGet, "/v1/vms/vm1", "", http.StatusOK)
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.SSHKeys) != 1 || response.SSHKeys[0] != validSSHKey {
-		t.Fatalf("info ssh keys = %v", response.SSHKeys)
+	if len(response.Desired.Guest.SSHKeys) != 1 || response.Desired.Guest.SSHKeys[0] != validSSHKey {
+		t.Fatalf("info ssh keys = %v", response.Desired.Guest.SSHKeys)
 	}
 }
 
 func TestReplaceSSHKeysRejectsMissingAndDuplicateLists(t *testing.T) {
 	server := newTestServer(t)
-	do(t, server, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	do(t, server, http.MethodPut, "/vms/vm1/ssh-keys", `{}`, http.StatusBadRequest)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/ssh-keys", `{}`, http.StatusBadRequest)
 	body := `{"ssh_keys":["` + validSSHKey + `","` + validSSHKey + `"]}`
-	do(t, server, http.MethodPut, "/vms/vm1/ssh-keys", body, http.StatusBadRequest)
-	do(t, server, http.MethodPut, "/vms/vm1/ssh-keys", `{"ssh_keys":[]}`, http.StatusOK)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/ssh-keys", body, http.StatusBadRequest)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/ssh-keys", `{"ssh_keys":[]}`, http.StatusOK)
 }
 
 func TestReplaceMetadataReturnsUpdatedVirtualMachine(t *testing.T) {
 	server := newTestServer(t)
-	do(t, server, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
 	body := `{"metadata":{"env":"prod","team":"platform"}}`
-	recorder := do(t, server, http.MethodPut, "/vms/vm1/metadata", body, http.StatusOK)
+	recorder := do(t, server, http.MethodPut, "/v1/vms/vm1/metadata", body, http.StatusOK)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Metadata["env"] != "prod" || response.Metadata["team"] != "platform" {
-		t.Fatalf("metadata = %v", response.Metadata)
+	if response.Desired.Guest.Metadata["env"] != "prod" || response.Desired.Guest.Metadata["team"] != "platform" {
+		t.Fatalf("metadata = %v", response.Desired.Guest.Metadata)
 	}
 }
 
 func TestReplaceMetadataRejectsEmptyKeyAndAllowsClearing(t *testing.T) {
 	server := newTestServer(t)
-	do(t, server, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	do(t, server, http.MethodPut, "/vms/vm1/metadata", `{"metadata":{"":"value"}}`, http.StatusBadRequest)
-	do(t, server, http.MethodPut, "/vms/vm1/metadata", `{"metadata":{}}`, http.StatusOK)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/metadata", `{"metadata":{"":"value"}}`, http.StatusBadRequest)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/metadata", `{"metadata":{}}`, http.StatusOK)
+}
+
+func TestImmediateMetadataUpdateReturnsAcceptedWhenReconciliationMustContinue(t *testing.T) {
+	manager := &fakeVirtualMachineManager{
+		virtualMachines: map[string]*fakeVM{},
+		deferMetadata:   true,
+	}
+	server := newServer(t, manager)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	do(t, server, http.MethodPut, "/v1/vms/vm1/metadata", `{"metadata":{"env":"prod"}}`, http.StatusAccepted)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/ssh-keys", `{"ssh_keys":[]}`, http.StatusAccepted)
 }
 
 func TestCreateIsIdempotentAndReturnsAccepted(t *testing.T) {
 	srv := newTestServer(t)
-	recorder := do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
 	var got virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
@@ -382,14 +432,14 @@ func TestCreateIsIdempotentAndReturnsAccepted(t *testing.T) {
 	if got.ID != "vm1" {
 		t.Errorf("id = %q, want vm1", got.ID)
 	}
-	if got.State != "unknown" || got.DesiredState != "running" {
-		t.Errorf("state/desired = %q/%q, want unknown/running", got.State, got.DesiredState)
+	if got.Observed.State != "unknown" || got.Desired.State != "running" {
+		t.Errorf("state/desired = %q/%q, want unknown/running", got.Observed.State, got.Desired.State)
 	}
-	if got.Image.Ref != "ubuntu" || got.Image.Architecture != "amd64" {
-		t.Fatalf("image = %+v", got.Image)
+	if got.Desired.Image.Ref != "ubuntu" || got.Desired.Image.Architecture != "amd64" {
+		t.Fatalf("image = %+v", got.Desired.Image)
 	}
-	if got.Image.Rootfs.SHA256 != strings.Repeat("a", 64) || got.Image.Kernel.SHA256 != strings.Repeat("a", 64) {
-		t.Fatalf("image artifacts = %+v", got.Image)
+	if got.Desired.Image.Rootfs.SHA256 != strings.Repeat("a", 64) || got.Desired.Image.Kernel.SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("image artifacts = %+v", got.Desired.Image)
 	}
 
 	var response map[string]any
@@ -402,23 +452,53 @@ func TestCreateIsIdempotentAndReturnsAccepted(t *testing.T) {
 	if _, found := response["pid"]; found {
 		t.Fatal("response contains Firecracker PID")
 	}
+	for _, field := range []string{"state", "desired_state", "vcpus", "memory_mib", "disk", "network", "user_data"} {
+		if _, found := response[field]; found {
+			t.Fatalf("response contains old or private top-level field %q", field)
+		}
+	}
+	if strings.Contains(recorder.Body.String(), "signature=secret") {
+		t.Fatal("response contains a signed image URL")
+	}
 
-	getRecorder := do(t, srv, http.MethodGet, "/vms/vm1", "", http.StatusOK)
+	getRecorder := do(t, srv, http.MethodGet, "/v1/vms/vm1", "", http.StatusOK)
 	if err := json.Unmarshal(getRecorder.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Network.MAC != "06:00:00:00:00:01" {
-		t.Fatalf("network MAC = %q", got.Network.MAC)
+	if got.Observed.Network.MAC != "06:00:00:00:00:01" {
+		t.Fatalf("network MAC = %q", got.Observed.Network.MAC)
 	}
 }
 
+func TestListReturnsAnArrayOfNestedResources(t *testing.T) {
+	server := newTestServer(t)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	recorder := do(t, server, http.MethodGet, "/v1/vms", "", http.StatusOK)
+
+	var response []virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response) != 1 || response[0].Desired.Compute.VirtualCPUCount != 1 {
+		t.Fatalf("virtual machine list = %+v", response)
+	}
+}
+
+func TestMutationRequestsRejectUnknownAndTrailingJSON(t *testing.T) {
+	server := newTestServer(t)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped","unknown":true}`, http.StatusBadRequest)
+	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped"}{}`, http.StatusBadRequest)
+}
+
 func TestCreateRejectsLongID(t *testing.T) {
-	id := strings.Repeat("a", maxResourceIDLength+1)
-	do(t, newTestServer(t), http.MethodPut, "/vms/"+id, validCreateRequest, http.StatusBadRequest)
+	id := strings.Repeat("a", maximumResourceIDLength+1)
+	do(t, newTestServer(t), http.MethodPut, "/v1/vms/"+id, validCreateRequest, http.StatusBadRequest)
 }
 
 func TestGetUnknownIs404(t *testing.T) {
-	recorder := do(t, newTestServer(t), http.MethodGet, "/vms/nope", "", http.StatusNotFound)
+	recorder := do(t, newTestServer(t), http.MethodGet, "/v1/vms/nope", "", http.StatusNotFound)
 	var response errorResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
@@ -429,11 +509,11 @@ func TestGetUnknownIs404(t *testing.T) {
 }
 
 func TestInternalErrorDoesNotLeakDetails(t *testing.T) {
-	driver := &fakeVirtualMachineDriver{
+	driver := &fakeVirtualMachineManager{
 		virtualMachines: map[string]*fakeVM{},
 		listError:       errors.New("download https://images.example/rootfs?signature=secret failed"),
 	}
-	recorder := do(t, newServer(t, driver), http.MethodGet, "/vms", "", http.StatusInternalServerError)
+	recorder := do(t, newServer(t, driver), http.MethodGet, "/v1/vms", "", http.StatusInternalServerError)
 	if strings.Contains(recorder.Body.String(), "secret") || strings.Contains(recorder.Body.String(), "images.example") {
 		t.Fatalf("response leaked internal details: %s", recorder.Body.String())
 	}
@@ -444,6 +524,9 @@ func TestInternalErrorDoesNotLeakDetails(t *testing.T) {
 	if response.Error.Code != "internal_error" {
 		t.Errorf("error code = %q, want internal_error", response.Error.Code)
 	}
+	if !response.Error.Retryable {
+		t.Fatal("internal error must be retryable")
+	}
 }
 
 func TestCreateRejectsInvalidNetwork(t *testing.T) {
@@ -452,23 +535,23 @@ func TestCreateRejectsInvalidNetwork(t *testing.T) {
 	invalidEgress := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"egress":"server"`, 1)
 	negativePrivateThroughput := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"private_network_throughput_mibps":-1,"egress":"host"`, 1)
 	negativePublicThroughput := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"public_network_throughput_mibps":-1,"egress":"host"`, 1)
-	do(t, srv, http.MethodPut, "/vms/vm1", invalidAddress, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/vms/vm1", invalidEgress, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/vms/vm1", negativePrivateThroughput, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/vms/vm1", negativePublicThroughput, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", invalidAddress, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", invalidEgress, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", negativePrivateThroughput, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", negativePublicThroughput, http.StatusBadRequest)
 }
 
 func TestCreateReturnsNetworkThroughput(t *testing.T) {
 	srv := newTestServer(t)
 	body := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"egress":"uplink"`, 1)
-	recorder := do(t, srv, http.MethodPut, "/vms/vm1", body, http.StatusAccepted)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Network.PrivateNetworkThroughputMiBps != 100 || response.Network.PublicNetworkThroughputMiBps != 50 {
-		t.Fatalf("network throughput = %+v", response.Network)
+	if response.Desired.Network.PrivateNetworkThroughputMiBps != 100 || response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
+		t.Fatalf("network throughput = %+v", response.Desired.Network)
 	}
 }
 
@@ -479,7 +562,7 @@ func TestCreateRejectsPublicIPv4WithoutUplink(t *testing.T) {
 	for _, egress := range []string{"mesh", "none"} {
 		body := strings.Replace(validCreateRequest, `"egress":"uplink"`,
 			`"public_ipv4":"203.0.113.10","egress":"`+egress+`"`, 1)
-		do(t, srv, http.MethodPut, "/vms/vm1", body, http.StatusBadRequest)
+		do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusBadRequest)
 	}
 }
 
@@ -489,108 +572,114 @@ func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 	srv := newTestServer(t)
 	body := strings.Replace(validCreateRequest, `"egress":"uplink"`,
 		`"public_network_throughput_mibps":50,"egress":"mesh"`, 1)
-	recorder := do(t, srv, http.MethodPut, "/vms/vm1", body, http.StatusAccepted)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Network.PublicNetworkThroughputMiBps != 50 {
-		t.Fatalf("public throughput = %+v", response.Network)
+	if response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
+		t.Fatalf("public throughput = %+v", response.Desired.Network)
 	}
 }
 
-func TestUpdateNetworkAppliesLiveSettings(t *testing.T) {
+func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	body := `{"egress":"uplink","public_ipv4":"203.0.113.10","private_network_throughput_mibps":100,"public_network_throughput_mibps":50}`
-	recorder := do(t, srv, http.MethodPut, "/vms/vm1/network", body, http.StatusOK)
+	body := `{"egress":"uplink","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"public_network_throughput_mibps":50}`
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/network", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Network.Egress != string(vm.EgressUplink) || response.Network.PublicIPv4 != "203.0.113.10" {
-		t.Fatalf("network = %+v", response.Network)
+	if response.Desired.Network.Egress != string(vm.EgressUplink) || response.Desired.Network.PublicIPv4 != "203.0.113.10" {
+		t.Fatalf("network = %+v", response.Desired.Network)
 	}
-	if response.Network.PrivateNetworkThroughputMiBps != 100 || response.Network.PublicNetworkThroughputMiBps != 50 {
-		t.Fatalf("network throughput = %+v", response.Network)
+	if response.Desired.Network.PrivateNetworkThroughputMiBps != 100 || response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
+		t.Fatalf("network throughput = %+v", response.Desired.Network)
 	}
 }
 
-func TestUpdateNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
+func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	recorder := do(t, srv, http.MethodPut, "/vms/vm1/network",
-		`{"egress":"mesh","private_network_throughput_mibps":100}`, http.StatusOK)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
+		`{"egress":"mesh","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100}`, http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Network.Egress != string(vm.EgressMesh) {
-		t.Fatalf("egress = %q, want %q", response.Network.Egress, vm.EgressMesh)
+	if response.Desired.Network.Egress != string(vm.EgressMesh) {
+		t.Fatalf("egress = %q, want %q", response.Desired.Network.Egress, vm.EgressMesh)
 	}
 
-	do(t, srv, http.MethodPut, "/vms/vm1/network",
-		`{"egress":"mesh","public_ipv4":"203.0.113.10"}`, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
+		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1"}`, http.StatusBadRequest)
 
 	// Atlas resends every mutable setting, so a stored public limit must not
 	// block a change to a mode that cannot apply it.
-	do(t, srv, http.MethodPut, "/vms/vm1/network",
-		`{"egress":"none","public_network_throughput_mibps":50}`, http.StatusOK)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
+		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50}`, http.StatusAccepted)
 }
 
-func TestUpdateDiskLimitsAppliesAndRejects(t *testing.T) {
+func TestSetDiskAppliesCompleteSpecificationAndRejectsInvalidLimits(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	recorder := do(t, srv, http.MethodPut, "/vms/vm1/disk", `{"throughput_mibps":50,"iops":2000}`, http.StatusOK)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":1024,"throughput_mibps":50,"iops":2000}`, http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Disk.ThroughputMiBps != 50 || response.Disk.IOPS != 2000 {
-		t.Fatalf("disk = %+v", response.Disk)
+	if response.Desired.Disk.ThroughputMiBps != 50 || response.Desired.Disk.IOPS != 2000 {
+		t.Fatalf("disk = %+v", response.Desired.Disk)
 	}
 
-	do(t, srv, http.MethodPut, "/vms/vm1/disk", `{"throughput_mibps":-1}`, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/vms/vm1/disk", `{"iops":-1}`, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":1024,"throughput_mibps":-1}`, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":1024,"iops":-1}`, http.StatusBadRequest)
 }
 
-func TestResizeDiskGrows(t *testing.T) {
+func TestSetDiskGrows(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
-	rec := do(t, srv, http.MethodPost, "/vms/vm1/resize/disk", `{"disk_mib":2048}`, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	rec := do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":1500,"throughput_mibps":0,"iops":0}`, http.StatusAccepted)
 	var got virtualMachineResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Disk.SizeMiB != 2048 {
-		t.Fatalf("disk size = %d, want 2048", got.Disk.SizeMiB)
+	if got.Desired.Disk.SizeMiB != 1500 {
+		t.Fatalf("disk size = %d, want 1500", got.Desired.Disk.SizeMiB)
 	}
 }
 
-func TestResizeShrinkIs409(t *testing.T) {
+func TestSetDiskRejectsInsufficientCapacity(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPost, "/vms/vm1/resize/disk", `{"disk_mib":512}`, http.StatusConflict)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":2048,"throughput_mibps":0,"iops":0}`, http.StatusConflict)
 }
 
-func TestResizeComputeNeedsStoppedVM(t *testing.T) {
+func TestSetDiskRejectsShrink(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPost, "/vms/vm1/resize/compute", `{"vcpus":1,"memory_mib":256}`, http.StatusConflict)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":512,"throughput_mibps":0,"iops":0}`, http.StatusConflict)
 }
 
-func TestResizeComputeRequiresBothValues(t *testing.T) {
+func TestSetComputeNeedsStoppedVM(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPost, "/vms/vm1/resize/compute", `{"vcpus":1}`, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":1,"memory_mib":256}`, http.StatusConflict)
 }
 
-func TestResizeComputeChecksOnlyAdditionalCapacity(t *testing.T) {
+func TestSetComputeRequiresBothValues(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":1}`, http.StatusBadRequest)
+}
+
+func TestSetComputeChecksOnlyAdditionalCapacity(t *testing.T) {
 	if needsMoreThanAvailable(1024, 512, 512) {
 		t.Fatal("exact memory growth capacity was rejected")
 	}
@@ -602,13 +691,32 @@ func TestResizeComputeChecksOnlyAdditionalCapacity(t *testing.T) {
 	}
 }
 
-func TestResizeComputeUpdatesStoppedVM(t *testing.T) {
-	driver := &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}}
+func TestPublicAPIErrorMapsUploadAndShutdownErrors(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "invalid upload", err: storage.ErrInvalidUpload, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "shutdown", err: storage.ErrShuttingDown, status: http.StatusServiceUnavailable, code: "unavailable"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			apiError := publicAPIError(testCase.err)
+			if apiError.status != testCase.status || apiError.code != testCase.code {
+				t.Fatalf("api error = %d/%q, want %d/%q", apiError.status, apiError.code, testCase.status, testCase.code)
+			}
+		})
+	}
+}
+
+func TestSetComputeUpdatesStoppedVM(t *testing.T) {
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	srv := newServer(t, driver)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 	driver.virtualMachines["vm1"].info.State = vm.StateStopped
 
-	do(t, srv, http.MethodPost, "/vms/vm1/resize/compute", `{"vcpus":1,"memory_mib":256}`, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":1,"memory_mib":256}`, http.StatusAccepted)
 
 	m := driver.virtualMachines["vm1"]
 	if m.info.MemoryMiB != 256 {
@@ -633,7 +741,7 @@ func TestNewRequiresAuthenticationHash(t *testing.T) {
 func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 	wireGuardManager := &fakeWireGuardManager{}
 	services := newFakeRuntimeServices()
-	driver := &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}}
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	server := newServerWithServices(t, driver, services, wireGuardManager)
 
 	request := `{
@@ -647,7 +755,7 @@ func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 		}],
 		"privileged_vm_addresses":["fdaa:1:0:0::1"]
 	}`
-	recorder := do(t, server, http.MethodPost, "/sync", request, http.StatusOK)
+	recorder := do(t, server, http.MethodPost, "/v1/sync", request, http.StatusOK)
 	if len(services.privileged) != 1 || services.privileged[0] != "fdaa:1:0:0::1" {
 		t.Fatalf("privileged addresses = %+v", services.privileged)
 	}
@@ -670,11 +778,11 @@ func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 // A missing collection would read as an empty set and clear host state.
 func TestSyncRequiresControllerCollections(t *testing.T) {
 	server := newTestServer(t)
-	do(t, server, http.MethodPost, "/sync", `{}`, http.StatusBadRequest)
-	do(t, server, http.MethodPost, "/sync", `{"wireguard_peers":[]}`, http.StatusBadRequest)
-	do(t, server, http.MethodPost, "/sync", `{"wireguard_peers":[],"images":[]}`, http.StatusBadRequest)
+	do(t, server, http.MethodPost, "/v1/sync", `{}`, http.StatusBadRequest)
+	do(t, server, http.MethodPost, "/v1/sync", `{"wireguard_peers":[]}`, http.StatusBadRequest)
+	do(t, server, http.MethodPost, "/v1/sync", `{"wireguard_peers":[],"images":[]}`, http.StatusBadRequest)
 	do(
-		t, server, http.MethodPost, "/sync",
+		t, server, http.MethodPost, "/v1/sync",
 		`{"wireguard_peers":[],"images":[],"privileged_vm_addresses":[]}`,
 		http.StatusOK,
 	)
@@ -692,9 +800,38 @@ func TestDocsSkipAuthentication(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/vms", nil))
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/vms", nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("/vms without a token = %d, want 401", rec.Code)
+		t.Fatalf("/v1/vms without a token = %d, want 401", rec.Code)
+	}
+}
+
+func TestOpenAPIDocumentContainsOnlyTheVersionedControllerContract(t *testing.T) {
+	server := newTestServer(t)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/docs/swagger.json", nil))
+
+	var document struct {
+		Paths map[string]map[string]struct {
+			Security []map[string][]string `json:"security"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := document.Paths["/v1/vms/{id}/power"]; !found {
+		t.Fatal("OpenAPI document does not contain the versioned power route")
+	}
+	for _, path := range []string{"/vms", "/sync", "/snapshots/{id}"} {
+		if _, found := document.Paths[path]; found {
+			t.Fatalf("OpenAPI document contains unversioned route %q", path)
+		}
+	}
+	if len(document.Paths["/health"]["get"].Security) != 0 {
+		t.Fatal("OpenAPI health route requires authentication")
+	}
+	if len(document.Paths["/v1/vms"]["get"].Security) == 0 {
+		t.Fatal("OpenAPI virtual machine route has no authentication")
 	}
 }
 
@@ -718,10 +855,10 @@ func do(t *testing.T, srv http.Handler, method, path, body string, want int) *ht
 
 func TestCreateAndDeleteImageStagingSnapshot(t *testing.T) {
 	services := newFakeRuntimeServices()
-	driver := &fakeVirtualMachineDriver{virtualMachines: map[string]*fakeVM{}}
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	server := newServerWithServices(t, driver, services, &fakeWireGuardManager{})
 
-	recorder := do(t, server, http.MethodPost, "/vms/vm1/snapshots", "", http.StatusCreated)
+	recorder := do(t, server, http.MethodPost, "/v1/vms/vm1/snapshots", "", http.StatusCreated)
 	var response snapshotCreatedResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
@@ -730,28 +867,67 @@ func TestCreateAndDeleteImageStagingSnapshot(t *testing.T) {
 		t.Fatalf("snapshot response = %+v", response)
 	}
 
-	do(t, server, http.MethodDelete, "/snapshots/01900000-0000-7000-8000-000000000001", "", http.StatusNoContent)
-	do(t, server, http.MethodDelete, "/snapshots/01900000-0000-7000-8000-000000000001", "", http.StatusNoContent)
+	do(t, server, http.MethodDelete, "/v1/snapshots/01900000-0000-7000-8000-000000000001", "", http.StatusNoContent)
+	do(t, server, http.MethodDelete, "/v1/snapshots/01900000-0000-7000-8000-000000000001", "", http.StatusNoContent)
 }
 
 func TestPauseResumeRecordDesired(t *testing.T) {
 	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	rec := do(t, srv, http.MethodPost, "/vms/vm1/actions/pause", "", http.StatusAccepted)
+	rec := do(t, srv, http.MethodPut, "/v1/vms/vm1/power", `{"state":"paused"}`, http.StatusAccepted)
 	var got virtualMachineResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.DesiredState != "paused" {
-		t.Errorf("desired = %q, want paused", got.DesiredState)
+	if got.Desired.State != "paused" {
+		t.Errorf("desired = %q, want paused", got.Desired.State)
 	}
-	rec = do(t, srv, http.MethodPost, "/vms/vm1/actions/resume", "", http.StatusAccepted)
+	rec = do(t, srv, http.MethodPut, "/v1/vms/vm1/power", `{"state":"running"}`, http.StatusAccepted)
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.DesiredState != "running" {
-		t.Errorf("desired = %q, want running", got.DesiredState)
+	if got.Desired.State != "running" {
+		t.Errorf("desired = %q, want running", got.Desired.State)
+	}
+}
+
+func TestRestartAndDeleteReturnUpdatedResources(t *testing.T) {
+	server := newTestServer(t)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	recorder := do(t, server, http.MethodPost, "/v1/vms/vm1/restart", "", http.StatusAccepted)
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Desired.RestartGeneration != 1 {
+		t.Fatalf("restart generation = %d, want 1", response.Desired.RestartGeneration)
+	}
+
+	recorder = do(t, server, http.MethodDelete, "/v1/vms/vm1", "", http.StatusAccepted)
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Desired.State != string(vm.StateDestroyed) {
+		t.Fatalf("desired state = %q, want destroyed", response.Desired.State)
+	}
+}
+
+func TestUnversionedControllerRoutesAreNotAvailable(t *testing.T) {
+	server := newTestServer(t)
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/sync"},
+		{http.MethodGet, "/vms"},
+		{http.MethodPut, "/vms/vm1"},
+		{http.MethodPost, "/vms/vm1/actions/start"},
+		{http.MethodPost, "/vms/vm1/resize/disk"},
+		{http.MethodGet, "/snapshots/snapshot-1"},
+	} {
+		do(t, server, request.method, request.path, "", http.StatusNotFound)
 	}
 }
 
@@ -762,11 +938,11 @@ func TestRemovedSnapshotAndImageRoutesReturnNotFound(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/images"},
-		{http.MethodGet, "/vms/vm1/snapshots"},
-		{http.MethodPost, "/vms/vm1/snapshots/snapshot-1/restore"},
+		{http.MethodGet, "/v1/vms/vm1/snapshots"},
+		{http.MethodPost, "/v1/vms/vm1/snapshots/snapshot-1/restore"},
 	} {
 		expectedStatus := http.StatusNotFound
-		if request.path == "/vms/vm1/snapshots" {
+		if request.path == "/v1/vms/vm1/snapshots" {
 			expectedStatus = http.StatusMethodNotAllowed
 		}
 		do(t, server, request.method, request.path, "", expectedStatus)

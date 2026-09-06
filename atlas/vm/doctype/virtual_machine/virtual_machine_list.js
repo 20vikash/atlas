@@ -85,7 +85,7 @@ function showCreateVirtualMachineDialog() {
 				fieldname: "server_ip_address",
 				fieldtype: "Link",
 				label: __("Public IPv4"),
-				options: "Server IP Address",
+				options: "Metal Server IP Address",
 				depends_on: 'eval:doc.egress == "uplink"',
 				filters: { status: "Allocated" },
 			},

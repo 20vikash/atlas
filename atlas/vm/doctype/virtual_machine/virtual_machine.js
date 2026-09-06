@@ -407,8 +407,8 @@ function showAttachIPAddressDialog(frm) {
 		{
 			fieldname: "server_ip_address",
 			fieldtype: "Link",
-			label: __("Server IP Address"),
-			options: "Server IP Address",
+			label: __("Metal Server IP Address"),
+			options: "Metal Server IP Address",
 			reqd: 1,
 			filters: { status: "Allocated" },
 		},

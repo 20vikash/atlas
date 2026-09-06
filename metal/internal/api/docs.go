@@ -2,7 +2,6 @@ package api
 
 import (
 	_ "embed"
-	"encoding/json"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -14,22 +13,7 @@ import (
 //go:embed swagger.json
 var specification []byte
 
-// securedSpecification requires bearer authentication.
-var securedSpecification = withBearerSecurity(specification)
-
-func withBearerSecurity(specification []byte) []byte {
-	var document map[string]any
-	if err := json.Unmarshal(specification, &document); err != nil {
-		panic(err)
-	}
-	document["security"] = []map[string][]string{{"BearerAuth": {}}}
-	secured, err := json.Marshal(document)
-	if err != nil {
-		panic(err)
-	}
-	return secured
-}
-
+// docsPage renders the embedded specification with a browser API reference.
 const docsPage = `<!doctype html>
 <html lang="en">
 	<head>
@@ -52,10 +36,12 @@ const docsPage = `<!doctype html>
 </html>
 `
 
+// showDocumentation serves the API reference page.
 func (s *Server) showDocumentation(c echo.Context) error {
 	return c.HTML(http.StatusOK, docsPage)
 }
 
+// getOpenAPISpecification serves the embedded OpenAPI document.
 func (s *Server) getOpenAPISpecification(c echo.Context) error {
-	return c.JSONBlob(http.StatusOK, securedSpecification)
+	return c.JSONBlob(http.StatusOK, specification)
 }

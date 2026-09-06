@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
-	"github.com/frappe/atlas/metal/internal/systemd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// stubUnits is a systemd.Manager whose unit stays active until it is stopped or
+// stubUnits is a platform.UnitManager whose unit stays active until it is stopped or
 // killed. Wait blocks while the unit is active, like the D-Bus manager does.
 // A killed unit reports "failed" until ResetFailed clears it, as systemd does.
 type stubUnits struct {
@@ -26,6 +26,11 @@ type stubUnits struct {
 	kills  int
 	waits  int
 }
+
+type stubSerialBroker struct{}
+
+func (*stubSerialBroker) Open(string) error  { return nil }
+func (*stubSerialBroker) Close(string) error { return nil }
 
 func (s *stubUnits) shutdown() {
 	s.mu.Lock()
@@ -59,19 +64,19 @@ func (s *stubUnits) ResetFailed(context.Context, string) error {
 	return nil
 }
 
-func (s *stubUnits) Status(context.Context, string) (systemd.Status, error) {
+func (s *stubUnits) Status(context.Context, string) (platform.Status, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
 	case s.failed:
-		return systemd.Status{ActiveState: "failed"}, nil
+		return platform.Status{ActiveState: "failed"}, nil
 	case s.active:
-		return systemd.Status{ActiveState: "active"}, nil
+		return platform.Status{ActiveState: "active"}, nil
 	}
-	return systemd.Status{ActiveState: "inactive"}, nil
+	return platform.Status{ActiveState: "inactive"}, nil
 }
 
-func (s *stubUnits) Wait(ctx context.Context, _ string) (systemd.Result, error) {
+func (s *stubUnits) Wait(ctx context.Context, _ string) (platform.Result, error) {
 	s.mu.Lock()
 	s.waits++
 	s.mu.Unlock()
@@ -80,18 +85,18 @@ func (s *stubUnits) Wait(ctx context.Context, _ string) (systemd.Result, error) 
 		up := s.active
 		s.mu.Unlock()
 		if !up {
-			return systemd.Result{}, nil
+			return platform.Result{}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return systemd.Result{}, ctx.Err()
+			return platform.Result{}, ctx.Err()
 		case <-time.After(time.Millisecond):
 		}
 	}
 }
 
-func (s *stubUnits) List(context.Context) ([]string, error)                  { return nil, nil }
-func (s *stubUnits) SetLimits(context.Context, string, systemd.Limits) error { return nil }
+func (s *stubUnits) List(context.Context) ([]string, error)                   { return nil, nil }
+func (s *stubUnits) SetLimits(context.Context, string, platform.Limits) error { return nil }
 
 func (s *stubUnits) counts() (stops, kills, waits int) {
 	s.mu.Lock()
@@ -119,10 +124,10 @@ func fcSocket(t *testing.T, onRequest func()) string {
 	return sock
 }
 
-func testMachine(units systemd.Manager, sock string, timeout time.Duration) *machine {
+func testMachine(units platform.UnitManager, sock string, timeout time.Duration) *machine {
 	return &machine{
-		d:           &Driver{units: units, consoleBroker: &stubConsoleBroker{}},
-		cfg:         vmConfig{ID: "abc", Sock: sock},
+		runtime:     &Runtime{units: units, serialBroker: &stubSerialBroker{}},
+		input:       vm.RuntimeMachine{ID: "abc"},
 		api:         api.New(sock),
 		stopTimeout: timeout,
 	}
@@ -164,7 +169,7 @@ func TestKillTerminates(t *testing.T) {
 	units := &stubUnits{active: true}
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	if err := m.killUnlocked(context.Background()); err != nil {
+	if err := m.kill(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stops, kills, waits := units.counts()
@@ -186,25 +191,25 @@ func TestStopClearsTheFailedUnitState(t *testing.T) {
 	if err := m.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	st, err := units.Status(context.Background(), m.cfg.ID)
+	st, err := units.Status(context.Background(), m.input.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.state(context.Background(), st); got != vm.StateStopped {
+	if got, stateError := m.state(context.Background(), st); stateError != nil || got != vm.StateStopped {
 		t.Errorf("state = %q, want %q", got, vm.StateStopped)
 	}
 }
 
-func TestActiveVMWithUnreadableStateReportsUnknown(t *testing.T) {
+func TestActiveVMWithUnreadableStateReturnsError(t *testing.T) {
 	units := &stubUnits{active: true}
 	machine := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	status, err := units.Status(context.Background(), machine.cfg.ID)
+	status, err := units.Status(context.Background(), machine.input.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := machine.state(context.Background(), status); got != vm.StateUnknown {
-		t.Errorf("state = %q, want %q", got, vm.StateUnknown)
+	if got, stateError := machine.state(context.Background(), status); stateError == nil || got != vm.StateUnknown {
+		t.Errorf("state = %q, error = %v", got, stateError)
 	}
 }
 
@@ -212,11 +217,11 @@ func TestCrashedVMReportsFailed(t *testing.T) {
 	units := &stubUnits{failed: true}
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	st, err := units.Status(context.Background(), m.cfg.ID)
+	st, err := units.Status(context.Background(), m.input.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := m.state(context.Background(), st); got != vm.StateFailed {
+	if got, stateError := m.state(context.Background(), st); stateError != nil || got != vm.StateFailed {
 		t.Errorf("state = %q, want %q", got, vm.StateFailed)
 	}
 }

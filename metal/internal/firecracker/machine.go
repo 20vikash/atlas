@@ -2,52 +2,85 @@ package firecracker
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
-	"os"
 	"syscall"
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
-	"github.com/frappe/atlas/metal/internal/network"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+// defaultStopTimeout is how long a guest has to shut itself down after
+// Ctrl+Alt+Del before it is killed.
 const defaultStopTimeout = 30 * time.Second
 
+// machine binds a runtime to one VM for the length of an operation. State comes
+// from two places: systemd owns whether the process runs, and Firecracker owns
+// what the guest is doing inside it.
 type machine struct {
-	d           *Driver
-	cfg         vmConfig
+	runtime     *Runtime
+	input       vm.RuntimeMachine
 	api         *api.Client
 	stopTimeout time.Duration
 }
 
-func (d *Driver) newMachine(vc vmConfig) *machine {
+// newMachine returns a handle for one VM.
+func (runtime *Runtime) newMachine(input vm.RuntimeMachine) *machine {
 	return &machine{
-		d:           d,
-		cfg:         vc,
-		api:         api.New(vc.Sock),
+		runtime:     runtime,
+		input:       input,
+		api:         api.New(runtime.configuration.socketPath(input.ID)),
 		stopTimeout: defaultStopTimeout,
 	}
 }
 
-func (m *machine) ID() string { return m.cfg.ID }
-
-// Start boots a virtual machine.
-func (m *machine) Start(ctx context.Context) error {
-	unlock, err := m.d.operationLocks.lock(ctx, m.cfg.ID)
+// status reports the VM state from the unit and the guest.
+func (m *machine) status(ctx context.Context) (vm.State, error) {
+	unitStatus, err := m.runtime.units.Status(ctx, m.input.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer unlock()
 
-	return m.startUnlocked(ctx)
+	return m.state(ctx, unitStatus)
 }
 
-func (m *machine) startUnlocked(ctx context.Context) error {
-	if m.d.hasMatchingMemorySnapshot(m.cfg.Spec) {
-		err := m.d.launchWarmImage(ctx, m.cfg, m.cfg.Spec.Image.Name)
+// state maps a unit state to a VM state. Only an active unit has a guest worth
+// asking, so the other unit states answer on their own.
+func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, error) {
+	switch status.ActiveState {
+	case "failed":
+		return vm.StateFailed, nil
+	case "inactive", "deactivating":
+		return vm.StateStopped, nil
+	case "active":
+	default:
+		return vm.StateUnknown, nil
+	}
+
+	instance, err := m.api.InstanceInfo(ctx)
+	if err != nil {
+		return vm.StateUnknown, fmt.Errorf("inspect Firecracker instance: %w", err)
+	}
+
+	switch instance.State {
+	case "Not started":
+		return vm.StateCreated, nil
+	case "Running":
+		return vm.StateRunning, nil
+	case "Paused":
+		return vm.StatePaused, nil
+	default:
+		return vm.StateUnknown, nil
+	}
+}
+
+// Start boots a VM. It tries the warm image first and falls back to a cold boot,
+// because warm boot is an optimization and cold boot is the reliable path. A
+// failed warm boot releases the disk it prepared before starting again.
+func (m *machine) Start(ctx context.Context) error {
+	if m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
+		err := m.runtime.launchWarmImage(ctx, m.input, m.input.Specification.Image.Name)
 		if err == nil {
 			m.recordImageUse()
 			return nil
@@ -55,159 +88,113 @@ func (m *machine) startUnlocked(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		log.Printf("firecracker: warm boot for vm %s failed, use cold boot: %v", m.cfg.ID, err)
-		if err := m.d.virtualMachineStorage.Release(ctx, m.cfg.ID); err != nil {
+
+		m.runtime.logger.Warn("warm boot failed, using cold boot", "virtual_machine_id", m.input.ID, "error", err)
+		if err := m.runtime.virtualMachineStorage.Release(ctx, m.input.ID); err != nil {
 			return err
 		}
 	}
 
-	if err := m.d.relaunch(ctx, m.cfg); err != nil {
+	if err := m.runtime.relaunch(ctx, m.input); err != nil {
 		return err
 	}
 	if err := m.api.InstanceStart(ctx); err != nil {
 		return err
 	}
 	m.recordImageUse()
+
 	return nil
 }
 
-func (m *machine) recordImageUse() {
-	if err := m.d.imageStore.RecordImageUse(m.cfg.Spec.Image.Name, time.Now()); err != nil {
-		log.Printf("firecracker: record image use for vm %s: %v", m.cfg.ID, err)
-	}
-}
-
-// Stop shuts down the guest or kills it after the timeout.
+// Stop shuts the guest down and clears the unit failure the exit records.
 func (m *machine) Stop(ctx context.Context) error {
-	unlock, err := m.d.operationLocks.lock(ctx, m.cfg.ID)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	return m.stopUnlocked(ctx)
-}
-
-func (m *machine) stopUnlocked(ctx context.Context) error {
 	if err := m.shutdownGuest(ctx); err != nil {
 		return err
 	}
-	if _, err := m.d.units.Wait(ctx, m.cfg.ID); err != nil {
+	if _, err := m.runtime.units.Wait(ctx, m.input.ID); err != nil {
 		return err
 	}
-	_ = m.d.consoleBroker.Close(m.cfg.ID)
+	_ = m.runtime.serialBroker.Close(m.input.ID)
 
-	// Clear the failed state after an intentional process stop.
-	return m.d.units.ResetFailed(ctx, m.cfg.ID)
+	// An intentional stop leaves the unit failed, because the process was killed.
+	return m.runtime.units.ResetFailed(ctx, m.input.ID)
 }
 
-func (m *machine) killUnlocked(ctx context.Context) error {
-	if err := m.d.units.Kill(ctx, m.cfg.ID, syscall.SIGKILL); err != nil {
+// Pause halts the guest virtual CPUs.
+func (m *machine) Pause(ctx context.Context) error {
+	state, err := m.status(ctx)
+	if err != nil {
 		return err
 	}
-	if _, err := m.d.units.Wait(ctx, m.cfg.ID); err != nil {
-		return err
+	if state != vm.StateRunning {
+		return vm.ErrConflict
 	}
-	_ = m.d.consoleBroker.Close(m.cfg.ID)
-	return m.d.units.ResetFailed(ctx, m.cfg.ID)
+
+	return m.api.Pause(ctx)
 }
 
+// Resume returns a paused guest to the running state.
+func (m *machine) Resume(ctx context.Context) error {
+	state, err := m.status(ctx)
+	if err != nil {
+		return err
+	}
+	if state != vm.StatePaused {
+		return vm.ErrConflict
+	}
+
+	return m.api.Resume(ctx)
+}
+
+// kill stops a VM without giving the guest a chance to shut down.
+func (m *machine) kill(ctx context.Context) error {
+	if err := m.runtime.units.Kill(ctx, m.input.ID, syscall.SIGKILL); err != nil {
+		return err
+	}
+	if _, err := m.runtime.units.Wait(ctx, m.input.ID); err != nil {
+		return err
+	}
+	_ = m.runtime.serialBroker.Close(m.input.ID)
+
+	return m.runtime.units.ResetFailed(ctx, m.input.ID)
+}
+
+// shutdownGuest asks the guest to power off and kills it when it does not. A
+// guest with no ACPI handler never answers Ctrl+Alt+Del, so the wait is bounded.
 func (m *machine) shutdownGuest(ctx context.Context) error {
 	if m.api.SendCtrlAltDel(ctx) == nil {
 		wait, cancel := context.WithTimeout(ctx, m.stopTimeout)
 		defer cancel()
-		if _, err := m.d.units.Wait(wait, m.cfg.ID); err == nil {
+
+		if _, err := m.runtime.units.Wait(wait, m.input.ID); err == nil {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 	}
-	return m.d.units.Kill(ctx, m.cfg.ID, syscall.SIGKILL)
+
+	return m.runtime.units.Kill(ctx, m.input.ID, syscall.SIGKILL)
 }
 
-// Destroy removes all virtual machine resources.
-func (m *machine) Destroy(ctx context.Context) error {
-	unlock, err := m.d.operationLocks.lock(ctx, m.cfg.ID)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	return m.destroyUnlocked(ctx)
-}
-
-func (m *machine) destroyUnlocked(ctx context.Context) error {
-	configuration, err := m.d.cfg.readVMConfig(m.cfg.ID)
-	if errors.Is(err, vm.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if configuration.DesiredState != vm.StateDestroyed {
-		configuration.DesiredState = vm.StateDestroyed
-		if err := m.d.cfg.writeVMConfig(configuration); err != nil {
-			return err
-		}
-	}
-
-	if !configuration.Cleanup.Systemd {
-		if err := m.cleanupSystemd(ctx); err != nil {
-			return err
-		}
-		configuration.Cleanup.Systemd = true
-		if err := m.d.cfg.writeVMConfig(configuration); err != nil {
-			return err
-		}
-	}
-	if !configuration.Cleanup.Network {
-		release := network.ReleaseRequest{
-			VirtualMachineID:  configuration.ID,
-			UserID:            configuration.UID,
-			WireGuardMeshIPv6: configuration.Spec.Network.WireGuardMeshIPv6,
-		}
-		if err := m.d.networkAllocator.Release(ctx, release); err != nil {
-			return fmt.Errorf("release VM network: %w", err)
-		}
-		configuration.Cleanup.Network = true
-		if err := m.d.cfg.writeVMConfig(configuration); err != nil {
-			return err
-		}
-	}
-	if !configuration.Cleanup.Storage {
-		if err := m.d.virtualMachineStorage.Release(ctx, configuration.ID); err != nil {
-			return fmt.Errorf("release VM storage: %w", err)
-		}
-		configuration.Cleanup.Storage = true
-		if err := m.d.cfg.writeVMConfig(configuration); err != nil {
-			return err
-		}
-	}
-
-	if err := os.Remove(m.d.cfg.sockPath(configuration.ID)); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove VM socket: %w", err)
-	}
-	return os.RemoveAll(m.d.cfg.vmDir(configuration.ID))
-}
-
+// cleanupSystemd stops the unit and clears its state, so the ID can be reused.
 func (m *machine) cleanupSystemd(ctx context.Context) error {
-	if err := m.d.units.Stop(ctx, m.cfg.ID); err != nil {
+	if err := m.runtime.units.Stop(ctx, m.input.ID); err != nil {
 		return fmt.Errorf("stop VM unit: %w", err)
 	}
-	_ = m.d.consoleBroker.Close(m.cfg.ID)
-	if err := m.d.units.ResetFailed(ctx, m.cfg.ID); err != nil {
+	_ = m.runtime.serialBroker.Close(m.input.ID)
+
+	if err := m.runtime.units.ResetFailed(ctx, m.input.ID); err != nil {
 		return fmt.Errorf("reset VM unit: %w", err)
 	}
+
 	return nil
 }
 
-func (m *machine) Wait(ctx context.Context) (vm.ExitStatus, error) {
-	r, err := m.d.units.Wait(ctx, m.cfg.ID)
-	if err != nil {
-		return vm.ExitStatus{}, err
+// recordImageUse marks the image as used, so pruning keeps it. A failure here
+// must not fail a started VM, so it is logged instead.
+func (m *machine) recordImageUse() {
+	if err := m.runtime.imageStore.RecordImageUse(m.input.Specification.Image.Name, time.Now()); err != nil {
+		m.runtime.logger.Error("record image use failed", "virtual_machine_id", m.input.ID, "error", err)
 	}
-	return vm.ExitStatus{Code: r.Code, Signal: r.Signal}, nil
 }
-
-var _ vm.VM = (*machine)(nil)

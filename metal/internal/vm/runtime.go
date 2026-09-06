@@ -1,0 +1,92 @@
+package vm
+
+import "context"
+
+// Runtime controls virtual machine processes and guest-facing operations.
+type Runtime interface {
+	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
+	Start(context.Context, RuntimeMachine) error
+	Stop(context.Context, RuntimeMachine) error
+	Pause(context.Context, RuntimeMachine) error
+	Resume(context.Context, RuntimeMachine) error
+	Remove(context.Context, RuntimeMachine) error
+	RefreshMetadata(context.Context, RuntimeMachine) error
+	RefreshDisk(context.Context, RuntimeMachine) error
+	ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error)
+}
+
+// RuntimeMachine contains the complete input for one runtime operation.
+type RuntimeMachine struct {
+	ID               string
+	UserID           uint32
+	GroupID          uint32
+	Specification    Specification
+	NetworkInterface NetworkInterface
+}
+
+// RuntimeStatus contains the observed runtime state.
+type RuntimeStatus struct {
+	State State
+}
+
+// NetworkInterface contains the host network values used by a runtime.
+type NetworkInterface struct {
+	NetworkNamespacePath string
+	TapName              string
+	MACAddress           string
+	GuestIPAddress       string
+	GatewayIPAddress     string
+}
+
+// Network converges and releases host network resources.
+type Network interface {
+	Ensure(context.Context, NetworkRequest) (NetworkInterface, error)
+	Release(context.Context, NetworkReleaseRequest) error
+}
+
+// NetworkRequest contains the complete desired host network state.
+type NetworkRequest struct {
+	VirtualMachineID string
+	UserID           uint32
+	GroupID          uint32
+	Configuration    NetworkConfiguration
+}
+
+// NetworkReleaseRequest identifies host network resources to remove.
+type NetworkReleaseRequest struct {
+	VirtualMachineID  string
+	UserID            uint32
+	WireGuardMeshIPv6 string
+}
+
+// Storage manages virtual machine disks.
+type Storage interface {
+	DiskUsage(context.Context, string) (DiskUsage, error)
+	ResizeDisk(context.Context, string, int) error
+	Release(context.Context, string) error
+}
+
+// DiskUsage contains disk size and allocation values.
+type DiskUsage struct {
+	SizeMiB int
+	UsedMiB int
+}
+
+// Snapshots stages machine image snapshots.
+type Snapshots interface {
+	Stage(context.Context, SnapshotRequest) (StagedSnapshot, error)
+}
+
+// SnapshotRequest identifies the virtual machine and image to stage.
+type SnapshotRequest struct {
+	VirtualMachineID string
+	ImageReference   string
+}
+
+// StagedSnapshot describes a staged machine image.
+type StagedSnapshot struct {
+	ID                     string
+	SourceVirtualMachineID string
+	RootfsSizeBytes        int64
+	KernelSizeBytes        int64
+}

@@ -13,10 +13,12 @@ from frappe.model.document import Document
 if TYPE_CHECKING:
 	from atlas.atlas.core.dns_providers.base import DnsProvider
 	from atlas.atlas.core.server_providers.base import ServerProvider
-	from atlas.atlas.s3 import S3Client
+	from atlas.atlas.object_storage import ObjectStorageClient
 
 
 class AtlasSettings(Document):
+	"""Site-wide Atlas configuration and provider credentials."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -39,12 +41,12 @@ class AtlasSettings(Document):
 		route53_access_key_id: DF.Data | None
 		route53_access_key_secret: DF.Password | None
 		route53_dns_zone_id: DF.Data | None
-		s3_access_key_id: DF.Data | None
-		s3_bucket: DF.Data | None
-		s3_endpoint_url: DF.Data | None
-		s3_region: DF.Data | None
-		s3_secret_access_key: DF.Password | None
-		s3_signed_url_expiry: DF.Int
+		object_storage_access_key_id: DF.Data | None
+		object_storage_bucket: DF.Data | None
+		object_storage_endpoint_url: DF.Data | None
+		object_storage_region: DF.Data | None
+		object_storage_secret_access_key: DF.Password | None
+		object_storage_signed_url_expiry: DF.Int
 		scaleway_access_key: DF.Data | None
 		scaleway_machine_billing_cycle: DF.Literal["Hourly", "Monthly"]
 		scaleway_organization_id: DF.Data | None
@@ -72,34 +74,38 @@ class AtlasSettings(Document):
 
 	@property
 	def resource_name_prefix(self) -> str:
+		"""Return the prefix Atlas puts on provider resource names."""
 		return f"atlas-{self.region_name.lower()}-"
 
 	@cached_property
 	def server_provider_controller(self) -> "ServerProvider":
+		"""Return the configured server provider."""
 		from atlas.atlas.core.server_providers import get_server_provider
 
 		return get_server_provider(settings=self)
 
 	@cached_property
 	def dns_provider_controller(self) -> "DnsProvider":
+		"""Return the configured DNS provider."""
 		from atlas.atlas.core.dns_providers import get_dns_provider
 
 		return get_dns_provider(settings=self)
 
-	def get_s3_client(self) -> "S3Client":
-		"""Create the configured S3 client."""
-		from atlas.atlas.s3 import S3Client
+	def get_object_storage_client(self) -> "ObjectStorageClient":
+		"""Create the configured object storage client."""
+		from atlas.atlas.object_storage import ObjectStorageClient
 
-		return S3Client(
-			bucket=self.s3_bucket,
-			access_key_id=self.s3_access_key_id,
-			secret_access_key=self.get_password("s3_secret_access_key", raise_exception=False),
-			endpoint_url=self.s3_endpoint_url or "",
-			region=self.s3_region or "",
-			signed_url_expiry=self.s3_signed_url_expiry or 86400,
+		return ObjectStorageClient(
+			bucket=self.object_storage_bucket,
+			access_key_id=self.object_storage_access_key_id,
+			secret_access_key=self.get_password("object_storage_secret_access_key", raise_exception=False),
+			endpoint_url=self.object_storage_endpoint_url or "",
+			region=self.object_storage_region or "",
+			signed_url_expiry=self.object_storage_signed_url_expiry or 86400,
 		)
 
 	def validate(self) -> None:
+		"""Reject settings that would leave Atlas unable to reach a provider."""
 		if self.is_setup_completed and not (
 			self.is_server_provider_setup_completed and self.is_dns_setup_completed
 		):
@@ -129,6 +135,7 @@ class AtlasSettings(Document):
 			self.dns_provider_controller.validate_credentials()
 
 	def before_save(self) -> None:
+		"""Apply provider setup when the credentials change."""
 		if (
 			self.is_dns_setup_completed
 			and self.is_server_provider_setup_completed
@@ -138,9 +145,10 @@ class AtlasSettings(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def setup_server_provider(self) -> None:
+		"""Prepare the provider account for Atlas use."""
 		frappe.only_for("System Manager")
 		try:
-			self.server_provider_controller.bootstrap()
+			self.server_provider_controller.setup_infrastructure()
 		except Exception:
 			# Commit any changes to the database before re-raising the exception
 			# to avoid losing the setup progress.
@@ -149,11 +157,13 @@ class AtlasSettings(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def setup_dns_provider(self) -> None:
+		"""Prepare the DNS zone for Atlas use."""
 		frappe.only_for("System Manager")
 		self.dns_provider_controller.bootstrap()
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_sizes(self) -> None:
+		"""Refresh the Metal Server Size catalog from the provider."""
 		frappe.only_for("System Manager")
 		if not self.is_setup_completed:
 			frappe.throw(_("Atlas Settings must be fully set up before syncing server sizes."))
@@ -167,13 +177,16 @@ class AtlasSettings(Document):
 			deduplicate=True,
 			enqueue_after_commit=True,
 		)
-		frappe.msgprint(_("Server sizes sync has been queued. Please check after some time."))
+		frappe.msgprint(_("Metal Server sizes sync has been queued. Please check after some time."))
 
 	def _sync_server_sizes(self) -> None:
-		self.server_provider_controller.sync_provider_sizes()
+		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
+
+		CatalogSynchronizer(self.server_provider_controller).sync_server_sizes()
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_images(self) -> None:
+		"""Refresh the Metal Server Image catalog from the provider."""
 		frappe.only_for("System Manager")
 		if not self.is_setup_completed:
 			frappe.throw(_("Atlas Settings must be fully set up before syncing server images."))
@@ -187,7 +200,9 @@ class AtlasSettings(Document):
 			deduplicate=True,
 			enqueue_after_commit=True,
 		)
-		frappe.msgprint(_("Server images sync has been queued. Please check after some time."))
+		frappe.msgprint(_("Metal Server images sync has been queued. Please check after some time."))
 
 	def _sync_server_images(self) -> None:
-		self.server_provider_controller.sync_provider_images()
+		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
+
+		CatalogSynchronizer(self.server_provider_controller).sync_server_images()

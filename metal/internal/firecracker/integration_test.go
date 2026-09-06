@@ -21,8 +21,8 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/network"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/systemd"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -69,31 +69,41 @@ func integrationMesh(t *testing.T) *network.Mesh {
 	return mesh
 }
 
-func newDriver(t *testing.T) *Driver {
+func newManager(t *testing.T) *vm.Manager {
 	t.Helper()
-	units, err := systemd.Connect(context.Background())
+	units, err := platform.Connect(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { units.Close() })
-	stores := storage.NewStores(env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"))
-	consoleBroker := console.NewBroker(t.TempDir())
-	t.Cleanup(consoleBroker.Shutdown)
-	return New(
+	stores := storage.NewStores(t.Context(), env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"), nil)
+	serialBroker := console.NewSerialBroker(t.TempDir())
+	t.Cleanup(serialBroker.Shutdown)
+	networkManager := network.NewLinuxAllocator(integrationMesh(t))
+	virtualMachineRuntime := NewRuntime(
 		DefaultConfig(),
 		units,
 		stores.VirtualMachines,
 		stores.Images,
-		stores.Snapshots,
-		network.NewLinuxAllocator(integrationMesh(t)),
-		consoleBroker,
+		serialBroker,
+		nil,
 	)
+	manager, err := vm.NewManager(vm.ManagerConfig{
+		MachinesDirectory: DefaultConfig().MachinesDir,
+	}, vm.ManagerDependencies{
+		Runtime: virtualMachineRuntime, Network: networkManager,
+		Storage: stores.VirtualMachines, Snapshots: stores.Snapshots,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
 }
 
-func spec(image, pub string) vm.Spec {
-	return vm.Spec{
-		VCPUs: 1, MemoryMiB: 256, DiskMiB: 1024,
-		Image: vm.ImageRef{
+func spec(image, pub string) vm.Specification {
+	return vm.Specification{
+		VirtualCPUCount: 1, MemoryMiB: 256, DiskMiB: 1024,
+		Image: vm.Image{
 			Name:         image,
 			RootfsURL:    os.Getenv("METAL_IMAGE_URL"),
 			RootfsSHA256: os.Getenv("METAL_IMAGE_SHA256"),
@@ -101,7 +111,7 @@ func spec(image, pub string) vm.Spec {
 			KernelSHA256: os.Getenv("METAL_KERNEL_SHA256"),
 			Architecture: runtime.GOARCH,
 		},
-		Network: vm.Network{Egress: vm.EgressUplink},
+		Network: vm.NetworkConfiguration{Egress: vm.EgressUplink},
 		SSHKeys: []string{pub},
 	}
 }
@@ -138,23 +148,27 @@ func waitSSH(t *testing.T, id string) bool {
 }
 
 // bootVM creates a VM, starts it, waits for SSH, and registers cleanup.
-func bootVM(t *testing.T, d *Driver, s vm.Spec) vm.VM {
+func bootVM(t *testing.T, manager *vm.Manager, specification vm.Specification) string {
 	t.Helper()
-	m, err := d.Create(context.Background(), uuid.NewString(), s)
+	identifier := uuid.NewString()
+	_, err := manager.Create(context.Background(), identifier, specification)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	t.Cleanup(func() { _ = m.Destroy(context.Background()) })
-	if err := m.Start(context.Background()); err != nil {
+	t.Cleanup(func() {
+		_ = manager.Delete(context.Background(), identifier)
+		_ = manager.Reconcile(context.Background(), identifier)
+	})
+	if err := manager.Reconcile(context.Background(), identifier); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if !waitSSH(t, m.ID()) {
-		t.Fatalf("ssh into %s never succeeded", m.ID())
+	if !waitSSH(t, identifier) {
+		t.Fatalf("ssh into %s never succeeded", identifier)
 	}
-	return m
+	return identifier
 }
 
 func TestBootAndSSH(t *testing.T) {
 	image, pub := skipUnlessHost(t)
-	bootVM(t, newDriver(t), spec(image, pub))
+	bootVM(t, newManager(t), spec(image, pub))
 }

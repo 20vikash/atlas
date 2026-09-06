@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import ipaddress
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-import frappe
 import requests
-from frappe import _
 from frappe.utils.password import get_decrypted_password
 
+from atlas.vm.core.metal_models import MetalVirtualMachine
+
 if TYPE_CHECKING:
-	from atlas.server.doctype.server.server import Server
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 
 class MetalClientError(Exception):
@@ -32,6 +33,7 @@ class MetalClientError(Exception):
 
 	@property
 	def is_not_found(self) -> bool:
+		"""Report whether Metal answered that the resource does not exist."""
 		return self.status == 404
 
 
@@ -43,116 +45,148 @@ class MetalClient:
 	status_timeout_seconds = (5, 30)
 	snapshot_timeout_seconds = (5, 3600)
 
-	def __init__(self, server: "Server") -> None:
-		if not server.private_ipv4_address:
-			raise MetalClientError(f"Server {server.name} has no private IPv4 address")
-		token = get_decrypted_password("Server", server.name, "metald_api_token", raise_exception=False)
+	def __init__(self, server: "MetalServer") -> None:
+		if not server.public_ipv4_address:
+			raise MetalClientError(f"Server {server.name} has no public IPv4 address")
+		try:
+			public_ipv4_address = ipaddress.IPv4Address(server.public_ipv4_address)
+		except (ipaddress.AddressValueError, TypeError) as error:
+			raise MetalClientError(f"Server {server.name} has an invalid public IPv4 address") from error
+		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
 		if not token:
 			raise MetalClientError(f"Server {server.name} has no Metal API token")
 
-		self.base_url = f"http://{server.public_ipv4_address}:9000"
+		self.base_url = f"http://{public_ipv4_address}:9000"
 		self.headers = {"Authorization": f"Bearer {token}"}
 
 	def get_console_connection(self, virtual_machine_id: str, mode: str = "tty") -> dict[str, str]:
 		"""Return the websocket URL and auth header for a VM console."""
 		websocket_url = self.base_url.replace("http://", "ws://", 1)
 		return {
-			"url": f"{websocket_url}/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}",
+			"url": f"{websocket_url}/v1/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}",
 			"authorization": self.headers["Authorization"],
 		}
 
-	def put_virtual_machine(self, virtual_machine_id: str, request: dict[str, Any]) -> None:
+	def put_virtual_machine(self, virtual_machine_id: str, request: dict[str, Any]) -> MetalVirtualMachine:
 		"""Store one VM request under its stable Atlas ID."""
-		self._request(
+		response = self._request(
 			"PUT",
-			f"/vms/{virtual_machine_id}",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}",
 			json=request,
 			expected_status=202,
 			uncertain_on_failure=True,
 			timeout=self.create_timeout_seconds,
 		)
+		return self._virtual_machine(response)
 
-	def get_virtual_machine(self, virtual_machine_id: str) -> dict[str, Any]:
-		"""Return live data for one VM."""
-		return self._request("GET", f"/vms/{virtual_machine_id}", timeout=self.status_timeout_seconds)
+	def get_virtual_machine(self, virtual_machine_id: str) -> MetalVirtualMachine:
+		"""Return the desired and observed state for one VM."""
+		response = self._request(
+			"GET",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}",
+			timeout=self.status_timeout_seconds,
+		)
+		return self._virtual_machine(response)
 
-	def reboot_virtual_machine(self, virtual_machine_id: str) -> None:
-		"""Request a background VM restart."""
-		self._request("POST", f"/vms/{virtual_machine_id}/actions/reboot", expected_status=202)
+	def request_virtual_machine_restart(self, virtual_machine_id: str) -> MetalVirtualMachine:
+		"""Store a restart request for one VM."""
+		response = self._request(
+			"POST",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/restart",
+			expected_status=202,
+			uncertain_on_failure=True,
+		)
+		return self._virtual_machine(response)
 
-	def terminate_virtual_machine(self, virtual_machine_id: str) -> None:
-		"""Ask Metal to remove one VM."""
-		self._request("POST", f"/vms/{virtual_machine_id}/actions/terminate", expected_status=202)
+	def delete_virtual_machine(self, virtual_machine_id: str) -> MetalVirtualMachine:
+		"""Store a removal request for one VM."""
+		response = self._request(
+			"DELETE",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}",
+			expected_status=202,
+			uncertain_on_failure=True,
+		)
+		return self._virtual_machine(response)
 
-	def perform_action(self, virtual_machine_id: str, action: str) -> None:
-		"""Ask Metal to apply one VM action."""
-		self._request("POST", f"/vms/{virtual_machine_id}/actions/{action}", expected_status=202)
+	def set_virtual_machine_power_state(self, virtual_machine_id: str, state: str) -> MetalVirtualMachine:
+		"""Replace the desired power state for one VM."""
+		response = self._request(
+			"PUT",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/power",
+			json={"state": state},
+			expected_status=202,
+			uncertain_on_failure=True,
+		)
+		return self._virtual_machine(response)
 
 	def replace_virtual_machine_ssh_keys(
 		self, virtual_machine_id: str, ssh_keys: list[str]
-	) -> dict[str, Any]:
+	) -> MetalVirtualMachine:
 		"""Replace all authorized SSH keys for one VM."""
-		return self._request(
+		response = self._request(
 			"PUT",
-			f"/vms/{quote(virtual_machine_id, safe='')}/ssh-keys",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/ssh-keys",
 			json={"ssh_keys": ssh_keys},
-			expected_status=200,
+			expected_status=(200, 202),
+			uncertain_on_failure=True,
 		)
+		return self._virtual_machine(response)
 
 	def replace_virtual_machine_metadata(
 		self, virtual_machine_id: str, metadata: dict[str, str]
-	) -> dict[str, Any]:
+	) -> MetalVirtualMachine:
 		"""Replace all custom metadata for one VM with a plain string-to-string map."""
-		return self._request(
+		response = self._request(
 			"PUT",
-			f"/vms/{quote(virtual_machine_id, safe='')}/metadata",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/metadata",
 			json={"metadata": metadata},
-			expected_status=200,
+			expected_status=(200, 202),
+			uncertain_on_failure=True,
 		)
+		return self._virtual_machine(response)
 
-	def update_virtual_machine_network(
+	def set_virtual_machine_network(
 		self, virtual_machine_id: str, network: dict[str, Any]
-	) -> dict[str, Any]:
-		"""Replace the mutable network settings for one VM without a restart."""
-		return self._request(
+	) -> MetalVirtualMachine:
+		"""Replace the complete desired network for one VM."""
+		response = self._request(
 			"PUT",
-			f"/vms/{quote(virtual_machine_id, safe='')}/network",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/network",
 			json=network,
-			expected_status=200,
+			expected_status=202,
+			uncertain_on_failure=True,
 		)
+		return self._virtual_machine(response)
 
-	def update_virtual_machine_disk(self, virtual_machine_id: str, disk: dict[str, Any]) -> dict[str, Any]:
-		"""Replace the disk limits for one VM without a restart."""
-		return self._request(
+	def set_virtual_machine_disk(self, virtual_machine_id: str, disk: dict[str, Any]) -> MetalVirtualMachine:
+		"""Replace the complete desired disk for one VM."""
+		response = self._request(
 			"PUT",
-			f"/vms/{quote(virtual_machine_id, safe='')}/disk",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/disk",
 			json=disk,
-			expected_status=200,
-		)
-
-	def resize_virtual_machine_disk(self, virtual_machine_id: str, disk_mib: int) -> None:
-		"""Ask Metal to increase one VM disk size."""
-		self._request(
-			"POST",
-			f"/vms/{virtual_machine_id}/resize/disk",
-			json={"disk_mib": disk_mib},
 			expected_status=202,
+			uncertain_on_failure=True,
 		)
+		return self._virtual_machine(response)
 
-	def resize_virtual_machine_compute(self, virtual_machine_id: str, vcpus: int, memory_mib: int) -> None:
-		"""Ask Metal to change VM CPU and memory. The VM must be stopped."""
-		self._request(
-			"POST",
-			f"/vms/{virtual_machine_id}/resize/compute",
-			json={"vcpus": vcpus, "memory_mib": memory_mib},
+	def set_virtual_machine_compute(
+		self, virtual_machine_id: str, virtual_cpu_count: int, memory_mib: int
+	) -> MetalVirtualMachine:
+		"""Replace the desired CPU and memory for one stopped VM."""
+		response = self._request(
+			"PUT",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/compute",
+			json={"virtual_cpu_count": virtual_cpu_count, "memory_mib": memory_mib},
 			expected_status=202,
+			uncertain_on_failure=True,
 		)
+		return self._virtual_machine(response)
 
 	def create_snapshot(self, virtual_machine_id: str) -> dict[str, Any]:
 		"""Create local image staging for one VM."""
 		return self._request(
 			"POST",
-			f"/vms/{quote(virtual_machine_id, safe='')}/snapshots",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/snapshots",
 			expected_status=201,
 			uncertain_on_failure=True,
 			timeout=self.snapshot_timeout_seconds,
@@ -162,7 +196,7 @@ class MetalClient:
 		"""Ask Metal to start uploading staged artifacts. Returns at once."""
 		self._request(
 			"POST",
-			f"/snapshots/{quote(snapshot_id, safe='')}/upload",
+			f"/v1/snapshots/{quote(snapshot_id, safe='')}/upload",
 			json=request,
 			expected_status=202,
 			uncertain_on_failure=True,
@@ -173,7 +207,7 @@ class MetalClient:
 		"""Get the upload status for one staged snapshot."""
 		return self._request(
 			"GET",
-			f"/snapshots/{quote(snapshot_id, safe='')}",
+			f"/v1/snapshots/{quote(snapshot_id, safe='')}",
 			timeout=self.snapshot_timeout_seconds,
 		)
 
@@ -181,7 +215,8 @@ class MetalClient:
 		"""Delete local image staging."""
 		self._request(
 			"DELETE",
-			f"/snapshots/{quote(snapshot_id, safe='')}",
+			f"/v1/snapshots/{quote(snapshot_id, safe='')}",
+			expected_status=204,
 			uncertain_on_failure=True,
 			timeout=self.snapshot_timeout_seconds,
 		)
@@ -195,12 +230,13 @@ class MetalClient:
 		"""Exchange controller and host state."""
 		return self._request(
 			"POST",
-			"/sync",
+			"/v1/sync",
 			json={
 				"wireguard_peers": wireguard_peers,
 				"images": images,
 				"privileged_vm_addresses": privileged_vm_addresses,
 			},
+			uncertain_on_failure=True,
 		)
 
 	def _request(
@@ -208,7 +244,7 @@ class MetalClient:
 		method: str,
 		path: str,
 		*,
-		expected_status: int | None = None,
+		expected_status: int | tuple[int, ...] | None = None,
 		uncertain_on_failure: bool = False,
 		**kwargs: Any,
 	) -> dict[str, Any]:
@@ -225,8 +261,12 @@ class MetalClient:
 			raise MetalClientError(str(error), retryable=True, uncertain=uncertain_on_failure) from error
 
 		if response.status_code >= 400:
-			message, code = self._error_data(response)
-			retryable = response.status_code in {408, 429} or response.status_code >= 500
+			message, code, response_retryable = self._error_data(response)
+			retryable = (
+				response_retryable
+				if response_retryable is not None
+				else response.status_code in {408, 429} or response.status_code >= 500
+			)
 			raise MetalClientError(
 				message,
 				status=response.status_code,
@@ -234,9 +274,10 @@ class MetalClient:
 				retryable=retryable,
 				uncertain=uncertain_on_failure and retryable,
 			)
-		if expected_status is not None and response.status_code != expected_status:
+		expected_statuses = (expected_status,) if isinstance(expected_status, int) else expected_status
+		if expected_statuses is not None and response.status_code not in expected_statuses:
 			raise MetalClientError(
-				f"Metal returned HTTP {response.status_code}, expected {expected_status}",
+				f"Metal returned HTTP {response.status_code}, expected {expected_statuses}",
 				status=response.status_code,
 				uncertain=uncertain_on_failure,
 			)
@@ -258,22 +299,28 @@ class MetalClient:
 			)
 		return body
 
+	def _virtual_machine(self, response: dict[str, Any]) -> MetalVirtualMachine:
+		try:
+			return MetalVirtualMachine.from_dict(response)
+		except ValueError as error:
+			raise MetalClientError("Metal returned an invalid virtual machine response") from error
+
 	@staticmethod
-	def _error_data(response: requests.Response) -> tuple[str, str | None]:
+	def _error_data(response: requests.Response) -> tuple[str, str | None, bool | None]:
 		try:
 			body = response.json()
 		except ValueError:
-			return f"Metal returned HTTP {response.status_code}", None
+			return f"Metal returned HTTP {response.status_code}", None, None
 		if isinstance(body, dict):
 			error = body.get("error")
 			if isinstance(error, dict):
 				message = error.get("message")
 				code = error.get("code")
+				retryable = error.get("retryable")
 				if isinstance(message, str):
-					return message, code if isinstance(code, str) else None
-		return f"Metal returned HTTP {response.status_code}", None
-
-
-def throw_metal_error(error: MetalClientError) -> None:
-	"""Show a Metal request error to the current user."""
-	frappe.throw(_("Metal request failed: {0}").format(error))
+					return (
+						message,
+						code if isinstance(code, str) else None,
+						retryable if isinstance(retryable, bool) else None,
+					)
+		return f"Metal returned HTTP {response.status_code}", None, None

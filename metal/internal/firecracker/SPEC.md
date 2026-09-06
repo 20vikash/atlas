@@ -1,115 +1,91 @@
-# firecracker: VM driver
+# firecracker: VM runtime
 
 [internal SPEC](../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
 
 ## Purpose
 
-Package `firecracker` implements the `vm` contracts. Systemd owns each jailed Firecracker process.
+This package does not own a VM process. systemd does. Each VM is a unit of the `metal-vm@` template, so a crash of metald leaves running guests alone, and a restart of metald finds them by asking systemd rather than by remembering anything.
+
+What this package owns is everything inside that unit: the jail, the boot configuration, the guest metadata, and the API conversation with Firecracker. It implements `vm.Runtime` and holds no VM records.
 
 ## Types
 
-| Type | Role |
+| Type | Owns |
 |---|---|
-| `Driver` | VM reservations, desired state, host dependencies, locks, and warm artifact creation. |
-| `machine` | One VM handle with persisted configuration and a Firecracker API client. |
-| `Config` | Machine paths, socket paths, binaries, and user ID range. |
-| `vmConfig` | Reservation, desired state, resource ownership, and cleanup progress. |
-| `vmStatus` | Observed state, error, and update time. |
+| `Runtime` | The `vm.Runtime` implementation and the host services it needs. |
+| `machine` | One VM for the length of one operation. Binds a unit and an API client. |
+| `Config` | Host directories and executable paths. |
 
-The driver receives separate VM storage, image, snapshot, systemd, and network dependencies.
+`Runtime` also satisfies `vm.WarmRuntime`, which supplies Firecracker build identity and memory snapshot capture.
 
 ## Composition
 
 ```text
-Driver
- ├─ systemd manager
- ├─ VM storage
- ├─ image store
- ├─ snapshot store
- ├─ network allocator
- └─ Firecracker API client for each machine
+vm.Manager -> firecracker.Runtime -> systemd -> jailer -> Firecracker
+                         |
+                         +-> VM disk storage
+                         +-> image storage
+                         +-> serial broker
 ```
 
-## Reservation and reconciliation
+## Jail
+
+Everything one VM owns lives under its own directory, so removing that directory removes the jail, the chroot, and the jailer environment together. The kernel is hard linked into the chroot, which is why the chroot base sits beside the VM files rather than on another file system.
+
+The jailer arguments reach systemd through an `EnvironmentFile`. systemd word splits that value, so no argument may contain a space. Firecracker's API socket lives inside the chroot at a fixed relative path, and a symlink outside gives metald a short path to dial.
+
+## Launch
+
+Cold and warm launch share one preparation step:
 
 ```text
-Create(id, specification)
-   -> validate the supplied ID and reservation
-   -> allocate a host user ID
-   -> derive network values
-   -> write config.json with desired running
-   -> return without starting Firecracker
-
-reconciler
-   -> compare desired and observed states
-   -> call Start, Stop, Pause, Resume, or Destroy
-   -> write status.json
-```
-
-Repeat create calls can refresh signed image URLs and cache policy. They cannot change reservation identity.
-
-## Cold boot
-
-```text
-allocate the Linux network
-write jailer.env and socket link
+write the jailer environment and the socket link
+open the console PTY          before the unit starts, so no output is lost
 start the systemd unit
-set resource limits
-wait for the Firecracker socket
-prepare the kernel and VM disk
-configure machine, boot source, drive, network, and MMDS
-start the instance
+set unit resource limits
+wait for the API socket       the process belongs to systemd, so this is the only signal
+    |
+    +- cold: prepare the disk, then configure machine, kernel, drives, network, MMDS
+    +- warm: prepare the disk from the warm snapshot, load state and memory, resume
 ```
 
-## Cold start vs warm start
+A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
 
-### Warm start
+Warm launch is attempted only when the image asks for it and the VM shape matches the snapshot exactly. Any failure falls back to a cold boot, so warm boot can never make a VM unstartable. A restored guest receives its metadata before it resumes, so it never reads the values of the VM the snapshot came from.
 
-The driver selects warm artifacts by image identity, VM shape, and Firecracker compatibility. It loads the snapshot while paused, updates MMDS, and resumes the VM.
+A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
 
-If warm start fails, the caller removes the attempted VM disk and starts cold.
+## State
 
-## Warm artifact creation
+State comes from two places. systemd owns whether the process runs, and Firecracker owns what the guest does inside it. Only an active unit is worth asking:
 
-The image reconciler calls `EnsureMemorySnapshot`. The driver creates a temporary VM without egress, waits five minutes, and pauses it.
+```text
+failed                  -> failed
+inactive, deactivating  -> stopped
+active -> Firecracker instance state
+             Not started -> created
+             Running     -> running
+             Paused      -> paused
+```
 
-The driver captures Firecracker state and memory. The image store copies these files and the disk snapshot into the warm cache.
+Anything else reads as `unknown`, and an API fault returns `unknown` with an error rather than a guess.
 
-## Stop escalation
+Stop asks the guest to power off and kills it when it does not answer, because a guest with no ACPI handler never will. An intentional stop leaves the unit failed, so the state is cleared afterwards.
 
-Stop sends Ctrl+Alt+Del and waits 30 seconds. It sends `SIGKILL` when the guest does not stop.
+`Remove` stops the unit and removes runtime-owned files. The manager releases network and storage.
 
-### Destroy
+## Guest metadata
 
-Destroy records progress for systemd, network, and storage cleanup. It removes the VM directory only after all cleanup steps succeed.
+Firecracker serves MMDS to the guest. This package builds that document, so nothing per VM is baked into an image and one image serves every VM. Metadata is replaced in place on a live guest and rewritten on every launch.
 
-## Snapshot, restore, promote
+## SSH console
 
-### Machine image snapshot
-
-`CreateSnapshot` generates a UUIDv7 staging ID. It briefly pauses a running VM and asks the snapshot store to stage the disk and kernel.
-
-This operation does not capture memory. It does not support in-place restore or promotion.
-
-### Internal warm snapshot load
-
-A new VM can load a compatible local warm snapshot. If the load fails, the driver removes the attempted disk and uses a cold boot.
-
-### Policy-driven warm artifact
-
-`EnsureMemorySnapshot` creates a local warm artifact for an exact image and VM shape. It does not create a public image reference.
-
-## State derivation
-
-The driver combines systemd state, Firecracker state, desired state, and the last reconciliation error. Unknown runtime values produce `StateUnknown`.
-
-## Statelessness and the socket
-
-`config.json` stores reservation and cleanup state. `status.json` stores observed state. A short socket link avoids the Unix socket path limit.
+An SSH session authorizes itself with a throwaway key pair: the public key is pushed into MMDS, `ssh` runs inside the VM network namespace on a PTY, and the key is removed when the session closes. No key outlives a session, and the guest image carries none. Sessions are capped host-wide.
 
 ## Related
 
 - [internal/firecracker/api/SPEC.md](api/SPEC.md) describes the Firecracker client.
-- [internal/vm/SPEC.md](../vm/SPEC.md) defines the implemented contracts.
-- [internal/storage/SPEC.md](../storage/SPEC.md) and [internal/network/SPEC.md](../network/SPEC.md) describe host resources.
-- [docs/vm.md](../../docs/vm.md) gives the broad VM lifecycle.
+- [internal/vm/SPEC.md](../vm/SPEC.md) defines the runtime interface and owns the temporary VM a warm build runs on.
+- [internal/storage/SPEC.md](../storage/SPEC.md) owns warm artifacts and the key that selects them.
+- [internal/platform/SPEC.md](../platform/SPEC.md) owns the systemd unit control.
+- [docs/vm.md](../../docs/vm.md) gives the VM lifecycle.

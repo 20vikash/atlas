@@ -10,15 +10,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/frappe/atlas/metal/internal/hostcmd"
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 // meshMTU is the VM interface MTU that Atlas WG Mesh needs. A mesh packet gains
 // a 40-byte outer IPv6 header and must still fit the 1420-byte WireGuard MTU.
 const meshMTU = 1380
 
+// meshGatewayAddress is the link-local address the guest routes the mesh through.
 const meshGatewayAddress = "fe80::1"
 
+// meshPrefix is the Atlas mesh address block.
 const meshPrefix = "fdaa::/16"
 
 // MeshConfig identifies the Atlas WG Mesh CLI and the host interfaces it uses.
@@ -61,12 +63,12 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 // EnsureHost configures Atlas WG Mesh when this host has no configuration, and
 // rejects a configuration that discovers on another interface.
 func (mesh *Mesh) EnsureHost(ctx context.Context) error {
-	status, statusError := hostcmd.Output(ctx, mesh.commandPath, "status")
+	status, statusError := platform.Output(ctx, mesh.commandPath, "status")
 	if statusError == nil {
 		return mesh.verifyDiscoveryInterface(status)
 	}
 
-	err := hostcmd.Run(ctx, mesh.commandPath, "configure",
+	err := platform.Run(ctx, mesh.commandPath, "configure",
 		"--uplink", mesh.uplinkName, "--wireguard", mesh.wireGuardName)
 	if err != nil {
 		return errors.Join(fmt.Errorf("read Atlas WG Mesh status: %w", statusError), err)
@@ -106,7 +108,7 @@ func discoveryInterface(status string) string {
 
 // Add registers one VM address on a host interface and announces its location.
 func (mesh *Mesh) Add(ctx context.Context, address, interfaceName string) error {
-	return hostcmd.Run(ctx, mesh.commandPath, "vm", "add",
+	return platform.Run(ctx, mesh.commandPath, "vm", "add",
 		"--interface", interfaceName,
 		"--address", address,
 		"--mtu", strconv.Itoa(meshMTU),
@@ -119,7 +121,7 @@ func (mesh *Mesh) Remove(ctx context.Context, address, interfaceName string) err
 	if err != nil || !registered {
 		return err
 	}
-	return hostcmd.Run(ctx, mesh.commandPath, "vm", "remove", "--interface", interfaceName, "--address", address)
+	return platform.Run(ctx, mesh.commandPath, "vm", "remove", "--interface", interfaceName, "--address", address)
 }
 
 // ApplyPrivilegedAddresses replaces the privileged VM whitelist with the
@@ -148,8 +150,9 @@ func (mesh *Mesh) ApplyPrivilegedAddresses(ctx context.Context, desired []string
 	return errors.Join(applyErrors...)
 }
 
+// setPrivileged adds or removes one address from the privileged whitelist.
 func (mesh *Mesh) setPrivileged(ctx context.Context, action, address string) error {
-	if err := hostcmd.Run(ctx, mesh.commandPath, "privileged-vm", action, "--address", address); err != nil {
+	if err := platform.Run(ctx, mesh.commandPath, "privileged-vm", action, "--address", address); err != nil {
 		return fmt.Errorf("%s privileged mesh address %s: %w", action, address, err)
 	}
 	return nil
@@ -157,7 +160,7 @@ func (mesh *Mesh) setPrivileged(ctx context.Context, action, address string) err
 
 // privilegedAddresses returns the whitelist that this host holds now.
 func (mesh *Mesh) privilegedAddresses(ctx context.Context) (map[string]struct{}, error) {
-	output, err := hostcmd.Output(ctx, mesh.commandPath, "privileged-vm", "list", "--json")
+	output, err := platform.Output(ctx, mesh.commandPath, "privileged-vm", "list", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("list privileged mesh addresses: %w", err)
 	}
@@ -201,7 +204,7 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 		return false, fmt.Errorf("parse mesh address %q: %w", address, err)
 	}
 
-	output, err := hostcmd.Output(ctx, mesh.commandPath, "vm", "list", "--json")
+	output, err := platform.Output(ctx, mesh.commandPath, "vm", "list", "--json")
 	if err != nil {
 		return false, fmt.Errorf("list Atlas WG Mesh VMs: %w", err)
 	}

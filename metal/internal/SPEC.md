@@ -12,29 +12,30 @@ The `vm` package defines the contracts. The other packages implement or consume 
 
 | Package | Role |
 |---|---|
-| [vm](vm/SPEC.md) | VM interfaces and value types. |
-| [firecracker](firecracker/SPEC.md) | Firecracker VM implementation and desired-state operations. |
+| [vm](vm/SPEC.md) | VM manager, records, reconciliation, interfaces, and value types. |
+| [firecracker](firecracker/SPEC.md) | Firecracker runtime and optional warm capability. |
 | [firecracker/api](firecracker/api/SPEC.md) | Firecracker REST client over a Unix socket. |
 | [api](api/SPEC.md) | Authenticated HTTP API. |
-| [reconciler](../docs/architecture.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
+| [host](host/SPEC.md) | Host synchronization and capacity. |
+| [console](console/SPEC.md) | VM serial consoles over PTYs. |
+| [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
 | [network](network/SPEC.md) | VM namespaces and managed WireGuard peers. |
-| [systemd](systemd/SPEC.md) | Unit control through D-Bus. |
-| [idalloc](idalloc/SPEC.md) | Host user ID allocation. |
-| `hostcmd` | Host command execution. |
+| [platform](platform/SPEC.md) | Host files, commands, and systemd control. |
 
 ## Dependency graph
 
 ```text
 cmd/metald
-   ├─ api -> vm
-   ├─ reconciler -> vm
-   ├─ firecracker -> vm, storage, network, systemd, idalloc, firecracker/api
-   ├─ storage -> vm, hostcmd
-   └─ network -> vm, hostcmd
+   ├─ api -> vm.Manager, host.Service, console.SerialBroker
+   ├─ host -> vm, network, storage
+   ├─ reconciler -> vm.Manager, storage stores
+   ├─ firecracker -> vm, storage, platform, console, firecracker/api
+   ├─ storage -> vm, platform
+   └─ network -> vm, platform
 ```
 
-Consumer packages define their interfaces. The `vm` package contains the public VM driver and VM contracts.
+The `vm` package defines small host service interfaces. The `vm.Manager` owns VM state, operations, and warm-image orchestration.
 
 ## Related
 

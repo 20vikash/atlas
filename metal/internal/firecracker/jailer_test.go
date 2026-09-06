@@ -2,7 +2,6 @@ package firecracker
 
 import (
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -23,20 +22,20 @@ func TestLayout(t *testing.T) {
 		t.Errorf("chrootRoot = %q", got)
 	}
 	want := "/var/lib/metal/machines/abc/firecracker/abc/root/run/firecracker.socket"
-	if got := c.chrootSockPath("abc"); got != want {
-		t.Errorf("chrootSockPath = %q", got)
+	if got := c.chrootSocketPath("abc"); got != want {
+		t.Errorf("chrootSocketPath = %q", got)
 	}
 	if !strings.HasPrefix(c.chrootRoot("abc"), c.vmDir("abc")+"/") {
-		t.Error("the chroot is outside the VM dir, so Destroy would leave it behind")
+		t.Error("the chroot is outside the VM directory")
 	}
 }
 
 func TestSockPathFitsSunPath(t *testing.T) {
 	id := uuid.Must(uuid.NewV7()).String()
-	if got := len(DefaultConfig().sockPath(id)); got > 108 {
-		t.Errorf("sockPath is %d bytes, over the 108 byte limit", got)
+	if got := len(DefaultConfig().socketPath(id)); got > 108 {
+		t.Errorf("socketPath is %d bytes, over the 108 byte limit", got)
 	}
-	if len(DefaultConfig().chrootSockPath(id)) <= 108 {
+	if len(DefaultConfig().chrootSocketPath(id)) <= 108 {
 		t.Log("the chroot path fits today, but the link is what keeps it safe")
 	}
 }
@@ -49,11 +48,11 @@ func TestLinkSocket(t *testing.T) {
 	if err := c.linkSocket("abc"); err != nil {
 		t.Fatalf("linkSocket is not repeatable: %v", err)
 	}
-	got, err := os.Readlink(c.sockPath("abc"))
+	got, err := os.Readlink(c.socketPath("abc"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != c.chrootSockPath("abc") {
+	if got != c.chrootSocketPath("abc") {
 		t.Errorf("link points at %q", got)
 	}
 }
@@ -94,35 +93,5 @@ func TestJailerEnv(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(b), "JAILER_ARGS=--id abc ") {
 		t.Errorf("env = %q", b)
-	}
-}
-
-func TestVMConfigRoundtrip(t *testing.T) {
-	c := testConfig(t.TempDir())
-	vc := vmConfig{ID: "abc", UID: 100000, GID: 100000, IP: "172.16.0.2", MAC: "02:aa:bb:cc:dd:ee", Sock: "/s"}
-	if err := c.writeVMConfig(vc); err != nil {
-		t.Fatal(err)
-	}
-	got, err := c.readVMConfig("abc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, vc) {
-		t.Errorf("got %+v, want %+v", got, vc)
-	}
-
-	used, err := c.usedIDs()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !used[100000] {
-		t.Errorf("usedIDs missing 100000: %v", used)
-	}
-}
-
-func TestReadVMConfigNotFound(t *testing.T) {
-	c := testConfig(t.TempDir())
-	if _, err := c.readVMConfig("missing"); err == nil {
-		t.Error("want error for missing config")
 	}
 }

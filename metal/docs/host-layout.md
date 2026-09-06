@@ -1,5 +1,7 @@
 # Metal host layout
 
+[metal SPEC](../SPEC.md) · overview: [architecture.md](architecture.md)
+
 Metal keeps virtual machine state on disk. After a restart, it reads the state from these paths. The controller supplies each virtual machine ID.
 
 ```text
@@ -25,8 +27,8 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 ├── wireguard-peers.json            atomically saved managed peer set
 └── machines/                       derived from metald.base_dir
     └── <id>/                       one directory for each VM ID
-        ├── config.json             reservation, desired state, and cleanup progress
-        ├── status.json             observed state and reconciliation error
+        ├── config.json             versioned reservation and desired state
+        ├── status.json             versioned observed state and cleanup progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
         └── firecracker/            the executable name that jailer appends
             └── <id>/
@@ -62,6 +64,6 @@ metal/warm/<key>@ready       local warm disk for one image and exact VM shape
 
 A VM disk keeps the VM ID. The paths `machines/<id>` and `vms/<id>` identify the same VM.
 
-The storage stores own image import, local warm artifacts, image staging, VM disks, and pool capacity. metald does not create the pool or select its device. Host setup creates the pool before metald starts, and `zfs.pool` names it. Each imported image has an immutable manifest. Metal rejects a request that reuses an image reference with different digests or architecture.
+metald does not create the ZFS pool or select its device. Host setup creates the pool before metald starts, and `zfs.pool` names it.
 
-Memory snapshots stay on the host. Atlas sends cached-image policy through `/sync`. Metal builds a memory snapshot only for an exact CPU, memory, and disk configuration. A VM cold-boots when compatible warm artifacts are not ready.
+What each path holds and why: [internal/storage/SPEC.md](../internal/storage/SPEC.md) for datasets and images, [internal/firecracker/SPEC.md](../internal/firecracker/SPEC.md) for the jail, and [internal/vm/SPEC.md](../internal/vm/SPEC.md) for the records.

@@ -9,25 +9,25 @@ import (
 )
 
 type fakeImageStore struct {
-	policies            []vm.ImageRef
+	policies            []vm.Image
 	cached              []string
 	prunedImages        bool
 	prunedSnapshots     bool
 	snapshotMaximumIdle time.Duration
 }
 
-func (store *fakeImageStore) ImagePolicies(context.Context) ([]vm.ImageRef, error) {
+func (store *fakeImageStore) ImagePolicies(context.Context) ([]vm.Image, error) {
 	return store.policies, nil
 }
 
-func (store *fakeImageStore) EnsureImage(_ context.Context, image vm.ImageRef) error {
+func (store *fakeImageStore) EnsureImage(_ context.Context, image vm.Image) error {
 	store.cached = append(store.cached, image.Name)
 	return nil
 }
 
 func (store *fakeImageStore) PruneImages(
 	context.Context,
-	[]vm.ImageRef,
+	[]vm.Image,
 	time.Time,
 	time.Duration,
 ) error {
@@ -51,14 +51,14 @@ type fakeMemorySnapshotBuilder struct {
 
 func (builder *fakeMemorySnapshotBuilder) EnsureMemorySnapshot(
 	_ context.Context,
-	image vm.ImageRef,
+	image vm.Image,
 ) error {
 	builder.images = append(builder.images, image.Name)
 	return nil
 }
 
 func TestImageReconcilerCachesAndWarmsDesiredImages(t *testing.T) {
-	store := &fakeImageStore{policies: []vm.ImageRef{
+	store := &fakeImageStore{policies: []vm.Image{
 		{Name: "cold", CacheImage: true},
 		{Name: "warm", CacheImage: true, MemorySnapshot: true},
 		{Name: "on-demand"},

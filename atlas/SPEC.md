@@ -1,4 +1,4 @@
-# Atlas App Specification
+# Atlas app specification
 
 [Root specification](../SPEC.md)
 
@@ -6,18 +6,22 @@
 
 ## Purpose
 
-The Atlas app provides Frappe settings and provider catalog records for Atlas infrastructure.
+The Atlas app uses Frappe to manage provider hosts, virtual machines, images, and user actions.
 
 ## Layout
 
 ```text
-atlas/                       Atlas module (settings)
-  core/                      Provider controllers and the host binary builder
-  doctype/                   Settings records
-vm/                          Virtual machine records, image records, and image builders
-server/                      Server module (catalog)
-  doctype/                   Server Size and Server Image records
-scripts/                     Host installation scripts
+atlas/                         Site settings, provider behavior, and host binary builds
+  core/                        Provider clients and the host binary builder
+  doctype/                     Atlas Settings
+metal_server/                   Provider hosts and Metal Server catalog records
+  core/                        Provisioning, host installation, disk inventory, and catalog sync
+  doctype/                     Metal Server records and catalog DocTypes
+vm/                            Virtual machine records, images, and orchestration
+  core/                        Placement, Metal transport, and image movement
+  doctype/                     Virtual Machine and Virtual Machine Image
+realtime/                      Browser console bridge
+scripts/                       Host installation scripts
 ```
 
 ## Software
@@ -26,65 +30,31 @@ The app uses Python 3.14, Frappe, MariaDB, Redis, Node, and Yarn.
 
 ## Scope
 
-The app stores Atlas settings, server catalogs, image metadata, and VM request metadata. Metal owns each VM runtime state and desired state. Atlas does not store a VM lifecycle state machine.
+Atlas stores settings, Metal Server catalogs, image metadata, and virtual machine request metadata. Metal owns each virtual machine runtime and desired state. Atlas does not store a virtual machine lifecycle state machine.
 
-The Virtual Machine name is the Metal VM ID. Creation uses idempotent `PUT /vms/{name}` and accepts HTTP `202`. Atlas uses `GET /vms/{name}` after a lost response. Atlas keeps the draft if the result is uncertain.
+The Virtual Machine name is the Metal VM ID. Creation uses idempotent `PUT /v1/vms/{name}` and accepts HTTP `202`. Atlas uses `GET /v1/vms/{name}` after a lost response. Atlas keeps the draft if the result is uncertain.
 
-Atlas exchanges WireGuard peers, desired cached images, and host capacity with `POST /sync`. Placement uses the latest capacity sample and the image architecture.
+Atlas exchanges WireGuard peers, desired cached images, and host capacity with `POST /v1/sync`. Placement uses a fresh capacity sample and the image architecture. It locks the candidate Metal Server and subtracts requests that the sample does not include.
 
-Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [VM operations](vm/README.md).
+Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [the VM module SPEC](vm/SPEC.md).
 
-## Host binaries
-
-Atlas builds `metald` and the Atlas WG Mesh CLI after installation and migration. A build occurs only when its source changes.
-
-Atlas publishes each build as a public File and stores the File link in Atlas Settings. Atlas keeps earlier files available.
-
-A host downloads the binary during `install-metald.sh`, so the file needs an address that the host can reach. Set `atlas_base_url` in the site configuration for that address. Atlas uses the site URL when the key is absent.
-
-```json
-"atlas_base_url": "https://devfc2.example.com"
-```
-
-### Ubuntu build tools
-
-Install these tools before you install or migrate Atlas.
-
-1. Update the Ubuntu package list.
-
-   ```bash
-   sudo apt-get update
-   ```
-
-2. Install the mandatory build tools and headers.
-
-   ```bash
-   sudo apt-get install --yes make clang libbpf-dev linux-libc-dev
-   ```
-
-On an offline machine, use an internal APT mirror or install these packages from approved local files.
-
-`make` runs both builds. `clang`, `libbpf-dev`, and `linux-libc-dev` build the eBPF object for Atlas WG Mesh.
-
-The builder uses an installed Go toolchain if it is version `1.26.2` or newer. Otherwise, the builder downloads Go.
-
-The builds also download Go modules. An offline installation needs an installed Go toolchain and a populated Go module cache.
-
-### Manual build
-
-Use these commands to build one binary:
-
-```bash
-bench --site SITE build-metald
-bench --site SITE build-wg-mesh
-```
-
-The command skips the build when the linked File and source hash are current. A missing tool stops the command or migration.
+Use [the virtual machine control-plane guide](docs/vm-control-plane.md) for request and retry boundaries. Use [the image guide](docs/images.md) for System and Machine image lifecycles. Use [Atlas operations](docs/operations.md) for fault recovery.
 
 ## Validation
 
-Run the Frappe tests described in [the CI workflow](../.github/workflows/atlas-ci.yml).
+See [docs/development.md](docs/development.md) for the commands to run.
+
+## Module specifications
+
+- [Atlas settings](atlas/SPEC.md)
+- [Metal Servers](metal_server/SPEC.md)
+- [Virtual machines](vm/SPEC.md)
+- [Realtime console bridge](realtime/SPEC.md)
 
 ## Ownership
 
-Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`. Keep catalog behavior in `server/doctype/`. Keep VM orchestration in `vm/virtual_machine_manager.py` and Machine image transfer in `vm/virtual_machine_image_manager.py`.
+Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
+
+Keep Metal Server orchestration in `metal_server/core/`. Keep DocType controllers as lifecycle and API boundaries.
+
+Keep virtual machine orchestration and image transfers in `vm/core/`.

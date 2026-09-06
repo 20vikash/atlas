@@ -11,12 +11,13 @@ Metal manages virtual machines on a host. Its executable is `metald`.
 ```text
 cmd/metald/                  metald executable
 internal/api/                HTTP API
+internal/console/            VM serial consoles over PTYs
 internal/firecracker/        Firecracker support
-internal/idalloc/            ID allocation
+internal/host/               Controller synchronization and host capacity
 internal/network/            Linux VM networking and WireGuard peer management
 internal/reconciler/         VM and image reconciliation
 internal/storage/            ZFS images, VM disks, and pool capacity
-internal/systemd/            systemd and dbus support
+internal/platform/           Host file, command, and systemd support
 internal/vm/                 VM domain logic
 scripts/                     host bootstrap scripts
 Makefile                     build metald into dist/
@@ -38,31 +39,23 @@ The module path is `github.com/frappe/atlas/metal`. Run Go commands from `metal/
 
 ## Validation
 
-Run `go test ./...`. Run integration tests when host dependencies are available.
-Run `make build` to build the stripped Linux binaries into `dist/`.
-Run `make openapi` to build the API specification. The binary embeds it, so run
-this once after a clone or `go build` fails. `make build` runs it first, and
-metald serves the result at `/docs`.
+See [`docs/development.md`](docs/development.md) for the commands to run.
 
 ## Documentation
 
-Follow [`docs/style.md`](docs/style.md) when you write or update docs.
+`docs/` gives the overall guide and the host-facing references. Package detail lives in each package's `SPEC.md`; start at [`internal/SPEC.md`](internal/SPEC.md).
 
-Concept overviews:
-
-- [`docs/architecture.md`](docs/architecture.md) the big picture and dependency graph.
-- [`docs/vm.md`](docs/vm.md) the VM lifecycle and operations.
-- [`docs/storage.md`](docs/storage.md) ZFS disks, images, and local artifacts.
-- [`docs/networking.md`](docs/networking.md) VM namespaces, public IPv4, and WireGuard peers.
-- [`docs/snapshots.md`](docs/snapshots.md) image staging and local warm artifacts.
-
-References:
-
-- [`docs/host-layout.md`](docs/host-layout.md) host paths and storage.
-- [`docs/api.md`](docs/api.md) the HTTP endpoint reference.
-- [`docs/testing.md`](docs/testing.md) the integration test and config.
-
-Package detail lives in each package's `SPEC.md`; see [`internal/SPEC.md`](internal/SPEC.md).
+| Document | Purpose |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | The big picture. Read this first. |
+| [`docs/host-layout.md`](docs/host-layout.md) | Every host path and dataset. |
+| [`docs/testing.md`](docs/testing.md) | Bring up a development host and run the integration test. |
+| [`docs/development.md`](docs/development.md) | Local checks and where changes belong. |
+| [`docs/operations.md`](docs/operations.md) | Fault checks and safe recovery. |
+| [`docs/vm.md`](docs/vm.md) | VM lifecycle and design rationale. |
+| [`docs/storage.md`](docs/storage.md) | Storage model and design rationale. |
+| [`docs/networking.md`](docs/networking.md) | Network model and design rationale. |
+| [`docs/api.md`](docs/api.md) | Controller API model and design rationale. |
 
 ## Scope
 

@@ -10,6 +10,9 @@ import (
 	"sync"
 )
 
+// socketLocks holds one mutex per socket path. Firecracker serves its API from
+// a single thread and rejects a concurrent request, so every client for one
+// socket shares a lock even when several clients are built for the same VM.
 var socketLocks sync.Map
 
 // Client sends requests to one Firecracker API socket.
@@ -18,7 +21,9 @@ type Client struct {
 	lock       *sync.Mutex
 }
 
-// New returns a client for one Firecracker API socket.
+// New returns a client for one Firecracker API socket. Keep-alives are disabled,
+// because a VM is replaced by a new process on the same path and a pooled
+// connection would outlive the process that accepted it.
 func New(socketPath string) *Client {
 	lock, _ := socketLocks.LoadOrStore(socketPath, &sync.Mutex{})
 	return &Client{
@@ -116,6 +121,8 @@ func (client *Client) PatchMMDS(ctx context.Context, data any) error {
 	return client.send(ctx, http.MethodPatch, "/mmds", data, nil)
 }
 
+// send makes one API request. It holds the socket lock for the whole exchange,
+// so requests to one VM are serialized.
 func (client *Client) send(ctx context.Context, method, path string, body, output any) error {
 	client.lock.Lock()
 	defer client.lock.Unlock()

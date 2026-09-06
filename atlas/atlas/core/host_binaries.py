@@ -43,6 +43,7 @@ class HostBinary:
 
 	@property
 	def file_name(self) -> str:
+		"""Return the published file name for this binary."""
 		return Path(self.artifact).name
 
 

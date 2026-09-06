@@ -1,225 +1,32 @@
-# Metal HTTP API
+# HTTP API
 
-metald serves JSON on its configured listener. It generates the OpenAPI document from handler annotations and serves the document at `/docs`.
+[metal SPEC](../SPEC.md) · detail: [internal/api/SPEC.md](../internal/api/SPEC.md)
 
-All routes except `/docs` and `/docs/swagger.json` require a bearer token. `metald.auth_token_hash` must contain the lowercase SHA-256 digest of this token.
+`metald` serves the controller API. The complete reference, with every field and status, is the OpenAPI document the binary embeds: open `GET /docs` in a browser, or read `GET /docs/swagger.json`.
 
-```http
-Authorization: Bearer <token>
-```
+## Model
 
-## Service routes
+A mutation stores desired state and returns. It does not wait for the host. The controller polls `GET /v1/vms/{id}` until the desired and observed generations match, and reads `observed.error` when they stop moving.
 
-| Method | Path | Action |
-|---|---|---|
-| `GET` | `/health` | return `200` when the API is available |
-| `POST` | `/sync` | apply controller state and return host capacity |
-| `GET` | `/docs` | serve the API documentation |
-| `GET` | `/docs/swagger.json` | serve the OpenAPI document |
+Each VM response nests `desired` and `observed`, so one read shows both what was asked for and what the host reached.
 
-## Virtual machines
+Every `/v1` route needs a bearer token. Only liveness and the documentation are public.
 
-VM create is an idempotent resource operation.
+Routes, status codes, and error mapping: [internal/api/SPEC.md](../internal/api/SPEC.md).
 
-```http
-PUT /vms/{id}
-Content-Type: application/json
-```
+## Console modes
 
-```json
-{
-  "vcpus": 2,
-  "memory_mib": 512,
-  "disk_mib": 2048,
-  "image": {
-    "ref": "ubuntu-24.04-1",
-    "architecture": "amd64",
-    "rootfs": {
-      "url": "https://images.example/rootfs?signature=...",
-      "sha256": "64 hexadecimal characters"
-    },
-    "kernel": {
-      "url": "https://images.example/vmlinux?signature=...",
-      "sha256": "64 hexadecimal characters"
-    },
-    "cache_image": true,
-    "memory_snapshot": true,
-    "memory_snapshot_configuration": {
-      "virtual_cpu_count": 2,
-      "memory_mib": 512,
-      "disk_mib": 2048
-    }
-  },
-  "hostname": "worker-1",
-  "ssh_keys": ["ssh-ed25519 ..."],
-  "user_data": "...",
-  "network": {
-    "public_ipv4": "203.0.113.10",
-    "wireguard_mesh_ipv6": "fdaa:1:0:7::1",
-    "private_network_throughput_mibps": 100,
-    "public_network_throughput_mibps": 50,
-    "egress": "uplink"
-  }
-}
-```
+One endpoint serves two modes. `mode=tty` is the default.
 
-The first request reserves the supplied ID and returns `202`. A repeat request for the same ID and specification also returns `202`. A request that changes reservation identity for the same ID returns `409`. The background reconciler starts the VM. The response can report `state: "unknown"` until the driver observes the VM.
-
-Metal stores one immutable manifest for each `image.ref`. The manifest contains the root file system digest, kernel digest, and architecture. Metal verifies downloads before import. A request that reuses an image reference with different content returns `409`.
-
-VM responses contain image identity and cache policy:
-
-```json
-{
-  "image": {
-    "ref": "ubuntu-24.04-1",
-    "architecture": "amd64",
-    "rootfs": {"sha256": "64 hexadecimal characters"},
-    "kernel": {"sha256": "64 hexadecimal characters"},
-    "cache_image": true,
-    "memory_snapshot": true,
-    "memory_snapshot_configuration": {
-      "virtual_cpu_count": 2,
-      "memory_mib": 512,
-      "disk_mib": 2048
-    }
-  },
-  "ssh_keys": ["ssh-ed25519 AAAA... user@example"]
-}
-```
-
-They do not contain image transport URLs, the internal guest IP, or the Firecracker PID. The MAC address is in the `network` object.
-
-| Method | Path | Action |
-|---|---|---|
-| `PUT` | `/vms/{id}` | create or confirm a VM reservation |
-| `GET` | `/vms` | list VMs |
-| `GET` | `/vms/{id}` | get one VM |
-| `PUT` | `/vms/{id}/network` | update mutable network settings |
-| `PUT` | `/vms/{id}/disk` | update disk throughput and IOPS limits |
-| `PUT` | `/vms/{id}/ssh-keys` | replace all authorized SSH keys |
-| `POST` | `/vms/{id}/actions/start` | request the running state |
-| `POST` | `/vms/{id}/actions/stop` | request the stopped state |
-| `POST` | `/vms/{id}/actions/pause` | request the paused state |
-| `POST` | `/vms/{id}/actions/resume` | request the running state |
-| `POST` | `/vms/{id}/actions/terminate` | request destruction |
-| `POST` | `/vms/{id}/resize/compute` | change stopped VM compute size and request a boot |
-| `POST` | `/vms/{id}/resize/disk` | grow the VM disk |
-| `GET` | `/vms/{id}/console` | open the serial console websocket |
-
-Lifecycle requests return `202`. Poll `GET /vms/{id}` until `state` reaches `desired_state`.
-
-`PUT /vms/{id}/ssh-keys` accepts the complete desired `ssh_keys` list and returns the updated VM. An empty list removes all keys. The list can contain at most 100 unique OpenSSH keys. Each key must use one line and be at most 16 KiB. Running and paused VMs receive updated MMDS immediately. Stopped VMs use the keys at their next boot.
-
-`PUT /vms/{id}/network` replaces mutable network settings without a VM restart and returns the updated VM.
-
-```json
-{
-  "egress": "uplink",
-  "public_ipv4": "203.0.113.10",
-  "private_network_throughput_mibps": 100,
-  "public_network_throughput_mibps": 50
-}
-```
-
-`egress` controls internet reachability. It does not control mesh reachability.
-
-| Value | VM can reach | Public IPv4 | Throughput limits |
+| Mode | Session | History | Viewers |
 |---|---|---|---|
-| `uplink` | mesh peers and the internet | allowed | private and public |
-| `mesh` | mesh peers only | rejected | private applied, public stored |
-| `none` | nothing | rejected | none |
+| `tty` | The VM's serial console. It runs from VM start to VM stop. | Recent output replays on attach. | Many, capped. A viewer that stops reading is disconnected. |
+| `ssh` | An SSH session created for this connection and closed with it. | None. | One. |
 
-`egress` is required.
+Both modes use the same framing. Binary frames carry terminal bytes in both directions. A text frame carries a control message, for example `{"resize":{"cols":120,"rows":40}}`. Full detail: [internal/console/SPEC.md](../internal/console/SPEC.md).
 
-Use an empty `public_ipv4` to detach the address. Throughput values apply in both directions. `0` removes a limit. Metal keeps a limit that the mode does not permit and applies it when the mode permits it. Active connections can stop when the public IPv4 address or the egress mode changes.
+## Design notes
 
-`PUT /vms/{id}/disk` replaces the disk limits and returns the updated VM. It applies them without a VM restart.
-
-```json
-{
-  "throughput_mibps": 50,
-  "iops": 2000
-}
-```
-
-Each limit covers reads and writes together. A value of `0` does not apply a limit. The same object sets the limits at creation, under `disk`.
-
-`GET /vms/{id}/console` upgrades the request to a websocket for the serial console. The bearer token guards the handshake. Metal sends console output as binary frames. A viewer sends keystrokes as binary frames and a terminal resize as a text frame `{"resize":{"cols":80,"rows":24}}`. New viewers first receive the recent scrollback. Metal keeps the console open only while the VM runs. After a metald restart, the console is unavailable until the VM starts again, and the socket closes with a going-away status.
-
-## Image staging
-
-Metal uses a VM disk checkpoint to create a new immutable image. It does not expose image list, delete, or restore APIs.
-
-| Method | Path | Action |
-|---|---|---|
-| `POST` | `/vms/{id}/snapshots` | create local rootfs and kernel staging with a new UUIDv7 |
-| `POST` | `/snapshots/{snapshot_id}/upload` | upload staged artifacts with multipart HTTP URLs |
-| `GET` | `/snapshots/{snapshot_id}` | get upload status and completed artifact details |
-| `DELETE` | `/snapshots/{snapshot_id}` | remove local staging |
-
-The create response contains the snapshot ID and rootfs and kernel sizes. Atlas uses the ID as its Machine image name. Parts are 2 GiB, except the final part. The status reports part ETags and artifact SHA-256 values.
-
-The upload request returns `202`. Poll `GET /snapshots/{snapshot_id}` until `completed` or `failed`. The response reports progress during upload and artifact details when complete.
-
-Metal updates snapshot activity during upload. The image reconciler deletes staging after 48 hours without activity. A staging snapshot cannot roll back its source VM.
-
-## Controller exchange
-
-`POST /sync` applies controller state and returns host state. `wireguard_peers` and `images` are required. Send an empty list to remove all managed remote peers or cached-image policies.
-
-`privileged_vm_addresses` is the complete Atlas WG Mesh whitelist. Only these tenant-0 addresses cross tenants. Metal replaces the whole set, so an empty list clears it. The field is required, because a missing one would read as an empty set.
-
-```json
-{
-  "wireguard_peers": [
-    {
-      "node": "node-2",
-      "node_id": 2,
-      "public_key": "base64 WireGuard public key",
-      "address": "192.0.2.2:51820"
-    }
-  ],
-  "images": [
-    {
-      "ref": "sha256:immutable-reference",
-      "architecture": "amd64",
-      "rootfs": {"url": "https://images.example/rootfs?...", "sha256": "..."},
-      "kernel": {"url": "https://images.example/kernel?...", "sha256": "..."},
-      "cache_image": true,
-      "memory_snapshot": false
-    }
-  ]
-}
-```
-
-```json
-{
-  "capacity": {
-    "total_cpu_count": 32,
-    "available_cpu_count": 24,
-    "virtual_machine_count": 4,
-    "total_memory_mib": 131072,
-    "available_memory_mib": 81920,
-    "total_storage_mib": 3662109,
-    "available_storage_mib": 2288818
-  }
-}
-```
-
-Node names, node IDs, public keys, and image references must be unique. Metal applies WireGuard peers, then saves the image policy. It reconciles images outside the request. Cached images for the host architecture remain local. Other images are pruned after 24 hours without a successful VM start when no dependent disk exists. A cached memory-snapshot image uses local warm artifacts only when CPU, memory, and disk match exactly.
-
-## Errors
-
-Errors have a stable code and a safe public message.
-
-```json
-{
-  "error": {
-    "code": "not_found",
-    "message": "resource not found"
-  }
-}
-```
-
-Common codes are `invalid_request`, `unauthorized`, `not_found`, `conflict`, `image_content_conflict`, `image_integrity_failed`, `internal_error`, and `not_implemented`. Internal command errors and signed URL query values are not included in responses.
+- Mutations are asynchronous, so a slow host never holds a controller connection open.
+- Generations are the only completion signal, so every real change raises one.
+- A response omits transport URLs, user data, and host paths: the controller cannot use them and must not store them.

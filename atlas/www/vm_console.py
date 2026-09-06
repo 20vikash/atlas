@@ -8,6 +8,7 @@ no_cache = 1
 
 
 def get_context(context):
+	"""Build the console page context for one virtual machine."""
 	context.no_cache = 1
 	context.show_sidebar = False
 	context.virtual_machine = frappe.form_dict.get("vm") or ""

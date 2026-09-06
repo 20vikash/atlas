@@ -152,7 +152,7 @@
    "label": "Artifacts"
   },
   {
-   "description": "S3 object key of the rootfs image.",
+   "description": "Object key of the rootfs image.",
    "fieldname": "image_object_key",
    "fieldtype": "Data",
    "label": "Image Object Key",
@@ -176,7 +176,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "S3 object key of the kernel.",
+   "description": "Object key of the kernel.",
    "fieldname": "kernel_object_key",
    "fieldtype": "Data",
    "label": "Kernel Object Key",

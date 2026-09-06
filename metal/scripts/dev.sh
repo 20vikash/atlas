@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Keep external settings in the environment.
-WORKDIR=/tmp/metald
+WORKDIR=${METALD_WORKDIR:-/tmp/metald}
 BULK=${METALD_BULK_DIR:-$WORKDIR}
 POOL=${METALD_POOL:-metal}
 FC_VER=${METALD_FC_VERSION:-v1.16.1}
@@ -139,5 +139,5 @@ pool = "$POOL"
 EOF
 
 step "ready: run metald serve --config $CONFIG"
-step "API token: $AUTH_TOKEN"
+step "API token is configured from METALD_AUTH_TOKEN"
 step "key $KEYDIR/id_ed25519; ssh as user 'root'"

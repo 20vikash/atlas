@@ -1,5 +1,7 @@
 # Integration testing
 
+Use [Metal development](development.md) for normal package checks. Use [Metal operations](operations.md) for fault recovery.
+
 Metal integration tests need a Linux host with root access, KVM, ZFS, iptables, `curl`, `jq`, and `sha256sum`.
 
 ## Prepare the host
@@ -20,6 +22,7 @@ Run the script again when required. It performs these actions:
 - Writes the Metal configuration and development token digest.
 
 The default development token is `metal-development-token`. Set `METALD_AUTH_TOKEN` to use another value.
+The setup script does not print the configured token.
 
 ## Secure Shell test
 
@@ -50,6 +53,7 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 | Variable | Default | Meaning |
 |---|---|---|
 | `METALD_BULK_DIR` | `/tmp/metald` | Directory for the ZFS pool file. |
+| `METALD_WORKDIR` | `/tmp/metald` | Directory for runtime files, images, keys, and configuration. |
 | `METALD_POOL_SIZE` | 8 GiB to 30 GiB | ZFS pool file size. |
 | `METALD_FC_VERSION` | `v1.16.1` | Firecracker release. |
 | `METALD_POOL` | `metal` | ZFS pool name. |
