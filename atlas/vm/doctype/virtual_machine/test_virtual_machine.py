@@ -319,6 +319,10 @@ class TestMetalClient(UnitTestCase):
 		)
 		self.assertEqual(
 			request.call_args_list[2].kwargs["json"],
+			{"size_mib": 2048, "throughput_mibps": 0, "iops": 0},
+		)
+		self.assertEqual(
+			request.call_args_list[3].kwargs["json"],
 			{"virtual_cpu_count": 2, "memory_mib": 2048},
 		)
 
