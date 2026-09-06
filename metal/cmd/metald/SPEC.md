@@ -32,6 +32,7 @@ load configuration
    -> connect Atlas WG Mesh and configure the host
    -> create the Firecracker runtime
    -> validate all VM records and create the VM manager
+   -> create the host service
    -> start the VM and image reconcilers
    -> create the authenticated API
    -> listen and serve
@@ -39,7 +40,9 @@ load configuration
 
 The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
 
-The network constructor is `network.NewLinuxAllocator(mesh)`. The VM manager receives the runtime, network, disk, and snapshot services.
+The network constructor is `network.NewLinuxAllocator(mesh)`. The VM manager receives the runtime, network, disk, snapshot, and logger services.
+
+The host service receives the mesh, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
 
 `connectMesh` runs on every start. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 

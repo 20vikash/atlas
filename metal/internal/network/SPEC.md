@@ -21,6 +21,8 @@ Package `network` makes each VM network agree with its complete desired state. I
 | `Mesh` | Registers VM addresses through the Atlas WG Mesh CLI. |
 | `WireGuardManager` | Applies the complete controller peer set. |
 
+`linux.go` coordinates `Ensure` and `Release`. `namespace.go` owns namespace and virtual Ethernet operations. `internet.go` owns routes and address translation.
+
 ## Network state
 
 `Ensure` checks and applies all host resources:

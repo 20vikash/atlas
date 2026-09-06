@@ -22,17 +22,13 @@ type virtualMachineStorage interface {
 }
 
 type imageStore interface {
-	EnsureImage(ctx context.Context, image vm.ImageRef) error
+	EnsureImage(ctx context.Context, image vm.Image) error
 	WarmImage(
 		ctx context.Context,
-		image vm.ImageRef,
+		image vm.Image,
 		configuration vm.MemorySnapshotConfiguration,
 		firecrackerCompatibility string,
 	) (storage.WarmImageArtifacts, bool, error)
-	CreateWarmSourceSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
-	DeleteWarmSourceSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
-	PromoteWarmSnapshot(ctx context.Context, promotion storage.WarmImagePromotion) (storage.WarmImageArtifacts, error)
-	RemoveOtherWarmImages(ctx context.Context, imageReference, desiredKey string) error
 	RecordImageUse(imageReference string, usedAt time.Time) error
 }
 
@@ -257,12 +253,12 @@ func (d *Runtime) firecrackerCompatibility() string {
 	)
 }
 
-func (d *Runtime) hasMatchingMemorySnapshot(spec vm.Spec) bool {
+func (d *Runtime) hasMatchingMemorySnapshot(spec vm.Specification) bool {
 	configuration := spec.Image.MemorySnapshotConfiguration
 	return spec.Image.CacheImage &&
 		spec.Image.MemorySnapshot &&
 		configuration != nil &&
-		configuration.VirtualCPUCount == spec.VCPUs &&
+		configuration.VirtualCPUCount == spec.VirtualCPUCount &&
 		configuration.MemoryMiB == spec.MemoryMiB &&
 		configuration.DiskMiB == spec.DiskMiB
 }

@@ -95,7 +95,7 @@ type operationErrorResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-func toVirtualMachine(information vm.Info) virtualMachineResponse {
+func toVirtualMachine(information vm.Information) virtualMachineResponse {
 	return virtualMachineResponse{
 		ID: information.ID,
 		Desired: desiredVirtualMachineResponse{
@@ -103,7 +103,7 @@ func toVirtualMachine(information vm.Info) virtualMachineResponse {
 			RestartGeneration: information.DesiredRestartGeneration,
 			State:             string(information.DesiredState),
 			Compute: computeResponse{
-				VirtualCPUCount: information.VCPUs,
+				VirtualCPUCount: information.VirtualCPUCount,
 				MemoryMiB:       information.MemoryMiB,
 			},
 			Disk: diskResponse{
@@ -158,7 +158,7 @@ func toOperationError(operationError *vm.PublicOperationError) *operationErrorRe
 	}
 }
 
-func toVirtualMachineImage(image vm.ImageRef) virtualMachineImageResponse {
+func toVirtualMachineImage(image vm.Image) virtualMachineImageResponse {
 	return virtualMachineImageResponse{
 		Ref:                         image.Name,
 		Architecture:                image.Architecture,

@@ -1,18 +1,11 @@
 package api
 
 import (
-	"bufio"
-	"context"
-	"fmt"
 	"net/http"
-	"os"
-	"runtime"
-	"strconv"
-	"strings"
-	"syscall"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -80,28 +73,19 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 		}
 	}
 
-	ctx := c.Request().Context()
-	if err := s.mesh.ApplyPrivilegedAddresses(ctx, request.PrivilegedVMAddresses); err != nil {
-		return err
-	}
-	if err := s.wireGuardManager.Apply(ctx, request.toWireGuardPeers()); err != nil {
-		return err
-	}
-	if err := s.imagePolicyStore.SetImagePolicies(ctx, request.imagePolicies()); err != nil {
-		return err
-	}
-	s.wakeReconciler()
-
-	capacity, err := s.getHostCapacity(ctx)
+	capacity, err := s.hostService.Synchronize(c.Request().Context(), host.DesiredState{
+		WireGuardPeers: request.toWireGuardPeers(), Images: request.imagePolicies(),
+		PrivilegedVirtualMachineAddresses: request.PrivilegedVMAddresses,
+	})
 	if err != nil {
 		return err
 	}
 
-	return c.JSON(http.StatusOK, syncResponse{Capacity: capacity})
+	return c.JSON(http.StatusOK, syncResponse{Capacity: capacityResponseFromHost(capacity)})
 }
 
-func (request syncRequest) imagePolicies() []vm.ImageRef {
-	images := make([]vm.ImageRef, 0, len(request.Images))
+func (request syncRequest) imagePolicies() []vm.Image {
+	images := make([]vm.Image, 0, len(request.Images))
 	for _, image := range request.Images {
 		images = append(images, image.specification())
 	}
@@ -121,79 +105,11 @@ func (request syncRequest) toWireGuardPeers() []network.WireGuardPeer {
 	return peers
 }
 
-func (s *Server) getHostCapacity(ctx context.Context) (capacityResponse, error) {
-	availableCPUCount, availableMemory, virtualMachineCount, err := s.getComputeCapacity(ctx)
-	if err != nil {
-		return capacityResponse{}, err
-	}
-
-	var information syscall.Sysinfo_t
-	if err := syscall.Sysinfo(&information); err != nil {
-		return capacityResponse{}, err
-	}
-	unit := uint64(information.Unit)
-	if unit == 0 {
-		unit = 1
-	}
-
-	storageCapacity, err := s.storage.Capacity(ctx)
-	if err != nil {
-		return capacityResponse{}, err
-	}
-
+func capacityResponseFromHost(capacity host.Capacity) capacityResponse {
 	return capacityResponse{
-		TotalCPUCount:       runtime.NumCPU(),
-		AvailableCPUCount:   availableCPUCount,
-		VirtualMachineCount: virtualMachineCount,
-		TotalMemoryMiB:      int((uint64(information.Totalram) * unit) >> 20),
-		AvailableMemoryMiB:  availableMemory,
-		TotalStorageMiB:     int(storageCapacity.TotalMiB),
-		AvailableStorageMiB: int(storageCapacity.AvailableMiB),
-	}, nil
-}
-
-func (s *Server) getComputeCapacity(ctx context.Context) (availableCPUCount, availableMemoryMiB, virtualMachineCount int, err error) {
-	virtualMachines, err := s.virtualMachineManager.List(ctx)
-	if err != nil {
-		return 0, 0, 0, err
+		TotalCPUCount: capacity.TotalCPUCount, AvailableCPUCount: capacity.AvailableCPUCount,
+		VirtualMachineCount: capacity.VirtualMachineCount, TotalMemoryMiB: capacity.TotalMemoryMiB,
+		AvailableMemoryMiB: capacity.AvailableMemoryMiB, TotalStorageMiB: capacity.TotalStorageMiB,
+		AvailableStorageMiB: capacity.AvailableStorageMiB,
 	}
-
-	allocatedCPUCount := 0
-	for _, information := range virtualMachines {
-		allocatedCPUCount += information.VCPUs
-	}
-
-	memoryMiB, err := readAvailableMemoryMiB()
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	return max(runtime.NumCPU()-allocatedCPUCount, 0), memoryMiB, len(virtualMachines), nil
-}
-
-func readAvailableMemoryMiB() (int, error) {
-	file, err := os.Open("/proc/meminfo")
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) != 3 || fields[0] != "MemAvailable:" || fields[2] != "kB" {
-			continue
-		}
-
-		value, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
-			return 0, err
-		}
-		return int(value / 1024), nil
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, err
-	}
-
-	return 0, fmt.Errorf("MemAvailable is missing from /proc/meminfo")
 }

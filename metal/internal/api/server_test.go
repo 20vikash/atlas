@@ -12,13 +12,14 @@ import (
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/console"
+	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 type fakeVM struct {
-	info vm.Info
+	info vm.Information
 }
 
 type fakeVirtualMachineManager struct {
@@ -28,16 +29,16 @@ type fakeVirtualMachineManager struct {
 	deferMetadata   bool
 }
 
-func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Spec) (vm.Info, error) {
+func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification) (vm.Information, error) {
 	if existing, found := manager.virtualMachines[id]; found {
 		return existing.info, nil
 	}
 
-	virtualMachine := &fakeVM{info: vm.Info{
+	virtualMachine := &fakeVM{info: vm.Information{
 		ID:                            id,
 		State:                         vm.StateUnknown,
 		DesiredState:                  vm.StateRunning,
-		VCPUs:                         specification.VCPUs,
+		VirtualCPUCount:               specification.VirtualCPUCount,
 		MemoryMiB:                     specification.MemoryMiB,
 		DiskMiB:                       specification.DiskMiB,
 		Image:                         specification.Image,
@@ -55,21 +56,21 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 	return virtualMachine.info, nil
 }
 
-func (manager *fakeVirtualMachineManager) Information(_ context.Context, id string) (vm.Info, error) {
+func (manager *fakeVirtualMachineManager) Information(_ context.Context, id string) (vm.Information, error) {
 	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
-		return vm.Info{}, vm.ErrNotFound
+		return vm.Information{}, vm.ErrNotFound
 	}
 
 	return virtualMachine.info, nil
 }
 
-func (manager *fakeVirtualMachineManager) List(context.Context) ([]vm.Info, error) {
+func (manager *fakeVirtualMachineManager) List(context.Context) ([]vm.Information, error) {
 	if manager.listError != nil {
 		return nil, manager.listError
 	}
 
-	virtualMachines := make([]vm.Info, 0, len(manager.virtualMachines))
+	virtualMachines := make([]vm.Information, 0, len(manager.virtualMachines))
 	for _, virtualMachine := range manager.virtualMachines {
 		virtualMachines = append(virtualMachines, virtualMachine.info)
 	}
@@ -154,7 +155,7 @@ func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id strin
 		return vm.ErrConflict
 	}
 
-	virtualMachine.info.VCPUs = virtualCPUCount
+	virtualMachine.info.VirtualCPUCount = virtualCPUCount
 	virtualMachine.info.MemoryMiB = memoryMiB
 	virtualMachine.info.DesiredState = vm.StateRunning
 	virtualMachine.info.DesiredGeneration++
@@ -193,12 +194,12 @@ func (manager *fakeVirtualMachineManager) CreateSnapshot(_ context.Context, id s
 	return vm.StagedSnapshot{ID: snapshotID, SourceVirtualMachineID: id, RootfsSizeBytes: 1024, KernelSizeBytes: 512}, nil
 }
 
-func (manager *fakeVirtualMachineManager) ConnectSSH(context.Context, string) (vm.SSHConn, error) {
+func (manager *fakeVirtualMachineManager) ConnectSSH(context.Context, string) (vm.SSHConnection, error) {
 	return nil, errors.New("ssh unavailable")
 }
 
 type fakeRuntimeServices struct {
-	policies   []vm.ImageRef
+	policies   []vm.Image
 	privileged []string
 	snapshots  map[string]storage.StagedSnapshot
 }
@@ -256,8 +257,8 @@ func (services *fakeRuntimeServices) DeleteSnapshot(_ context.Context, snapshotI
 	return nil
 }
 
-func (services *fakeRuntimeServices) SetImagePolicies(_ context.Context, images []vm.ImageRef) error {
-	services.policies = append([]vm.ImageRef(nil), images...)
+func (services *fakeRuntimeServices) SetImagePolicies(_ context.Context, images []vm.Image) error {
+	services.policies = append([]vm.Image(nil), images...)
 	return nil
 }
 
@@ -302,14 +303,18 @@ func newServerWithServices(
 	if manager, ok := virtualMachineManager.(*fakeVirtualMachineManager); ok {
 		manager.services = services
 	}
+	hostService, err := host.NewService(host.Dependencies{
+		Mesh: services, WireGuard: wireGuardManager, Images: services,
+		VirtualMachines: virtualMachineManager, Storage: fakeCapacityProvider{}, Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		SnapshotStore:         services,
-		ImagePolicyStore:      services,
 		WakeReconciler:        func() {},
-		WireGuardManager:      wireGuardManager,
-		Mesh:                  services,
-		Storage:               fakeCapacityProvider{},
+		HostService:           hostService,
 		ConsoleBroker:         stubConsoleBroker{},
 	})
 	if err != nil {

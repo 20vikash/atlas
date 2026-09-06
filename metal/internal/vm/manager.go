@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -22,6 +23,7 @@ import (
 type ManagerConfig struct {
 	MachinesDirectory string
 	UserIDRange       idalloc.Range
+	FastApplyTimeout  time.Duration
 }
 
 // ManagerDependencies contains the host services used by Manager.
@@ -30,6 +32,7 @@ type ManagerDependencies struct {
 	Network   Network
 	Storage   Storage
 	Snapshots Snapshots
+	Logger    *slog.Logger
 }
 
 // Manager owns virtual machine desired state and reconciliation.
@@ -40,6 +43,7 @@ type Manager struct {
 	network              Network
 	storage              Storage
 	snapshots            Snapshots
+	logger               *slog.Logger
 	operationLocks       keyedLocks
 	allocationMutex      sync.Mutex
 	temporaryUserIDs     map[uint32]bool
@@ -54,8 +58,14 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	if configuration.UserIDRange == (idalloc.Range{}) {
 		configuration.UserIDRange = idalloc.DefaultRange
 	}
+	if configuration.FastApplyTimeout <= 0 {
+		configuration.FastApplyTimeout = 2 * time.Second
+	}
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
+	}
+	if dependencies.Logger == nil {
+		dependencies.Logger = slog.Default()
 	}
 	manager := &Manager{
 		configuration:        configuration,
@@ -64,6 +74,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 		network:              dependencies.Network,
 		storage:              dependencies.Storage,
 		snapshots:            dependencies.Snapshots,
+		logger:               dependencies.Logger,
 		temporaryUserIDs:     make(map[uint32]bool),
 		temporaryIdentifiers: make(map[string]bool),
 	}
@@ -74,49 +85,49 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 }
 
 // Create reserves a VM or accepts a retry of the first request.
-func (manager *Manager) Create(ctx context.Context, identifier string, specification Spec) (Info, error) {
+func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification) (Information, error) {
 	if !validIdentifier(identifier) {
-		return Info{}, ErrConflict
+		return Information{}, ErrConflict
 	}
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
 	if err != nil {
-		return Info{}, err
+		return Information{}, err
 	}
 	defer unlock()
 
 	fingerprint, err := createFingerprint(specification)
 	if err != nil {
-		return Info{}, err
+		return Information{}, err
 	}
 	existing, err := manager.store.readDesired(identifier)
 	if err == nil {
 		if existing.State == StateDestroyed || existing.CreateFingerprint != fingerprint {
-			return Info{}, ErrConflict
+			return Information{}, ErrConflict
 		}
 		existing.Specification = existing.Specification.RefreshImageSource(specification)
 		if err := manager.store.writeDesired(existing); err != nil {
-			return Info{}, err
+			return Information{}, err
 		}
 		return manager.information(identifier)
 	}
 	if !errors.Is(err, ErrNotFound) {
-		return Info{}, err
+		return Information{}, err
 	}
 
 	manager.allocationMutex.Lock()
 	if manager.temporaryIdentifiers[identifier] {
 		manager.allocationMutex.Unlock()
-		return Info{}, ErrConflict
+		return Information{}, ErrConflict
 	}
 	defer manager.allocationMutex.Unlock()
 	if inUse, err := manager.publicIPv4InUse(identifier, specification.Network.PublicIPv4); err != nil {
-		return Info{}, err
+		return Information{}, err
 	} else if inUse {
-		return Info{}, ErrConflict
+		return Information{}, ErrConflict
 	}
 	userID, err := manager.allocateUserID()
 	if err != nil {
-		return Info{}, err
+		return Information{}, err
 	}
 	desired := DesiredRecord{
 		ID:                identifier,
@@ -129,28 +140,34 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 	}
 	observed := ObservedRecord{State: StateUnknown, UpdatedAt: time.Now().UTC()}
 	if err := manager.store.writeDesired(desired); err != nil {
-		return Info{}, err
+		return Information{}, err
 	}
 	if err := manager.store.writeObserved(identifier, observed); err != nil {
-		return Info{}, errors.Join(err, manager.store.remove(identifier))
+		return Information{}, errors.Join(err, manager.store.remove(identifier))
 	}
 	return informationFromRecords(desired, observed, DiskUsage{}), nil
 }
 
 // Information returns the persisted desired and observed VM state.
-func (manager *Manager) Information(ctx context.Context, identifier string) (Info, error) {
+func (manager *Manager) Information(ctx context.Context, identifier string) (Information, error) {
+	virtualMachine := manager.newMachine(identifier)
+	unlock, err := virtualMachine.lock(ctx)
+	if err != nil {
+		return Information{}, err
+	}
+	defer unlock()
 	return manager.information(identifier)
 }
 
 // List returns all valid virtual machine records.
-func (manager *Manager) List(ctx context.Context) ([]Info, error) {
+func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	identifiers, err := manager.store.listIDs()
 	if err != nil {
 		return nil, err
 	}
-	information := make([]Info, 0, len(identifiers))
+	information := make([]Information, 0, len(identifiers))
 	for _, identifier := range identifiers {
-		current, err := manager.information(identifier)
+		current, err := manager.Information(ctx, identifier)
 		if err != nil {
 			return nil, err
 		}
@@ -164,14 +181,14 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 	return manager.store.listIDs()
 }
 
-func (manager *Manager) information(identifier string) (Info, error) {
+func (manager *Manager) information(identifier string) (Information, error) {
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
-		return Info{}, err
+		return Information{}, err
 	}
 	observed, err := manager.store.readObserved(identifier)
 	if err != nil {
-		return Info{}, err
+		return Information{}, err
 	}
 	return informationFromRecords(desired, observed, observed.Disk), nil
 }
@@ -222,7 +239,7 @@ func validIdentifier(identifier string) bool {
 	return identifier != "" && identifier != "." && filepath.Base(identifier) == identifier
 }
 
-func createFingerprint(specification Spec) (string, error) {
+func createFingerprint(specification Specification) (string, error) {
 	normalized := cloneSpecification(specification)
 	normalized.Image.RootfsURL = ""
 	normalized.Image.KernelURL = ""
@@ -234,7 +251,7 @@ func createFingerprint(specification Spec) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-func cloneSpecification(specification Spec) Spec {
+func cloneSpecification(specification Specification) Specification {
 	specification.SSHKeys = slices.Clone(specification.SSHKeys)
 	specification.Metadata = maps.Clone(specification.Metadata)
 	if specification.Image.MemorySnapshotConfiguration != nil {
@@ -244,7 +261,7 @@ func cloneSpecification(specification Spec) Spec {
 	return specification
 }
 
-func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Info {
+func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Information {
 	var errorDetail *PublicOperationError
 	if observed.Error != nil {
 		errorDetail = &PublicOperationError{
@@ -256,12 +273,12 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB
 	}
-	return Info{
+	return Information{
 		ID:                            desired.ID,
 		State:                         observed.State,
 		DesiredState:                  desired.State,
 		Error:                         errorDetail,
-		VCPUs:                         desired.Specification.VCPUs,
+		VirtualCPUCount:               desired.Specification.VirtualCPUCount,
 		MemoryMiB:                     desired.Specification.MemoryMiB,
 		DiskMiB:                       usage.SizeMiB,
 		DiskUsedMiB:                   usage.UsedMiB,
@@ -294,68 +311,4 @@ func newOperationID() string {
 		return uuid.NewString()
 	}
 	return identifier.String()
-}
-
-// RunTemporary runs an operation on a manager-owned temporary virtual machine.
-func (manager *Manager) RunTemporary(
-	ctx context.Context,
-	identifier string,
-	specification Spec,
-	operation func(RuntimeMachine) error,
-) (operationError error) {
-	if !validIdentifier(identifier) {
-		return ErrConflict
-	}
-	manager.allocationMutex.Lock()
-	if manager.temporaryIdentifiers[identifier] {
-		manager.allocationMutex.Unlock()
-		return ErrConflict
-	}
-	if _, err := manager.store.readDesired(identifier); err == nil {
-		manager.allocationMutex.Unlock()
-		return ErrConflict
-	} else if !errors.Is(err, ErrNotFound) {
-		manager.allocationMutex.Unlock()
-		return err
-	}
-	userID, err := manager.allocateUserID()
-	if err != nil {
-		manager.allocationMutex.Unlock()
-		return err
-	}
-	manager.temporaryUserIDs[userID] = true
-	manager.temporaryIdentifiers[identifier] = true
-	manager.allocationMutex.Unlock()
-	defer func() {
-		manager.allocationMutex.Lock()
-		delete(manager.temporaryUserIDs, userID)
-		delete(manager.temporaryIdentifiers, identifier)
-		manager.allocationMutex.Unlock()
-	}()
-	desired := DesiredRecord{ID: identifier, UserID: userID, GroupID: userID, Specification: cloneSpecification(specification)}
-	interfaceState, err := manager.network.Ensure(ctx, networkRequest(desired))
-	if err != nil {
-		_ = manager.network.Release(context.WithoutCancel(ctx), NetworkReleaseRequest{
-			VirtualMachineID: identifier, UserID: userID,
-			WireGuardMeshIPv6: specification.Network.WireGuardMeshIPv6,
-		})
-		return fmt.Errorf("ensure temporary VM network: %w", err)
-	}
-	machine := runtimeMachine(desired, interfaceState)
-	defer func() {
-		cleanupContext := context.WithoutCancel(ctx)
-		operationError = errors.Join(
-			operationError,
-			manager.runtime.Remove(cleanupContext, machine),
-			manager.network.Release(cleanupContext, NetworkReleaseRequest{
-				VirtualMachineID: identifier, UserID: userID,
-				WireGuardMeshIPv6: specification.Network.WireGuardMeshIPv6,
-			}),
-			manager.storage.Release(cleanupContext, identifier),
-		)
-	}()
-	if err := manager.runtime.Start(ctx, machine); err != nil {
-		return fmt.Errorf("start temporary VM: %w", err)
-	}
-	return operation(machine)
 }

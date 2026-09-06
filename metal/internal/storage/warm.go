@@ -2,9 +2,6 @@ package storage
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,7 +22,7 @@ type WarmImageArtifacts struct {
 
 // WarmImagePromotion identifies a local template snapshot.
 type WarmImagePromotion struct {
-	Image                    vm.ImageRef
+	Image                    vm.Image
 	Configuration            vm.MemorySnapshotConfiguration
 	FirecrackerCompatibility string
 	SourceVirtualMachineID   string
@@ -35,29 +32,35 @@ type WarmImagePromotion struct {
 }
 
 // WarmImageKey identifies an exact image, shape, and Firecracker build.
-func WarmImageKey(image vm.ImageRef, configuration vm.MemorySnapshotConfiguration, firecrackerCompatibility string) string {
-	identity := struct {
-		Reference                string
-		Architecture             string
-		RootfsSHA256             string
-		KernelSHA256             string
-		Configuration            vm.MemorySnapshotConfiguration
-		FirecrackerCompatibility string
-	}{
-		Reference:                image.Name,
-		Architecture:             image.Architecture,
-		RootfsSHA256:             strings.ToLower(image.RootfsSHA256),
-		KernelSHA256:             strings.ToLower(image.KernelSHA256),
-		Configuration:            configuration,
-		FirecrackerCompatibility: firecrackerCompatibility,
+func WarmImageKey(image vm.Image, configuration vm.MemorySnapshotConfiguration, firecrackerCompatibility string) string {
+	return vm.WarmImageKey(image, configuration, firecrackerCompatibility)
+}
+
+// FindWarmImage reports whether the requested warm image is complete.
+func (store *ImageStore) FindWarmImage(ctx context.Context, image vm.Image, configuration vm.MemorySnapshotConfiguration, compatibility string) (bool, error) {
+	_, found, err := store.WarmImage(ctx, image, configuration, compatibility)
+	return found, err
+}
+
+// PromoteWarmImage stores a warm disk, state file, and memory file.
+func (store *ImageStore) PromoteWarmImage(ctx context.Context, promotion vm.WarmImagePromotion) error {
+	const snapshotName = "warm"
+	if err := store.CreateWarmSourceSnapshot(ctx, promotion.SourceVirtualMachineID, snapshotName); err != nil {
+		return fmt.Errorf("snapshot warm virtual machine disk: %w", err)
 	}
-	data, _ := json.Marshal(identity)
-	digest := sha256.Sum256(data)
-	return hex.EncodeToString(digest[:])
+	defer store.DeleteWarmSourceSnapshot(context.WithoutCancel(ctx), promotion.SourceVirtualMachineID, snapshotName)
+
+	_, err := store.PromoteWarmSnapshot(ctx, WarmImagePromotion{
+		Image: promotion.Image, Configuration: promotion.Configuration,
+		FirecrackerCompatibility: promotion.FirecrackerCompatibility,
+		SourceVirtualMachineID:   promotion.SourceVirtualMachineID, SourceSnapshotName: snapshotName,
+		StateFile: promotion.StateFile, MemoryFile: promotion.MemoryFile,
+	})
+	return err
 }
 
 // WarmImage returns compatible local warm artifacts when all files exist.
-func (store *ImageStore) WarmImage(ctx context.Context, image vm.ImageRef, configuration vm.MemorySnapshotConfiguration, firecrackerCompatibility string) (WarmImageArtifacts, bool, error) {
+func (store *ImageStore) WarmImage(ctx context.Context, image vm.Image, configuration vm.MemorySnapshotConfiguration, firecrackerCompatibility string) (WarmImageArtifacts, bool, error) {
 	key := WarmImageKey(image, configuration, firecrackerCompatibility)
 	artifacts := store.warmImageArtifacts(image.Name, key)
 

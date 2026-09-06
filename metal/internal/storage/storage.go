@@ -2,12 +2,15 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // ZFSPool manages datasets in one ZFS pool.
@@ -134,36 +137,6 @@ func (store *SnapshotStore) snapshotLock(snapshotID string) *sync.Mutex {
 	return lock.(*sync.Mutex)
 }
 
-func (pool *ZFSPool) imagesDataset() string { return pool.name + "/images" }
-
-func (pool *ZFSPool) baseDataset(imageReference string) string {
-	return pool.imagesDataset() + "/" + imageReference
-}
-
-func (pool *ZFSPool) baseSnapshot(imageReference string) string {
-	return pool.baseDataset(imageReference) + "@ready"
-}
-
-func (pool *ZFSPool) virtualMachineDataset(virtualMachineID string) string {
-	return pool.name + "/vms/" + virtualMachineID
-}
-
-func (pool *ZFSPool) virtualMachineDevicePath(virtualMachineID string) string {
-	return "/dev/zvol/" + pool.virtualMachineDataset(virtualMachineID)
-}
-
-func (pool *ZFSPool) snapshot(virtualMachineID, snapshotName string) string {
-	return pool.virtualMachineDataset(virtualMachineID) + "@" + snapshotName
-}
-
-func (pool *ZFSPool) stagingDataset(snapshotID string) string {
-	return pool.name + "/staging/" + snapshotID
-}
-
-func (pool *ZFSPool) stagingDevicePath(snapshotID string) string {
-	return "/dev/zvol/" + pool.stagingDataset(snapshotID)
-}
-
 func (store *SnapshotStore) snapshotDirectory(snapshotID string) string {
 	return filepath.Join(store.directory, snapshotID)
 }
@@ -175,3 +148,44 @@ func notFoundAware(err error) error {
 
 	return err
 }
+
+// ErrNotFound indicates that a disk, snapshot, or image does not exist.
+var ErrNotFound = errors.New("storage: not found")
+
+// ErrInUse indicates that an image has dependent virtual machines.
+var ErrInUse = errors.New("storage: in use")
+
+// ErrImageConflict indicates that an image reference has different content.
+var ErrImageConflict = errors.New("storage: image content conflict")
+
+// ErrImageIntegrity indicates that image verification failed.
+var ErrImageIntegrity = errors.New("storage: image integrity check failed")
+
+// VirtualMachineStorageRequest identifies the files and disk for one virtual machine.
+type VirtualMachineStorageRequest struct {
+	VirtualMachineID string
+	ImageReference   string
+	Image            vm.Image
+	ChrootRoot       string
+	UserID           uint32
+	GroupID          uint32
+	DiskMiB          int
+	SourceSnapshot   string
+}
+
+// BootConfiguration contains the files that Firecracker needs to boot.
+type BootConfiguration struct {
+	Kernel     string
+	KernelArgs string
+	Drives     []Drive
+}
+
+// Drive describes one Firecracker block device.
+type Drive struct {
+	Path     string
+	ReadOnly bool
+	Root     bool
+}
+
+// Usage describes disk allocation.
+type Usage = vm.DiskUsage

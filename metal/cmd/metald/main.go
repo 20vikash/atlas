@@ -21,6 +21,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/api"
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/firecracker"
+	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
@@ -191,12 +192,13 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 			Network:   networkManager,
 			Storage:   stores.VirtualMachines,
 			Snapshots: stores.Snapshots,
+			Logger:    logger,
 		},
 	)
 	if err != nil {
 		return fmt.Errorf("configure VM manager: %w", err)
 	}
-	memorySnapshotBuilder := firecracker.NewMemorySnapshotBuilder(
+	memorySnapshotBuilder := vm.NewWarmImageBuilder(
 		virtualMachineManager,
 		virtualMachineRuntime,
 		stores.Images,
@@ -218,14 +220,18 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
 	}
+	hostService, err := host.NewService(host.Dependencies{
+		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
+		VirtualMachines: virtualMachineManager, Storage: stores.Pool, Wake: wakeReconcilers,
+	})
+	if err != nil {
+		return fmt.Errorf("configure host service: %w", err)
+	}
 	server, err := api.New(api.Config{AuthTokenHash: o.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		SnapshotStore:         stores.Snapshots,
-		ImagePolicyStore:      stores.Images,
 		WakeReconciler:        wakeReconcilers,
-		WireGuardManager:      wireGuardManager,
-		Mesh:                  mesh,
-		Storage:               stores.Pool,
+		HostService:           hostService,
 		ConsoleBroker:         consoleBroker,
 	})
 	if err != nil {

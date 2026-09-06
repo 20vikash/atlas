@@ -2,20 +2,17 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	maximumSSHKeyCount    = 100
-	maximumSSHKeyLength   = 16 * 1024
-	immediateApplyTimeout = 2 * time.Second
+	maximumSSHKeyCount  = 100
+	maximumSSHKeyLength = 16 * 1024
 )
 
 type replaceVirtualMachineSSHKeysRequest struct {
@@ -52,10 +49,8 @@ func (s *Server) replaceVirtualMachineSSHKeys(c echo.Context) error {
 	if err != nil {
 		return badRequest(err.Error())
 	}
-	operationContext, cancelOperation := context.WithTimeout(c.Request().Context(), immediateApplyTimeout)
-	defer cancelOperation()
 	applied, err := s.virtualMachineManager.ReplaceSSHKeys(
-		operationContext,
+		c.Request().Context(),
 		virtualMachineID,
 		sshKeys,
 	)

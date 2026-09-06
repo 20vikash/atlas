@@ -50,12 +50,12 @@ func (manager *Manager) SetCompute(ctx context.Context, identifier string, virtu
 		if observed.State != StateStopped {
 			return false, ErrConflict
 		}
-		if record.Specification.VCPUs == virtualCPUCount &&
+		if record.Specification.VirtualCPUCount == virtualCPUCount &&
 			record.Specification.MemoryMiB == memoryMiB &&
 			record.State == StateRunning {
 			return false, nil
 		}
-		record.Specification.VCPUs = virtualCPUCount
+		record.Specification.VirtualCPUCount = virtualCPUCount
 		record.Specification.MemoryMiB = memoryMiB
 		record.State = StateRunning
 		return true, nil
@@ -145,16 +145,22 @@ func (manager *Manager) Delete(ctx context.Context, identifier string) error {
 }
 
 // ConnectSSH opens one guest SSH session.
-func (manager *Manager) ConnectSSH(ctx context.Context, identifier string) (SSHConn, error) {
-	desired, err := manager.store.readDesired(identifier)
+func (manager *Manager) ConnectSSH(ctx context.Context, identifier string) (SSHConnection, error) {
+	virtualMachine := manager.newMachine(identifier)
+	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return nil, err
 	}
-	interfaceState, err := manager.network.Ensure(ctx, networkRequest(desired))
+	defer unlock()
+	desired, _, err := virtualMachine.records()
 	if err != nil {
 		return nil, err
 	}
-	return manager.runtime.ConnectSSH(ctx, runtimeMachine(desired, interfaceState))
+	interfaceState, err := manager.network.Ensure(ctx, virtualMachine.networkRequest(desired))
+	if err != nil {
+		return nil, err
+	}
+	return manager.runtime.ConnectSSH(ctx, virtualMachine.runtimeConfiguration(desired, interfaceState))
 }
 
 // CreateSnapshot stages one machine image snapshot.
@@ -223,22 +229,38 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 }
 
 func (manager *Manager) applyMetadata(ctx context.Context, identifier string) (bool, error) {
-	if err := manager.refreshMetadata(ctx, identifier); err != nil {
+	operationContext, cancel := context.WithTimeout(ctx, manager.configuration.FastApplyTimeout)
+	defer cancel()
+	if err := manager.refreshMetadata(operationContext, identifier); err != nil {
 		return false, nil
 	}
 	return true, nil
 }
 
 func (manager *Manager) refreshMetadata(ctx context.Context, identifier string) error {
-	desired, err := manager.store.readDesired(identifier)
+	virtualMachine := manager.newMachine(identifier)
+	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return err
 	}
-	interfaceState, err := manager.network.Ensure(ctx, networkRequest(desired))
+	defer unlock()
+	desired, observed, err := virtualMachine.records()
 	if err != nil {
 		return err
 	}
-	return manager.runtime.RefreshMetadata(ctx, runtimeMachine(desired, interfaceState))
+	operationID := newOperationID()
+	runtimeConfiguration := virtualMachine.runtimeConfiguration(desired, observed.NetworkInterface)
+	if err := manager.runOperation(ctx, identifier, &observed, operationID, phaseMetadata, func() error {
+		return manager.runtime.RefreshMetadata(ctx, runtimeConfiguration)
+	}); err != nil {
+		return err
+	}
+	observed.Phase = ""
+	observed.OperationID = ""
+	observed.OperationStartedAt = time.Time{}
+	observed.Error = nil
+	observed.UpdatedAt = time.Now().UTC()
+	return manager.store.writeObserved(identifier, observed)
 }
 
 func (manager *Manager) mutate(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) error {
@@ -273,20 +295,9 @@ func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, 
 }
 
 func networkRequest(record DesiredRecord) NetworkRequest {
-	return NetworkRequest{
-		VirtualMachineID: record.ID,
-		UserID:           record.UserID,
-		GroupID:          record.GroupID,
-		Configuration:    record.Specification.Network,
-	}
+	return (machine{identifier: record.ID}).networkRequest(record)
 }
 
 func runtimeMachine(record DesiredRecord, interfaceState NetworkInterface) RuntimeMachine {
-	return RuntimeMachine{
-		ID:               record.ID,
-		UserID:           record.UserID,
-		GroupID:          record.GroupID,
-		Specification:    cloneSpecification(record.Specification),
-		NetworkInterface: interfaceState,
-	}
+	return (machine{identifier: record.ID}).runtimeConfiguration(record, interfaceState)
 }

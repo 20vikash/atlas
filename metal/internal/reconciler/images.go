@@ -16,9 +16,9 @@ const (
 
 // ImageStore reconciles and prunes local image artifacts.
 type ImageStore interface {
-	ImagePolicies(ctx context.Context) ([]vm.ImageRef, error)
-	EnsureImage(ctx context.Context, image vm.ImageRef) error
-	PruneImages(ctx context.Context, policies []vm.ImageRef, now time.Time, maximumIdle time.Duration) error
+	ImagePolicies(ctx context.Context) ([]vm.Image, error)
+	EnsureImage(ctx context.Context, image vm.Image) error
+	PruneImages(ctx context.Context, policies []vm.Image, now time.Time, maximumIdle time.Duration) error
 }
 
 // SnapshotStore prunes local snapshot staging.
@@ -28,7 +28,7 @@ type SnapshotStore interface {
 
 // MemorySnapshotBuilder creates local warm boot artifacts.
 type MemorySnapshotBuilder interface {
-	EnsureMemorySnapshot(ctx context.Context, image vm.ImageRef) error
+	EnsureMemorySnapshot(ctx context.Context, image vm.Image) error
 }
 
 // ImageConfig controls image reconciliation.
@@ -141,7 +141,7 @@ func (reconciler *ImageReconciler) reconcileAll(ctx context.Context) {
 	}
 }
 
-func (reconciler *ImageReconciler) reconcileImage(ctx context.Context, image vm.ImageRef) {
+func (reconciler *ImageReconciler) reconcileImage(ctx context.Context, image vm.Image) {
 	operationContext, cancel := context.WithTimeout(ctx, reconciler.operationTimeout)
 	defer cancel()
 

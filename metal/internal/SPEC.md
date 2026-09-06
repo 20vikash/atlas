@@ -13,9 +13,10 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | Package | Role |
 |---|---|
 | [vm](vm/SPEC.md) | VM manager, records, reconciliation, interfaces, and value types. |
-| [firecracker](firecracker/SPEC.md) | Firecracker runtime and warm image builder. |
+| [firecracker](firecracker/SPEC.md) | Firecracker runtime and optional warm capability. |
 | [firecracker/api](firecracker/api/SPEC.md) | Firecracker REST client over a Unix socket. |
 | [api](api/SPEC.md) | Authenticated HTTP API. |
+| `host` | Host synchronization and capacity. |
 | [reconciler](../docs/architecture.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
 | [network](network/SPEC.md) | VM namespaces and managed WireGuard peers. |
@@ -27,14 +28,14 @@ The `vm` package defines the contracts. The other packages implement or consume 
 
 ```text
 cmd/metald
-   ├─ api -> vm.Manager
+   ├─ api -> vm.Manager, host.Service
    ├─ reconciler -> vm.Manager
    ├─ firecracker -> vm, storage, systemd, firecracker/api
    ├─ storage -> vm, hostcmd
    └─ network -> vm, hostcmd
 ```
 
-The `vm` package defines small host service interfaces. The `vm.Manager` owns VM state and operations.
+The `vm` package defines small host service interfaces. The `vm.Manager` owns VM state, operations, and warm-image orchestration.
 
 ## Related
 

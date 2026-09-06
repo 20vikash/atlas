@@ -10,7 +10,7 @@ Package `api` validates HTTP requests and calls small service interfaces. Mutati
 
 `New(Config, Dependencies)` validates authentication and required services. It returns the configured Echo router or an error.
 
-`Dependencies` contains the VM manager, snapshot store, image policy store, wake function, WireGuard manager, and capacity provider.
+`Dependencies` contains the VM manager, snapshot store, host service, wake function, and console broker.
 
 Request and response types are split by resource. VM files use the `vm_` prefix. `Server` owns the handlers and injected services.
 
@@ -19,10 +19,12 @@ Each request receives safe `X-Request-ID` and `X-Operation-ID` response headers.
 ## Request flow
 
 ```text
-HTTP -> decode strict JSON -> validate -> call a service -> wake reconciler -> JSON
+HTTP -> decode strict JSON -> validate -> call a service -> JSON
 ```
 
 Create and lifecycle handlers return before host reconciliation completes.
+
+The synchronization handler calls `host.Service`. The host service applies controller-owned sets and returns capacity.
 
 ## Routes
 

@@ -42,6 +42,8 @@ Cold boot clones an image disk, links the kernel, configures Firecracker, and st
 
 Warm boot loads host-local disk, state, and memory artifacts for an exact image and VM shape. If warm boot fails, Metal uses cold boot.
 
+`vm.WarmImageBuilder` coordinates temporary VM work. Firecracker supplies memory snapshot operations, and storage owns the artifact files.
+
 ## Stop escalation
 
 Metal sends Ctrl+Alt+Del and waits up to 30 seconds. It sends `SIGKILL` when the guest does not stop.

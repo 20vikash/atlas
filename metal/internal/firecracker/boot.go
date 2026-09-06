@@ -26,12 +26,12 @@ func configure(
 	operationContext context.Context,
 	client *api.Client,
 	virtualMachineID string,
-	specification vm.Spec,
+	specification vm.Specification,
 	bootConfiguration storage.BootConfiguration,
 	networkInterface network.Interface,
 ) error {
 	machineConfiguration := api.MachineConfig{
-		VCPUCount:  specification.VCPUs,
+		VCPUCount:  specification.VirtualCPUCount,
 		MemSizeMiB: specification.MemoryMiB,
 	}
 	if err := client.PutMachineConfig(operationContext, machineConfiguration); err != nil {
@@ -86,53 +86,6 @@ func configure(
 	))
 }
 
-func metadataServiceData(virtualMachineID, ipAddress, macAddress string, specification vm.Spec) map[string]any {
-	publicKeys := make(map[string]any, len(specification.SSHKeys))
-	for keyIndex, sshKey := range specification.SSHKeys {
-		publicKeys[strconv.Itoa(keyIndex)] = map[string]any{"openssh-key": sshKey}
-	}
-
-	metadata := map[string]any{
-		"instance-id": virtualMachineID,
-		"public-keys": publicKeys,
-	}
-
-	if specification.Hostname != "" {
-		metadata["local-hostname"] = specification.Hostname
-	}
-
-	if ipAddress != "" {
-		metadata["local-ipv4"] = ipAddress
-	}
-
-	if macAddress != "" {
-		metadata["mac"] = macAddress
-	}
-
-	if specification.Network.PublicIPv4 != "" {
-		metadata["public-ipv4"] = specification.Network.PublicIPv4
-	}
-
-	if specification.Network.WireGuardMeshIPv6 != "" {
-		metadata["mesh-ipv6"] = specification.Network.WireGuardMeshIPv6
-	}
-
-	if len(specification.Metadata) > 0 {
-		customMetadata := make(map[string]any, len(specification.Metadata))
-		for key, value := range specification.Metadata {
-			customMetadata[key] = value
-		}
-		metadata["attributes"] = customMetadata
-	}
-
-	data := map[string]any{"latest": map[string]any{"meta-data": metadata}}
-	if specification.UserData != "" {
-		data["latest"].(map[string]any)["user-data"] = specification.UserData
-	}
-
-	return data
-}
-
 func bootArguments(bootConfiguration storage.BootConfiguration, networkInterface network.Interface) string {
 	networkArgument := fmt.Sprintf(
 		"ip=%s::%s:255.255.255.0::eth0:off",
@@ -142,11 +95,11 @@ func bootArguments(bootConfiguration storage.BootConfiguration, networkInterface
 	return bootConfiguration.KernelArgs + " " + networkArgument
 }
 
-func resourceLimits(specification vm.Spec) systemd.Limits {
+func resourceLimits(specification vm.Specification) systemd.Limits {
 	// A memory snapshot needs space for guest memory and its memory file.
 	return systemd.Limits{
 		MemoryMaxBytes: (2*int64(specification.MemoryMiB) + 128) << 20,
-		CPUQuotaPct:    specification.VCPUs * 100,
+		CPUQuotaPct:    specification.VirtualCPUCount * 100,
 	}
 }
 

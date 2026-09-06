@@ -115,18 +115,18 @@ func (request createRequest) validate() error {
 	return validateMetadata(request.Guest.Metadata)
 }
 
-func (request createRequest) spec() vm.Spec {
-	return vm.Spec{
-		VCPUs:     request.Compute.VirtualCPUCount,
-		MemoryMiB: request.Compute.MemoryMiB,
-		DiskMiB:   request.Disk.SizeMiB,
-		Disk:      request.Disk.spec(),
-		Image:     request.Image.specification(),
-		Network:   request.Network.spec(),
-		SSHKeys:   request.Guest.SSHKeys,
-		Hostname:  request.Guest.Hostname,
-		UserData:  request.Guest.UserData,
-		Metadata:  request.Guest.Metadata,
+func (request createRequest) spec() vm.Specification {
+	return vm.Specification{
+		VirtualCPUCount: request.Compute.VirtualCPUCount,
+		MemoryMiB:       request.Compute.MemoryMiB,
+		DiskMiB:         request.Disk.SizeMiB,
+		Disk:            request.Disk.spec(),
+		Image:           request.Image.specification(),
+		Network:         request.Network.spec(),
+		SSHKeys:         request.Guest.SSHKeys,
+		Hostname:        request.Guest.Hostname,
+		UserData:        request.Guest.UserData,
+		Metadata:        request.Guest.Metadata,
 	}
 }
 
@@ -140,8 +140,8 @@ func (request computeRequest) validate() error {
 	return nil
 }
 
-func (request imageRequest) specification() vm.ImageRef {
-	return vm.ImageRef{
+func (request imageRequest) specification() vm.Image {
+	return vm.Image{
 		Name:                        request.Ref,
 		Architecture:                request.Architecture,
 		RootfsURL:                   request.Rootfs.URL,

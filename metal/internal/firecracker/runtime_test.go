@@ -63,32 +63,17 @@ func (images *fakeImages) StageSnapshot(
 	return snapshot, nil
 }
 
-func (images *fakeImages) EnsureImage(context.Context, vm.ImageRef) error {
+func (images *fakeImages) EnsureImage(context.Context, vm.Image) error {
 	return nil
 }
 
 func (images *fakeImages) WarmImage(
 	context.Context,
-	vm.ImageRef,
+	vm.Image,
 	vm.MemorySnapshotConfiguration,
 	string,
 ) (storage.WarmImageArtifacts, bool, error) {
 	return storage.WarmImageArtifacts{}, false, nil
-}
-
-func (images *fakeImages) CreateWarmSourceSnapshot(context.Context, string, string) error {
-	return nil
-}
-
-func (images *fakeImages) DeleteWarmSourceSnapshot(context.Context, string, string) error {
-	return nil
-}
-
-func (images *fakeImages) PromoteWarmSnapshot(
-	context.Context,
-	storage.WarmImagePromotion,
-) (storage.WarmImageArtifacts, error) {
-	return storage.WarmImageArtifacts{}, nil
 }
 
 func (images *fakeImages) RemoveOtherWarmImages(context.Context, string, string) error {

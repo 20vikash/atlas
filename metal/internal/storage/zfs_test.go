@@ -80,7 +80,7 @@ func TestEnsureImageRejectsDifferentContentForReference(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := imageStore.ensureImage(context.Background(), "ubuntu", vm.ImageRef{
+	err := imageStore.ensureImage(context.Background(), "ubuntu", vm.Image{
 		RootfsURL:    "https://images.example/rootfs?signature=secret",
 		RootfsSHA256: strings.Repeat("c", 64),
 		KernelURL:    "https://images.example/kernel?signature=secret",

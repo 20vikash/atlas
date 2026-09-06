@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -25,16 +26,13 @@ const (
 
 // Reconcile moves observed VM state toward the latest desired record.
 func (manager *Manager) Reconcile(ctx context.Context, identifier string) error {
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	virtualMachine := manager.newMachine(identifier)
+	unlock, err := virtualMachine.lock(ctx)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	desired, err := manager.store.readDesired(identifier)
-	if err != nil {
-		return err
-	}
-	observed, err := manager.store.readObserved(identifier)
+	desired, observed, err := virtualMachine.records()
 	if err != nil {
 		return err
 	}
@@ -267,7 +265,7 @@ func (manager *Manager) reconcileDestroyed(
 }
 
 func (manager *Manager) runOperation(
-	_ context.Context,
+	ctx context.Context,
 	identifier string,
 	observed *ObservedRecord,
 	operationID string,
@@ -283,6 +281,7 @@ func (manager *Manager) runOperation(
 	observed.UpdatedAt = now
 	observed.Error = nil
 	if err := manager.store.writeObserved(identifier, *observed); err != nil {
+		manager.logOperationFailure(ctx, identifier, observed, phase, now, err)
 		return err
 	}
 	if err := operation(); err != nil {
@@ -292,9 +291,31 @@ func (manager *Manager) runOperation(
 		}
 		observed.UpdatedAt = observed.Error.UpdatedAt
 		if writeError := manager.store.writeObserved(identifier, *observed); writeError != nil {
+			manager.logOperationFailure(ctx, identifier, observed, phase, now, errors.Join(err, writeError))
 			return fmt.Errorf("%s: %w", phase, writeError)
 		}
+		manager.logOperationFailure(ctx, identifier, observed, phase, now, err)
 		return fmt.Errorf("%s: %w", phase, err)
 	}
+	manager.logger.Info("virtual machine operation completed",
+		"component", "vm", "operation", "reconcile", "phase", phase, "vm_id", identifier,
+		"operation_id", operationID, "applied_generation", observed.Generation,
+		"observed_state", observed.State, "duration", time.Since(now),
+	)
 	return nil
+}
+
+func (manager *Manager) logOperationFailure(
+	ctx context.Context,
+	identifier string,
+	observed *ObservedRecord,
+	phase string,
+	startedAt time.Time,
+	err error,
+) {
+	manager.logger.ErrorContext(ctx, "virtual machine operation failed",
+		"component", "vm", "operation", "reconcile", "phase", phase, "vm_id", identifier,
+		"operation_id", observed.OperationID, "applied_generation", observed.Generation,
+		"observed_state", observed.State, "duration", time.Since(startedAt), "error", err,
+	)
 }

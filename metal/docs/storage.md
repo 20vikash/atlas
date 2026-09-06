@@ -15,6 +15,8 @@ Metal uses ZFS for image volumes and virtual machine disks. A VM disk is a copy-
 
 `NewStores` creates these services with one shared `ZFSPool`.
 
+Focused files own pool, volume, image, download, warm, staging, and upload behavior.
+
 ## Image and clone model
 
 ```text

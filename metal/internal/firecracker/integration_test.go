@@ -100,10 +100,10 @@ func newManager(t *testing.T) *vm.Manager {
 	return manager
 }
 
-func spec(image, pub string) vm.Spec {
-	return vm.Spec{
-		VCPUs: 1, MemoryMiB: 256, DiskMiB: 1024,
-		Image: vm.ImageRef{
+func spec(image, pub string) vm.Specification {
+	return vm.Specification{
+		VirtualCPUCount: 1, MemoryMiB: 256, DiskMiB: 1024,
+		Image: vm.Image{
 			Name:         image,
 			RootfsURL:    os.Getenv("METAL_IMAGE_URL"),
 			RootfsSHA256: os.Getenv("METAL_IMAGE_SHA256"),
@@ -148,7 +148,7 @@ func waitSSH(t *testing.T, id string) bool {
 }
 
 // bootVM creates a VM, starts it, waits for SSH, and registers cleanup.
-func bootVM(t *testing.T, manager *vm.Manager, specification vm.Spec) string {
+func bootVM(t *testing.T, manager *vm.Manager, specification vm.Specification) string {
 	t.Helper()
 	identifier := uuid.NewString()
 	_, err := manager.Create(context.Background(), identifier, specification)

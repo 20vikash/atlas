@@ -36,3 +36,33 @@ func (pool *ZFSPool) Capacity(ctx context.Context) (Capacity, error) {
 	}
 	return Capacity{TotalMiB: total >> 20, AvailableMiB: available >> 20}, nil
 }
+
+func (pool *ZFSPool) imagesDataset() string { return pool.name + "/images" }
+
+func (pool *ZFSPool) baseDataset(imageReference string) string {
+	return pool.imagesDataset() + "/" + imageReference
+}
+
+func (pool *ZFSPool) baseSnapshot(imageReference string) string {
+	return pool.baseDataset(imageReference) + "@ready"
+}
+
+func (pool *ZFSPool) virtualMachineDataset(virtualMachineID string) string {
+	return pool.name + "/vms/" + virtualMachineID
+}
+
+func (pool *ZFSPool) virtualMachineDevicePath(virtualMachineID string) string {
+	return "/dev/zvol/" + pool.virtualMachineDataset(virtualMachineID)
+}
+
+func (pool *ZFSPool) snapshot(virtualMachineID, snapshotName string) string {
+	return pool.virtualMachineDataset(virtualMachineID) + "@" + snapshotName
+}
+
+func (pool *ZFSPool) stagingDataset(snapshotID string) string {
+	return pool.name + "/staging/" + snapshotID
+}
+
+func (pool *ZFSPool) stagingDevicePath(snapshotID string) string {
+	return "/dev/zvol/" + pool.stagingDataset(snapshotID)
+}

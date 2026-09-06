@@ -17,10 +17,13 @@ Package `vm` owns the desired state, the observed state, and VM reconciliation. 
 | `Network` | Makes the complete host network agree with the desired state. |
 | `Storage` | Gives disk usage, disk growth, and disk release operations. |
 | `Snapshots` | Stages a root file system and a kernel. |
-| `Spec` | Contains compute, disk, image, network, and guest data. |
-| `Info` | Combines safe desired data and observed data for consumers. |
+| `Specification` | Contains compute, disk, image, network, and guest data. |
+| `Information` | Combines safe desired data and observed data for consumers. |
+| `WarmImageBuilder` | Creates optional warm artifacts through narrow capability interfaces. |
 
 The daemon creates one `Manager`. A temporary `machine` value does not keep a record or an API client.
+
+`ManagerConfig.FastApplyTimeout` limits an immediate metadata operation. The default value is 2 seconds.
 
 ## Records
 
@@ -67,6 +70,12 @@ ConnectSSH
 ```
 
 The runtime does not own VM records, network identities, reconciliation, or cleanup progress.
+
+## Warm-image boundary
+
+`WarmRuntime` supplies Firecracker compatibility and memory snapshot operations. `WarmImageStore` finds, promotes, and removes warm artifacts.
+
+`WarmImageBuilder` owns the orchestration. It asks `Manager` to run a temporary VM and then promotes the completed artifact.
 
 ## Related
 

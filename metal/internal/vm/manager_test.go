@@ -66,7 +66,7 @@ func (runtime *fakeRuntime) RefreshDisk(context.Context, RuntimeMachine) error {
 	return nil
 }
 
-func (runtime *fakeRuntime) ConnectSSH(context.Context, RuntimeMachine) (SSHConn, error) {
+func (runtime *fakeRuntime) ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error) {
 	return nil, nil
 }
 
@@ -126,12 +126,12 @@ func newTestManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetwork, *fakeSt
 	return manager, runtime, network, storage
 }
 
-func testSpecification() Spec {
-	return Spec{
-		VCPUs:     2,
-		MemoryMiB: 2048,
-		DiskMiB:   4096,
-		Image: ImageRef{
+func testSpecification() Specification {
+	return Specification{
+		VirtualCPUCount: 2,
+		MemoryMiB:       2048,
+		DiskMiB:         4096,
+		Image: Image{
 			Name:         "image-1",
 			Architecture: "amd64",
 			RootfsURL:    "https://example.com/rootfs?token=first",

@@ -14,7 +14,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/frappe/atlas/metal/internal/console"
-	"github.com/frappe/atlas/metal/internal/network"
+	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -25,21 +25,6 @@ type Config struct {
 	Logger        *slog.Logger
 }
 
-// PrivilegedMesh replaces the Atlas WG Mesh privileged VM whitelist.
-type PrivilegedMesh interface {
-	ApplyPrivilegedAddresses(ctx context.Context, addresses []string) error
-}
-
-// WireGuardManager manages WireGuard peers.
-type WireGuardManager interface {
-	Apply(ctx context.Context, peers []network.WireGuardPeer) error
-}
-
-// CapacityProvider reports storage capacity.
-type CapacityProvider interface {
-	Capacity(ctx context.Context) (storage.Capacity, error)
-}
-
 // SnapshotStore uploads and removes local image staging snapshots.
 type SnapshotStore interface {
 	StartUpload(ctx context.Context, snapshotID string, request storage.SnapshotUploadRequest) error
@@ -47,9 +32,10 @@ type SnapshotStore interface {
 	DeleteSnapshot(ctx context.Context, snapshotID string) error
 }
 
-// ImagePolicyStore records the image policies from the controller.
-type ImagePolicyStore interface {
-	SetImagePolicies(ctx context.Context, images []vm.ImageRef) error
+// HostService synchronizes controller-owned host state and reports capacity.
+type HostService interface {
+	Synchronize(context.Context, host.DesiredState) (host.Capacity, error)
+	Capacity(context.Context) (host.Capacity, error)
 }
 
 // ConsoleBroker streams a virtual machine serial console to one viewer.
@@ -59,9 +45,9 @@ type ConsoleBroker interface {
 
 // VirtualMachineManager owns virtual machine state and operations.
 type VirtualMachineManager interface {
-	Create(context.Context, string, vm.Spec) (vm.Info, error)
-	Information(context.Context, string) (vm.Info, error)
-	List(context.Context) ([]vm.Info, error)
+	Create(context.Context, string, vm.Specification) (vm.Information, error)
+	Information(context.Context, string) (vm.Information, error)
+	List(context.Context) ([]vm.Information, error)
 	SetPowerState(context.Context, string, vm.State) error
 	RequestRestart(context.Context, string) error
 	SetCompute(context.Context, string, int, int) error
@@ -71,18 +57,15 @@ type VirtualMachineManager interface {
 	ReplaceMetadata(context.Context, string, map[string]string) (bool, error)
 	Delete(context.Context, string) error
 	CreateSnapshot(context.Context, string) (vm.StagedSnapshot, error)
-	ConnectSSH(context.Context, string) (vm.SSHConn, error)
+	ConnectSSH(context.Context, string) (vm.SSHConnection, error)
 }
 
 // Dependencies contains services used by the HTTP handlers.
 type Dependencies struct {
 	VirtualMachineManager VirtualMachineManager
 	SnapshotStore         SnapshotStore
-	ImagePolicyStore      ImagePolicyStore
 	WakeReconciler        func()
-	WireGuardManager      WireGuardManager
-	Mesh                  PrivilegedMesh
-	Storage               CapacityProvider
+	HostService           HostService
 	ConsoleBroker         ConsoleBroker
 }
 
@@ -90,11 +73,8 @@ type Dependencies struct {
 type Server struct {
 	virtualMachineManager VirtualMachineManager
 	snapshotStore         SnapshotStore
-	imagePolicyStore      ImagePolicyStore
 	wakeReconciler        func()
-	wireGuardManager      WireGuardManager
-	mesh                  PrivilegedMesh
-	storage               CapacityProvider
+	hostService           HostService
 	consoleBroker         ConsoleBroker
 	authTokenHash         []byte
 	logger                *slog.Logger
@@ -109,11 +89,8 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	server := &Server{
 		virtualMachineManager: dependencies.VirtualMachineManager,
 		snapshotStore:         dependencies.SnapshotStore,
-		imagePolicyStore:      dependencies.ImagePolicyStore,
 		wakeReconciler:        dependencies.WakeReconciler,
-		wireGuardManager:      dependencies.WireGuardManager,
-		mesh:                  dependencies.Mesh,
-		storage:               dependencies.Storage,
+		hostService:           dependencies.HostService,
 		consoleBroker:         dependencies.ConsoleBroker,
 		authTokenHash:         []byte(configuration.AuthTokenHash),
 	}
@@ -151,7 +128,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.ImagePolicyStore == nil || dependencies.WakeReconciler == nil || dependencies.WireGuardManager == nil || dependencies.Mesh == nil || dependencies.Storage == nil || dependencies.ConsoleBroker == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.ConsoleBroker == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil

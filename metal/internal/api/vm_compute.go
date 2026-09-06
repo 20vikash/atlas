@@ -53,15 +53,15 @@ func (s *Server) setVirtualMachineCompute(c echo.Context) error {
 	return s.respondWithCurrentVirtualMachine(c, http.StatusAccepted)
 }
 
-func (s *Server) validateComputeCapacity(c echo.Context, request computeRequest, current vm.Info) error {
-	availableCPUCount, availableMemoryMiB, _, err := s.getComputeCapacity(c.Request().Context())
+func (s *Server) validateComputeCapacity(c echo.Context, request computeRequest, current vm.Information) error {
+	capacity, err := s.hostService.Capacity(c.Request().Context())
 	if err != nil {
 		return err
 	}
-	if needsMoreThanAvailable(request.VirtualCPUCount, current.VCPUs, availableCPUCount) {
+	if needsMoreThanAvailable(request.VirtualCPUCount, current.VirtualCPUCount, capacity.AvailableCPUCount) {
 		return newAPIError(http.StatusConflict, "conflict", "not enough host CPU capacity")
 	}
-	if needsMoreThanAvailable(request.MemoryMiB, current.MemoryMiB, availableMemoryMiB) {
+	if needsMoreThanAvailable(request.MemoryMiB, current.MemoryMiB, capacity.AvailableMemoryMiB) {
 		return newAPIError(http.StatusConflict, "conflict", "not enough host memory capacity")
 	}
 	return nil

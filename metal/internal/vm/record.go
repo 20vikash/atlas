@@ -21,15 +21,15 @@ const recordSchemaVersion = 1
 
 // DesiredRecord stores the complete desired state of one virtual machine.
 type DesiredRecord struct {
-	SchemaVersion     int    `json:"schema_version"`
-	ID                string `json:"id"`
-	UserID            uint32 `json:"user_id"`
-	GroupID           uint32 `json:"group_id"`
-	CreateFingerprint string `json:"create_fingerprint"`
-	Generation        uint64 `json:"generation"`
-	RestartGeneration uint64 `json:"restart_generation"`
-	State             State  `json:"state"`
-	Specification     Spec   `json:"specification"`
+	SchemaVersion     int           `json:"schema_version"`
+	ID                string        `json:"id"`
+	UserID            uint32        `json:"user_id"`
+	GroupID           uint32        `json:"group_id"`
+	CreateFingerprint string        `json:"create_fingerprint"`
+	Generation        uint64        `json:"generation"`
+	RestartGeneration uint64        `json:"restart_generation"`
+	State             State         `json:"state"`
+	Specification     Specification `json:"specification"`
 }
 
 // ObservedRecord stores reconciliation progress and observed state.

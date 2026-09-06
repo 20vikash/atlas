@@ -12,7 +12,7 @@ type Runtime interface {
 	Remove(context.Context, RuntimeMachine) error
 	RefreshMetadata(context.Context, RuntimeMachine) error
 	RefreshDisk(context.Context, RuntimeMachine) error
-	ConnectSSH(context.Context, RuntimeMachine) (SSHConn, error)
+	ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error)
 }
 
 // RuntimeMachine contains the complete input for one runtime operation.
@@ -20,7 +20,7 @@ type RuntimeMachine struct {
 	ID               string
 	UserID           uint32
 	GroupID          uint32
-	Specification    Spec
+	Specification    Specification
 	NetworkInterface NetworkInterface
 }
 

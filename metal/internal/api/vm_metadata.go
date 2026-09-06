@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -48,10 +47,8 @@ func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
 	if err := validateMetadata(request.Metadata); err != nil {
 		return badRequest(err.Error())
 	}
-	operationContext, cancelOperation := context.WithTimeout(c.Request().Context(), immediateApplyTimeout)
-	defer cancelOperation()
 	applied, err := s.virtualMachineManager.ReplaceMetadata(
-		operationContext,
+		c.Request().Context(),
 		virtualMachineID,
 		request.Metadata,
 	)

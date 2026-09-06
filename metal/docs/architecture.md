@@ -18,6 +18,7 @@ api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> 
  |            ├─ storage stores
  |            └─ network manager
  |
+ ├─ host.Service ----> network, image policy, capacity
  └─ wake reconcilers
        ├─ VM desired-state reconciliation
        └─ image cache and snapshot staging cleanup
@@ -27,7 +28,9 @@ api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> 
 
 ## Layering
 
-`vm.Manager` owns records, operations, reconciliation, and cleanup. `firecracker.Runtime` owns Firecracker process and guest operations.
+`vm.Manager` owns records, operations, reconciliation, cleanup, and warm-image orchestration. `firecracker.Runtime` owns process and guest operations.
+
+`host.Service` owns controller synchronization and capacity calculation. The API only validates and maps the synchronization request.
 
 The storage, network, systemd, and Firecracker API packages own host integration. See [internal/SPEC.md](../internal/SPEC.md) for the package graph.
 
@@ -66,7 +69,7 @@ Metal dials a short socket link in `/run/metal`. This avoids the Unix socket pat
 
 Normal VM disks are ZFS clones of an image `@ready` snapshot. This keeps cold VM creation fast.
 
-The image reconciler can create host-local warm artifacts for a cached image. Warm artifacts require an exact image, CPU, memory, disk, architecture, and Firecracker match.
+The image reconciler calls `vm.WarmImageBuilder` for a cached image. Warm artifacts need an exact image, CPU, memory, disk, architecture, and Firecracker match.
 
 If warm boot fails, Metal removes the attempted VM disk and uses cold boot.
 

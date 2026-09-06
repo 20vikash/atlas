@@ -93,15 +93,15 @@ func (s *Server) getVirtualMachine(c echo.Context) error {
 	return s.respondWithVirtualMachine(c, http.StatusOK, information)
 }
 
-func (s *Server) loadVirtualMachine(c echo.Context) (vm.Info, error) {
+func (s *Server) loadVirtualMachine(c echo.Context) (vm.Information, error) {
 	identifier, err := virtualMachineID(c)
 	if err != nil {
-		return vm.Info{}, err
+		return vm.Information{}, err
 	}
 	return s.virtualMachineManager.Information(c.Request().Context(), identifier)
 }
 
-func (s *Server) respondWithVirtualMachine(c echo.Context, status int, information vm.Info) error {
+func (s *Server) respondWithVirtualMachine(c echo.Context, status int, information vm.Information) error {
 	return c.JSON(status, toVirtualMachine(information))
 }
 
