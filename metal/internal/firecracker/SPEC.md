@@ -12,7 +12,7 @@ Package `firecracker` implements `vm.Runtime`. Systemd owns each jailed Firecrac
 |---|---|
 | `Runtime` | Controls Firecracker processes and guest operations. |
 | `machine` | Holds the input and API client for one runtime operation. |
-| `Config` | Contains machine paths, socket paths, and binary paths. |
+| `Config` | Contains Firecracker host directories and executable paths. |
 | `WarmRuntime` implementation | Supplies compatibility and memory snapshot operations to `vm.WarmImageBuilder`. |
 
 The runtime receives VM disk storage, image storage, systemd, and console services. It does not read or write VM records.

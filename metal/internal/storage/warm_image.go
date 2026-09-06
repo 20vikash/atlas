@@ -31,11 +31,6 @@ type WarmImagePromotion struct {
 	MemoryFile               string
 }
 
-// WarmImageKey identifies an exact image, shape, and Firecracker build.
-func WarmImageKey(image vm.Image, configuration vm.MemorySnapshotConfiguration, firecrackerCompatibility string) string {
-	return vm.WarmImageKey(image, configuration, firecrackerCompatibility)
-}
-
 // FindWarmImage reports whether the requested warm image is complete.
 func (store *ImageStore) FindWarmImage(ctx context.Context, image vm.Image, configuration vm.MemorySnapshotConfiguration, compatibility string) (bool, error) {
 	_, found, err := store.WarmImage(ctx, image, configuration, compatibility)
@@ -61,7 +56,7 @@ func (store *ImageStore) PromoteWarmImage(ctx context.Context, promotion vm.Warm
 
 // WarmImage returns compatible local warm artifacts when all files exist.
 func (store *ImageStore) WarmImage(ctx context.Context, image vm.Image, configuration vm.MemorySnapshotConfiguration, firecrackerCompatibility string) (WarmImageArtifacts, bool, error) {
-	key := WarmImageKey(image, configuration, firecrackerCompatibility)
+	key := vm.WarmImageKey(image, configuration, firecrackerCompatibility)
 	artifacts := store.warmImageArtifacts(image.Name, key)
 
 	exists, err := datasetExists(ctx, strings.TrimSuffix(artifacts.RootSnapshot, "@ready"))
@@ -91,7 +86,7 @@ func (store *ImageStore) DeleteWarmSourceSnapshot(ctx context.Context, virtualMa
 
 // PromoteWarmSnapshot saves local root disk, state, and memory artifacts.
 func (store *ImageStore) PromoteWarmSnapshot(ctx context.Context, promotion WarmImagePromotion) (WarmImageArtifacts, error) {
-	key := WarmImageKey(promotion.Image, promotion.Configuration, promotion.FirecrackerCompatibility)
+	key := vm.WarmImageKey(promotion.Image, promotion.Configuration, promotion.FirecrackerCompatibility)
 	artifacts := store.warmImageArtifacts(promotion.Image.Name, key)
 	if _, found, err := store.WarmImage(ctx, promotion.Image, promotion.Configuration, promotion.FirecrackerCompatibility); err != nil || found {
 		return artifacts, err

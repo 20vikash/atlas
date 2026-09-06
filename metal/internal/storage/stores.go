@@ -1,3 +1,4 @@
+// Package storage manages ZFS images, virtual machine disks, and snapshots.
 package storage
 
 import (

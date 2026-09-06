@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-type recordingDriver struct {
+type recordingTarget struct {
 	ids     []string
 	listErr error
 
@@ -17,35 +17,35 @@ type recordingDriver struct {
 	done chan string
 }
 
-func newRecordingDriver(ids ...string) *recordingDriver {
-	return &recordingDriver{ids: ids, seen: map[string]int{}, done: make(chan string, 16)}
+func newRecordingTarget(ids ...string) *recordingTarget {
+	return &recordingTarget{ids: ids, seen: map[string]int{}, done: make(chan string, 16)}
 }
 
-func (d *recordingDriver) ListIDs(context.Context) ([]string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.ids, d.listErr
+func (target *recordingTarget) ListIDs(context.Context) ([]string, error) {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	return target.ids, target.listErr
 }
 
-func (d *recordingDriver) Reconcile(_ context.Context, id string) error {
-	d.mu.Lock()
-	d.seen[id]++
-	d.mu.Unlock()
-	d.done <- id
+func (target *recordingTarget) Reconcile(_ context.Context, id string) error {
+	target.mu.Lock()
+	target.seen[id]++
+	target.mu.Unlock()
+	target.done <- id
 	return nil
 }
 
-func TestSweepReconcilesEveryVM(t *testing.T) {
-	driver := newRecordingDriver("a", "b")
+func TestRunReconcilesEveryVirtualMachine(t *testing.T) {
+	target := newRecordingTarget("a", "b")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go New(driver, time.Hour, Config{}).Run(ctx)
+	go New(target, time.Hour, Config{}).Run(ctx)
 
 	got := map[string]bool{}
-	for range driver.ids {
+	for range target.ids {
 		select {
-		case id := <-driver.done:
+		case id := <-target.done:
 			got[id] = true
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for the start pass")
@@ -56,44 +56,44 @@ func TestSweepReconcilesEveryVM(t *testing.T) {
 	}
 }
 
-func TestWakeTriggersSweep(t *testing.T) {
-	driver := newRecordingDriver("a")
+func TestWakeRequestsReconciliation(t *testing.T) {
+	target := newRecordingTarget("a")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reconciler := New(driver, time.Hour, Config{})
+	reconciler := New(target, time.Hour, Config{})
 	go reconciler.Run(ctx)
 
-	<-driver.done
+	<-target.done
 	reconciler.Wake()
 	select {
-	case <-driver.done:
+	case <-target.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Wake did not trigger a pass")
 	}
 }
 
-func TestSweepSurvivesListError(t *testing.T) {
-	driver := newRecordingDriver("a")
-	driver.listErr = errors.New("list failed")
+func TestRunContinuesAfterListError(t *testing.T) {
+	target := newRecordingTarget("a")
+	target.listErr = errors.New("list failed")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reconciler := New(driver, time.Hour, Config{})
+	reconciler := New(target, time.Hour, Config{})
 	go reconciler.Run(ctx)
 
-	driver.mu.Lock()
-	driver.listErr = nil
-	driver.mu.Unlock()
+	target.mu.Lock()
+	target.listErr = nil
+	target.mu.Unlock()
 	reconciler.Wake()
 	select {
-	case <-driver.done:
+	case <-target.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("loop stopped after a list error")
 	}
 }
 
-type concurrencyDriver struct {
+type concurrencyTarget struct {
 	ids     []string
 	started chan string
 	release chan struct{}
@@ -103,35 +103,35 @@ type concurrencyDriver struct {
 	maximumObserved int
 }
 
-func (d *concurrencyDriver) ListIDs(context.Context) ([]string, error) { return d.ids, nil }
+func (target *concurrencyTarget) ListIDs(context.Context) ([]string, error) { return target.ids, nil }
 
-func (d *concurrencyDriver) Reconcile(ctx context.Context, id string) error {
-	d.mutex.Lock()
-	d.active++
-	if d.active > d.maximumObserved {
-		d.maximumObserved = d.active
+func (target *concurrencyTarget) Reconcile(ctx context.Context, id string) error {
+	target.mutex.Lock()
+	target.active++
+	if target.active > target.maximumObserved {
+		target.maximumObserved = target.active
 	}
-	d.mutex.Unlock()
+	target.mutex.Unlock()
 
-	d.started <- id
+	target.started <- id
 	select {
-	case <-d.release:
+	case <-target.release:
 	case <-ctx.Done():
 	}
 
-	d.mutex.Lock()
-	d.active--
-	d.mutex.Unlock()
+	target.mutex.Lock()
+	target.active--
+	target.mutex.Unlock()
 	return ctx.Err()
 }
 
-func TestSweepBoundsConcurrentOperations(t *testing.T) {
-	driver := &concurrencyDriver{
+func TestReconcileAllLimitsConcurrentOperations(t *testing.T) {
+	target := &concurrencyTarget{
 		ids:     []string{"a", "b", "c", "d"},
 		started: make(chan string, 4),
 		release: make(chan struct{}),
 	}
-	reconciler := New(driver, time.Hour, Config{
+	reconciler := New(target, time.Hour, Config{
 		MaxConcurrentOperations: 2,
 		OperationTimeout:        time.Second,
 	})
@@ -141,54 +141,54 @@ func TestSweepBoundsConcurrentOperations(t *testing.T) {
 		close(done)
 	}()
 
-	<-driver.started
-	<-driver.started
+	<-target.started
+	<-target.started
 	select {
-	case id := <-driver.started:
+	case id := <-target.started:
 		t.Fatalf("operation %s started above the limit", id)
 	case <-time.After(20 * time.Millisecond):
 	}
 
 	for range 2 {
-		driver.release <- struct{}{}
+		target.release <- struct{}{}
 	}
-	<-driver.started
-	<-driver.started
+	<-target.started
+	<-target.started
 	for range 2 {
-		driver.release <- struct{}{}
+		target.release <- struct{}{}
 	}
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("reconcile pass did not finish")
 	}
-	if driver.maximumObserved != 2 {
-		t.Fatalf("maximum concurrent operations = %d, want 2", driver.maximumObserved)
+	if target.maximumObserved != 2 {
+		t.Fatalf("maximum concurrent operations = %d, want 2", target.maximumObserved)
 	}
 }
 
-type timeoutDriver struct {
+type timeoutTarget struct {
 	timedOut chan struct{}
 }
 
-func (d *timeoutDriver) ListIDs(context.Context) ([]string, error) { return []string{"a"}, nil }
+func (target *timeoutTarget) ListIDs(context.Context) ([]string, error) { return []string{"a"}, nil }
 
-func (d *timeoutDriver) Reconcile(ctx context.Context, _ string) error {
+func (target *timeoutTarget) Reconcile(ctx context.Context, _ string) error {
 	<-ctx.Done()
-	close(d.timedOut)
+	close(target.timedOut)
 	return ctx.Err()
 }
 
-func TestSweepAppliesOperationTimeout(t *testing.T) {
-	driver := &timeoutDriver{timedOut: make(chan struct{})}
-	reconciler := New(driver, time.Hour, Config{
+func TestReconcileAllAppliesOperationTimeout(t *testing.T) {
+	target := &timeoutTarget{timedOut: make(chan struct{})}
+	reconciler := New(target, time.Hour, Config{
 		MaxConcurrentOperations: 1,
 		OperationTimeout:        20 * time.Millisecond,
 	})
 
 	reconciler.reconcileAll(context.Background())
 	select {
-	case <-driver.timedOut:
+	case <-target.timedOut:
 	default:
 		t.Fatal("reconcile operation did not time out")
 	}
