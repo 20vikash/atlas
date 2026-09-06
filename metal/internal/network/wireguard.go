@@ -16,6 +16,10 @@ import (
 	"github.com/frappe/atlas/metal/internal/platform"
 )
 
+// peerKeepaliveSeconds keeps a NAT mapping open between peers that are otherwise
+// idle, so a peer behind NAT stays reachable.
+const peerKeepaliveSeconds = "25"
+
 // ErrInvalidPeers reports an invalid desired WireGuard peer set.
 var ErrInvalidPeers = errors.New("network: invalid WireGuard peers")
 
@@ -88,10 +92,14 @@ func (manager *WireGuardManager) Apply(ctx context.Context, desired []WireGuardP
 	return nil
 }
 
+// newWireGuardManager builds a manager over the given command runner.
 func newWireGuardManager(configuration WireGuardConfig, commands wireGuardCommands) *WireGuardManager {
 	return &WireGuardManager{configuration: configuration, commands: commands}
 }
 
+// reconcile removes peers that changed or disappeared, then configures every
+// desired peer. A changed peer is removed first, because `wg set` cannot move a
+// node to a new public key in place.
 func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired []WireGuardPeer, localAddress netip.Addr) error {
 	currentByNode := wireGuardPeersByNode(current)
 	desiredByNode := wireGuardPeersByNode(desired)
@@ -118,7 +126,7 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 			"allowed-ips",
 			allowedAddress.String()+"/128",
 			"persistent-keepalive",
-			"25",
+			peerKeepaliveSeconds,
 		); err != nil {
 			return fmt.Errorf("configure WireGuard peer %q: %w", node, err)
 		}
@@ -127,6 +135,8 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 	return nil
 }
 
+// wireGuardAddress reads the global IPv6 address of the local interface, which
+// supplies the prefix every peer address is built from.
 func (manager *WireGuardManager) wireGuardAddress(ctx context.Context) (netip.Addr, error) {
 	output, err := manager.commands.Output(ctx, "ip", "-6", "-o", "addr", "show", "dev", manager.configuration.InterfaceName, "scope", "global")
 	if err != nil {
@@ -147,6 +157,9 @@ func (manager *WireGuardManager) wireGuardAddress(ctx context.Context) (netip.Ad
 	return netip.Addr{}, fmt.Errorf("WireGuard interface has no global IPv6 address")
 }
 
+// validateWireGuardPeers rejects a set with a missing field, an unusable
+// address, or a repeated node, node ID, or public key. The whole set is checked
+// before anything is applied, so a bad entry never lands halfway.
 func validateWireGuardPeers(peers []WireGuardPeer) error {
 	nodes := make(map[string]struct{}, len(peers))
 	nodeIDs := make(map[uint32]struct{}, len(peers))
@@ -178,11 +191,14 @@ func validateWireGuardPeers(peers []WireGuardPeer) error {
 	return nil
 }
 
+// validWireGuardPort reports whether port is a usable UDP port.
 func validWireGuardPort(port string) bool {
 	value, err := strconv.ParseUint(port, 10, 16)
 	return err == nil && value > 0
 }
 
+// peerWireGuardAddress builds a peer address from the local prefix and the node
+// ID: the first 4 bytes are kept, and the node ID becomes the last 4.
 func peerWireGuardAddress(localAddress netip.Addr, nodeID uint32) netip.Addr {
 	address := localAddress.As16()
 	for index := 4; index < len(address); index++ {
@@ -192,6 +208,7 @@ func peerWireGuardAddress(localAddress netip.Addr, nodeID uint32) netip.Addr {
 	return netip.AddrFrom16(address)
 }
 
+// wireGuardPeersByNode indexes a peer set by node name.
 func wireGuardPeersByNode(peers []WireGuardPeer) map[string]WireGuardPeer {
 	byNode := make(map[string]WireGuardPeer, len(peers))
 	for _, peer := range peers {
@@ -200,6 +217,8 @@ func wireGuardPeersByNode(peers []WireGuardPeer) map[string]WireGuardPeer {
 	return byNode
 }
 
+// withoutLocalPeer drops this host from a peer set. A host must not peer with
+// itself, and the controller sends the whole fleet.
 func withoutLocalPeer(peers []WireGuardPeer, localPublicKey string) []WireGuardPeer {
 	managed := make([]WireGuardPeer, 0, len(peers))
 	for _, peer := range peers {
@@ -210,6 +229,8 @@ func withoutLocalPeer(peers []WireGuardPeer, localPublicKey string) []WireGuardP
 	return managed
 }
 
+// loadWireGuardPeers reads the peers this manager last applied. An absent file
+// means none, which is the correct state for a fresh host.
 func loadWireGuardPeers(path string) ([]WireGuardPeer, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -226,6 +247,8 @@ func loadWireGuardPeers(path string) ([]WireGuardPeer, error) {
 	return peers, nil
 }
 
+// saveWireGuardPeers records the applied set, so the next Apply knows what it
+// owns and leaves peers added by other tools alone.
 func saveWireGuardPeers(path string, peers []WireGuardPeer) error {
 	data, err := json.Marshal(peers)
 	if err != nil {
@@ -242,12 +265,15 @@ type wireGuardCommands interface {
 	Output(ctx context.Context, name string, arguments ...string) (string, error)
 }
 
+// hostWireGuardCommands runs the commands on this host. Tests replace it.
 type hostWireGuardCommands struct{}
 
+// Run executes one host command.
 func (hostWireGuardCommands) Run(ctx context.Context, name string, arguments ...string) error {
 	return platform.Run(ctx, name, arguments...)
 }
 
+// Output executes one host command and returns its stdout.
 func (hostWireGuardCommands) Output(ctx context.Context, name string, arguments ...string) (string, error) {
 	return platform.Output(ctx, name, arguments...)
 }

@@ -9,6 +9,9 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
+// Every VM sees the same private addresses. They are unique because each VM has
+// its own namespace, so nothing has to be allocated per VM. The MAC encodes the
+// guest address (ac:10:00:02 is 172.16.0.2) and sets the locally administered bit.
 const (
 	tapName             = "tap0"
 	gatewayIPAddress    = "172.16.0.1"
@@ -17,6 +20,7 @@ const (
 	guestMACAddress     = "06:00:ac:10:00:02"
 )
 
+// meshRegistrar registers and unregisters guest mesh addresses.
 type meshRegistrar interface {
 	Add(ctx context.Context, address, interfaceName string) error
 	Remove(ctx context.Context, address, interfaceName string) error
@@ -42,26 +46,49 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 		UserID:                        desired.UserID,
 		GroupID:                       desired.GroupID,
 	}
-	exists, err := networkNamespaceExists(ctx, request.VirtualMachineID)
-	if err != nil {
+	if err := ensureNamespace(ctx, request.VirtualMachineID); err != nil {
 		return vm.NetworkInterface{}, err
 	}
-	if !exists {
-		return allocator.allocate(ctx, request)
-	}
-	if err := allocator.ensureExisting(ctx, request); err != nil {
+	if err := allocator.converge(ctx, request); err != nil {
 		return vm.NetworkInterface{}, err
 	}
-	return allocator.resolve(request.VirtualMachineID), nil
+
+	return allocator.interfaceFor(request.VirtualMachineID), nil
 }
 
-func (allocator *LinuxAllocator) ensureExisting(ctx context.Context, request request) error {
+// ensureNamespace creates the VM network namespace when it is absent.
+func ensureNamespace(ctx context.Context, virtualMachineID string) error {
+	exists, err := networkNamespaceExists(ctx, virtualMachineID)
+	if err != nil || exists {
+		return err
+	}
+
+	return platform.Run(ctx, "ip", "netns", "add", namespaceName(virtualMachineID))
+}
+
+// converge makes every host network resource agree with the request. Resources
+// the request drops are removed before the ones it wants are added, so a change
+// of egress mode never leaves both shapes in place at once.
+func (allocator *LinuxAllocator) converge(ctx context.Context, request request) error {
 	if request.PublicIPv4 != "" && !request.Egress.HasInternetPath() {
 		return fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
 	}
+
 	if err := ensureNamespaceBase(ctx, request); err != nil {
 		return err
 	}
+	if err := allocator.removeUnwanted(ctx, request); err != nil {
+		return err
+	}
+	if err := allocator.addWanted(ctx, request); err != nil {
+		return err
+	}
+
+	return configureTrafficControl(ctx, request.trafficControl())
+}
+
+// removeUnwanted tears down what this request no longer asks for.
+func (allocator *LinuxAllocator) removeUnwanted(ctx context.Context, request request) error {
 	if request.PublicIPv4 == "" {
 		if err := removePublicIPv4Rules(ctx, request.VirtualMachineID); err != nil {
 			return err
@@ -80,6 +107,14 @@ func (allocator *LinuxAllocator) ensureExisting(ctx context.Context, request req
 			return err
 		}
 	}
+
+	return nil
+}
+
+// addWanted builds what this request asks for. The order matters: the veth pair
+// carries everything above it, and the mesh registration announces the VM, so it
+// comes last and the first packet it attracts finds a complete path.
+func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request) error {
 	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.Egress.HasVirtualEthernet()); err != nil {
 		return err
 	}
@@ -98,26 +133,12 @@ func (allocator *LinuxAllocator) ensureExisting(ctx context.Context, request req
 			return err
 		}
 	}
-	return configureTrafficControl(ctx, request.trafficControl())
+
+	return nil
 }
 
-func (allocator *LinuxAllocator) allocate(ctx context.Context, request request) (Interface, error) {
-	exists, err := networkNamespaceExists(ctx, request.VirtualMachineID)
-	if err != nil {
-		return Interface{}, err
-	}
-	if !exists {
-		if err := platform.Run(ctx, "ip", "netns", "add", namespaceName(request.VirtualMachineID)); err != nil {
-			return Interface{}, err
-		}
-	}
-	if err := allocator.ensureExisting(ctx, request); err != nil {
-		return Interface{}, err
-	}
-	return allocator.resolve(request.VirtualMachineID), nil
-}
-
-func (allocator *LinuxAllocator) resolve(virtualMachineID string) Interface {
+// interfaceFor returns the values a runtime needs to attach one VM.
+func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface {
 	return Interface{
 		NetworkNamespacePath: namespacePath(virtualMachineID),
 		TapName:              tapName,
@@ -149,8 +170,7 @@ func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseReq
 }
 
 // addMeshRegistration routes the guest mesh address through the namespace and
-// registers it with Atlas WG Mesh. The registration announces the VM location,
-// so it comes last and the first packet that it attracts finds a complete path.
+// registers it with Atlas WG Mesh.
 func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, virtualMachineID string, userID uint32, address string) error {
 	if address == "" {
 		return nil

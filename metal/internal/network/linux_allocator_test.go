@@ -10,8 +10,8 @@ import (
 
 func TestGuestMACAddressIsTheSameForEveryVirtualMachine(t *testing.T) {
 	allocator := &LinuxAllocator{}
-	address := allocator.resolve("vm-1").MACAddress
-	if address != allocator.resolve("vm-2").MACAddress {
+	address := allocator.interfaceFor("vm-1").MACAddress
+	if address != allocator.interfaceFor("vm-2").MACAddress {
 		t.Error("MAC address differs between virtual machines")
 	}
 	if address != "06:00:ac:10:00:02" {

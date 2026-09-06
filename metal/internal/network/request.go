@@ -6,6 +6,8 @@ import "github.com/frappe/atlas/metal/internal/vm"
 // ReleaseRequest identifies the virtual machine network to remove.
 type ReleaseRequest = vm.NetworkReleaseRequest
 
+// request is the internal form of one desired VM network. It flattens the
+// vm.NetworkRequest, so the helpers below take one value instead of a chain.
 type request struct {
 	VirtualMachineID              string
 	Egress                        vm.Egress
@@ -17,6 +19,7 @@ type request struct {
 	GroupID                       uint32
 }
 
+// trafficControl narrows the request to the fields the policers need.
 func (request request) trafficControl() trafficControlRequest {
 	return trafficControlRequest{
 		VirtualMachineID:              request.VirtualMachineID,

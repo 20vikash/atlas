@@ -44,24 +44,15 @@ For `uplink` and `mesh`, Metal derives one transit `/30` from the VM user ID. Th
 
 ## Public IPv4
 
-A public IPv4 address requires `uplink`. Metal rejects it for `mesh` and `none`. Metal adds these rules:
-
-- Host DNAT from the public address to the namespace transit address.
-- Host SNAT from the namespace transit address to the public address.
-- Host forwarding rules for the VM.
-- Namespace DNAT from the transit address to the guest address.
-
-Each rule has the comment `metal-public-ipv4-<vm-id>`. This lets Metal remove only the rules for one VM.
+A public IPv4 address requires `uplink`. Metal rejects it for `mesh` and `none`. Metal translates the address to the guest on the way in and back on the way out, and tags every rule it adds so it can remove the rules of one VM exactly. The rule set and its ordering: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
 ## Throughput limits
 
 The VM network configuration can set `private_network_throughput_mibps` and `public_network_throughput_mibps`. Each value applies in both directions. A value of `0` does not apply a limit.
 
-Metal applies the limits inside the namespace, on `vg-<user-id>`. The host end `vh-<user-id>` belongs to Atlas WG Mesh, which attaches a terminating `direct-action` program to its `clsact` hook. Metal keeps the policers on the end that it owns, so neither component can stop the other. Private traffic uses the RFC 1918 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, and the IPv6 unique local range `fc00::/7`, which contains every mesh prefix. Public traffic uses the remaining IPv4 addresses.
+Private traffic is the RFC 1918 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, plus the IPv6 unique local range `fc00::/7`, which contains every mesh prefix. Public traffic is every remaining IPv4 address.
 
-The VM is inside the namespace, so `egress` carries traffic from the VM and the remote end is the destination. `ingress` carries traffic to the VM and the two are reversed.
-
-The private filters use a lower `tc` priority than the public filter, so a private packet stops at the private policer. One `tc` priority holds one protocol, so the private IPv4 and IPv6 filters use separate priorities. The virtual Ethernet removal clears the traffic-control rules.
+Filter placement, direction, and priority: [internal/network/SPEC.md](../internal/network/SPEC.md). Removing the virtual Ethernet clears the traffic-control rules with it.
 
 `uplink` and `mesh` have a veth pair, so both receive the private limit. A `mesh` VM has no internet path, so Metal keeps a public limit and does not apply it. A `none` VM has no veth pair and receives no limits. Metal keeps the requested values and applies them when the veth pair returns.
 

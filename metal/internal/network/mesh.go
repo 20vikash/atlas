@@ -17,8 +17,10 @@ import (
 // a 40-byte outer IPv6 header and must still fit the 1420-byte WireGuard MTU.
 const meshMTU = 1380
 
+// meshGatewayAddress is the link-local address the guest routes the mesh through.
 const meshGatewayAddress = "fe80::1"
 
+// meshPrefix is the Atlas mesh address block.
 const meshPrefix = "fdaa::/16"
 
 // MeshConfig identifies the Atlas WG Mesh CLI and the host interfaces it uses.
@@ -148,6 +150,7 @@ func (mesh *Mesh) ApplyPrivilegedAddresses(ctx context.Context, desired []string
 	return errors.Join(applyErrors...)
 }
 
+// setPrivileged adds or removes one address from the privileged whitelist.
 func (mesh *Mesh) setPrivileged(ctx context.Context, action, address string) error {
 	if err := platform.Run(ctx, mesh.commandPath, "privileged-vm", action, "--address", address); err != nil {
 		return fmt.Errorf("%s privileged mesh address %s: %w", action, address, err)

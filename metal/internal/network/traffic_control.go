@@ -67,6 +67,8 @@ func configureTrafficControl(ctx context.Context, request trafficControlRequest)
 	return nil
 }
 
+// removeTrafficControl drops the existing policers, so a new set replaces them
+// instead of stacking on top. tc fails to add a qdisc that is already there.
 func removeTrafficControl(ctx context.Context, namespace, interfaceName string) error {
 	prefix := namespaceCommandPrefix(namespace)
 	show := commandWithPrefix(prefix, "tc", "qdisc", "show", "dev", interfaceName)
@@ -90,53 +92,57 @@ func removeTrafficControl(ctx context.Context, namespace, interfaceName string) 
 // destination, ingress carries traffic to it and matches the source.
 func trafficControlSteps(namespace, guestVirtualEthernet string, request trafficControlRequest) [][]string {
 	hasPublicLimit := request.PublicNetworkThroughputMiBps > 0 && request.Egress.HasInternetPath()
-	if request.PrivateNetworkThroughputMiBps == 0 && !hasPublicLimit {
+	hasPrivateLimit := request.PrivateNetworkThroughputMiBps > 0
+	if !hasPrivateLimit && !hasPublicLimit {
 		return nil
 	}
 
 	prefix := namespaceCommandPrefix(namespace)
-	steps := [][]string{commandWithPrefix(prefix, "tc", "qdisc", "add", "dev", guestVirtualEthernet, "clsact")}
+	device := guestVirtualEthernet
+	steps := [][]string{commandWithPrefix(prefix, "tc", "qdisc", "add", "dev", device, "clsact")}
 
-	if request.PrivateNetworkThroughputMiBps > 0 {
-		privateRate := fmt.Sprintf("%dmibps", request.PrivateNetworkThroughputMiBps)
+	if hasPrivateLimit {
+		rate := rateArgument(request.PrivateNetworkThroughputMiBps)
 		for _, private := range privatePrefixes {
 			steps = append(steps,
-				commandWithPrefix(prefix,
-					"tc", "filter", "add", "dev", guestVirtualEthernet, "egress",
-					"protocol", private.Protocol, "prio", private.Priority,
-					"flower", "dst_ip", private.Prefix,
-					"action", "police", "rate", privateRate, "burst", trafficControlBurst,
-					"conform-exceed", "drop/ok",
-				),
-				commandWithPrefix(prefix,
-					"tc", "filter", "add", "dev", guestVirtualEthernet, "ingress",
-					"protocol", private.Protocol, "prio", private.Priority,
-					"flower", "src_ip", private.Prefix,
-					"action", "police", "rate", privateRate, "burst", trafficControlBurst,
-					"conform-exceed", "drop/ok",
-				),
+				policeFilter(prefix, device, "egress", private.Protocol, private.Priority, "dst_ip", private.Prefix, rate),
+				policeFilter(prefix, device, "ingress", private.Protocol, private.Priority, "src_ip", private.Prefix, rate),
 			)
 		}
 	}
 
-	if request.PublicNetworkThroughputMiBps > 0 && request.Egress.HasInternetPath() {
-		publicRate := fmt.Sprintf("%dmibps", request.PublicNetworkThroughputMiBps)
+	if hasPublicLimit {
+		rate := rateArgument(request.PublicNetworkThroughputMiBps)
 		steps = append(steps,
-			commandWithPrefix(prefix,
-				"tc", "filter", "add", "dev", guestVirtualEthernet, "egress",
-				"protocol", "ip", "prio", publicTrafficPriority,
-				"flower",
-				"action", "police", "rate", publicRate, "burst", trafficControlBurst,
-				"conform-exceed", "drop/ok",
-			),
-			commandWithPrefix(prefix,
-				"tc", "filter", "add", "dev", guestVirtualEthernet, "ingress",
-				"protocol", "ip", "prio", publicTrafficPriority,
-				"flower",
-				"action", "police", "rate", publicRate, "burst", trafficControlBurst,
-				"conform-exceed", "drop/ok",
-			),
+			policeFilter(prefix, device, "egress", "ip", publicTrafficPriority, "", "", rate),
+			policeFilter(prefix, device, "ingress", "ip", publicTrafficPriority, "", "", rate),
 		)
 	}
+
 	return steps
+}
+
+// policeFilter builds one tc filter that polices matching traffic to rate. An
+// empty matchPrefix matches every address, which is how the public limit works.
+// Traffic above the rate is dropped, not queued, so a VM cannot build a backlog.
+func policeFilter(prefix []string, device, direction, protocol, priority, matchField, matchPrefix, rate string) []string {
+	arguments := []string{
+		"filter", "add", "dev", device, direction,
+		"protocol", protocol, "prio", priority,
+		"flower",
+	}
+	if matchPrefix != "" {
+		arguments = append(arguments, matchField, matchPrefix)
+	}
+	arguments = append(arguments,
+		"action", "police", "rate", rate, "burst", trafficControlBurst,
+		"conform-exceed", "drop/ok",
+	)
+
+	return commandWithPrefix(prefix, "tc", arguments...)
+}
+
+// rateArgument formats a throughput limit the way tc expects it.
+func rateArgument(throughputMiBps int) string {
+	return fmt.Sprintf("%dmibps", throughputMiBps)
 }
