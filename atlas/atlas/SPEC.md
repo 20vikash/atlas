@@ -19,6 +19,7 @@ This module also holds site-wide settings, the regional wildcard TLS certificate
 | `registry` | The map from a stable provider name to its implementation. |
 | `DNSProvider`, `Route53Provider` | The DNS contract and its Route 53 implementation. |
 | `host_binaries` | Building and publishing `metald` and the Atlas WG Mesh CLI. |
+| `artifacts` | Publishing a build output as a public File, and its download URL. |
 | `LetsEncrypt` | Wildcard certificate issuance through the dns-01 challenge. |
 | `AcmeClient` | The ACME v2 conversation for one account key. |
 | `certificate` | Reading a PEM chain, and checking a certificate against its key. |
@@ -56,7 +57,9 @@ Do not put a key or password in `script` or `environment`. These fields are stor
 
 ## Host binaries
 
-A build runs only when its source hash changes. The result is published as a public File, because the host fetches it during `install-metald.sh` and holds no Atlas credential. Earlier files stay available, so a host mid-installation is never left without its binary.
+A build runs only when its source hash changes. Atlas publishes the result as a public File because a host has no Atlas credential.
+
+`artifacts` publishes build output and its download URL. It keeps a replaced File until no Atlas Settings link refers to it. The [Service module](../service/SPEC.md) uses the same helper for its package.
 
 ## Related
 

@@ -32,6 +32,8 @@ class AtlasSettings(Document):
 		from frappe.types import DF
 
 		dns_provider: DF.Literal["Route53"]
+		http_proxy_package_file: DF.Link | None
+		http_proxy_package_hash: DF.Data | None
 		is_dns_setup_completed: DF.Check
 		is_letsencrypt_staging: DF.Check
 		is_server_provider_setup_completed: DF.Check

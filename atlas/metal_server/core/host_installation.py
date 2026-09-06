@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils.password import get_decrypted_password
 
-from atlas.atlas.core.host_binaries import get_binary_download_url
+from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
 if TYPE_CHECKING:
@@ -73,8 +73,8 @@ class HostInstallation:
 			target=self.server.name,
 			script_path="install-metald.sh",
 			environment={
-				"METALD_DOWNLOAD_URL": get_binary_download_url(settings.metald_binary_x86_64_file),
-				"WG_MESH_DOWNLOAD_URL": get_binary_download_url(settings.wg_mesh_binary_x86_64_file),
+				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
+				"WG_MESH_DOWNLOAD_URL": get_download_url(settings.wg_mesh_binary_x86_64_file),
 				"METALD_AUTH_TOKEN_HASH": hashlib.sha256(token.encode()).hexdigest(),
 				"LISTEN_ADDRESS": "0.0.0.0:9000",
 				"STORAGE_POOL_DEVICE": settings.server_provider_controller.get_storage_pool_device(

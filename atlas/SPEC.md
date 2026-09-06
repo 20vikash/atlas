@@ -17,6 +17,8 @@ atlas/                         Site settings, provider behavior, TLS, and host b
 metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
   doctype/                     Metal Server records and catalog DocTypes
+service/                       Atlas services that run on virtual machines
+  core/                        HTTP proxy packaging
 vm/                            Virtual machine records, images, and orchestration
   core/                        Placement, Metal transport, and image movement
   doctype/                     Virtual Machine and Virtual Machine Image
@@ -50,6 +52,7 @@ See [docs/development.md](docs/development.md) for the commands to run.
 
 - [Atlas settings](atlas/SPEC.md)
 - [Metal Servers](metal_server/SPEC.md)
+- [Services](service/SPEC.md)
 - [Virtual machines](vm/SPEC.md)
 - [Realtime console bridge](realtime/SPEC.md)
 
@@ -60,5 +63,7 @@ Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior
 Keep certificate issuance in `atlas/core/tls/`.
 
 Keep Metal Server orchestration in `metal_server/core/`. Keep DocType controllers as lifecycle and API boundaries.
+
+Keep service packaging and installation in `service/core/`.
 
 Keep virtual machine orchestration and image transfers in `vm/core/`.

@@ -331,7 +331,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.get_binary_download_url",
+				"atlas.metal_server.core.host_installation.get_download_url",
 				side_effect=lambda file_name: file_urls[file_name],
 			),
 			patch(

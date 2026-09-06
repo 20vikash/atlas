@@ -87,7 +87,10 @@ app_license = "agpl-3.0"
 
 # before_install = "atlas.install.before_install"
 after_install = "atlas.atlas.core.host_binaries.publish_host_binaries"
-after_migrate = "atlas.atlas.core.host_binaries.publish_host_binaries"
+after_migrate = [
+	"atlas.atlas.core.host_binaries.publish_host_binaries",
+	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+]
 
 # Uninstallation
 # ------------
@@ -181,9 +184,13 @@ scheduler_events = {
 			"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.enqueue_pending_ip_address_reconcilation",
 			"atlas.metal_server.usage.enqueue_server_syncs",
 		],
-		# Poll and advance in-progress Machine image uploads every 30 seconds.
 		"* * * * * */30": [
+			# Poll and advance in-progress Machine image uploads every 30 seconds.
 			"atlas.vm.core.image_transfer.enqueue_pending_machine_image_transfers",
+		],
+		"*/15 * * * *": [
+			# Remove the published files that a newer build replaced.
+			"atlas.atlas.core.artifacts.delete_unlinked_files",
 		],
 		"* * * * *": [
 			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
