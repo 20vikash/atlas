@@ -300,39 +300,3 @@ class VirtualMachineService:
 		"""Raise one safe Metal failure at the Frappe boundary."""
 		frappe.throw(_("Metal request failed: {0}").format(error))
 		raise AssertionError from error
-
-	@classmethod
-	def reconcile_stale_draft(cls, name: str) -> None:
-		"""Finalize a present virtual machine or delete a confirmed absent draft."""
-		virtual_machine = cast("VirtualMachine", frappe.get_doc("Virtual Machine", name))
-		service = cls(virtual_machine)
-		try:
-			service.metal_client.get_virtual_machine(name)
-		except MetalClientError as error:
-			if not error.is_not_found:
-				frappe.log_error(
-					message=frappe.get_traceback(),
-					title=f"Virtual Machine {name} draft reconciliation failed",
-				)
-				return
-			virtual_machine.flags.metal_absence_confirmed = True
-			virtual_machine.delete(ignore_permissions=True)
-			return
-		virtual_machine.db_set("is_draft", 0)
-
-	@classmethod
-	def reconcile_terminating(cls, name: str) -> None:
-		"""Delete a virtual machine after Metal confirms its absence."""
-		virtual_machine = cast("VirtualMachine", frappe.get_doc("Virtual Machine", name))
-		service = cls(virtual_machine)
-		try:
-			service.metal_client.get_virtual_machine(name)
-		except MetalClientError as error:
-			if not error.is_not_found:
-				frappe.log_error(
-					message=frappe.get_traceback(),
-					title=f"Virtual Machine {name} termination reconciliation failed",
-				)
-				return
-			virtual_machine.flags.metal_absence_confirmed = True
-			virtual_machine.delete(ignore_permissions=True)

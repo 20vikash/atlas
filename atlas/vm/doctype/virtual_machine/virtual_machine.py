@@ -9,6 +9,7 @@ from frappe.model.document import Document
 from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.parsing import strict_bool
+from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import EGRESS_MODES
 from atlas.vm.core.vm_service import VirtualMachineService
@@ -19,6 +20,8 @@ PRIVILEGED_TENANT_ID = 0
 
 
 class VirtualMachine(Document):
+	"""One requested virtual machine. Runtime values read through to Metal."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -41,9 +44,11 @@ class VirtualMachine(Document):
 
 	@request_cache
 	def get_metal_vm_info(self) -> MetalVirtualMachine | None:
+		"""Return the Metal record for this VM, cached for one request."""
 		return VirtualMachineService(self).get_information()
 
 	def before_insert(self) -> None:
+		"""Reject a record created outside the Virtual Machine API."""
 		if not getattr(self.flags, "created_by_virtual_machine_api", False):
 			frappe.throw(_("Create Virtual Machines from the Virtual Machine list."))
 
@@ -62,6 +67,7 @@ class VirtualMachine(Document):
 
 	@property
 	def current_state(self) -> str:
+		"""Return the state a user sees. A draft or an absent VM is unknown."""
 		if self.is_draft:
 			return "unknown"
 
@@ -73,87 +79,105 @@ class VirtualMachine(Document):
 
 	@property
 	def desired_state(self) -> str | None:
+		"""Return the state Metal was asked to reach."""
 		information = self.get_metal_vm_info()
 		return information.desired.state if information else None
 
 	@property
 	def error(self) -> str | None:
+		"""Return the last reconciliation failure message, when there is one."""
 		information = self.get_metal_vm_info()
 		return information.observed.error.message if information and information.observed.error else None
 
 	@property
 	def hostname(self) -> str | None:
+		"""Return the guest hostname."""
 		information = self.get_metal_vm_info()
 		return information.desired.guest.hostname if information else None
 
 	@property
 	def mac(self) -> str | None:
+		"""Return the guest MAC address the host assigned."""
 		information = self.get_metal_vm_info()
 		return information.observed.network.mac if information else None
 
 	@property
 	def egress(self) -> str | None:
+		"""Return the requested egress mode."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.egress if information else None
 
 	@property
 	def wireguard_mesh_ipv6(self) -> str | None:
+		"""Return the Atlas WG Mesh address of the guest."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.wireguard_mesh_ipv6 if information else None
 
 	@property
 	def public_ipv4(self) -> str | None:
+		"""Return the attached public IPv4 address, when there is one."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.public_ipv4 if information else None
 
 	@property
 	def disk_throughput_mibps(self) -> int:
+		"""Return the disk throughput limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()
 		return information.desired.disk.throughput_mibps if information else 0
 
 	@property
 	def disk_iops(self) -> int:
+		"""Return the disk IOPS limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()
 		return information.desired.disk.iops if information else 0
 
 	@property
 	def private_network_throughput_mibps(self) -> int:
+		"""Return the private network limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.private_network_throughput_mibps if information else 0
 
 	@property
 	def public_network_throughput_mibps(self) -> int:
+		"""Return the public network limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.public_network_throughput_mibps if information else 0
 
 	@property
 	def ssh_keys(self) -> str:
+		"""Return the authorized keys as one newline-separated block."""
 		information = self.get_metal_vm_info()
 		return "\n".join(information.desired.guest.ssh_keys) if information else ""
 
 	@property
 	def metadata(self) -> str:
+		"""Return the guest metadata as indented JSON."""
 		information = self.get_metal_vm_info()
 		return json.dumps(information.desired.guest.metadata if information else {}, indent=2)
 
 	@frappe.whitelist(methods=["POST"])
 	def start(self) -> None:
+		"""Request the running state."""
 		self.set_power_state("running")
 
 	@frappe.whitelist(methods=["POST"])
 	def stop(self) -> None:
+		"""Request the stopped state."""
 		self.set_power_state("stopped")
 
 	@frappe.whitelist(methods=["POST"])
 	def pause(self) -> None:
+		"""Request the paused state."""
 		self.set_power_state("paused")
 
 	@frappe.whitelist(methods=["POST"])
 	def resume(self) -> None:
+		"""Request the running state from paused."""
 		self.set_power_state("running")
 
 	@frappe.whitelist(methods=["POST"])
 	def set_privileged(self, is_privileged: bool | int | str) -> None:
+		"""Set or clear the privileged flag. Only tenant 0 may hold it."""
 		frappe.only_for("System Manager")
 		if self.is_draft or self.is_terminating:
 			frappe.throw(_("Virtual Machine {0} is not ready for this change.").format(self.name))
@@ -349,7 +373,7 @@ def reconcile_stale_drafts() -> None:
 
 def reconcile_stale_draft(name: str) -> None:
 	"""Finalize a present VM or delete a confirmed absent draft."""
-	VirtualMachineService.reconcile_stale_draft(name)
+	reconciliation.reconcile_stale_draft(name)
 
 
 def reconcile_terminating_virtual_machines() -> None:
@@ -361,4 +385,4 @@ def reconcile_terminating_virtual_machines() -> None:
 
 def reconcile_terminating_virtual_machine(name: str) -> None:
 	"""Delete a terminated VM once Metal confirms it is absent."""
-	VirtualMachineService.reconcile_terminating(name)
+	reconciliation.reconcile_terminating(name)
