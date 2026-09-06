@@ -22,6 +22,7 @@ Run the script again when required. It performs these actions:
 - Writes the Metal configuration and development token digest.
 
 The default development token is `metal-development-token`. Set `METALD_AUTH_TOKEN` to use another value.
+The setup script does not print the configured token.
 
 ## Secure Shell test
 
