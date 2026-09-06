@@ -2,6 +2,8 @@ from frappe.model.document import Document
 
 
 class ServerUsage(Document):
+	"""One host capacity sample reported by Metal."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 

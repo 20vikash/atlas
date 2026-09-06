@@ -139,6 +139,7 @@ class MetalVirtualMachine:
 
 
 def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
+	"""Parse the desired half of a Metal VM response."""
 	compute = object_field(value, "compute")
 	disk = object_field(value, "disk")
 	image = object_field(value, "image")
@@ -174,6 +175,7 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 
 
 def parse_image(value: dict[str, Any]) -> MetalImage:
+	"""Parse the image object of a Metal VM response."""
 	configuration = value.get("memory_snapshot_configuration")
 	if configuration is not None:
 		configuration = integer_map(configuration, "memory_snapshot_configuration")
@@ -189,6 +191,7 @@ def parse_image(value: dict[str, Any]) -> MetalImage:
 
 
 def parse_observed_state(value: dict[str, Any]) -> MetalObservedState:
+	"""Parse the observed half of a Metal VM response."""
 	error_value = value.get("error")
 	operation_error = None
 	if error_value is not None:
@@ -213,16 +216,19 @@ def parse_observed_state(value: dict[str, Any]) -> MetalObservedState:
 
 
 def object_field(value: dict[str, Any], field_name: str) -> dict[str, Any]:
+	"""Return one nested object, or an empty mapping when it is absent."""
 	return object_value(value.get(field_name), field_name)
 
 
 def object_value(value: object, field_name: str) -> dict[str, Any]:
+	"""Return one nested object value under a key."""
 	if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
 		raise ValueError(f"{field_name} must be an object")
 	return value
 
 
 def string_field(value: dict[str, Any], field_name: str, *, default: str | None = None) -> str:
+	"""Return one string field, or an empty string."""
 	field_value = value.get(field_name, default)
 	if not isinstance(field_value, str):
 		raise ValueError(f"{field_name} must be a string")
@@ -230,6 +236,7 @@ def string_field(value: dict[str, Any], field_name: str, *, default: str | None 
 
 
 def integer_field(value: dict[str, Any], field_name: str) -> int:
+	"""Return one integer field, or zero."""
 	field_value = value.get(field_name)
 	if not isinstance(field_value, int) or isinstance(field_value, bool) or field_value < 0:
 		raise ValueError(f"{field_name} must be a non-negative integer")
@@ -237,6 +244,7 @@ def integer_field(value: dict[str, Any], field_name: str) -> int:
 
 
 def boolean_field(value: dict[str, Any], field_name: str) -> bool:
+	"""Return one boolean field, or False."""
 	field_value = value.get(field_name)
 	if not isinstance(field_value, bool):
 		raise ValueError(f"{field_name} must be a boolean")
@@ -244,6 +252,7 @@ def boolean_field(value: dict[str, Any], field_name: str) -> bool:
 
 
 def string_tuple_field(value: dict[str, Any], field_name: str) -> tuple[str, ...]:
+	"""Return one list of strings as a tuple."""
 	field_value = value.get(field_name)
 	if not isinstance(field_value, list) or any(not isinstance(item, str) for item in field_value):
 		raise ValueError(f"{field_name} must be a string list")
@@ -251,6 +260,7 @@ def string_tuple_field(value: dict[str, Any], field_name: str) -> tuple[str, ...
 
 
 def string_map_field(value: dict[str, Any], field_name: str) -> dict[str, str]:
+	"""Return one string-to-string map."""
 	field_value = object_field(value, field_name)
 	if any(not isinstance(item, str) for item in field_value.values()):
 		raise ValueError(f"{field_name} values must be strings")
@@ -258,6 +268,7 @@ def string_map_field(value: dict[str, Any], field_name: str) -> dict[str, str]:
 
 
 def integer_map(value: object, field_name: str) -> dict[str, int]:
+	"""Return one string-to-integer map."""
 	field_value = object_value(value, field_name)
 	if any(not isinstance(item, int) or isinstance(item, bool) or item < 0 for item in field_value.values()):
 		raise ValueError(f"{field_name} values must be non-negative integers")

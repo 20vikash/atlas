@@ -94,6 +94,7 @@ def get_privileged_vm_addresses() -> list[str]:
 
 
 def get_wireguard_peers() -> list[dict[str, Any]]:
+	"""Return the complete managed WireGuard peer set for one host."""
 	servers = frappe.get_all(
 		"Server",
 		filters={"status": "Running", "is_provisioning_completed": 1},
@@ -118,6 +119,7 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 
 
 def get_usage_values(usage: object) -> dict[str, int]:
+	"""Return the capacity values to record from a Metal sync response."""
 	if not isinstance(usage, dict):
 		raise ValueError("Metal capacity response must be an object")
 	fields = (

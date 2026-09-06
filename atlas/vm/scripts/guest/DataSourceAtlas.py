@@ -5,6 +5,8 @@ TOKEN_TTL_SECONDS = "21600"
 
 
 class DataSourceAtlas(sources.DataSource):
+	"""cloud-init data source that reads Atlas metadata from MMDS."""
+
 	dsname = "Atlas"
 
 	def __init__(self, sys_cfg, distro, paths, ud_proc=None):
@@ -52,6 +54,7 @@ class DataSourceAtlas(sources.DataSource):
 		return "metadata (Atlas MMDS v2)"
 
 	def get_instance_id(self):
+		"""Return the instance identifier from MMDS."""
 		return self.metadata.get("instance-id")
 
 
@@ -61,4 +64,5 @@ datasources = [
 
 
 def get_datasource_list(depends):
+	"""Return the data sources this module provides."""
 	return sources.list_from_depends(depends, datasources)

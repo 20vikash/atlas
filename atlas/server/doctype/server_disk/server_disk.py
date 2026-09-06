@@ -6,6 +6,8 @@ from frappe.model.document import Document
 
 
 class ServerDisk(Document):
+	"""One block device attached to a server."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 

@@ -4,16 +4,20 @@ The Atlas Frappe app owns provider integration, Server records, placement, image
 
 Atlas sends desired virtual machine state to Metal. Metal owns runtime state and host resources.
 
-## Main areas
+## Start here
+
+1. Read the [system architecture](../docs/architecture.md) to understand the Atlas and Metal boundary.
+2. Read the [Atlas app specification](SPEC.md) for app ownership and layout.
+3. Choose an area below, then read its module SPEC before you change its code.
 
 | Area | Purpose | Start here |
 |---|---|---|
-| Atlas settings | Provider selection, credentials, region data, and host binaries | [Atlas module](atlas/README.md) |
-| Servers | Provider hosts and Metal installation | [Server module](server/README.md) |
-| Virtual machines | Placement, Metal requests, images, and user workflows | [Virtual machine module](vm/README.md) |
+| Atlas settings | Provider selection, credentials, region data, and host binaries | [Atlas module](atlas/SPEC.md) |
+| Servers | Provider hosts and Metal installation | [Server module](server/SPEC.md) |
+| Virtual machines | Placement, Metal requests, images, and user workflows | [Virtual machine module](vm/SPEC.md) |
 | Realtime | Console WebSocket bridge | [Realtime specification](realtime/SPEC.md) |
 
-## Concepts
+## Guides
 
 - [Provider contract and extension guide](docs/providers.md)
 - [Server lifecycle](docs/server-lifecycle.md)

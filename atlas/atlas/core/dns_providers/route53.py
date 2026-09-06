@@ -19,6 +19,8 @@ class Route53Error(Exception):
 
 @register
 class Route53Provider(DnsProvider):
+	"""Manage DNS records in one Route 53 hosted zone."""
+
 	provider_type = "Route53"
 	credential_fields = ("route53_access_key_id", "route53_access_key_secret")
 

@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class VirtualMachineImage(Document):
+	"""One durable boot artifact. Its reference is immutable."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -56,11 +58,13 @@ class VirtualMachineImage(Document):
 	# end: auto-generated types
 
 	def validate(self) -> None:
+		"""Reject an image whose artifacts or snapshot shape are inconsistent."""
 		self.validate_memory_snapshot_configuration()
 		if self.status == "Available":
 			self.validate_artifacts()
 
 	def get_metal_image_request(self, user_data: str = "") -> dict[str, Any]:
+		"""Return the image object for a Metal create request."""
 		self.validate_user_data(user_data)
 		self.validate_is_available()
 		if self.cache_image:
@@ -68,6 +72,7 @@ class VirtualMachineImage(Document):
 		return self.get_metal_image(SIGNED_URL_EXPIRY_SECONDS)
 
 	def get_desired_image(self) -> dict[str, Any]:
+		"""Return the image policy this host should cache."""
 		image = self.get_metal_image(SIGNED_URL_EXPIRY_SECONDS)
 		image.update(
 			{
@@ -79,6 +84,7 @@ class VirtualMachineImage(Document):
 		return image
 
 	def get_metal_image(self, expiry_seconds: int) -> dict[str, Any]:
+		"""Return the image object with freshly signed artifact URLs."""
 		return {
 			"ref": self.immutable_reference,
 			"architecture": self.platform,
@@ -88,11 +94,13 @@ class VirtualMachineImage(Document):
 
 	@property
 	def immutable_reference(self) -> str:
+		"""Return the name that identifies this exact content on a host."""
 		identity = f"{self.platform}\0{self.image_sha256}\0{self.kernel_sha256}"
 		return f"sha256:{hashlib.sha256(identity.encode()).hexdigest()}"
 
 	@property
 	def memory_snapshot_configuration(self) -> dict[str, int] | None:
+		"""Return the exact VM shape a warm artifact serves."""
 		if not self.memory_snapshot:
 			return None
 		return {
@@ -102,12 +110,15 @@ class VirtualMachineImage(Document):
 		}
 
 	def get_image_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+		"""Return a signed URL for the root file system object."""
 		return self.get_object_url(self.image_object_key, expiry_seconds)
 
 	def get_kernel_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+		"""Return a signed URL for the kernel object."""
 		return self.get_object_url(self.kernel_object_key, expiry_seconds)
 
 	def validate_memory_snapshot_configuration(self) -> None:
+		"""Require a complete VM shape when a warm artifact is requested."""
 		if not self.memory_snapshot:
 			return
 
@@ -125,6 +136,7 @@ class VirtualMachineImage(Document):
 			frappe.throw(_("Memory Snapshot Disk must be at least {0} MiB.").format(self.image_size_mib))
 
 	def validate_artifacts(self) -> None:
+		"""Require both artifacts with an exact size and digest."""
 		if not self.image_object_key or not self.kernel_object_key:
 			frappe.throw(_("An available Virtual Machine Image requires rootfs and kernel object keys."))
 		if not SHA256_PATTERN.fullmatch(self.image_sha256 or ""):
@@ -135,6 +147,7 @@ class VirtualMachineImage(Document):
 			frappe.throw(_("An available Virtual Machine Image requires positive artifact sizes."))
 
 	def validate_is_available(self) -> None:
+		"""Reject an image that is not ready to boot a VM."""
 		if self.status != "Available":
 			frappe.throw(_("Virtual Machine Image {0} is not available.").format(self.title))
 
@@ -146,10 +159,12 @@ class VirtualMachineImage(Document):
 			)
 
 	def validate_user_data(self, user_data: str) -> None:
+		"""Reject user data that the guest cannot accept."""
 		if user_data and not self.supports_cloud_init:
 			frappe.throw(_("This Virtual Machine Image does not support cloud-init user data."))
 
 	def get_object_url(self, object_key: str | None, expiry_seconds: int) -> str:
+		"""Return a signed URL for one stored object."""
 		if not object_key:
 			frappe.throw(_("Virtual Machine Image {0} has no object key.").format(self.title))
 		settings = cast("AtlasSettings", frappe.get_single("Atlas Settings"))
@@ -157,6 +172,7 @@ class VirtualMachineImage(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def retry_transfer(self) -> None:
+		"""Start the image transfer again, keeping the existing identifiers."""
 		frappe.only_for("System Manager")
 		if self.image_type != "Machine" or self.status != "Failed":
 			frappe.throw(_("Only a failed Machine image transfer can be retried."))

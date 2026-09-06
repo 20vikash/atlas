@@ -9,6 +9,8 @@ from frappe.model.document import Document
 
 
 class ServerImage(Document):
+	"""One provider operating system image in the catalog."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -24,16 +26,19 @@ class ServerImage(Document):
 	# end: auto-generated types
 
 	def autoname(self) -> None:
+		"""Name the image from its provider and identifier."""
 		if not self.provider_type or not self.image:
 			frappe.throw(_("Server Image requires provider_type and image"))
 		self.name = f"{self.provider_type}/{self.image}"
 
 	def validate(self) -> None:
+		"""Reject an image without a provider identifier."""
 		expected = f"{self.provider_type}/{self.image}"
 		if self.name and self.name != expected:
 			frappe.throw(_("Server Image name {0} does not match {1}").format(self.name, expected))
 
 	def get_provider_metadata(self, key: str) -> str:
+		"""Return the provider values this image was created from."""
 		metadata = frappe.parse_json(self.provider_metadata or "{}")
 		value = metadata.get(key)
 		if not isinstance(value, str):

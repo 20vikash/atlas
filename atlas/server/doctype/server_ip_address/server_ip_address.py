@@ -19,6 +19,8 @@ class IPAddressIntent:
 
 
 class ServerIPAddress(Document):
+	"""One public IPv4 address owned by a server."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -36,6 +38,7 @@ class ServerIPAddress(Document):
 	# end: auto-generated types
 
 	def validate(self) -> None:
+		"""Reject an address that is not consistent with its server."""
 		try:
 			address = ipaddress.ip_interface(self.address)
 		except ValueError:
@@ -47,6 +50,7 @@ class ServerIPAddress(Document):
 		self.address = str(address.ip)
 
 	def on_trash(self) -> None:
+		"""Release the provider reservation before the record is removed."""
 		if self.status != "Allocated":
 			frappe.throw(_("Detach this IP address before deletion."))
 		frappe.get_single("Atlas Settings").server_provider_controller.delete_public_ipv4_address(
@@ -107,6 +111,7 @@ class ServerIPAddress(Document):
 			raise
 
 	def get_intent(self) -> IPAddressIntent:
+		"""Return the desired provider state for this address."""
 		return IPAddressIntent(
 			version=self.intent_version or 0,
 			status=self.status,
@@ -115,6 +120,7 @@ class ServerIPAddress(Document):
 		)
 
 	def apply_intent(self, intent: IPAddressIntent) -> None:
+		"""Make the provider state match the desired state."""
 		provider = frappe.get_single("Atlas Settings").server_provider_controller
 		if intent.status == "Attaching":
 			if not intent.server:

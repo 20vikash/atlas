@@ -1,38 +1,47 @@
-# Atlas Module Specification
+# Atlas settings, providers, and host binaries
 
-[App specification](../SPEC.md)
+[Atlas app specification](../SPEC.md)
+
+For the provider overview, see [docs/providers.md](../docs/providers.md).
 
 ## Purpose
 
-The `atlas` Python module contains the Frappe application code for Atlas settings and provider catalogs.
+Atlas talks to an infrastructure provider only through one interface. Everything provider-specific lives behind it, so adding a provider never reaches into server or virtual machine code.
 
-Read [the module README](README.md) for entry points.
+This module also holds site-wide settings and builds the binaries a host downloads during installation.
 
-## Layout
+## Types
+
+| Type | Owns |
+|---|---|
+| `AtlasSettings` (DocType) | Provider selection, credentials, and the published binary links. |
+| `ServerProvider` | The contract every server provider implements. |
+| `registry` | The map from a stable provider name to its implementation. |
+| `DNSProvider`, `Route53Provider` | The DNS contract and its Route 53 implementation. |
+| `host_binaries` | Building and publishing `metald` and the Atlas WG Mesh CLI. |
+| `ssh`, `parsing`, `mesh_address`, `s3` | Host access, strict input parsing, mesh addressing, and object storage. |
+
+## Provider boundary
 
 ```text
-core/server_providers/      Provider interfaces and implementations
-core/dns_providers/         DNS provider interfaces and implementations
-doctype/atlas_settings/     Atlas Settings DocType (module: Atlas)
-../vm/doctype/              Virtual machine and image DocTypes (module: VM)
-../server/doctype/          Server catalog DocTypes (module: Server)
-  server_size/               Server Size DocType
-  server_image/               Server Image DocType
+server / vm code
+      |
+      v
+ServerProvider  (typed create, result, catalog, power, address, and error values)
+      |
+      +-- scaleway/   client, servers, ip_addresses, catalog, partitioning, infrastructure
 ```
 
-## Ownership
+A provider component never saves a Frappe document. It returns typed values, and the caller decides what to record. That keeps provider code testable without a database and keeps persistence in one place.
 
-Keep provider behavior in the matching `core/` package. Keep document behavior in the matching DocType controller. Keep provider metadata in the related catalog record.
-Keep VM records, image records, image transfer, and image builders in `../vm/`. Keep S3 operations in `s3.py`.
+Server Size stores disk capacity in GiB and price in integer USD cents. The provider fills a missing billing period from the price it does report.
 
-## Interfaces
+## Host binaries
 
-Server providers implement `ServerProvider`. The registry maps one stable provider type to one implementation.
+A build runs only when its source hash changes. The result is published as a public File, because the host fetches it during `install-metald.sh` and holds no Atlas credential. Earlier files stay available, so a host mid-installation is never left without its binary.
 
-Providers use typed creation, result, catalog, power, address, and error values. Low-level provider components do not save Frappe documents.
+## Related
 
-The Atlas Settings controller queues catalog synchronization jobs after setup. `server/core/catalog_sync.py` owns catalog persistence.
-
-Server size records store disk capacity in GiB and prices in integer USD cents. The provider controller preserves the provider price and fills a missing billing period from the available price.
-
-Read [the provider guide](../docs/providers.md) for the complete contract.
+- [docs/providers.md](../docs/providers.md) describes the provider contract and how to add a provider.
+- [docs/development.md](../docs/development.md) lists the build tools and manual build commands.
+- [server SPEC](../server/SPEC.md) describes the provider interface consumer.

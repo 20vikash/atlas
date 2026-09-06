@@ -33,6 +33,7 @@ class MetalClientError(Exception):
 
 	@property
 	def is_not_found(self) -> bool:
+		"""Report whether Metal answered that the resource does not exist."""
 		return self.status == 404
 
 

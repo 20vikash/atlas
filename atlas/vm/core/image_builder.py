@@ -110,6 +110,7 @@ def upload_with_progress(s3_client: S3Client, source: Path, key: str) -> None:
 	progress_lock = threading.Lock()
 
 	def on_progress(chunk_bytes: int) -> None:
+		"""Record build progress on the image record."""
 		nonlocal transferred_bytes
 		with progress_lock:
 			transferred_bytes += chunk_bytes

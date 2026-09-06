@@ -1,37 +1,53 @@
 # Server module specification
 
-[App specification](../SPEC.md)
+[Atlas app specification](../SPEC.md)
 
-[Human entry point](README.md)
+For the lifecycle overview, see [docs/server-lifecycle.md](../docs/server-lifecycle.md).
 
 ## Purpose
 
-The Server module owns provider host records, setup, disk inventory, and capacity samples.
+A Server is one Metal host. This module takes it from a provider API call to a machine that can run virtual machines, and then keeps Atlas informed about its capacity.
 
-Capacity synchronization logs transport and response faults separately. Server IP Address reconciliation logs the address, action, and intent version, then preserves the pending intent for a retry.
+Provisioning is a sequence of phases, not one transaction. Each phase records progress, so a failed run resumes at the phase that failed instead of repeating work.
 
-## Ownership
+## Types
 
-`doctype/server/server.py` owns lifecycle hooks, permissions, and whitelisted methods.
+| Type | Owns |
+|---|---|
+| `Server` (DocType) | Lifecycle hooks, permissions, and the whitelisted API. |
+| `provisioning` | The phase order, progress saves, and failure logs. |
+| `host_installation` | Installing and configuring Metal on the host. |
+| `disk_inventory` | Reading block devices into Server Disk rows. |
+| `catalog_sync` | Refreshing Server Size and Server Image from the provider. |
+| `ServerIPAddress` (DocType) | One public IPv4 address and its provider intent. |
+| `ServerSSHTask` (DocType) | One recorded SSH command and its result. |
+| `ServerUsage` (DocType) | One capacity sample reported by Metal. |
 
-`core/provisioning.py` owns the setup order, progress saves, commits, and failure logs.
+## Provisioning
 
-`core/host_installation.py`, `core/disk_inventory.py`, and `core/catalog_sync.py` own their named operations.
-
-## Invariants
-
-- `Server.before_validate` remains the remote creation entry.
-- A creation retry uses one stable provider server identity.
-- Compensation deletes only a server that the current request created.
-- Each setup step is safe to repeat.
-- The Server schema remains unchanged during this refactor.
-
-## Tests
-
-```sh
-ruff check atlas
-pilot --site TEST_SITE run-tests --module atlas.server.doctype.server.test_server
-pilot --site TEST_SITE run-tests --module atlas.server.core.test_provisioning
-pilot --site TEST_SITE run-tests --module atlas.server.doctype.server_ip_address.test_server_ip_address
-pilot --site TEST_SITE run-tests --module atlas.server.doctype.server_usage.test_server_usage
+```text
+create provider server   one stable provider identity across retries
+  -> wait for ready
+  -> attach addresses
+  -> install Metal
+  -> configure WireGuard
+  -> mark provisioning complete
 ```
+
+Every phase is safe to repeat. A creation retry reuses the provider identity the first attempt made, so a lost response cannot produce a second machine. Compensation deletes only a provider server that the current request created.
+
+## Capacity
+
+`POST /v1/sync` sends the desired host state and returns capacity in the same exchange. Atlas records the result as a Server Usage row, which is what placement later reads.
+
+A transport fault and a response fault are logged separately, because they need different responses: one is a network problem, the other is a host problem.
+
+## Public IPv4
+
+An address carries a desired intent and an intent version. Reconciliation applies the intent and preserves a pending one for a retry, so a failed apply is never mistaken for a completed one.
+
+## Related
+
+- [docs/server-lifecycle.md](../docs/server-lifecycle.md) describes the lifecycle and its reasons.
+- [docs/providers.md](../docs/providers.md) describes the provider contract.
+- [atlas/atlas/SPEC.md](../atlas/SPEC.md) describes provider implementations and settings.

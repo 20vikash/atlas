@@ -165,20 +165,24 @@ class ScalewayProvider(ServerProvider):
 
 	@override
 	def reserve_public_ipv4_address(self) -> ReservedIPAddress:
+		"""Reserve one public IPv4 address for a server."""
 		return self.ip_addresses.reserve()
 
 	@override
 	def delete_public_ipv4_address(self, provider_resource_id: str) -> None:
+		"""Release one reserved public IPv4 address."""
 		self.ip_addresses.delete(provider_resource_id)
 
 	@override
 	def attach_public_ipv4_address(self, provider_resource_id: str, server: "Server") -> None:
+		"""Attach a reserved address to a server."""
 		if not server.provider_server_id:
 			raise ScalewayError("Atlas server has no Scaleway server ID")
 		self.ip_addresses.attach(provider_resource_id, server.provider_server_id)
 
 	@override
 	def detach_public_ipv4_address(self, provider_resource_id: str) -> None:
+		"""Detach an address from a server."""
 		self.ip_addresses.detach(provider_resource_id)
 
 	def attach_private_network(self, server: "Server") -> None:
@@ -204,6 +208,7 @@ class ScalewayProvider(ServerProvider):
 			raise ScalewayError("Atlas server has no Scaleway server ID")
 
 		def is_attached() -> Mapping | None:
+			"""Report whether the address is attached to a server."""
 			private_network = self.servers.private_network(server.provider_server_id)
 			if private_network is None:
 				raise ScalewayError("Scaleway server is not attached to the Atlas private network")
@@ -225,6 +230,7 @@ class ScalewayProvider(ServerProvider):
 			raise ScalewayError("Atlas server has no Scaleway server ID")
 
 		def is_ready() -> Mapping | None:
+			"""Report whether the server has finished provider provisioning."""
 			remote_server = self.servers.fetch(server.provider_server_id)
 			self.apply_provider_server(server, self.servers.to_provider_server(remote_server))
 			status = remote_server.get("status")
@@ -258,6 +264,7 @@ class ScalewayProvider(ServerProvider):
 			raise ScalewayError("Atlas server has no private network interface or address")
 
 		def has_private_address() -> bool | None:
+			"""Report whether the server has its private network address."""
 			try:
 				result = SSHRunner(server.public_ipv4_address).run_command(
 					f"ip -4 -o addr show dev {device} scope global", timeout_seconds=15

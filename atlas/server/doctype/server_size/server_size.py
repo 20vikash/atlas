@@ -9,6 +9,8 @@ from frappe.model.document import Document
 
 
 class ServerSize(Document):
+	"""One provider machine type in the catalog."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -29,11 +31,13 @@ class ServerSize(Document):
 	# end: auto-generated types
 
 	def autoname(self) -> None:
+		"""Name the size from its provider and identifier."""
 		if not self.provider_type or not self.size:
 			frappe.throw(_("Server Size requires provider_type and size"))
 		self.name = f"{self.provider_type}/{self.size}"
 
 	def validate(self) -> None:
+		"""Reject a size without CPU, memory, or storage values."""
 		expected = f"{self.provider_type}/{self.size}"
 		if self.name and self.name != expected:
 			frappe.throw(_("Server Size name {0} does not match {1}").format(self.name, expected))

@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
 
 class AtlasSettings(Document):
+	"""Site-wide Atlas configuration and provider credentials."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -72,16 +74,19 @@ class AtlasSettings(Document):
 
 	@property
 	def resource_name_prefix(self) -> str:
+		"""Return the prefix Atlas puts on provider resource names."""
 		return f"atlas-{self.region_name.lower()}-"
 
 	@cached_property
 	def server_provider_controller(self) -> "ServerProvider":
+		"""Return the configured server provider."""
 		from atlas.atlas.core.server_providers import get_server_provider
 
 		return get_server_provider(settings=self)
 
 	@cached_property
 	def dns_provider_controller(self) -> "DnsProvider":
+		"""Return the configured DNS provider."""
 		from atlas.atlas.core.dns_providers import get_dns_provider
 
 		return get_dns_provider(settings=self)
@@ -100,6 +105,7 @@ class AtlasSettings(Document):
 		)
 
 	def validate(self) -> None:
+		"""Reject settings that would leave Atlas unable to reach a provider."""
 		if self.is_setup_completed and not (
 			self.is_server_provider_setup_completed and self.is_dns_setup_completed
 		):
@@ -129,6 +135,7 @@ class AtlasSettings(Document):
 			self.dns_provider_controller.validate_credentials()
 
 	def before_save(self) -> None:
+		"""Apply provider setup when the credentials change."""
 		if (
 			self.is_dns_setup_completed
 			and self.is_server_provider_setup_completed
@@ -138,6 +145,7 @@ class AtlasSettings(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def setup_server_provider(self) -> None:
+		"""Prepare the provider account for Atlas use."""
 		frappe.only_for("System Manager")
 		try:
 			self.server_provider_controller.setup_infrastructure()
@@ -149,11 +157,13 @@ class AtlasSettings(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def setup_dns_provider(self) -> None:
+		"""Prepare the DNS zone for Atlas use."""
 		frappe.only_for("System Manager")
 		self.dns_provider_controller.bootstrap()
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_sizes(self) -> None:
+		"""Refresh the Server Size catalog from the provider."""
 		frappe.only_for("System Manager")
 		if not self.is_setup_completed:
 			frappe.throw(_("Atlas Settings must be fully set up before syncing server sizes."))
@@ -176,6 +186,7 @@ class AtlasSettings(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_images(self) -> None:
+		"""Refresh the Server Image catalog from the provider."""
 		frappe.only_for("System Manager")
 		if not self.is_setup_completed:
 			frappe.throw(_("Atlas Settings must be fully set up before syncing server images."))

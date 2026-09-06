@@ -56,9 +56,11 @@ class ConsoleSession:
 			await self.close()
 
 	async def send_input(self, data: bytes) -> None:
+		"""Send one input frame to Metal."""
 		await self.connection.send(data)
 
 	async def send_resize(self, cols: int, rows: int) -> None:
+		"""Send one resize control message to Metal."""
 		await self.connection.send(json.dumps({"resize": {"cols": cols, "rows": rows}}))
 
 	async def close(self) -> None:
@@ -128,6 +130,7 @@ async def atlas_console_open(socket: Socket, token: str) -> None:
 
 @realtime.on("atlas_console_input", allow_guest=True)
 async def atlas_console_input(socket: Socket, data: str) -> None:
+	"""Forward viewer keystrokes to the console session."""
 	session = _sessions.get(socket.sid)
 	if not session:
 		return
@@ -147,6 +150,7 @@ async def atlas_console_input(socket: Socket, data: str) -> None:
 
 @realtime.on("atlas_console_resize", allow_guest=True)
 async def atlas_console_resize(socket: Socket, size: dict) -> None:
+	"""Forward a terminal resize to the console session."""
 	session = _sessions.get(socket.sid)
 	if session and isinstance(size, dict):
 		await session.send_resize(
@@ -163,6 +167,7 @@ def _terminal_dimension(value: object, default: int) -> int:
 
 @realtime.on("disconnect", allow_guest=True)
 async def atlas_console_disconnect(socket: Socket) -> None:
+	"""Close the console session for this socket."""
 	session = _sessions.pop(socket.sid, None)
 	if session:
 		await session.close()

@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class ServerSSHTask(Document):
+	"""One SSH command run against a server, with its recorded result."""
+
 	timeout_buffer_seconds = 10
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
@@ -39,6 +41,7 @@ class ServerSSHTask(Document):
 	# end: auto-generated types
 
 	def validate(self) -> None:
+		"""Reject a task without a server or a command."""
 		if not 1 <= self.port <= 65_535:
 			frappe.throw(_("SSH port must be between 1 and 65535."))
 		if not 1 <= self.timeout_seconds <= 3_600:

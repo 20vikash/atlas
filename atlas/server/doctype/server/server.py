@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 
 class Server(Document):
+	"""One Metal host, with its provider resources and provisioning state."""
+
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -57,12 +59,14 @@ class Server(Document):
 
 	@property
 	def settings(self) -> AtlasSettings:
+		"""Return the Atlas settings this server uses."""
 		if not hasattr(self, "_settings"):
 			self._settings = frappe.get_single("Atlas Settings")
 
 		return self._settings
 
 	def autoname(self) -> None:
+		"""Name the server from its provider and region."""
 		if not self.settings.region_name:
 			frappe.throw(_("Atlas Settings requires a region name before creating a Server"))
 
@@ -77,6 +81,7 @@ class Server(Document):
 			raise
 
 	def before_validate(self) -> None:
+		"""Fill values that depend on the selected size and image."""
 		self.settings.server_provider_controller.validate_settings()
 		self._validate_provider_catalog()
 		if self.provider_server_id:
@@ -100,15 +105,18 @@ class Server(Document):
 		self.flags.provider_server_created = provider_server.was_created
 
 	def validate(self) -> None:
+		"""Reject a server whose size, image, or region do not agree."""
 		self._validate_provider_catalog()
 		self._sync_disks_if_running()
 		self._set_wireguard_ip_address_if_not_set()
 
 	def after_insert(self) -> None:
+		"""Start provisioning in the background."""
 		self._enqueue_setup_server()
 
 	@property
 	def setup_job_id(self) -> str:
+		"""Return the background job identifier for this server."""
 		return f"atlas||server-provision||{self.name}"
 
 	@frappe.whitelist(methods=["POST"])
