@@ -9,7 +9,7 @@ from frappe import _
 from frappe.utils.password import get_decrypted_password
 
 from atlas.atlas.core.host_binaries import get_binary_download_url
-from atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task import MetalServerSSHTask
+from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -28,8 +28,9 @@ class HostInstallation:
 	def configure_wireguard(self) -> None:
 		"""Configure WireGuard and store its public key."""
 		self.set_wireguard_ip_address()
-		result = MetalServerSSHTask.create_for_script_file(
-			server=self.server.name,
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
 			script_path="configure-wireguard.sh",
 			environment={
 				"WIREGUARD_ADDRESS": self.server.wireguard_ip_address,
@@ -67,8 +68,9 @@ class HostInstallation:
 			self.server.metald_api_token = token
 			self.server.save(ignore_permissions=True, ignore_version=True)
 
-		result = MetalServerSSHTask.create_for_script_file(
-			server=self.server.name,
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
 			script_path="install-metald.sh",
 			environment={
 				"METALD_DOWNLOAD_URL": get_binary_download_url(settings.metald_binary_x86_64_file),

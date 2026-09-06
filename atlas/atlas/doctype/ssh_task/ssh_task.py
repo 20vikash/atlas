@@ -15,10 +15,15 @@ if TYPE_CHECKING:
 	from frappe.types import DF
 
 
-class MetalServerSSHTask(Document):
-	"""One SSH command run against a server, with its recorded result."""
+class SSHTask(Document):
+	"""One SSH command run against a Metal Server or a Virtual Machine, with its recorded result.
+
+	The task carries no credential. It connects with the identity of the Atlas
+	host, so the caller must make the target reachable before it creates a task.
+	"""
 
 	timeout_buffer_seconds = 10
+	custom_script_path = "custom_script"
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -33,15 +38,17 @@ class MetalServerSSHTask(Document):
 		output: DF.Code | None
 		port: DF.Int
 		script: DF.Code
-		server: DF.Link
+		script_path: DF.Data | None
 		ssh_user: DF.Data
 		started_at: DF.Datetime | None
 		status: DF.Literal["Pending", "Running", "Success", "Failed"]
+		target: DF.DynamicLink
+		target_type: DF.Literal["Metal Server", "Virtual Machine"]
 		timeout_seconds: DF.Int
 	# end: auto-generated types
 
 	def validate(self) -> None:
-		"""Reject a task without a server or a command."""
+		"""Reject a task without a target or a command."""
 		if not 1 <= self.port <= 65_535:
 			frappe.throw(_("SSH port must be between 1 and 65535."))
 		if not 1 <= self.timeout_seconds <= 3_600:
@@ -67,7 +74,7 @@ class MetalServerSSHTask(Document):
 			"_run",
 			queue="long",
 			timeout=self.timeout_seconds,
-			job_id=f"atlas||server-ssh-task||{self.name}",
+			job_id=f"atlas||ssh-task||{self.name}",
 			deduplicate=True,
 			enqueue_after_commit=True,
 		)
@@ -85,17 +92,20 @@ class MetalServerSSHTask(Document):
 	@staticmethod
 	def create_for_command(
 		*,
-		server: str,
+		target_type: str,
+		target: str,
 		command: str,
 		port: int = 22,
 		ssh_user: str = "root",
 		environment: Mapping[str, object] | None = None,
 		timeout_seconds: int = 120,
 		run_in_background: bool = True,
-	) -> "MetalServerSSHTask":
+	) -> "SSHTask":
 		"""Record a shell command and run it now or in a background job."""
-		return MetalServerSSHTask._create(
-			server=server,
+		return SSHTask._create(
+			target_type=target_type,
+			target=target,
+			script_path=SSHTask.custom_script_path,
 			script=command,
 			port=port,
 			ssh_user=ssh_user,
@@ -107,17 +117,20 @@ class MetalServerSSHTask(Document):
 	@staticmethod
 	def create_for_script_file(
 		*,
-		server: str,
+		target_type: str,
+		target: str,
 		script_path: str,
 		port: int = 22,
 		ssh_user: str = "root",
 		environment: Mapping[str, object] | None = None,
 		timeout_seconds: int = 120,
 		run_in_background: bool = True,
-	) -> "MetalServerSSHTask":
+	) -> "SSHTask":
 		"""Record a script file source and run it now or in a background job."""
-		return MetalServerSSHTask._create(
-			server=server,
+		return SSHTask._create(
+			target_type=target_type,
+			target=target,
+			script_path=script_path,
 			script=SSHRunner.get_script_source(script_path),
 			port=port,
 			ssh_user=ssh_user,
@@ -129,19 +142,23 @@ class MetalServerSSHTask(Document):
 	@staticmethod
 	def _create(
 		*,
-		server: str,
+		target_type: str,
+		target: str,
+		script_path: str,
 		script: str,
 		port: int,
 		ssh_user: str,
 		environment: Mapping[str, object] | None,
 		timeout_seconds: int,
 		run_in_background: bool,
-	) -> "MetalServerSSHTask":
+	) -> "SSHTask":
 		"""Create a pending SSH task."""
 		task = frappe.get_doc(
 			{
-				"doctype": "Metal Server SSH Task",
-				"server": server,
+				"doctype": "SSH Task",
+				"target_type": target_type,
+				"target": target,
+				"script_path": script_path,
 				"port": port,
 				"ssh_user": ssh_user,
 				"script": script,
@@ -157,8 +174,8 @@ class MetalServerSSHTask(Document):
 		"""Run this SSH task and store its completed result."""
 		self._mark_running()
 		try:
-			server = frappe.get_doc("Metal Server", self.server)
-			runner = SSHRunner(server.public_ipv4_address, self.port, self.ssh_user)
+			target = frappe.get_doc(self.target_type, self.target)
+			runner = SSHRunner(target.ssh_host, self.port, self.ssh_user)
 			result = runner.run_command(
 				self.script,
 				data=self._environment(),
@@ -174,8 +191,8 @@ class MetalServerSSHTask(Document):
 	@classmethod
 	def mark_timed_out_tasks(cls) -> None:
 		"""Mark all expired SSH tasks as failed."""
-		for task in frappe.get_all("Metal Server SSH Task", filters={"status": "Running"}, pluck="name"):
-			frappe.get_doc("Metal Server SSH Task", task).mark_timed_out()
+		for task in frappe.get_all("SSH Task", filters={"status": "Running"}, pluck="name"):
+			frappe.get_doc("SSH Task", task).mark_timed_out()
 
 	def mark_timed_out(self, now: datetime | None = None) -> bool:
 		"""Mark this running SSH task as failed after its timeout buffer."""
@@ -213,7 +230,7 @@ class MetalServerSSHTask(Document):
 		self.output = f"{self.output or ''}{output}"
 		self.db_set("output", self.output, update_modified=False)
 		frappe.publish_realtime(
-			"server_ssh_task_output_update",
+			"ssh_task_output_update",
 			doctype=self.doctype,
 			docname=self.name,
 			message={"name": self.name, "output": self.output},
@@ -249,4 +266,4 @@ class MetalServerSSHTask(Document):
 
 def mark_timed_out_ssh_tasks():
 	"""Mark SSH tasks that outlive their configured timeout."""
-	MetalServerSSHTask.mark_timed_out_tasks()
+	SSHTask.mark_timed_out_tasks()

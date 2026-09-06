@@ -186,7 +186,7 @@ scheduler_events = {
 			"atlas.vm.core.image_transfer.enqueue_pending_machine_image_transfers",
 		],
 		"* * * * *": [
-			"atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task.mark_timed_out_ssh_tasks",
+			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
 		],
 	},

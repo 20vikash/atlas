@@ -20,8 +20,9 @@ Provisioning is a sequence of phases, not one transaction. Each phase records pr
 | `disk_inventory` | Reading block devices into Metal Server Disk rows. |
 | `catalog_sync` | Refreshing Metal Server Size and Metal Server Image from the provider. |
 | `MetalServerIPAddress` (DocType) | One public IPv4 address and its provider intent. |
-| `MetalServerSSHTask` (DocType) | One recorded SSH command and its result. |
 | `MetalServerUsage` (DocType) | One capacity sample reported by Metal. |
+
+The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/README.md) for host commands. The DocType belongs to the Atlas module.
 
 ## Provisioning
 

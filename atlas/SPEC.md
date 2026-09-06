@@ -13,7 +13,7 @@ The Atlas app uses Frappe to manage provider hosts, virtual machines, images, an
 ```text
 atlas/                         Site settings, provider behavior, TLS, and host binary builds
   core/                        Provider clients, TLS issuance, and the host binary builder
-  doctype/                     Atlas Settings
+  doctype/                     Atlas Settings and SSH Task
 metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
   doctype/                     Metal Server records and catalog DocTypes
@@ -30,7 +30,7 @@ The app uses Python 3.14, Frappe, MariaDB, Redis, Node, and Yarn.
 
 ## Scope
 
-Atlas stores settings, Metal Server catalogs, image metadata, and virtual machine request metadata. Metal owns each virtual machine runtime and desired state. Atlas does not store a virtual machine lifecycle state machine.
+Atlas stores settings, Metal Server catalogs, image metadata, virtual machine request metadata, and SSH task logs. Metal owns each virtual machine runtime and desired state. Atlas does not store a virtual machine lifecycle state machine.
 
 The Virtual Machine name is the Metal VM ID. Creation uses idempotent `PUT /v1/vms/{name}` and accepts HTTP `202`. Atlas uses `GET /v1/vms/{name}` after a lost response. Atlas keeps the draft if the result is uncertain.
 

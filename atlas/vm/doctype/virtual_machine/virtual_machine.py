@@ -120,6 +120,18 @@ class VirtualMachine(Document):
 		return information.desired.network.public_ipv4 if information else None
 
 	@property
+	def ssh_host(self) -> str:
+		"""Return the address an SSH Task connects to."""
+		if not self.public_ipv4:
+			frappe.throw(
+				_("Virtual Machine {0} has no public IPv4 address. Attach one and use uplink egress.").format(
+					self.name
+				)
+			)
+
+		return self.public_ipv4
+
+	@property
 	def disk_throughput_mibps(self) -> int:
 		"""Return the disk throughput limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()

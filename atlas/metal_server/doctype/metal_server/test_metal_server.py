@@ -156,14 +156,16 @@ class TestServer(UnitTestCase):
 		with (
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
 			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.MetalServerSSHTask.create_for_script_file",
+				"atlas.metal_server.doctype.metal_server.metal_server.SSHTask.create_for_script_file",
 				return_value=log,
 			) as create_for_script_file,
 		):
 			log_name = MetalServer.ping_server(server)
 
 		self.assertEqual(log_name, "SSH-00001")
-		create_for_script_file.assert_called_once_with(server=server.name, script_path="ping-server.sh")
+		create_for_script_file.assert_called_once_with(
+			target_type="Metal Server", target=server.name, script_path="ping-server.sh"
+		)
 
 	def test_ping_server_rejects_a_server_that_is_not_running(self) -> None:
 		server = self._server(status="Stopped")
@@ -174,7 +176,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.MetalServerSSHTask.create_for_script_file"
+				"atlas.metal_server.doctype.metal_server.metal_server.SSHTask.create_for_script_file"
 			) as create_for_script_file,
 		):
 			with self.assertRaises(ValueError):
@@ -189,7 +191,7 @@ class TestServer(UnitTestCase):
 		with (
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
 			patch(
-				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command",
+				"atlas.metal_server.core.disk_inventory.SSHTask.create_for_command",
 				return_value=task,
 			) as create_for_command,
 		):
@@ -218,7 +220,7 @@ class TestServer(UnitTestCase):
 		with (
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
 			patch(
-				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command",
+				"atlas.metal_server.core.disk_inventory.SSHTask.create_for_command",
 				return_value=task,
 			),
 		):
@@ -237,7 +239,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command",
+				"atlas.metal_server.core.disk_inventory.SSHTask.create_for_command",
 				return_value=task,
 			),
 		):
@@ -254,9 +256,7 @@ class TestServer(UnitTestCase):
 			patch(
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
-			patch(
-				"atlas.metal_server.core.disk_inventory.MetalServerSSHTask.create_for_command"
-			) as create_for_command,
+			patch("atlas.metal_server.core.disk_inventory.SSHTask.create_for_command") as create_for_command,
 		):
 			with self.assertRaises(ValueError):
 				MetalServer.sync_disks(server)
@@ -292,7 +292,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
 			) as create_for_script_file,
 		):
 			with self.assertRaises(ValueError):
@@ -309,7 +309,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
 			) as create_for_script_file,
 		):
 			with self.assertRaises(ValueError):
@@ -335,7 +335,7 @@ class TestServer(UnitTestCase):
 				side_effect=lambda file_name: file_urls[file_name],
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 				return_value=task,
 			) as create_for_script_file,
 		):
@@ -366,7 +366,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
 			) as create_for_script_file,
 			self.assertRaises(frappe.ValidationError),
 		):
@@ -456,7 +456,7 @@ class TestServer(UnitTestCase):
 		task = SimpleNamespace(result=SimpleNamespace(output=output, is_success=True))
 
 		with patch(
-			"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+			"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 			return_value=task,
 		) as create_for_script_file:
 			MetalServer._configure_wireguard(server)
@@ -484,7 +484,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 				return_value=task,
 			),
 		):
@@ -500,7 +500,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file",
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 				return_value=task,
 			),
 		):
@@ -516,7 +516,7 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
 			),
 			patch(
-				"atlas.metal_server.core.host_installation.MetalServerSSHTask.create_for_script_file"
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
 			) as create_for_script_file,
 		):
 			with self.assertRaises(ValueError):

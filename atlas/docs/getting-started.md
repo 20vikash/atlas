@@ -69,7 +69,7 @@ Wait for the background jobs to finish. The catalog supplies the provider size a
 
 Open **Metal Server** and create a record. Select `Scaleway/EM-A116X-SSD` and an Ubuntu 24.04 Metal Server Image.
 
-Save the record, then wait for its status to become `Running`. Open its linked **Metal Server SSH Task** records to see each host command and its result.
+Save the record. Wait for its status to become `Running`. Open its linked **SSH Task** records to see each host command and its result.
 
 ## 8. Build a virtual machine image
 
