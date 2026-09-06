@@ -1,8 +1,8 @@
 # Atlas HTTP proxy
 
-Atlas HTTP proxy is a VM image for one region. It routes site and custom-domain traffic to site VMs over IPv6.
+Atlas HTTP proxy runs on one virtual machine for one region. It routes site and custom-domain traffic to site VMs over IPv6.
 
-Use the control daemon for configuration. It listens on IPv4 and IPv6 port `9000` by default.
+Atlas installs it and pushes `/etc/atlas/proxy-control.toml` over SSH. The control daemon reads that file and serves the site and custom-domain maps on IPv4 and IPv6 port `9000`.
 
 Read these documents in this order:
 
@@ -11,14 +11,12 @@ Read these documents in this order:
 3. [OpenResty](docs/openresty.md)
 4. [Development](docs/development.md)
 
-The control daemon is the public API. OpenResty uses a private Unix socket. Do not expose it to a network.
+The control daemon is the public API and it serves the maps only. Every other setting comes from the configuration file. OpenResty uses a private Unix socket. Do not expose it to a network.
 
 ## Main paths
 
 ```text
-build-image.sh                  Build `proxy.ext4` with Firecracker.
-run-image.sh                    Boot a built image with Firecracker.
-nginx/setup.sh                  Set up a new Ubuntu VM image.
+nginx/setup.sh                  Install the proxy on an Ubuntu VM.
 nginx/nginx.conf                Configure OpenResty.
 nginx/lua/http/                 Route HTTP traffic and store HTTP maps.
 nginx/lua/stream/               Route TLS traffic by SNI.
@@ -28,28 +26,32 @@ control/proxy_control/          Store the control daemon package.
 control/pyproject.toml          Define Python packages for the daemon.
 docs/                           Store operator and developer guides.
 tests/                          Store the Python test suites.
-tests/docker/                   Store the Docker test environment.
 ```
 
 ## Quick start
 
 ```sh
 sudo ./nginx/setup.sh
-sudo systemctl enable --now openresty.service atlas-proxy-control.service
 ```
 
-The setup script creates a placeholder certificate and an empty authentication file. The proxy can start before the controller sends its configuration.
+The script installs OpenResty and the control daemon, enables both units, and applies the certificate the configuration file carries. Run it again after you change the configuration file, or run `/opt/atlas/proxy-control/bin/proxy-control` for the certificate alone.
+
+A fresh install has an empty configuration file. The proxy starts with a placeholder certificate. The control daemon serves `/healthz` and refuses protected requests until Atlas sends a credential.
 
 Follow the [setup guide](docs/setup.md) to configure the proxy.
 
-## Local testing with firecracker
+## Local development
+
+Install the control package with its test dependencies, then run the control daemon tests:
 
 ```sh
-sudo ./build-image.sh
-sudo ./run-image.sh -j https://issuer.example.com/jwks.json -a atlas-proxy-control
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --editable 'control[test]'
+python -m pytest -q control/tests
 ```
 
-`build-image.sh` boots the pinned Ubuntu 24.04 minimal image, runs `nginx/setup.sh`, and saves `proxy.ext4`. It removes build-only SSH access first. `run-image.sh` requires `proxy.ext4`. It writes the password into the boot copy and can seed JWKS through MMDS. See [Development](docs/development.md).
+Install the full proxy on Ubuntu 24.04 with the [setup guide](docs/setup.md). Use the [development guide](docs/development.md) to change the package or run the daemon locally.
 
 ## License
 

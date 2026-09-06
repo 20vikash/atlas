@@ -7,6 +7,7 @@ The root `atlas/CLAUDE.md` governs the code in this module.
 Use these rules when you write or update any `SPEC.md` or file under `docs/`.
 
 Mandatory: Keep each Markdown prose paragraph on one source line. Do not add line breaks to wrap text. Start a new line only for a new paragraph, list item, heading, table row, or structured block.
+Mandatory: Document current behavior only. Do not mention removed implementations, deleted interfaces, old commands, or previous behavior.
 
 ### Two layers
 

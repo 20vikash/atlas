@@ -4,7 +4,9 @@
 
 ## Purpose
 
-The HTTP proxy is a regional VM image. It routes site traffic to site VMs over IPv6.
+The HTTP proxy runs on one regional virtual machine. It routes site traffic to site VMs over IPv6.
+
+Atlas installs it and owns its configuration. One file, `/etc/atlas/proxy-control.toml`, carries the credentials and the wildcard certificate. Atlas writes that file over SSH and runs `nginx/setup.sh` or `proxy-control` to apply it. The HTTP API serves the site and custom-domain maps only.
 
 ## Layout
 
@@ -16,21 +18,22 @@ nginx/                       OpenResty and Nginx configuration
   pages/                     Error pages
   systemd/                   systemd units
 tests/                       Python tests
-  docker/                    Docker test environment
 docs/                        Setup and operation docs
 ```
 
 ## Software
 
-The control daemon uses Python 3.12. The data plane uses OpenResty, Nginx, Lua, and systemd.
+The control daemon uses Python 3.14. The data plane uses OpenResty, Nginx, Lua, and systemd.
 
 ## Interfaces
 
 The control daemon uses TCP port `9000` by default. OpenResty uses a private Unix socket. Do not expose the socket to a network.
 
+`nginx/setup.sh` is the only installer. It runs on a plain Ubuntu 24.04 virtual machine and is safe to repeat.
+
 ## Validation
 
-From this directory, run `python -m pytest -q tests`. Use the Docker test stack when required.
+From the service root, run `python -m pip install --editable 'control[test]'` and `python -m pytest -q control/tests`.
 
 ## Documentation
 

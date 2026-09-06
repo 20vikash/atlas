@@ -1,6 +1,6 @@
 # Control daemon
 
-The control daemon is the main API for the controller.
+The control daemon serves the site and custom-domain maps. Every other setting comes from `/etc/atlas/proxy-control.toml`, which Atlas writes over SSH. See [Setup](setup.md#configuration-file).
 
 By default, it listens on these addresses:
 
@@ -9,7 +9,7 @@ By default, it listens on these addresses:
 
 The daemon reads the OpenResty maps through a Unix socket. The daemon does not store a second copy of the maps.
 
-CAUTION: Allow port `9000` only from the controller network. The daemon can change proxy routes and certificates.
+CAUTION: Allow port `9000` only from the controller network. The daemon can change proxy routes.
 
 ## Authentication
 
@@ -18,9 +18,11 @@ The daemon accepts 2 bearer token types:
 - A password checked against a bcrypt hash.
 - A JWT checked against a JWKS endpoint.
 
+Both come from the `[auth]` section of the configuration file, which the daemon reads on each request. A credential change therefore applies without a restart.
+
 ### Password
 
-Send the raw password in a bearer token. The daemon checks it against the bcrypt hash in `/etc/atlas/proxy-control.htpasswd`.
+Send the raw password in a bearer token. The daemon checks it against `auth.password_hash`.
 
 ```sh
 export ATLAS_PROXY_CONTROL_PASSWORD='replace-with-the-raw-password'
@@ -39,10 +41,10 @@ If JWKS is configured, a valid JWKS token can authorize the request without a pa
 
 ### JWKS
 
-Set these variables to accept a JWT from an external issuer:
+Set these values in the `[auth]` section to accept a JWT from an external issuer:
 
-- `ATLAS_PROXY_CONTROL_JWKS_URL`
-- `ATLAS_PROXY_CONTROL_JWKS_AUDIENCE_ID`
+- `jwks_url`
+- `jwks_audience_id`
 
 The daemon fetches the keys, matches `kid`, and checks the signature, `exp`, and `aud` claims.
 
@@ -54,19 +56,10 @@ JWKS accepts only these algorithms:
 - `EdDSA`
 
 ```sh
-export ATLAS_PROXY_CONTROL_JWKS_URL='https://issuer.example.com/.well-known/jwks.json'
-export ATLAS_PROXY_CONTROL_JWKS_AUDIENCE_ID='atlas-proxy-control'
 curl \
   -H "Authorization: Bearer $JWT" \
   "$ATLAS_PROXY_CONTROL_URL/v1/state"
 ```
-
-You can set the JWKS values in instance user data instead:
-
-- `proxy_jwks_url`
-- `proxy_jwks_audience_id`
-
-The daemon reads these keys at startup from `/latest/meta-data/user-data/<key>`. It uses the version-2 token flow for AWS IMDSv2 and Firecracker MMDS v2.
 
 A request is authorized when it matches the password or a valid JWKS token.
 
@@ -74,16 +67,15 @@ Use this API only on a trusted controller or WireGuard network. The bearer passw
 
 ## Health endpoints
 
-Use authentication for these endpoints:
+Use `/healthz` to check the daemon without authentication. Use `/readyz` with authentication to check the OpenResty admin API.
 
-| Method and path | Use                                      | Success result |
-| --------------- | ---------------------------------------- | -------------- |
-| `GET /healthz`  | Check that the daemon runs.              | `200`          |
-| `GET /readyz`   | Check that the OpenResty admin API runs. | `204`          |
+| Method and path | Auth | Use                                      | Success result |
+| --------------- | ---- | ---------------------------------------- | -------------- |
+| `GET /healthz`  | No   | Check that the daemon runs.              | `200`          |
+| `GET /readyz`   | Yes  | Check that the OpenResty admin API runs. | `204`          |
 
 ```sh
 curl \
-  -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" \
   "$ATLAS_PROXY_CONTROL_URL/healthz"
 
 curl \
@@ -198,32 +190,11 @@ An exact domain key has priority. The most specific wildcard suffix has the next
 
 ## Wildcard certificate
 
-Use `PUT /v1/certificate` to set the proxy wildcard domain and its certificate. This endpoint applies only to the regional wildcard certificate.
+Configure the regional wildcard certificate in the `[tls]` section. Run `proxy-control` to validate and activate the certificate. See [Setup](setup.md#change-the-configuration).
 
-```json
-{
-  "wildcard_domain": "*.iad.frappe.dev",
-  "fullchain_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
-  "private_key_pem": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-}
-```
+The apply step checks the certificate date, name, and private key. It writes the certificate files below `/var/lib/nginx/certs/<region>`, writes the region to `/var/lib/nginx/region`, checks the OpenResty configuration, and reloads OpenResty. It restores the previous files when any step fails.
 
-Save the JSON in `certificate.json` and send the request.
-
-```sh
-curl \
-  -X PUT \
-  -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" \
-  -H 'Content-Type: application/json' \
-  --data-binary @certificate.json \
-  "$ATLAS_PROXY_CONTROL_URL/v1/certificate"
-```
-
-The daemon checks the certificate date, name, and private key. It writes the files, checks the OpenResty configuration, and reloads OpenResty.
-
-The daemon writes `iad.frappe.dev` to `/var/lib/nginx/region`. It writes the certificate files below `/var/lib/nginx/certs/iad.frappe.dev`.
-
-Do not use this endpoint for a custom-domain certificate. Install a custom-domain certificate on its site VM.
+Do not use this for a custom-domain certificate. Install a custom-domain certificate on its site VM.
 
 ## Error responses
 
@@ -232,4 +203,4 @@ Do not use this endpoint for a custom-domain certificate. Install a custom-domai
 | `400`  | The request data is not valid.                                    |
 | `401`  | The password is not valid, and no valid JWKS token was presented. |
 | `502`  | The daemon cannot use the OpenResty admin API.                    |
-| `503`  | OpenResty is not ready or cannot reload.                          |
+| `503`  | OpenResty is not ready.                                           |

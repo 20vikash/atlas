@@ -16,54 +16,78 @@ PASSWORD = "correct-horse"
 AUDIENCE = "atlas-proxy-control"
 
 
-@pytest.fixture
-def htpasswd_file(tmp_path: Path) -> Path:
-	path = tmp_path / "proxy-control.htpasswd"
-	password_hash = bcrypt.hashpw(PASSWORD.encode(), bcrypt.gensalt())
-	path.write_text(f"admin:{password_hash.decode()}\n")
+def write_config(path: Path, password: str = "", jwks: bool = False) -> Path:
+	"""Write a configuration file with the credentials a test needs."""
+	lines = ["[tls]", "enabled = false", "", "[auth]"]
+	if password:
+		lines.append(f'password_hash = "{bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()}"')
+	if jwks:
+		lines.append('jwks_url = "https://issuer.example.com/jwks.json"')
+		lines.append(f'jwks_audience_id = "{AUDIENCE}"')
+
+	path.write_text("\n".join(lines) + "\n")
 	return path
 
 
-def test_require_accepts_correct_password(htpasswd_file):
-	Authentication(htpasswd_file).require(authorization=f"Bearer {PASSWORD}")
+@pytest.fixture
+def config_file(tmp_path: Path) -> Path:
+	return write_config(tmp_path / "proxy-control.toml", password=PASSWORD)
 
 
-def test_require_rejects_wrong_password(htpasswd_file):
+def test_require_accepts_correct_password(config_file):
+	Authentication(config_file).require(authorization=f"Bearer {PASSWORD}")
+
+
+def test_require_rejects_wrong_password(config_file):
 	with pytest.raises(HTTPException):
-		Authentication(htpasswd_file).require(authorization="Bearer wrong-password")
+		Authentication(config_file).require(authorization="Bearer wrong-password")
 
 
-def test_require_rejects_missing_bearer_scheme(htpasswd_file):
+def test_require_rejects_missing_bearer_scheme(config_file):
 	with pytest.raises(HTTPException):
-		Authentication(htpasswd_file).require(authorization=PASSWORD)
+		Authentication(config_file).require(authorization=PASSWORD)
 
 
-def test_require_rejects_missing_header(htpasswd_file):
+def test_require_rejects_missing_header(config_file):
 	with pytest.raises(HTTPException):
-		Authentication(htpasswd_file).require(authorization=None)
+		Authentication(config_file).require(authorization=None)
 
 
-def test_require_rejects_missing_auth_file(tmp_path):
+# A broken or missing file authorizes nobody instead of failing open.
+def test_require_rejects_missing_config_file(tmp_path):
 	with pytest.raises(HTTPException):
-		Authentication(tmp_path / "missing.htpasswd").require(authorization=f"Bearer {PASSWORD}")
+		Authentication(tmp_path / "missing.toml").require(authorization=f"Bearer {PASSWORD}")
 
 
-def test_require_rejects_line_without_a_hash(tmp_path):
-	path = tmp_path / "proxy-control.htpasswd"
-	path.write_text("invalid")
+def test_require_rejects_a_malformed_config_file(tmp_path):
+	path = tmp_path / "proxy-control.toml"
+	path.write_text("[auth\n")
 
 	with pytest.raises(HTTPException):
 		Authentication(path).require(authorization=f"Bearer {PASSWORD}")
 
 
 # nginx/setup.sh writes an empty placeholder file, so the daemon can start before
-# the controller sends a credential.
+# Atlas sends a credential.
 def test_require_rejects_file_with_no_credentials(tmp_path):
-	path = tmp_path / "proxy-control.htpasswd"
-	path.write_text("# no credentials yet\n\n")
+	path = tmp_path / "proxy-control.toml"
+	path.write_text("")
 
 	with pytest.raises(HTTPException):
 		Authentication(path).require(authorization=f"Bearer {PASSWORD}")
+
+
+# Atlas pushes a new credential without restarting the daemon.
+def test_require_reads_the_credential_on_each_request(tmp_path):
+	path = write_config(tmp_path / "proxy-control.toml", password=PASSWORD)
+	auth = Authentication(path)
+	auth.require(authorization=f"Bearer {PASSWORD}")
+
+	write_config(path, password="rotated")
+
+	auth.require(authorization="Bearer rotated")
+	with pytest.raises(HTTPException):
+		auth.require(authorization=f"Bearer {PASSWORD}")
 
 
 class _FakeJWKClient:
@@ -89,63 +113,60 @@ def _token(private_key, kid: str, audience: str = AUDIENCE, ttl: int = 3600) -> 
 	return jwt.encode(payload, private_key, algorithm="RS256", headers={"kid": kid})
 
 
-def _jwks_auth(htpasswd_file, jwk: PyJWK) -> Authentication:
-	auth = Authentication(
-		htpasswd_file, jwks_url="https://issuer.example.com/jwks.json", jwks_audience=AUDIENCE
-	)
+def _jwks_auth(path: Path, jwk: PyJWK, password: str = PASSWORD) -> Authentication:
+	write_config(path, password=password, jwks=True)
+	auth = Authentication(path)
 	auth._jwks_client = _FakeJWKClient([jwk])
+	auth._jwks_url = "https://issuer.example.com/jwks.json"
 	return auth
 
 
-def test_require_accepts_valid_jwks_token(htpasswd_file):
+def test_require_accepts_valid_jwks_token(config_file):
 	private_key = _key_pair()
 	jwk = _jwk(private_key.public_key(), kid="key-1")
-	auth = _jwks_auth(htpasswd_file, jwk)
+	auth = _jwks_auth(config_file, jwk)
 	token = _token(private_key, kid="key-1")
 	auth.require(authorization=f"Bearer {token}")
 
 
-# A fresh image has the empty placeholder file and no password.
-# JWKS must still give access.
-def test_require_accepts_valid_jwks_token_when_file_has_no_credentials(tmp_path):
-	path = tmp_path / "proxy-control.htpasswd"
-	path.write_text("")
+# A fresh install has no password. JWKS must still give access.
+def test_require_accepts_valid_jwks_token_without_a_password(tmp_path):
 	private_key = _key_pair()
 	jwk = _jwk(private_key.public_key(), kid="key-1")
-	auth = _jwks_auth(path, jwk)
+	auth = _jwks_auth(tmp_path / "proxy-control.toml", jwk, password="")
 	token = _token(private_key, kid="key-1")
 	auth.require(authorization=f"Bearer {token}")
 
 
-def test_require_rejects_jwks_token_with_wrong_audience(htpasswd_file):
+def test_require_rejects_jwks_token_with_wrong_audience(config_file):
 	private_key = _key_pair()
 	jwk = _jwk(private_key.public_key(), kid="key-1")
-	auth = _jwks_auth(htpasswd_file, jwk)
+	auth = _jwks_auth(config_file, jwk)
 	token = _token(private_key, kid="key-1", audience="someone-else")
 	with pytest.raises(HTTPException):
 		auth.require(authorization=f"Bearer {token}")
 
 
-def test_require_rejects_jwks_token_with_unknown_kid(htpasswd_file):
+def test_require_rejects_jwks_token_with_unknown_kid(config_file):
 	private_key = _key_pair()
 	jwk = _jwk(private_key.public_key(), kid="key-1")
-	auth = _jwks_auth(htpasswd_file, jwk)
+	auth = _jwks_auth(config_file, jwk)
 	token = _token(private_key, kid="key-does-not-exist")
 	with pytest.raises(HTTPException):
 		auth.require(authorization=f"Bearer {token}")
 
 
-def test_require_rejects_expired_jwks_token(htpasswd_file):
+def test_require_rejects_expired_jwks_token(config_file):
 	private_key = _key_pair()
 	jwk = _jwk(private_key.public_key(), kid="key-1")
-	auth = _jwks_auth(htpasswd_file, jwk)
+	auth = _jwks_auth(config_file, jwk)
 	token = _token(private_key, kid="key-1", ttl=-60)
 	with pytest.raises(HTTPException):
 		auth.require(authorization=f"Bearer {token}")
 
 
-def test_jwks_is_ignored_when_not_configured(htpasswd_file):
+def test_jwks_is_ignored_when_not_configured(config_file):
 	private_key = _key_pair()
 	token = _token(private_key, kid="key-1")
 	with pytest.raises(HTTPException):
-		Authentication(htpasswd_file).require(authorization=f"Bearer {token}")
+		Authentication(config_file).require(authorization=f"Bearer {token}")

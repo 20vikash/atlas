@@ -19,6 +19,7 @@ Atlas is a monorepo for Frappe Cloud V2 VM infrastructure. It contains a Frappe/
 - Use short, direct sentences and one term for one thing. Keep technical names and exact values unchanged.
 - Do not use em dashes in comments, docstrings, or documentation.
 - Mandatory: Keep each Markdown prose paragraph on one source line. Do not add line breaks to wrap text. Start a new line only for a new paragraph, list item, heading, table row, or structured block.
+- Mandatory: Document current behavior only. Do not mention removed implementations, deleted interfaces, old commands, or previous behavior.
 - Allow structured multi-line Go doc comments, examples, tables, and code blocks.
 - Do not add explanatory comments at the top of a file. Exceptions are required Go package comments, build directives, and license headers.
 - Keep comments and documentation concise. Explain only information that the code does not make clear.

@@ -14,6 +14,9 @@ dependencies = [
     "uvicorn==0.52.4",
 ]
 
+[project.scripts]
+proxy-control = "proxy_control.apply:main"
+
 [project.optional-dependencies]
 test = ["pytest==9.0.3", "ruff==0.16.5"]
 

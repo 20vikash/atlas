@@ -1,6 +1,6 @@
 # Setup
 
-Use this guide to make a proxy VM image or start a VM from a snapshot.
+Use this guide to install the proxy on a virtual machine. Atlas does this for a Proxy Server record. Follow the manual steps when you set up a proxy by hand.
 
 ## Before you start
 
@@ -8,32 +8,92 @@ Use Ubuntu 24.04 and `root` or `sudo`. Give the VM access to the Ubuntu, OpenRes
 
 The daemon needs Python 3.14. The setup script adds the deadsnakes PPA and creates its virtual environment with `python3.14`.
 
-The setup script creates the locked `frappe` account with passwordless `sudo`. The image builder removes `ubuntu`, sets `frappe` as the cloud-init user, and sets the hostname to `atlas-proxy`. Add an SSH key with cloud-init. The script also creates an authentication file and placeholder certificate if they do not exist.
+The setup script creates the locked `frappe` account with passwordless `sudo`. It also creates the configuration file and a placeholder certificate when they do not exist.
 
-## Make a new base VM image
+## Install
 
-1. Copy this repository to an Ubuntu VM.
-2. Run the setup script:
+1. Copy this component to the VM.
+2. Write `/etc/atlas/proxy-control.toml`. See [Configuration file](#configuration-file).
+3. Run the setup script:
 
   ```sh
   sudo ./nginx/setup.sh
   ```
 
-3. Check that both services are enabled:
+The script installs OpenResty and the control daemon, enables both units, and applies the certificate the configuration file carries. It is safe to run again.
+
+An empty configuration file stops the script before it applies anything and before it starts the daemon. Write the file and run the script again.
+
+4. Check that both services are enabled:
 
   ```sh
   sudo systemctl is-enabled openresty.service atlas-proxy-control.service
   ```
 
-4. Shut down the VM and make a snapshot.
+## Configuration file
 
-The setup script enables both services. They start when the VM starts after the snapshot.
+`/etc/atlas/proxy-control.toml` is the only configuration source. It holds the credentials and the regional wildcard certificate, so its mode is `0600` and its owner is `root`.
 
-## Start a VM from a base snapshot
+```toml
+[control]
+port = 9000
+admin_socket = "/run/nginx/admin.sock"
+cert_dir = "/var/lib/nginx/certs"
 
-1. Start the VM.
-2. Use cloud-init to write `/etc/atlas/proxy-control.htpasswd` and restart `atlas-proxy-control.service`.
-3. Check the services:
+[auth]
+password_hash = "$2b$12$replace-with-a-bcrypt-hash"
+jwks_url = "https://issuer.example.com/jwks.json"
+jwks_audience_id = "atlas-proxy-control"
+
+[tls]
+enabled = true
+wildcard_domain = "*.par-1.example.com"
+fullchain_pem = '''
+-----BEGIN CERTIFICATE-----
+...
+-----END CERTIFICATE-----
+'''
+private_key_pem = '''
+-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+'''
+```
+
+`[control]` and `[auth]` are optional. Without credentials the daemon serves `/healthz` and refuses every protected request.
+
+TLS is on unless you set `enabled = false`, so a proxy without a certificate refuses to start rather than serving its placeholder to real traffic. The daemon exits, `proxy-control` exits `2`, and both name the missing values. `[tls]` needs `wildcard_domain`, `fullchain_pem`, and `private_key_pem` together.
+
+Use `enabled = false` only to run the data plane without a wildcard certificate, such as a custom-domain-only proxy or a test host. The proxy then keeps the self-signed placeholder.
+
+`wildcard_domain` also sets the region. The apply step writes it to `/var/lib/nginx/region`, which is what separates a site subdomain from a custom domain.
+
+Use a PEM literal string with `'''`. PEM text contains no `'''`, so no value needs escaping.
+
+## Change the configuration
+
+Write the new file, then apply it:
+
+```sh
+sudo /opt/atlas/proxy-control/bin/proxy-control
+```
+
+The command installs the certificate, writes the region file, and reloads OpenResty. It does nothing when TLS is off. It exits non-zero when the certificate is missing, when the certificate and the key do not match, or when the certificate does not cover the wildcard domain.
+
+The daemon reads its credentials on each request, so a credential change needs no restart. A `port` change needs `systemctl restart atlas-proxy-control.service`.
+
+## Configure the maps
+
+The HTTP API carries the maps only:
+
+1. Send `PUT /v1/sites` with the full site map.
+2. Send `PUT /v1/domains` with the full custom-domain map.
+
+See [Control daemon](control-daemon.md) for request examples.
+
+Do not direct public DNS traffic to the VM before the certificate and the maps are in place.
+
+## Check a running proxy
 
 ```sh
 sudo systemctl status openresty.service atlas-proxy-control.service
@@ -41,49 +101,9 @@ curl -fsS -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" http://127.0.
 curl -fsS -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" -o /dev/null http://127.0.0.1:9000/readyz
 ```
 
-4. Send the wildcard certificate and full maps from the controller.
-
-Do not direct public DNS traffic to the VM before the controller sends the required configuration.
-
-## Cloud-init authentication file
-
-The file must contain one bcrypt htpasswd entry, with a fixed user name such as `atlas`.
-
-```text
-atlas:$2y$05$examplebcryptpasswordhash
-```
-
-The daemon rejects every request if the file is missing, empty, or invalid. Use cloud-init to write the file and restart the daemon:
-
-```yaml
-write_files:
-  - path: /etc/atlas/proxy-control.htpasswd
-    owner: root:root
-    permissions: '0640'
-    content: |
-      atlas:$2y$05$replace-with-a-bcrypt-hash
-runcmd:
-  - systemctl restart atlas-proxy-control.service
-```
-
-## Configure the VM after start
-
-1. Send `PUT /v1/certificate` with the wildcard domain, certificate, and private key.
-2. Send `PUT /v1/sites` with the full site map.
-3. Send `PUT /v1/domains` with the full custom-domain map.
-
-See [Control daemon](control-daemon.md) for request examples.
-
-## Use an existing configured snapshot
-
-An existing configured snapshot can contain an old certificate and old maps. The proxy loads that data when it starts.
-
-Send the current certificate and full maps before you direct traffic to the VM. Use a base snapshot with empty maps and the placeholder certificate when possible.
-
 ## Service commands
 
 ```sh
-sudo systemctl status openresty.service atlas-proxy-control.service
 sudo systemctl restart openresty.service
 sudo systemctl restart atlas-proxy-control.service
 journalctl -u openresty.service -f

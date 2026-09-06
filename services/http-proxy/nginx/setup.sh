@@ -13,6 +13,7 @@ LUA_DIR="/etc/nginx/lua"
 RUN_DIR="/run/nginx"
 LOG_DIR="/var/log/nginx"
 STATE_DIR="/var/lib/nginx"
+CONFIG_FILE="/etc/atlas/proxy-control.toml"
 SBIN_PATH="/usr/local/openresty/nginx/sbin/nginx"
 SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -90,10 +91,10 @@ install -d /opt/atlas/proxy-control
 # Ensure that the codebase is compatible with the guest Python version.
 /opt/atlas/proxy-control/bin/python -m compileall -q /opt/atlas/proxy-control/lib/python3*/site-packages/proxy_control
 
-# Create runtime state, bootstrap authentication, and certificate files.
+# Create runtime state, the configuration file, and certificate files.
 install -d -m 0750 /etc/atlas
-if [ ! -e /etc/atlas/proxy-control.htpasswd ]; then
-	install -m 0640 /dev/null /etc/atlas/proxy-control.htpasswd
+if [ ! -e "$CONFIG_FILE" ]; then
+	install -m 0600 /dev/null "$CONFIG_FILE"
 fi
 install -d -o root -g nginx -m 0770 "$RUN_DIR"
 install -d -m 0755 "$LOG_DIR"
@@ -139,5 +140,17 @@ else
 fi
 
 "$SBIN_PATH" -t -c "$CONF_DIR/nginx.conf"
+
+# Apply the certificate the configuration file carries. The daemon refuses to
+# start without one, so an empty file waits for Atlas to write the real one.
+if [ -d /run/systemd/system ]; then
+	systemctl restart openresty.service
+	if [ -s "$CONFIG_FILE" ]; then
+		/opt/atlas/proxy-control/bin/proxy-control
+		systemctl restart atlas-proxy-control.service
+	else
+		echo "no configuration in $CONFIG_FILE: write it, then run this script again"
+	fi
+fi
 
 echo "proxy stack built: stock OpenResty ${OPENRESTY_VERSION} (nginx + lua + stream-lua + headers-more, no local compile)."

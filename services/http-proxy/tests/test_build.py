@@ -145,11 +145,37 @@ def test_control_daemon_is_installed():
 	res = exec_proxy(
 		"/opt/atlas/proxy-control/bin/python",
 		"-c",
-		"import proxy_control.main, fastapi, httpx, uvicorn",
+		"import proxy_control.apply, proxy_control.config, fastapi, httpx, uvicorn",
 	)
 	assert res.returncode == 0
 	unit = exec_proxy("cat", "/etc/systemd/system/atlas-proxy-control.service")
 	assert "Requires=openresty.service" in unit.stdout
+
+
+def test_the_apply_command_refuses_an_unconfigured_proxy():
+	"""Atlas runs this over SSH after it writes the configuration file.
+
+	The image ships an empty file, and TLS is on by default, so the command must
+	report the missing certificate instead of leaving the placeholder in place.
+	"""
+	res = exec_proxy("/opt/atlas/proxy-control/bin/proxy-control", check=False)
+
+	assert res.returncode == 2
+	assert "[tls]" in res.stderr
+
+
+def test_the_daemon_refuses_to_start_without_a_certificate():
+	res = exec_proxy("/opt/atlas/proxy-control/bin/python", "-m", "proxy_control.main", check=False)
+
+	assert res.returncode != 0
+	assert "[tls]" in res.stderr
+
+
+def test_the_configuration_file_is_private_to_root():
+	"""It carries the wildcard private key and the control credential."""
+	res = exec_proxy("stat", "-c", "%a %U", "/etc/atlas/proxy-control.toml")
+
+	assert res.stdout.strip() == "600 root"
 
 
 def test_stream_block_declares_its_own_lua_package_path():
