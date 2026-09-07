@@ -30,6 +30,20 @@ func (bpfActivityLoader) createMap(capacity uint32) (activityMap, error) {
 	return &bpfActivityMap{kernelMap: kernelMap}, nil
 }
 
+// resolveInterfaceIndex reads the current tap0 index inside the VM namespace.
+func (bpfActivityLoader) resolveInterfaceIndex(namespacePath string) (int, error) {
+	var interfaceIndex int
+	err := inNamespace(osNamespaceSyscalls{}, namespacePath, func() error {
+		device, err := net.InterfaceByName(tapName)
+		if err != nil {
+			return fmt.Errorf("resolve %s: %w", tapName, err)
+		}
+		interfaceIndex = device.Index
+		return nil
+	})
+	return interfaceIndex, err
+}
+
 // loadProgram loads one program instance. It rewrites the read-only user ID
 // constant and shares the one activity map instead of a per-program map.
 func (bpfActivityLoader) loadProgram(userID uint32, shared activityMap) (activityProgram, error) {
@@ -60,6 +74,15 @@ func (bpfActivityLoader) loadProgram(userID uint32, shared activityMap) (activit
 // bpfActivityMap wraps the shared kernel map.
 type bpfActivityMap struct {
 	kernelMap *ebpf.Map
+}
+
+// delete removes the activity value for one released VM user ID. An absent key
+// is not an error, because the map may have no entry yet.
+func (handle *bpfActivityMap) delete(userID uint32) error {
+	if err := handle.kernelMap.Delete(userID); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+		return err
+	}
+	return nil
 }
 
 // Close releases the shared kernel map.

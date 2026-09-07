@@ -2,15 +2,22 @@ package network
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// fakeActivityMap records whether the monitor closed the shared map.
+// fakeActivityMap records how the monitor closes and clears the shared map.
 type fakeActivityMap struct {
-	closed bool
+	closed         bool
+	deletedUserIDs []uint32
+}
+
+func (m *fakeActivityMap) delete(userID uint32) error {
+	m.deletedUserIDs = append(m.deletedUserIDs, userID)
+	return nil
 }
 
 func (m *fakeActivityMap) Close() error {
@@ -43,9 +50,14 @@ func (p *fakeActivityProgram) Close() error {
 type fakeActivityLoader struct {
 	createErr     error
 	loadErr       error
+	attachErr     error
+	resolveErr    error
+	resolveIndex  int
+	attachIndex   int
 	createdMap    *fakeActivityMap
 	capacities    []uint32
 	loadedUserIDs []uint32
+	programs      []*fakeActivityProgram
 }
 
 func (loader *fakeActivityLoader) createMap(capacity uint32) (activityMap, error) {
@@ -62,7 +74,13 @@ func (loader *fakeActivityLoader) loadProgram(userID uint32, _ activityMap) (act
 		return nil, loader.loadErr
 	}
 	loader.loadedUserIDs = append(loader.loadedUserIDs, userID)
-	return &fakeActivityProgram{}, nil
+	program := &fakeActivityProgram{attachErr: loader.attachErr, interfaceIndex: loader.attachIndex}
+	loader.programs = append(loader.programs, program)
+	return program, nil
+}
+
+func (loader *fakeActivityLoader) resolveInterfaceIndex(_ string) (int, error) {
+	return loader.resolveIndex, loader.resolveErr
 }
 
 func testUserIDRange() vm.UserIDRange { return vm.UserIDRange{Min: 100000, Max: 165535} }
@@ -148,6 +166,147 @@ func TestCloseClosesTheSharedMap(t *testing.T) {
 
 	if err := monitor.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if !loader.createdMap.closed {
+		t.Error("the shared map was not closed")
+	}
+}
+
+func newTestMonitor(t *testing.T, loader *fakeActivityLoader) *ActivityMonitor {
+	t.Helper()
+	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return monitor
+}
+
+func TestEnsureAttachmentAttachesAndStores(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	stored := monitor.attachments["vm-1"]
+	if stored == nil || stored.interfaceIndex != 5 || stored.userID != 100001 {
+		t.Fatalf("stored attachment = %+v", stored)
+	}
+	if len(loader.programs) != 1 || len(loader.programs[0].attachedPaths) != 1 {
+		t.Errorf("program was not attached once: %+v", loader.programs)
+	}
+}
+
+func TestEnsureAttachmentIsIdempotent(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	// tap0 still has index 5, so a repeat must not load a second program.
+	loader.resolveIndex = 5
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+	if len(loader.programs) != 1 {
+		t.Errorf("loaded %d programs, want 1", len(loader.programs))
+	}
+}
+
+func TestEnsureAttachmentReplacesWhenInterfaceIndexChanges(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	// tap0 was recreated with index 7, so the attachment must be replaced.
+	loader.resolveIndex = 7
+	loader.attachIndex = 7
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(loader.programs) != 2 {
+		t.Fatalf("loaded %d programs, want 2", len(loader.programs))
+	}
+	if !loader.programs[0].closed {
+		t.Error("the replaced program was not closed")
+	}
+	if stored := monitor.attachments["vm-1"]; stored.interfaceIndex != 7 {
+		t.Errorf("stored interface index = %d, want 7", stored.interfaceIndex)
+	}
+}
+
+func TestEnsureAttachmentClosesTheProgramWhenAttachFails(t *testing.T) {
+	loader := &fakeActivityLoader{attachErr: errors.New("egress attach failed")}
+	monitor := newTestMonitor(t, loader)
+
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err == nil {
+		t.Fatal("want an attach error")
+	}
+	if len(loader.programs) != 1 || !loader.programs[0].closed {
+		t.Error("the program must close when attach fails")
+	}
+	if monitor.attachments["vm-1"] != nil {
+		t.Error("a failed attach must not store an attachment")
+	}
+}
+
+func TestReleaseAttachmentClosesAndDeletesTheMapValue(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := monitor.ReleaseAttachment("vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if !loader.programs[0].closed {
+		t.Error("the program was not closed")
+	}
+	if want := []uint32{100001}; !slices.Equal(loader.createdMap.deletedUserIDs, want) {
+		t.Errorf("deleted user IDs = %v, want %v", loader.createdMap.deletedUserIDs, want)
+	}
+	if monitor.attachments["vm-1"] != nil {
+		t.Error("the attachment was not removed")
+	}
+}
+
+func TestReleaseAttachmentAcceptsAnAbsentAttachment(t *testing.T) {
+	loader := &fakeActivityLoader{}
+	monitor := newTestMonitor(t, loader)
+
+	if err := monitor.ReleaseAttachment("missing"); err != nil {
+		t.Fatalf("release of an absent attachment returned %v", err)
+	}
+}
+
+func TestCloseReleasesEveryAttachment(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	for _, id := range []string{"vm-1", "vm-2"} {
+		request := AttachmentRequest{VirtualMachineID: id, UserID: 100001, NamespacePath: "/run/netns/metal-" + id}
+		if err := monitor.EnsureAttachment(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := monitor.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, program := range loader.programs {
+		if !program.closed {
+			t.Error("an attachment program was not closed")
+		}
 	}
 	if !loader.createdMap.closed {
 		t.Error("the shared map was not closed")
