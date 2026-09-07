@@ -45,6 +45,11 @@ type RuntimeMachine struct {
 	GroupID          uint32
 	Specification    Specification
 	NetworkInterface NetworkInterface
+	// SpecificationGeneration and RestartGeneration identify the desired state a
+	// snapshot belongs to. A restore validates them against the current desired
+	// record before it loads the snapshot.
+	SpecificationGeneration uint64
+	RestartGeneration       uint64
 }
 
 // RuntimeStatus contains the observed runtime state.
