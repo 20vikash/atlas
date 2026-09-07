@@ -20,6 +20,13 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 - Safe recovery: Correct the unit or runtime-file fault. Wake reconciliation with the same desired request when required.
 - Do not: Do not start Firecracker directly. Do not remove a running unit's files.
 
+## Serial console is blank or unavailable
+
+- Symptom: The console closes, or it has no output.
+- Check: Confirm `/run/metal/consoles/<id>` exists. Check `TTYPath`, `StandardInput`, and `StandardOutput` for `metal-vm@<id>.service`. Check `NotifyAccess` and `FileDescriptorStoreMax` for `metal.service`.
+- Recovery: Correct the unit settings, run `systemctl daemon-reload`, then restart the VM through the API.
+- Do not: Do not restart `metal-vm@<id>.service` or remove a running guest's console link.
+
 ## Disk usage or ZFS inspection fails
 
 - Symptom: `/v1/sync` fails or a virtual machine operation reports storage inspection failure.

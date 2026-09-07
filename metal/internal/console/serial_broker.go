@@ -30,20 +30,29 @@ type Winsize struct {
 	Cols uint16
 }
 
+// DescriptorStore keeps PTY masters across a process restart.
+type DescriptorStore interface {
+	Store(name string, file *os.File) error
+	Remove(name string) error
+	TakeFiles() map[string][]*os.File
+}
+
 // SerialBroker owns the serial consoles of all running virtual machines.
 type SerialBroker struct {
 	directory       string
 	scrollbackBytes int
+	descriptorStore DescriptorStore
 
 	mutex    sync.Mutex
 	consoles map[string]*console
 }
 
-// NewSerialBroker returns a SerialBroker that keeps the PTY slave links under directory.
-func NewSerialBroker(directory string) *SerialBroker {
+// NewSerialBroker returns a SerialBroker with links in directory and masters in descriptorStore.
+func NewSerialBroker(directory string, descriptorStore DescriptorStore) *SerialBroker {
 	return &SerialBroker{
 		directory:       directory,
 		scrollbackBytes: defaultScrollbackBytes,
+		descriptorStore: descriptorStore,
 		consoles:        make(map[string]*console),
 	}
 }
@@ -71,9 +80,42 @@ func (b *SerialBroker) Open(id string) error {
 		return err
 	}
 
+	// Keep one stored descriptor for each VM.
+	if err := b.descriptorStore.Remove(id); err != nil {
+		return b.closeFailedConsole(master, link, fmt.Errorf("clear stored console descriptor: %w", err))
+	}
+	if err := b.descriptorStore.Store(id, master); err != nil {
+		return b.closeFailedConsole(master, link, fmt.Errorf("store console descriptor: %w", err))
+	}
+
 	b.consoles[id] = newConsole(master, link, b.scrollbackBytes)
 
 	return nil
+}
+
+// Adopt restores consoles for running virtual machines.
+func (b *SerialBroker) Adopt(runningVirtualMachineIDs []string) int {
+	runningVirtualMachines := make(map[string]struct{}, len(runningVirtualMachineIDs))
+	for _, virtualMachineID := range runningVirtualMachineIDs {
+		runningVirtualMachines[virtualMachineID] = struct{}{}
+	}
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	for virtualMachineID, masterFiles := range b.descriptorStore.TakeFiles() {
+		if _, found := runningVirtualMachines[virtualMachineID]; !found || len(masterFiles) == 0 {
+			b.removeStaleConsole(virtualMachineID, masterFiles)
+			continue
+		}
+
+		b.consoles[virtualMachineID] = newConsole(masterFiles[0], filepath.Join(b.directory, virtualMachineID), b.scrollbackBytes)
+		// One VM has one console.
+		closeFiles(masterFiles[1:])
+	}
+	b.removeLinksWithoutConsoles()
+
+	return len(b.consoles)
 }
 
 // Close stops and removes a VM's console. Close is idempotent.
@@ -87,7 +129,7 @@ func (b *SerialBroker) Close(id string) error {
 		return nil
 	}
 
-	return openConsole.close()
+	return errors.Join(b.descriptorStore.Remove(id), openConsole.close())
 }
 
 // Attach streams a VM's console to one viewer until it disconnects.
@@ -103,7 +145,7 @@ func (b *SerialBroker) Attach(ctx context.Context, id string, client io.ReadWrit
 	return openConsole.attach(ctx, client, resize)
 }
 
-// Shutdown closes every open console.
+// Shutdown disconnects viewers and keeps stored PTY masters open.
 func (b *SerialBroker) Shutdown() {
 	b.mutex.Lock()
 	openConsoles := b.consoles
@@ -111,7 +153,43 @@ func (b *SerialBroker) Shutdown() {
 	b.mutex.Unlock()
 
 	for _, openConsole := range openConsoles {
-		_ = openConsole.close()
+		openConsole.detachViewers()
+	}
+}
+
+// closeFailedConsole removes a failed console setup.
+func (b *SerialBroker) closeFailedConsole(master *os.File, link string, cause error) error {
+	master.Close()
+	_ = os.Remove(link)
+
+	return cause
+}
+
+// removeStaleConsole releases a stale console and its master files.
+func (b *SerialBroker) removeStaleConsole(virtualMachineID string, masterFiles []*os.File) {
+	closeFiles(masterFiles)
+	_ = b.descriptorStore.Remove(virtualMachineID)
+	_ = os.Remove(filepath.Join(b.directory, virtualMachineID))
+}
+
+// closeFiles closes every PTY master file.
+func closeFiles(masterFiles []*os.File) {
+	for _, masterFile := range masterFiles {
+		_ = masterFile.Close()
+	}
+}
+
+// removeLinksWithoutConsoles deletes links without consoles.
+func (b *SerialBroker) removeLinksWithoutConsoles() {
+	entries, err := os.ReadDir(b.directory)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if _, found := b.consoles[entry.Name()]; !found {
+			_ = os.Remove(filepath.Join(b.directory, entry.Name()))
+		}
 	}
 }
 

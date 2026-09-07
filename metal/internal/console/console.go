@@ -201,6 +201,17 @@ func (c *console) addViewer() (*viewer, []byte, error) {
 	return attached, history, nil
 }
 
+// detachViewers disconnects viewers and keeps the PTY master open.
+func (c *console) detachViewers() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	for attached := range c.viewers {
+		delete(c.viewers, attached)
+		close(attached.dropped)
+	}
+}
+
 // removeViewer stops delivery to one viewer.
 func (c *console) removeViewer(attached *viewer) {
 	c.mutex.Lock()

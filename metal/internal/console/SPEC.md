@@ -15,6 +15,7 @@ This package owns the serial console only. The API serves an SSH session on the 
 | Type | Responsibility |
 |---|---|
 | `SerialBroker` | Owns the console of every running VM and maps a VM ID to it. |
+| `DescriptorStore` | Keeps PTY masters open across a restart of metald. |
 | `console` | Owns one PTY master, its scrollback, and its viewers. |
 | `ringBuffer` | Holds the most recent output for replay. |
 | `Winsize` | Carries a viewer terminal size to the PTY. |
@@ -27,13 +28,15 @@ Each VM gets one PTY pair. Metal keeps the master. The systemd unit opens the sl
 Firecracker --writes--> PTY slave <--symlink-- <sockets>/consoles/<id>
                             |
                         PTY master  (held by console)
-                            |
-                     drain goroutine
+                            |            \
+                     drain goroutine      systemd descriptor store
                        |          |
                   ringBuffer   viewers --> API WebSocket
 ```
 
-`Open` allocates the pair and starts the drain. `Close` releases it. `Shutdown` releases all of them when the daemon stops. `Attach` joins one viewer to a console that is already open.
+`Open` stores the master and starts the drain. `Close` releases it. `Attach` adds a viewer. `Shutdown` disconnects viewers and keeps masters. `Adopt` restores stored masters after metald restarts.
+
+Linux destroys a PTY when its master closes. The systemd descriptor store keeps the masters until the next metald process adopts them. `NotifyAccess` and `FileDescriptorStoreMax` enable the store.
 
 ## Backpressure
 
@@ -44,11 +47,14 @@ A viewer that attaches receives the scrollback first, then live output. Scrollba
 ## Lifecycle
 
 ```text
+metald start               -> Adopt(running VM IDs)
 firecracker prepareLaunch  -> Open(id)
 api  GET /v1/vms/{id}/console?mode=tty -> Attach(id)   many, concurrent, capped
 firecracker stop or remove -> Close(id)
 metald shutdown            -> Shutdown()
 ```
+
+`Adopt` restores consoles for running VMs and removes stale masters and links.
 
 A console outlives its viewers. It exists from VM launch to VM stop, so output produced while nobody is attached still reaches the next viewer. An SSH session has the opposite lifetime: it starts and ends with one WebSocket, and it replays nothing.
 
