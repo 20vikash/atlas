@@ -624,6 +624,13 @@ func TestCreateDefaultsToNonSleepy(t *testing.T) {
 	}
 }
 
+func TestPowerRequestRejectsSleeping(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	// sleeping is an observed state only, so a power request cannot ask for it.
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/power", `{"state":"sleeping"}`, http.StatusBadRequest)
+}
+
 func TestSetSleepPolicyUpdatesTheFlag(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)

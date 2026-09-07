@@ -260,6 +260,16 @@ func TestSetSleepPolicyRaisesGenerationOnlyOnChange(t *testing.T) {
 	}
 }
 
+func TestSetPowerStateRejectsSleeping(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateSleeping); !errors.Is(err, ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+}
+
 func TestSetSleepPolicyRejectsAMissingVirtualMachine(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	if err := manager.SetSleepPolicy(context.Background(), "missing", true); !errors.Is(err, ErrNotFound) {
