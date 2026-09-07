@@ -71,20 +71,20 @@ Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `
 
 ## Packet activity
 
-`ActivityMonitor` records the last packet time of each VM. A sleepy VM sleeps after an idle timeout, so Metal must know when a VM last sent or received a packet.
+`ActivityMonitor` records the last packet time of each VM. A sleepy VM sleeps after an idle timeout, so Metal must know when a VM last received a packet from the host side.
 
-One eBPF program attaches to `tap0` ingress and egress inside the VM namespace. `tap0` carries every guest packet, so both directions pass it. The program does not attach to the veth pair, because Atlas WG Mesh owns the host end.
+One eBPF program attaches to the `tap0` egress path, which carries host-to-guest traffic, inside the VM namespace. The guest's own frames arrive on the ingress path and are not hooked, so the guest's housekeeping does not count as activity. The program does not attach to the veth pair, because Atlas WG Mesh owns the host end.
 
 ```text
-guest packet    -> tap0 ingress hook -> activity_by_user_id[user_id]
-external packet -> tap0 egress hook  -> activity_by_user_id[user_id]
+host-to-guest packet -> tap0 egress hook -> activity_by_user_id[user_id]
+guest-to-host packet -> tap0 ingress     -> not hooked, not counted
 ```
 
-The program only observes. It updates the map and returns `TCX_NEXT` on every path, so it never drops or changes a packet. It does not read packet bytes, so every Ethernet frame counts. ARP and neighbour discovery count too, so the first such frame can wake a VM before the first IP packet.
+The program only observes. It updates the map and returns `TCX_NEXT`, so it never drops or changes a packet. It does not read packet bytes, so every host-to-guest Ethernet frame counts. Incoming ARP and neighbour discovery count too, so an incoming frame can wake a VM before the first IP packet.
 
 `activity_by_user_id` is one shared hash map. The key is the VM user ID. The value is a monotonic nanosecond time from `bpf_ktime_get_ns`. `LastNetworkActivity` reads the value, reads `CLOCK_MONOTONIC` right after, and converts the age to a UTC wall-clock time. A wall-clock change never makes a VM sleep early, because the age comes from the monotonic clock.
 
-The monitor owns the shared map, one program instance for each VM, and the ingress and egress links. `EnsureAttachment` is idempotent and replaces the attachment only when `tap0` gets a new index. `ReleaseAttachment` closes the links and clears the map value. `Close` releases everything, and the daemon calls it after every worker stops.
+The monitor owns the shared map, one program instance for each VM, and the egress link. `EnsureAttachment` is idempotent and replaces the attachment only when `tap0` gets a new index. `ReleaseAttachment` closes the link and clears the map value. `Close` releases everything, and the daemon calls it after every worker stops.
 
 metald does not pin the programs or maps. A metald restart attaches new links and starts a new activity baseline. The baseline is the attachment time, so a restart can delay sleep by one idle timeout, which is safe. It never causes an early sleep.
 

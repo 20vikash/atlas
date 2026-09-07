@@ -78,12 +78,26 @@ func waitForFreshActivity(t *testing.T, monitor *ActivityMonitor, request vm.Net
 	return vm.NetworkActivity{}
 }
 
-// TestActivityCountsBothPacketDirections proves a frame in each direction over
-// tap0 advances the activity time. It needs root, the ip command, and TCX
-// support. Run it with:
+// assertNoActivity fails if any packet registers within a short window.
+func assertNoActivity(t *testing.T, monitor *ActivityMonitor, request vm.NetworkActivityRequest) {
+	t.Helper()
+	time.Sleep(300 * time.Millisecond)
+	activity, err := monitor.LastNetworkActivity(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activity.HasBeenSeen {
+		t.Fatal("guest-to-host traffic must not register as activity")
+	}
+}
+
+// TestActivityCountsHostToGuestOnly proves a host-to-guest frame advances the
+// activity time and a guest-to-host frame does not. So the guest's own traffic,
+// such as link-local IPv6 housekeeping, does not keep a sleepy VM awake. It needs
+// root, the ip command, and TCX support. Run it with:
 //
-//	sudo -E go test -tags integration -run TestActivityCountsBothPacketDirections ./internal/network/
-func TestActivityCountsBothPacketDirections(t *testing.T) {
+//	sudo -E go test -tags integration -run TestActivityCountsHostToGuestOnly ./internal/network/
+func TestActivityCountsHostToGuestOnly(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
 	}
@@ -99,6 +113,9 @@ func TestActivityCountsBothPacketDirections(t *testing.T) {
 	runOrSkip(t, "ip", "-n", namespace, "addr", "add", "172.16.0.1/24", "dev", tapName)
 	runOrSkip(t, "ip", "-n", namespace, "link", "set", tapName, "up")
 	runOrSkip(t, "ip", "-n", namespace, "link", "set", "lo", "up")
+	// Quiet the tap IPv6 stack, so no kernel-generated egress frame advances
+	// activity and hides the guest-to-host result.
+	runOrSkip(t, "ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf."+tapName+".disable_ipv6=1")
 	runOrSkip(t, "ip", "-n", namespace, "neigh", "replace", guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
 
 	monitor, err := NewActivityMonitor(ActivityMonitorConfig{
@@ -125,24 +142,15 @@ func TestActivityCountsBothPacketDirections(t *testing.T) {
 	tapQueue := openTapQueue(t, namespacePath, tapName)
 	t.Cleanup(func() { _ = unix.Close(tapQueue) })
 
-	// Ingress: a frame written into the tap enters the kernel on tap0.
+	// A guest-to-host frame written into the tap enters the kernel on tap0 ingress.
+	// It must not count, because the guest's own traffic must not keep it awake.
 	arpPayload := make([]byte, 28)
 	if _, err := unix.Write(tapQueue, ethernetFrame(0x0806, arpPayload)); err != nil {
-		t.Fatalf("write ingress frame: %v", err)
+		t.Fatalf("write guest frame: %v", err)
 	}
-	afterIngress := waitForFreshActivity(t, monitor, request, baseline.LastSeenAt)
+	assertNoActivity(t, monitor, request)
 
-	// A malformed, non-IP frame must also count and must not block the write.
-	if _, err := unix.Write(tapQueue, ethernetFrame(0x88b5, []byte{0x01, 0x02, 0x03})); err != nil {
-		t.Fatalf("write malformed frame: %v", err)
-	}
-	waitForFreshActivity(t, monitor, request, afterIngress.LastSeenAt)
-
-	// Egress: a packet from the namespace stack toward the guest leaves on tap0.
-	mark, err := monitor.LastNetworkActivity(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// A host-to-guest packet toward the guest leaves on tap0 egress and counts.
 	_ = runQuietly("ip", "netns", "exec", namespace, "ping", "-c", "1", "-W", "1", guestIPAddress)
-	waitForFreshActivity(t, monitor, request, mark.LastSeenAt)
+	waitForFreshActivity(t, monitor, request, baseline.LastSeenAt)
 }

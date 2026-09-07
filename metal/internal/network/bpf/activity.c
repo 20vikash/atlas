@@ -14,8 +14,9 @@ struct {
    rewrites it before load, so one instance serves one VM. */
 const volatile __u32 virtual_machine_user_id = 0;
 
-/* record_activity stores the current time for this VM on every frame in both
-   directions. It does not read packet bytes and does not change the packet. */
+/* record_activity stores the current time for this VM on each invocation. The
+   loader attaches it to the tap0 egress hook only, which carries host-to-guest
+   traffic. It does not read packet bytes and does not change the packet. */
 SEC("tc")
 int record_activity(struct __sk_buff *skb) {
 	__u32 key = virtual_machine_user_id;

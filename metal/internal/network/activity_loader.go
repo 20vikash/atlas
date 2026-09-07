@@ -108,13 +108,13 @@ func (handle *bpfActivityMap) Close() error { return handle.kernelMap.Close() }
 type bpfActivityProgram struct {
 	program  *ebpf.Program
 	syscalls namespaceSyscalls
-	ingress  link.Link
 	egress   link.Link
 }
 
-// attach hooks tap0 ingress and egress inside the VM network namespace. It
-// resolves tap0 inside the namespace and uses one program instance for both
-// links. It closes the ingress link when the egress attach fails.
+// attach hooks the tap0 egress path inside the VM network namespace. The egress
+// path carries host-to-guest traffic. The guest's own frames arrive on the
+// ingress path and are not hooked, so a sleepy VM idles instead of keeping itself
+// awake with link-local IPv6 or other housekeeping.
 func (handle *bpfActivityProgram) attach(namespacePath string) (int, error) {
 	var interfaceIndex int
 	err := inNamespace(handle.syscalls, namespacePath, func() error {
@@ -124,25 +124,16 @@ func (handle *bpfActivityProgram) attach(namespacePath string) (int, error) {
 		}
 		interfaceIndex = device.Index
 
-		ingress, err := link.AttachTCX(link.TCXOptions{
-			Program:   handle.program,
-			Attach:    ebpf.AttachTCXIngress,
-			Interface: interfaceIndex,
-		})
-		if err != nil {
-			return fmt.Errorf("attach TCX ingress: %w", err)
-		}
-
 		egress, err := link.AttachTCX(link.TCXOptions{
 			Program:   handle.program,
 			Attach:    ebpf.AttachTCXEgress,
 			Interface: interfaceIndex,
 		})
 		if err != nil {
-			return errors.Join(fmt.Errorf("attach TCX egress: %w", err), ingress.Close())
+			return fmt.Errorf("attach TCX egress: %w", err)
 		}
 
-		handle.ingress, handle.egress = ingress, egress
+		handle.egress = egress
 		return nil
 	})
 	if err != nil {
@@ -151,12 +142,9 @@ func (handle *bpfActivityProgram) attach(namespacePath string) (int, error) {
 	return interfaceIndex, nil
 }
 
-// Close releases the TCX links and the program instance.
+// Close releases the TCX link and the program instance.
 func (handle *bpfActivityProgram) Close() error {
 	var closeErrors []error
-	if handle.ingress != nil {
-		closeErrors = append(closeErrors, handle.ingress.Close())
-	}
 	if handle.egress != nil {
 		closeErrors = append(closeErrors, handle.egress.Close())
 	}
