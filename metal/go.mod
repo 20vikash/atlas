@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/cilium/ebpf v0.19.0
 	github.com/coder/websocket v1.8.13
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/creack/pty v1.1.24
@@ -14,7 +15,6 @@ require (
 )
 
 require (
-	github.com/cilium/ebpf v0.19.0 // indirect
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
