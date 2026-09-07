@@ -140,6 +140,9 @@ const (
 	StateStopped State = "stopped"
 	// StateFailed means the runtime stopped the guest unexpectedly.
 	StateFailed State = "failed"
+	// StateSleeping means the guest is asleep. Its memory is in a saved snapshot
+	// and no Firecracker process runs. It is an observed state only.
+	StateSleeping State = "sleeping"
 	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"
 )
@@ -157,7 +160,7 @@ func IsDesiredState(state State) bool {
 // isObservedState reports whether state is one a runtime can report.
 func isObservedState(state State) bool {
 	switch state {
-	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateDestroyed:
+	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateSleeping, StateDestroyed:
 		return true
 	default:
 		return false
