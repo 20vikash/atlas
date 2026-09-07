@@ -33,3 +33,10 @@ binary_path = "/usr/local/bin/atlas-wg-mesh"
 # here, and that hook consumes discovery traffic for every VLAN under the
 # interface, so name the VLAN itself and never its parent. Required.
 uplink = "eno1.1878"
+
+[sleep]
+# Automatic sleep is off by default. It applies only to VMs with is_sleepy set.
+enabled = false
+# One Metal-wide idle timeout for every sleepy VM on this host. When enabled, it
+# must be a positive Go duration. A VM request or record never carries a timeout.
+idle_timeout = "30m"

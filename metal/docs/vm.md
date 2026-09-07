@@ -26,6 +26,12 @@ Cold boot clones an image disk, links the kernel, configures Firecracker, and st
 
 Records, generations, reconciliation, and cleanup: [internal/vm/SPEC.md](../internal/vm/SPEC.md). Boot and stop mechanics: [internal/firecracker/SPEC.md](../internal/firecracker/SPEC.md).
 
+## Sleepy VMs
+
+A VM specification has an `is_sleepy` flag. When it is set, and the host turns on automatic sleep, Metal can sleep the VM after an idle timeout. The create request and the sleep-policy endpoint carry only `is_sleepy`. The idle timeout is one Metal-wide host value and is never part of a VM request or record. See [testing.md](testing.md) for the `[sleep]` host configuration.
+
+The flag and the host configuration are the only parts of the sleepy VM feature in this state. Setting `is_sleepy` does not yet sleep a VM.
+
 ## Design notes
 
 - The controller supplies the VM ID, so reservation retries use one stable resource.

@@ -57,6 +57,10 @@ These tests create a temporary namespace and a `tap0`, attach the eBPF program, 
 | `firecracker.sockets_dir` | `/run/metal` | Short VM socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
 | `zfs.pool` | `metal` | ZFS pool name. |
+| `sleep.enabled` | `false` | Turn on automatic sleep for sleepy VMs. |
+| `sleep.idle_timeout` | none | One Metal-wide idle timeout. Required and positive when enabled. |
+
+`idle_timeout` is one host value for every sleepy VM. A VM request or record carries only `is_sleepy` and never a timeout.
 
 ## Development environment
 
