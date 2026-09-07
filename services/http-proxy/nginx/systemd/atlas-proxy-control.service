@@ -1,7 +1,7 @@
 [Unit]
 Description=Atlas proxy control daemon
-Requires=openresty.service
-After=openresty.service
+Requires=openresty.service atlas-proxy-control.socket
+After=openresty.service atlas-proxy-control.socket
 
 [Service]
 Type=simple

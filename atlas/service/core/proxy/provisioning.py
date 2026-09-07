@@ -131,11 +131,24 @@ class ProxyServerProvisioner:
 			self.save_progress(save)
 			return
 
-		result = SSHRunner(self.ssh_host).run_command(
-			configuration.get_push_command(), timeout_seconds=CONFIGURE_TIMEOUT_SECONDS
+		write = SSHRunner(self.ssh_host).run_command(
+			configuration.get_write_command(), timeout_seconds=CONFIGURE_TIMEOUT_SECONDS
 		)
-		if not result.is_success:
-			frappe.throw(_("The proxy rejected its configuration: {0}").format(result.output.strip()))
+		if not write.is_success:
+			frappe.throw(
+				_("The proxy did not accept its configuration file: {0}").format(write.output.strip())
+			)
+
+		task = SSHTask.create_for_command(
+			target_type="Virtual Machine",
+			target=self.proxy_server.virtual_machine,
+			command=configuration.get_apply_command(),
+			timeout_seconds=CONFIGURE_TIMEOUT_SECONDS,
+			run_in_background=False,
+		)
+		result = task.result
+		if result is None or not result.is_success:
+			frappe.throw(_("The proxy rejected its configuration. See SSH Task {0}.").format(task.name))
 
 		self.proxy_server.pushed_config_hash = configuration.digest
 		self.proxy_server.tls_expires_on = frappe.get_single("Atlas Settings").wildcard_tls_expires_on

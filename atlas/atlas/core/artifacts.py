@@ -7,10 +7,11 @@ import frappe
 
 def publish_public_file(file_name: str, label: str, content: bytes) -> str:
 	"""Publish a public build file and return its document name."""
+	digest = hashlib.sha256(content).hexdigest()
 	file_doc = frappe.get_doc(
 		{
 			"doctype": "File",
-			"file_name": file_name,
+			"file_name": get_content_addressed_name(file_name, digest),
 			"attached_to_doctype": "Atlas Settings",
 			"attached_to_name": "Atlas Settings",
 			"is_private": 0,
@@ -18,8 +19,14 @@ def publish_public_file(file_name: str, label: str, content: bytes) -> str:
 		}
 	).insert(ignore_permissions=True)
 
-	print(f"atlas: {label} sha256 {hashlib.sha256(content).hexdigest()}")
+	print(f"atlas: {label} sha256 {digest}")
 	return file_doc.name
+
+
+def get_content_addressed_name(file_name: str, digest: str) -> str:
+	"""Return a file name with a content digest."""
+	name, dot, extension = file_name.partition(".")
+	return f"{name}-{digest[:12]}{dot}{extension}"
 
 
 def delete_unlinked_files() -> None:

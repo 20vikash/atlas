@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 CONFIG_PATH = "/etc/atlas/proxy-control.toml"
 APPLY_COMMAND = "/opt/atlas/proxy-control/bin/proxy-control"
 DAEMON_UNIT = "atlas-proxy-control.service"
+DAEMON_SOCKET_UNIT = "atlas-proxy-control.socket"
 
 CONFIG_TEMPLATE = Template(
 	"""[control]
@@ -36,15 +37,20 @@ $private_key
 """
 )
 
-PUSH_COMMAND_TEMPLATE = Template(
+WRITE_COMMAND_TEMPLATE = Template(
 	"""set -eu
 install -d -m 0750 /etc/atlas
 install -m 0600 /dev/null $config_path
 cat > $config_path <<'ATLAS_PROXY_CONFIG_END'
 $content
-ATLAS_PROXY_CONFIG_END
+ATLAS_PROXY_CONFIG_END"""
+)
+
+APPLY_COMMAND_TEMPLATE = Template(
+	"""set -eu
 $apply_command
-systemctl enable --now $daemon_unit
+systemctl enable --now $socket_unit
+systemctl enable $daemon_unit
 systemctl restart $daemon_unit"""
 )
 
@@ -90,9 +96,10 @@ class ProxyConfiguration:
 
 	@property
 	def digest(self) -> str:
-		"""Return the digest of the configuration inputs."""
+		"""Return the digest of the configuration and its template."""
 		password = self.proxy_server.get_password("control_api_password", raise_exception=False) or ""
 		values = (
+			CONFIG_TEMPLATE.template,
 			self.proxy_server.get_domain(),
 			self.wildcard_domain,
 			password,
@@ -103,13 +110,14 @@ class ProxyConfiguration:
 		)
 		return hashlib.sha256("\0".join(values).encode()).hexdigest()
 
-	def get_push_command(self) -> str:
-		"""Return commands to update the configuration."""
-		return PUSH_COMMAND_TEMPLATE.substitute(
-			config_path=CONFIG_PATH,
-			content=self.content,
-			apply_command=APPLY_COMMAND,
-			daemon_unit=DAEMON_UNIT,
+	def get_write_command(self) -> str:
+		"""Return the command that writes the configuration file."""
+		return WRITE_COMMAND_TEMPLATE.substitute(config_path=CONFIG_PATH, content=self.content)
+
+	def get_apply_command(self) -> str:
+		"""Return the command that applies the configuration."""
+		return APPLY_COMMAND_TEMPLATE.substitute(
+			apply_command=APPLY_COMMAND, socket_unit=DAEMON_SOCKET_UNIT, daemon_unit=DAEMON_UNIT
 		)
 
 

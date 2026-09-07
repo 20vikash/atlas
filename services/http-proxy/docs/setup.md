@@ -20,7 +20,7 @@ The setup script creates the locked `frappe` account with passwordless `sudo`. I
   sudo ./nginx/setup.sh
   ```
 
-The script installs OpenResty and the control daemon, enables both units, and applies the certificate the configuration file carries. It is safe to run again.
+The script installs OpenResty and the control daemon, enables their units, and applies the certificate the configuration file carries. It is safe to run again. A repeated run keeps the installed OpenResty package and reloads the running service, so the open connections stay up.
 
 An empty configuration file stops the script before it applies anything and before it starts the daemon. Write the file and run the script again.
 
@@ -105,8 +105,12 @@ curl -fsS -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" -o /dev/null 
 ## Service commands
 
 ```sh
-sudo systemctl restart openresty.service
+sudo systemctl reload openresty.service
 sudo systemctl restart atlas-proxy-control.service
 journalctl -u openresty.service -f
 journalctl -u atlas-proxy-control.service -f
 ```
+
+A reload keeps the open connections. Use `systemctl restart openresty.service` only when a reload cannot apply the change.
+
+`atlas-proxy-control.socket` owns `127.0.0.1:9000`. It keeps the port open while the daemon restarts, so a request waits instead of getting a `502`. Restart the socket unit only to change the listening address.

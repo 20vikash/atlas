@@ -29,8 +29,12 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openr
 	> /etc/apt/sources.list.d/openresty.list
 apt-get update
 OPENRESTY_PKG_VERSION="${OPENRESTY_VERSION}-${OPENRESTY_PKG_RELEASE}~$(lsb_release -sc)1"
-apt-mark unhold openresty 2>/dev/null || true
-apt-get install -y --reinstall --no-install-recommends "openresty=${OPENRESTY_PKG_VERSION}"
+if [ -x "$SBIN_PATH" ] && [ "$("$SBIN_PATH" -v 2>&1 | sed 's#.*openresty/##')" = "$OPENRESTY_VERSION" ]; then
+	echo "OpenResty ${OPENRESTY_VERSION} is already installed"
+else
+	apt-mark unhold openresty 2>/dev/null || true
+	apt-get install -y --no-install-recommends "openresty=${OPENRESTY_PKG_VERSION}"
+fi
 apt-get install -y --no-install-recommends sudo
 apt-mark hold openresty
 
@@ -123,22 +127,27 @@ if [ ! -e "$STATE_DIR/certs/privkey.pem" ]; then
 	ln -sfn _placeholder/privkey.pem "$STATE_DIR/certs/privkey.pem"
 fi
 
-# Install and enable both services. They start on the next boot.
+# Install and enable the units.
 install -d /etc/systemd/system/openresty.service.d
 install -m 0644 "$SERVICE_DIR/nginx/systemd/openresty.service.d/atlas.conf" \
 	/etc/systemd/system/openresty.service.d/atlas.conf
 install -m 0644 "$SERVICE_DIR/nginx/systemd/atlas-proxy-control.service" \
 	/etc/systemd/system/atlas-proxy-control.service
+install -m 0644 "$SERVICE_DIR/nginx/systemd/atlas-proxy-control.socket" \
+	/etc/systemd/system/atlas-proxy-control.socket
 if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload
 	systemctl enable openresty.service
+	systemctl enable --now atlas-proxy-control.socket
 	systemctl enable atlas-proxy-control.service
 else
-	install -d /etc/systemd/system/multi-user.target.wants
+	install -d /etc/systemd/system/multi-user.target.wants /etc/systemd/system/sockets.target.wants
 	ln -sf /usr/lib/systemd/system/openresty.service \
 		/etc/systemd/system/multi-user.target.wants/openresty.service
 	ln -sf /usr/lib/systemd/system/atlas-proxy-control.service \
 		/etc/systemd/system/multi-user.target.wants/atlas-proxy-control.service
+	ln -sf /etc/systemd/system/atlas-proxy-control.socket \
+		/etc/systemd/system/sockets.target.wants/atlas-proxy-control.socket
 fi
 
 "$SBIN_PATH" -t -c "$CONF_DIR/nginx.conf"
@@ -146,7 +155,11 @@ fi
 # Apply the certificate the configuration file carries. The daemon refuses to
 # start without one, so an empty file waits for Atlas to write the real one.
 if [ -d /run/systemd/system ]; then
-	systemctl restart openresty.service
+	if systemctl is-active --quiet openresty.service; then
+		systemctl reload openresty.service
+	else
+		systemctl start openresty.service
+	fi
 	if [ -s "$CONFIG_FILE" ]; then
 		/opt/atlas/proxy-control/bin/proxy-control
 		systemctl restart atlas-proxy-control.service

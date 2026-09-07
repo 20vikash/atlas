@@ -101,20 +101,42 @@ class TestApplySteps(UnitTestCase):
 		ssh_runner.assert_not_called()
 		proxy_server.save.assert_called_once_with(ignore_permissions=True)
 
-	def test_a_rejected_configuration_fails_loudly(self) -> None:
+	def test_a_rejected_configuration_file_fails_loudly(self) -> None:
 		proxy_server = _proxy_server()
 		provisioner = ProxyServerProvisioner(proxy_server)
 		with (
 			patch.object(provisioning, "ProxyConfiguration") as configuration,
 			patch.object(provisioning, "SSHRunner") as ssh_runner,
+			patch.object(provisioning.SSHTask, "create_for_command") as create_task,
 			patch.object(provisioner.__class__, "ssh_host", new=property(lambda self: "203.0.113.9")),
 		):
 			configuration.return_value.digest = "digest-2"
-			ssh_runner.return_value.run_command.return_value = SSHResult("bad certificate", 1)
+			ssh_runner.return_value.run_command.return_value = SSHResult("no space left", 1)
 
 			with self.assertRaises(frappe.ValidationError):
 				provisioner.push_configuration()
 
+		create_task.assert_not_called()
+		self.assertIsNone(proxy_server.pushed_config_hash)
+
+	# The task keeps the error available in Desk.
+	def test_a_failed_apply_step_names_its_ssh_task(self) -> None:
+		proxy_server = _proxy_server(virtual_machine="vm-00001")
+		provisioner = ProxyServerProvisioner(proxy_server)
+		with (
+			patch.object(provisioning, "ProxyConfiguration") as configuration,
+			patch.object(provisioning, "SSHRunner") as ssh_runner,
+			patch.object(provisioning.SSHTask, "create_for_command") as create_task,
+			patch.object(provisioner.__class__, "ssh_host", new=property(lambda self: "203.0.113.9")),
+		):
+			configuration.return_value.digest = "digest-3"
+			ssh_runner.return_value.run_command.return_value = SSHResult("", 0)
+			create_task.return_value = SimpleNamespace(name="task-1", result=SSHResult("bad certificate", 1))
+
+			with self.assertRaises(frappe.ValidationError) as error:
+				provisioner.push_configuration()
+
+		self.assertIn("task-1", str(error.exception))
 		self.assertIsNone(proxy_server.pushed_config_hash)
 
 	def test_an_installed_package_is_not_installed_again(self) -> None:

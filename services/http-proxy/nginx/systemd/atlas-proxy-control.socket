@@ -1,0 +1,9 @@
+[Unit]
+Description=Atlas proxy control daemon socket
+
+[Socket]
+ListenStream=127.0.0.1:9000
+Backlog=1024
+
+[Install]
+WantedBy=sockets.target

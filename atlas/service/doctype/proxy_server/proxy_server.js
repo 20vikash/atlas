@@ -38,9 +38,12 @@ frappe.ui.form.on("Proxy Server", {
 			);
 		});
 
-		frm.call("get_domain").then(({ message: domain }) => {
-			if (domain) {
-				frm.add_web_link(`https://${domain}`, __("Open proxy server"));
+		frappe.db.get_single_value("Atlas Settings", "wildcard_domain").then((wildcard_domain) => {
+			if (wildcard_domain) {
+				frm.add_web_link(
+					`https://${frm.doc.name}.${wildcard_domain}/docs`,
+					__("Open proxy server docs")
+				);
 			}
 		});
 

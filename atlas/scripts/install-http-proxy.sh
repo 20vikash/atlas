@@ -38,7 +38,11 @@ curl -fsSL "$HTTP_PROXY_DOWNLOAD_URL" -o "$archive"
 
 
 step "check the package"
-echo "$HTTP_PROXY_PACKAGE_SHA256  $archive" | sha256sum --check --status -
+package_hash=$(sha256sum "$archive" | cut -d' ' -f1)
+if [ "$package_hash" != "$HTTP_PROXY_PACKAGE_SHA256" ]; then
+	echo "the package at $HTTP_PROXY_DOWNLOAD_URL has hash $package_hash, expected $HTTP_PROXY_PACKAGE_SHA256" >&2
+	exit 1
+fi
 
 # Refuse a member that could write outside the unpack directory.
 if tar -tf "$archive" | grep -qvE '^http-proxy/[^/]'; then

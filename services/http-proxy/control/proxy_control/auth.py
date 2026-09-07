@@ -3,10 +3,19 @@ from typing import Annotated, ClassVar
 
 import bcrypt
 import jwt
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
 from .config import AuthConfig, ConfigError, load
+
+CONTROL_BEARER_SCHEME = "BearerAuth"
+bearer = HTTPBearer(
+	scheme_name=CONTROL_BEARER_SCHEME,
+	bearerFormat="password or JWT",
+	description="Use the control API password or a valid JWT.",
+	auto_error=False,
+)
 
 
 class Authentication:
@@ -40,6 +49,13 @@ class Authentication:
 			return
 
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+
+	def require_request(
+		self, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+	) -> None:
+		"""Authenticate one API request."""
+		authorization = f"{credentials.scheme} {credentials.credentials}" if credentials else None
+		self.require(authorization)
 
 	def _auth(self) -> AuthConfig:
 		"""Return the current credentials."""

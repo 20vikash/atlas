@@ -55,6 +55,15 @@ class TestPublishedFiles(IntegrationTestCase):
 		frappe.db.set_single_value("Atlas Settings", self.SETTINGS_FIELD, file_name)
 		return file_name
 
+	def test_a_published_name_carries_the_digest(self) -> None:
+		first = frappe.db.get_value("File", self.publish(b"first build"), "file_name")
+
+		second = frappe.db.get_value("File", self.publish(b"second build"), "file_name")
+
+		self.assertNotEqual(first, second)
+		self.assertTrue(first.startswith("atlas-test-artifact-"))
+		self.assertTrue(first.endswith(".tar.gz"))
+
 	def test_each_publish_makes_its_own_file(self) -> None:
 		first = self.publish(b"first build")
 
