@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type fakeRuntime struct {
@@ -124,7 +125,10 @@ func (fakeSnapshots) Stage(context.Context, SnapshotRequest) (StagedSnapshot, er
 
 func newTestManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetwork, *fakeStorage) {
 	t.Helper()
-	runtime := &fakeRuntime{state: StateStopped}
+	runtime := &fakeRuntime{
+		state:       StateStopped,
+		stopOutcome: StopOutcome{SnapshotGeneration: 1, SnapshotCreatedAt: time.Unix(1000, 0).UTC()},
+	}
 	network := &fakeNetwork{}
 	storage := &fakeStorage{}
 	manager, err := NewManager(
@@ -311,7 +315,7 @@ func TestStopWarmStoresTheWarmStopIntent(t *testing.T) {
 	}
 }
 
-func TestWarmStopReconcilesToStoppedThenResumes(t *testing.T) {
+func TestWarmStopReconcilesToSleepingThenResumes(t *testing.T) {
 	manager, runtime, _, _ := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
 		t.Fatal(err)
@@ -320,7 +324,7 @@ func TestWarmStopReconcilesToStoppedThenResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A warm stop terminates the VM but keeps a resume marker.
+	// A warm stop terminates the VM and reaches the sleeping observed state.
 	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -334,11 +338,11 @@ func TestWarmStopReconcilesToStoppedThenResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.State != StateStopped || !observed.WarmStopped {
+	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.SnapshotGeneration != 1 {
 		t.Fatalf("observed after warm stop = %+v", observed)
 	}
 
-	// Starting again resumes from the snapshot and clears the marker.
+	// Starting again resumes from the snapshot and clears the sleep progress.
 	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +356,7 @@ func TestWarmStopReconcilesToStoppedThenResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.State != StateRunning || observed.WarmStopped {
+	if observed.State != StateRunning || observed.Sleep != nil {
 		t.Fatalf("observed after resume = %+v", observed)
 	}
 }
@@ -376,7 +380,7 @@ func TestStopOutsideTheAPIColdBoots(t *testing.T) {
 	}
 }
 
-func TestWarmResumeFallsBackToColdBoot(t *testing.T) {
+func TestSnapshotResumeFailureKeepsSleeping(t *testing.T) {
 	manager, runtime, _, _ := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
 		t.Fatal(err)
@@ -391,23 +395,58 @@ func TestWarmResumeFallsBackToColdBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The snapshot cannot be restored, so the start cold boots and reaches running.
+	// The snapshot cannot be restored. A resume failure must keep the VM sleeping
+	// and never cold boot, so the in-memory guest is not lost.
 	runtime.startFromSnapshotError = errors.New("snapshot incompatible")
 	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
+	if err := manager.Reconcile(context.Background(), "machine-1"); err == nil {
+		t.Fatal("expected the resume failure to surface")
 	}
-	if runtime.startMode != StartNormal {
-		t.Fatalf("last start mode = %d, want the cold-boot fallback", runtime.startMode)
+	if runtime.startMode == StartNormal {
+		t.Fatal("a resume failure must not cold boot")
 	}
 	observed, err := manager.store.readObserved("machine-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.State != StateRunning || observed.WarmStopped {
-		t.Fatalf("observed after fallback = %+v", observed)
+	if observed.State != StateSleeping || observed.Sleep == nil {
+		t.Fatalf("observed after resume failure = %+v", observed)
+	}
+}
+
+func TestWarmStoppedVMStaysSleeping(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later pass holds the VM asleep. It does not snapshot again or resume.
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.stops != 1 {
+		t.Fatalf("stops = %d, want one warm stop", runtime.stops)
+	}
+	if runtime.startMode == StartFromSleepSnapshot {
+		t.Fatal("a held sleeping VM must not resume")
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateSleeping {
+		t.Fatalf("observed = %+v, want sleeping", observed)
 	}
 }
 

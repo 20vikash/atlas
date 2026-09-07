@@ -64,10 +64,6 @@ type ObservedRecord struct {
 	NetworkInterface       NetworkInterface `json:"network_interface,omitempty"`
 	Disk                   DiskUsage        `json:"disk,omitempty"`
 	Sleep                  *SleepProgress   `json:"sleep,omitempty"`
-	// WarmStopped is set when a warm stop published a memory snapshot for this VM.
-	// The next start resumes from it. A cold start, a plain stop, or a restart
-	// clears it, so only a deliberate warm stop leads to a resume.
-	WarmStopped bool `json:"warm_stopped,omitempty"`
 }
 
 // SleepProgress records the automatic sleep operation of one VM. It holds only
