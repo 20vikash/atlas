@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -71,6 +72,45 @@ func TestLoadAuthenticationTokenHash(t *testing.T) {
 func TestLoadMissingFile(t *testing.T) {
 	if _, err := load("/no/such/config.toml"); err == nil {
 		t.Error("explicit missing path: want error, got nil")
+	}
+}
+
+func TestLoadSleepConfiguration(t *testing.T) {
+	cases := []struct {
+		name        string
+		body        string
+		wantErr     bool
+		wantEnabled bool
+		wantTimeout time.Duration
+	}{
+		{name: "absent section is disabled", body: "", wantEnabled: false, wantTimeout: 0},
+		{name: "enabled with a positive timeout", body: "[sleep]\nenabled = true\nidle_timeout = \"30m\"\n", wantEnabled: true, wantTimeout: 30 * time.Minute},
+		{name: "disabled keeps a parsed timeout", body: "[sleep]\nenabled = false\nidle_timeout = \"30m\"\n", wantEnabled: false, wantTimeout: 30 * time.Minute},
+		{name: "disabled without a timeout", body: "[sleep]\nenabled = false\n", wantEnabled: false, wantTimeout: 0},
+		{name: "enabled without a timeout is rejected", body: "[sleep]\nenabled = true\n", wantErr: true},
+		{name: "enabled with a zero timeout is rejected", body: "[sleep]\nenabled = true\nidle_timeout = \"0s\"\n", wantErr: true},
+		{name: "enabled with a negative timeout is rejected", body: "[sleep]\nenabled = true\nidle_timeout = \"-5m\"\n", wantErr: true},
+		{name: "an invalid duration is rejected", body: "[sleep]\nenabled = true\nidle_timeout = \"soon\"\n", wantErr: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			o, err := load(writeConfig(t, testCase.body))
+			if testCase.wantErr {
+				if err == nil {
+					t.Fatal("want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if o.sleep.enabled != testCase.wantEnabled {
+				t.Errorf("enabled = %t, want %t", o.sleep.enabled, testCase.wantEnabled)
+			}
+			if o.sleep.idleTimeout != testCase.wantTimeout {
+				t.Errorf("idleTimeout = %v, want %v", o.sleep.idleTimeout, testCase.wantTimeout)
+			}
+		})
 	}
 }
 
