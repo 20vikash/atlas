@@ -8,9 +8,17 @@ from .client import ProxyClient
 class MappingStore:
 	"""Manage OpenResty maps."""
 
-	def __init__(self, client: ProxyClient, reserved_subdomain: str = ""):
+	def __init__(
+		self,
+		client: ProxyClient,
+		reserved_subdomains: tuple[str, ...] | str = (),
+		wildcard_domain: str = "",
+	):
 		self.client = client
-		self.reserved_subdomain = reserved_subdomain
+		if isinstance(reserved_subdomains, str):
+			reserved_subdomains = (reserved_subdomains,) if reserved_subdomains else ()
+		self.reserved_subdomains = {value.lower() for value in reserved_subdomains}
+		self.wildcard_zone = wildcard_domain.lower().removeprefix("*.").rstrip(".")
 
 	async def get(self, kind: str) -> dict[str, str]:
 		self._validate_kind(kind)
@@ -37,14 +45,31 @@ class MappingStore:
 
 	def is_reserved(self, kind: str, key: str) -> bool:
 		"""Report whether a key is the control subdomain."""
-		return bool(self.reserved_subdomain) and kind == "sites" and key.lower() == self.reserved_subdomain
+		if kind != "sites":
+			return False
+		name = key.lower()
+		return name == "proxy" or name.startswith("proxy-") or name in self.reserved_subdomains
+
+	def without_reserved(self, kind: str, values: dict[str, str]) -> dict[str, str]:
+		"""Return a map without control subdomains."""
+		return self._without_reserved(kind, values)
 
 	def _validate_key(self, kind: str, key: str) -> None:
 		if self.is_reserved(kind, key):
 			raise HTTPException(status_code=409, detail=f"{key} is reserved for the proxy control daemon")
+		if kind == "domains" and self._is_wildcard_subdomain(key):
+			raise HTTPException(status_code=409, detail=f"{key} belongs in the site map")
 
 	def _without_reserved(self, kind: str, values: dict[str, str]) -> dict[str, str]:
-		return {key: value for key, value in values.items() if not self.is_reserved(kind, key)}
+		for key in values:
+			self._validate_key(kind, key)
+		return values
+
+	def _is_wildcard_subdomain(self, key: str) -> bool:
+		if not self.wildcard_zone:
+			return False
+		name = key.lower().rstrip(".")
+		return name == self.wildcard_zone or name.endswith(f".{self.wildcard_zone}")
 
 	async def _forward(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
 		status, response_body = await self.client.request(method, path, body)

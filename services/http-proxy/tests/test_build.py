@@ -348,6 +348,34 @@ ZONE = "test.x.frappe.dev"
 VM_A = "fd00:a71a:5::a"
 HTTPS_PORT = "8443"
 SETUP_SH = os.path.join(HERE, "..", "nginx", "setup.sh")
+OPENRESTY_SYSTEMD_OVERRIDE = os.path.join(
+	HERE,
+	"..",
+	"nginx",
+	"systemd",
+	"openresty.service.d",
+	"atlas.conf",
+)
+
+
+def test_setup_restarts_openresty_after_it_installs_the_systemd_override():
+	"""A restart makes the active service use the Atlas configuration and PID file."""
+	with open(SETUP_SH) as setup_file:
+		setup = setup_file.read()
+
+	override_install = setup.index("openresty.service.d/atlas.conf")
+	service_restart = setup.index("systemctl restart openresty.service")
+
+	assert service_restart > override_install
+
+
+def test_openresty_uses_the_nginx_group_for_runtime_sockets():
+	"""Systemd must keep the bridge socket available after a service reload."""
+	with open(OPENRESTY_SYSTEMD_OVERRIDE) as override_file:
+		override = override_file.read()
+
+	assert "Group=nginx" in override.splitlines()
+	assert "RuntimeDirectory=nginx" in override.splitlines()
 
 
 def _upstream_conns() -> int:

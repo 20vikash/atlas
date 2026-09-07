@@ -91,7 +91,9 @@ Atlas places the virtual machine on the running Metal Server and sends the desir
 
 Open **Atlas Settings**, select **Actions**, and click **Renew TLS certificate**. Wait for the wildcard certificate to appear in the Proxy tab.
 
-Open **Proxy Server** and click **Create Proxy Server**. Select the Ubuntu image and set the proxy VM size.
+Open **Metal Server IP Address** and click **Reserve Public IPv4** for each planned proxy.
+
+Open **Proxy Server** and click **Create Proxy Server**. Select the Ubuntu image, set the proxy VM size, and select an Allocated public IPv4 address. Repeat this action to create up to five regional proxies. Atlas adds ready nodes to the health-checked `proxy.<wildcard-domain>` address.
 
 Wait for the status to become `Active`. Open its linked **SSH Task** records to see the install output. See [Proxy Server](proxy-server.md) for engineering details.
 

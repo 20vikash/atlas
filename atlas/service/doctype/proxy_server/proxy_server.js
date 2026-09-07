@@ -46,18 +46,5 @@ frappe.ui.form.on("Proxy Server", {
 				);
 			}
 		});
-
-		frm.add_custom_button(
-			__("Show control API password"),
-			() => {
-				frm.call("get_control_api_password").then(({ message: password }) => {
-					frappe.msgprint({
-						title: __("Control API password"),
-						message: `<code>${frappe.utils.escape_html(password)}</code>`,
-					});
-				});
-			},
-			__("Actions")
-		);
 	},
 });

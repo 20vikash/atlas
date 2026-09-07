@@ -46,12 +46,13 @@ def test_the_schema_lists_the_mapping_routes(tmp_path: Path, monkeypatch: pytest
 	assert "/v1/state" not in paths
 	assert "/docs" not in paths
 	assert schema["components"]["securitySchemes"]["BearerAuth"]["scheme"] == "bearer"
+	assert schema["components"]["securitySchemes"]["BearerAuth"]["bearerFormat"] == "password or JWT"
 
 	for path, methods in paths.items():
 		for operation in methods.values():
 			assert operation["summary"]
 			assert operation["description"]
-			if path != "/healthz":
+			if path not in {"/healthz", "/readyz"}:
 				assert operation["security"] == [{"BearerAuth": []}]
 
 	assert paths["/v1/sites"]["put"]["summary"] == "Sync site routes"

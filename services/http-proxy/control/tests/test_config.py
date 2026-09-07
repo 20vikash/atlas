@@ -10,14 +10,27 @@ from proxy_control.config import (
 
 FULL = """
 [control]
-domain = "proxy-001.par-1.example.com"
+domain = "proxy.par-1.example.com"
+node_domain = "proxy-001.par-1.example.com"
 admin_socket = "/run/nginx/other.sock"
 cert_dir = "/srv/certs"
 
 [auth]
-password_hash = "$2b$12$hash"
+password_hash = "current-hash"
+previous_password_hash = "previous-hash"
+previous_password_valid_until = 1788800000
 jwks_url = "https://issuer.example.com/jwks.json"
 jwks_audience_id = "atlas-proxy-control"
+
+[cluster]
+node_id = "proxy-001"
+password = "current-secret"
+previous_password = "previous-secret"
+previous_password_valid_until = 1788800000
+peers = [
+  { node_id = "proxy-001", address = "https://proxy-001.par-1.example.com" },
+  { node_id = "proxy-002", address = "https://proxy-002.par-1.example.com" },
+]
 
 [tls]
 wildcard_domain = "*.par-1.example.com"
@@ -42,7 +55,7 @@ def test_a_missing_file_is_refused(tmp_path: Path):
 
 def test_a_missing_tls_section_is_refused(tmp_path: Path):
 	path = tmp_path / "proxy-control.toml"
-	path.write_text('[auth]\npassword_hash = "hash"\n')
+	path.write_text('[auth]\njwks_url = "https://issuer.example.com/jwks.json"\n')
 
 	with pytest.raises(ConfigError):
 		load(path)
@@ -56,10 +69,17 @@ def test_a_full_file_is_read(tmp_path: Path):
 
 	assert config.admin_socket == "/run/nginx/other.sock"
 	assert config.cert_dir == Path("/srv/certs")
-	assert config.auth.password_hash == "$2b$12$hash"
 	assert config.auth.jwks_audience_id == "atlas-proxy-control"
-	assert config.domain == "proxy-001.par-1.example.com"
-	assert config.reserved_subdomain == "proxy-001"
+	assert config.auth.password_hash == "current-hash"
+	assert config.auth.previous_password_hash == "previous-hash"
+	assert config.auth.previous_password_valid_until == 1788800000
+	assert config.domain == "proxy.par-1.example.com"
+	assert config.node_domain == "proxy-001.par-1.example.com"
+	assert config.reserved_subdomains == ("proxy", "proxy-001")
+	assert config.cluster.node_id == "proxy-001"
+	assert config.cluster.previous_password == "previous-secret"
+	assert config.cluster.previous_password_valid_until == 1788800000
+	assert len(config.cluster.peers) == 2
 	assert config.tls is not None
 	assert config.tls.wildcard_domain == "*.par-1.example.com"
 	assert config.tls.fullchain_pem.startswith("-----BEGIN CERTIFICATE-----")
@@ -68,12 +88,14 @@ def test_a_full_file_is_read(tmp_path: Path):
 
 def test_a_partial_file_keeps_the_defaults(tmp_path: Path):
 	path = tmp_path / "proxy-control.toml"
-	path.write_text(TLS_SECTION + '\n[auth]\npassword_hash = "$2b$12$hash"\n')
+	path.write_text(TLS_SECTION + '\n[auth]\njwks_url = "https://issuer.example.com/jwks.json"\n')
 
 	config = load(path)
 
-	assert config.auth.password_hash == "$2b$12$hash"
-	assert config.auth.jwks_url == ""
+	assert config.auth.jwks_url == "https://issuer.example.com/jwks.json"
+	assert config.auth.jwks_audience_id == ""
+	assert config.auth.password_hash == ""
+	assert config.auth.previous_password_valid_until == 0
 	assert config.tls.wildcard_domain == "*.par-1.example.com"
 
 
@@ -171,3 +193,19 @@ def test_no_control_domain_reserves_nothing(tmp_path: Path):
 
 	assert config.domain == ""
 	assert config.reserved_subdomain == ""
+
+
+def test_cluster_membership_must_include_the_local_node(tmp_path: Path):
+	path = tmp_path / "proxy-control.toml"
+	path.write_text(
+		TLS_SECTION
+		+ """
+[cluster]
+node_id = "proxy-001"
+password = "secret"
+peers = [{ node_id = "proxy-002", address = "https://proxy-002.par-1.example.com" }]
+"""
+	)
+
+	with pytest.raises(ConfigError, match="must include"):
+		load(path)

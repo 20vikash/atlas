@@ -25,6 +25,14 @@ function showCreateProxyServerDialog() {
 				reqd: 1,
 				default: 16384,
 			},
+			{
+				fieldname: "server_ip_address",
+				fieldtype: "Link",
+				label: __("Public IPv4 Address"),
+				options: "Metal Server IP Address",
+				reqd: 1,
+				filters: { status: "Allocated" },
+			},
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {

@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Annotated, ClassVar
 
@@ -13,7 +14,7 @@ CONTROL_BEARER_SCHEME = "BearerAuth"
 bearer = HTTPBearer(
 	scheme_name=CONTROL_BEARER_SCHEME,
 	bearerFormat="password or JWT",
-	description="Use the control API password or a valid JWT.",
+	description="Use the regional proxy password or a valid JWT.",
 	auto_error=False,
 )
 
@@ -65,12 +66,20 @@ class Authentication:
 			return AuthConfig()
 
 	def _matches_password(self, auth: AuthConfig, password: str) -> bool:
-		if not auth.password_hash:
-			return False
-		try:
-			return bcrypt.checkpw(password.encode(), auth.password_hash.encode())
-		except ValueError:
-			return False
+		password_hashes = [auth.password_hash]
+		if time.time() <= auth.previous_password_valid_until:
+			password_hashes.append(auth.previous_password_hash)
+
+		for password_hash in password_hashes:
+			if not password_hash:
+				continue
+			try:
+				if bcrypt.checkpw(password.encode(), password_hash.encode()):
+					return True
+			except ValueError:
+				continue
+
+		return False
 
 	def _matches_jwks(self, auth: AuthConfig, token: str) -> bool:
 		if not auth.jwks_url or not auth.jwks_audience_id:

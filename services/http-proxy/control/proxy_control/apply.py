@@ -38,9 +38,9 @@ def main() -> int:
 
 
 def write_control_subdomain(config: ControlConfig) -> None:
-	"""Write the control label for OpenResty."""
+	"""Write the control labels for OpenResty."""
 	path = Path(config.cert_dir).parent / CONTROL_SUBDOMAIN_FILE
-	path.write_text(f"{config.reserved_subdomain}\n")
+	path.write_text(f"{','.join(config.reserved_subdomains)}\n")
 	path.chmod(0o644)
 
 

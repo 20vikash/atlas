@@ -1,49 +1,51 @@
-# Setup
+# Setup and configuration
 
-Use this guide to install the proxy on a virtual machine. Atlas does this for a Proxy Server record. Follow the manual steps when you set up a proxy by hand.
+Atlas normally installs and configures each proxy. Use this guide to inspect that process or install a node by hand.
 
-## Before you start
+## Requirements
 
-Use Ubuntu 24.04 and `root` or `sudo`. Give the VM access to the Ubuntu, OpenResty, and deadsnakes package servers.
+Use Ubuntu 24.04 and `root` or `sudo`. Give the VM access to the Ubuntu, OpenResty, and deadsnakes package servers. The control daemon needs Python 3.14.
 
-The daemon needs Python 3.14. The setup script adds the deadsnakes PPA and creates its virtual environment with `python3.14`.
-
-The setup script creates the locked `frappe` account with passwordless `sudo`. It also creates the configuration file and a placeholder certificate when they do not exist.
+Each node needs a public IPv4 address, a stable `proxy-NNN.<wildcard-domain>` A record, and HTTPS access to every configured peer. The regional wildcard certificate must cover the node address and `proxy.<wildcard-domain>`.
 
 ## Install
 
 1. Copy this component to the VM.
-2. Write `/etc/atlas/proxy-control.toml`. See [Configuration file](#configuration-file).
-3. Run the setup script:
+2. Write `/etc/atlas/proxy-control.toml` with mode `0600` and owner `root`.
+3. Run `sudo ./nginx/setup.sh`.
+4. Check `openresty.service`, `atlas-proxy-control.socket`, and `atlas-proxy-control.service`.
 
-  ```sh
-  sudo ./nginx/setup.sh
-  ```
-
-The script installs OpenResty and the control daemon, enables their units, and applies the certificate the configuration file carries. It is safe to run again. A repeated run keeps the installed OpenResty package and reloads the running service, so the open connections stay up.
-
-An empty configuration file stops the script before it applies anything and before it starts the daemon. Write the file and run the script again.
-
-4. Check that both services are enabled:
-
-  ```sh
-  sudo systemctl is-enabled openresty.service atlas-proxy-control.service
-  ```
+The setup script creates the locked `frappe` account, installs OpenResty and the daemon, and creates a placeholder certificate. A repeated run keeps the installed package and restarts OpenResty.
 
 ## Configuration file
 
-`/etc/atlas/proxy-control.toml` is the only configuration source. It holds the credentials and the regional wildcard certificate, so its mode is `0600` and its owner is `root`.
+The following example configures `proxy-001` in a three-node cluster:
 
 ```toml
 [control]
-domain = "proxy-001.par-1.example.com"
+domain = "proxy.par-1.example.com"
+node_domain = "proxy-001.par-1.example.com"
 admin_socket = "/run/nginx/admin.sock"
 cert_dir = "/var/lib/nginx/certs"
 
 [auth]
-password_hash = "$2b$12$replace-with-a-bcrypt-hash"
+password_hash = "$2b$12$replace-with-the-current-bcrypt-hash"
+previous_password_hash = "$2b$12$replace-with-the-previous-bcrypt-hash"
+previous_password_valid_until = 1788800000
 jwks_url = "https://issuer.example.com/jwks.json"
 jwks_audience_id = "atlas-proxy-control"
+
+[cluster]
+node_id = "proxy-001"
+password = "replace-with-the-current-regional-password"
+previous_password = "replace-with-the-previous-regional-password"
+previous_password_valid_until = 1788800000
+state_path = "/var/lib/nginx/cluster-state.json"
+peers = [
+  { node_id = "proxy-001", address = "https://proxy-001.par-1.example.com" },
+  { node_id = "proxy-002", address = "https://proxy-002.par-1.example.com" },
+  { node_id = "proxy-003", address = "https://proxy-003.par-1.example.com" },
+]
 
 [tls]
 wildcard_domain = "*.par-1.example.com"
@@ -59,58 +61,54 @@ private_key_pem = '''
 '''
 ```
 
-`[control]` and `[auth]` are optional. Without credentials the daemon serves `/healthz` and refuses every protected request.
+`control.domain` is the regional address. `control.node_domain` is the local node address. Both names must be one label below the wildcard zone. The apply command writes both labels to `/var/lib/nginx/control-subdomain`, so OpenResty sends them to the daemon before it checks the site map.
 
-`[tls]` is required. A proxy without a valid wildcard certificate refuses to configure. The daemon and `proxy-control` name missing values.
+`auth` protects the public map API. The daemon accepts the current password hash. It accepts the previous hash until `previous_password_valid_until`. This value is a Unix time in seconds. The daemon also accepts JWTs from `jwks_url` when the audience matches `jwks_audience_id`.
 
-`wildcard_domain` also sets the region. The apply step writes it to `/var/lib/nginx/region`, which is what separates a site subdomain from a custom domain.
+`cluster` protects internal peer routes. It contains the raw regional passwords. It accepts the previous password until `previous_password_valid_until`. The peer array must include the local `node_id` and unique node IDs. It supports at most 5 entries. Every peer address must use HTTPS.
 
-`control.domain` is the name that reaches this daemon. It must sit one label below the wildcard name, so the certificate covers it and its first label is the reserved subdomain. The apply step writes that label to `/var/lib/nginx/control-subdomain`.
+`tls` is required. The apply command refuses a missing certificate, a key that does not match, or a certificate that does not cover the wildcard name.
 
-The daemon binds `127.0.0.1` only. OpenResty routes the control domain to it on port 443, so every request carries the wildcard certificate and no port has to be open to a network. A site map may not use the reserved subdomain: `PATCH` and `DELETE` on it return `409`, and a full `PUT` installs every other entry and skips it.
+## Apply a changed configuration
 
-Use a PEM literal string with `'''`. PEM text contains no `'''`, so no value needs escaping.
-
-## Change the configuration
-
-Write the new file, then apply it:
+Write the new file atomically, then run:
 
 ```sh
 sudo /opt/atlas/proxy-control/bin/proxy-control
-```
-
-The command installs the certificate, writes the region file, and reloads OpenResty. It exits non-zero when the certificate is missing, when the certificate and the key do not match, or when the certificate does not cover the wildcard domain.
-
-The daemon reads its credentials on each request, so a credential change needs no restart. It always listens on `127.0.0.1:9000`.
-
-## Configure the maps
-
-The HTTP API carries the maps only:
-
-1. Send `PUT /v1/sites` with the full site map.
-2. Send `PUT /v1/domains` with the full custom-domain map.
-
-See [Control daemon](control-daemon.md) for request examples.
-
-Do not direct public DNS traffic to the VM before the certificate and the maps are in place.
-
-## Check a running proxy
-
-```sh
-sudo systemctl status openresty.service atlas-proxy-control.service
-curl -fsS -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" http://127.0.0.1:9000/healthz
-curl -fsS -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" -o /dev/null http://127.0.0.1:9000/readyz
-```
-
-## Service commands
-
-```sh
-sudo systemctl reload openresty.service
 sudo systemctl restart atlas-proxy-control.service
-journalctl -u openresty.service -f
+```
+
+The apply command installs the certificate, writes the region and control label files, and reloads OpenResty. Restart the daemon after a peer, password, or cluster setting changes.
+
+## Join a node
+
+1. Create the node A record.
+2. Install the package and send a configuration that contains the current peer list.
+3. Start the daemon.
+4. Add the node to the configurations of active peers.
+5. Wait for `/readyz` to return `204`.
+6. Create its HTTPS health check and add its address to `proxy.<wildcard-domain>`.
+7. Make sure that `*.<wildcard-domain>` is a CNAME to `proxy.<wildcard-domain>`.
+
+At startup, the node reads its durable snapshot and asks peers for their status. It downloads the highest-generation peer snapshot when that snapshot is newer. The readiness route stays unavailable until the node has synchronized and knows a leader.
+
+## DNS
+
+Each node has one A record at `proxy-NNN.<wildcard-domain>` with a 3600-second TTL. The regional `proxy.<wildcard-domain>` name has one multivalue A record per node with a 120-second TTL.
+
+Each regional record has an HTTPS health check for `/healthz`. The health check uses the node name as the TLS host name.
+
+The `*.<wildcard-domain>` CNAME points to `proxy.<wildcard-domain>` and has a 3600-second TTL. Exact node and regional records take priority over this wildcard record.
+
+Remove the regional record and health check before you release a node address. Then remove the node A record.
+
+## Checks
+
+```sh
+sudo systemctl status openresty.service atlas-proxy-control.socket atlas-proxy-control.service
+curl -fsS -o /dev/null http://127.0.0.1:9000/healthz
+curl -fsS -o /dev/null http://127.0.0.1:9000/readyz
 journalctl -u atlas-proxy-control.service -f
 ```
 
-A reload keeps the open connections. Use `systemctl restart openresty.service` only when a reload cannot apply the change.
-
-`atlas-proxy-control.socket` owns `127.0.0.1:9000`. It keeps the port open while the daemon restarts, so a request waits instead of getting a `502`. Restart the socket unit only to change the listening address.
+`/healthz` checks OpenResty and its routes. `/readyz` also checks cluster synchronization and the leader.

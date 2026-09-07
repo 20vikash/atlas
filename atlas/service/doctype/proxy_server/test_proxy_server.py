@@ -21,7 +21,10 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 			| values
 		)
 		proxy_server.flags.created_by_proxy_server_api = True
-		with patch.object(type(proxy_server), "enqueue_provisioning"):
+		with (
+			patch.object(type(proxy_server), "enqueue_provisioning"),
+			patch.object(proxy_server_module.frappe.db, "count", return_value=0),
+		):
 			proxy_server.insert(ignore_permissions=True, ignore_links=True)
 		return proxy_server
 
@@ -29,16 +32,6 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 		proxy_server = self.build()
 
 		self.assertRegex(proxy_server.name, r"^proxy-\d{3}$")
-
-	# Atlas holds the password and sends the proxy only its hash.
-	def test_a_control_api_password_is_generated_once(self) -> None:
-		proxy_server = self.build()
-
-		password = proxy_server.get_password("control_api_password")
-
-		self.assertTrue(password)
-		proxy_server.save(ignore_permissions=True)
-		self.assertEqual(proxy_server.get_password("control_api_password"), password)
 
 	def test_creation_outside_the_api_is_refused(self) -> None:
 		with self.assertRaises(frappe.ValidationError):
@@ -54,7 +47,10 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 			}
 		)
 		proxy_server.flags.created_by_proxy_server_api = True
-		with patch.object(type(proxy_server), "enqueue_provisioning") as enqueue_provisioning:
+		with (
+			patch.object(type(proxy_server), "enqueue_provisioning") as enqueue_provisioning,
+			patch.object(proxy_server_module.frappe.db, "count", return_value=0),
+		):
 			proxy_server.insert(ignore_permissions=True, ignore_links=True)
 
 		enqueue_provisioning.assert_called_once()
@@ -93,17 +89,6 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 
 		enqueue_provisioning.assert_called_once()
 
-	def test_a_system_manager_can_read_the_control_api_password(self) -> None:
-		proxy_server = self.build()
-
-		with (
-			patch.object(proxy_server_module, "_validate_system_manager"),
-			patch.object(proxy_server, "get_password", return_value="control-password"),
-		):
-			password = proxy_server.get_control_api_password()
-
-		self.assertEqual(password, "control-password")
-
 	def test_a_website_user_cannot_manage_proxies(self) -> None:
 		with (
 			patch.object(frappe, "only_for"),
@@ -114,6 +99,56 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 
 
 class TestProxyServerCreate(UnitTestCase):
+	def test_dns_cleanup_removes_the_regional_record_without_an_address(self) -> None:
+		proxy_server = MagicMock()
+		proxy_server.name = "proxy-001"
+		proxy_server.public_ipv4 = None
+		proxy_server.dns_health_check_id = "health-1"
+		proxy_server.get_domain.return_value = "proxy-001.example.com"
+		provider = MagicMock()
+
+		with patch.object(
+			proxy_server_module.frappe,
+			"get_single",
+			return_value=SimpleNamespace(
+				dns_provider_controller=provider,
+				wildcard_domain="example.com",
+			),
+		):
+			proxy_server_module.ProxyServer.remove_dns_record(proxy_server)
+
+		provider.remove_multivalue_a_record.assert_called_once_with("proxy.example.com", "proxy-001")
+		provider.remove_health_check.assert_called_once_with("health-1")
+
+	def test_dns_cleanup_always_removes_the_node_record(self) -> None:
+		proxy_server = MagicMock()
+		proxy_server.public_ipv4 = None
+		proxy_server.dns_health_check_id = None
+		proxy_server.get_domain.return_value = "proxy-001.example.com"
+		provider = MagicMock()
+
+		with patch.object(
+			proxy_server_module.frappe,
+			"get_single",
+			return_value=SimpleNamespace(
+				dns_provider_controller=provider,
+				wildcard_domain="example.com",
+			),
+		):
+			proxy_server_module.ProxyServer.remove_dns_record(proxy_server)
+
+		provider.remove_a_record.assert_called_once_with("proxy-001.example.com")
+
+	def test_a_sixth_proxy_is_refused(self) -> None:
+		proxy_server = MagicMock()
+		proxy_server.flags.created_by_proxy_server_api = True
+
+		with (
+			patch.object(proxy_server_module.frappe.db, "count", return_value=5),
+			self.assertRaises(frappe.ValidationError),
+		):
+			proxy_server_module.ProxyServer.before_insert(proxy_server)
+
 	def test_the_creation_api_creates_a_proxy_for_the_new_vm(self) -> None:
 		proxy_server = MagicMock(name="proxy_server")
 		proxy_server.name = "proxy-001"
@@ -129,10 +164,6 @@ class TestProxyServerCreate(UnitTestCase):
 				"get_single",
 				return_value=SimpleNamespace(public_ssh_key="ssh-ed25519 AAAA atlas"),
 			),
-			patch(
-				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.reserve",
-				return_value="203.0.113.9",
-			),
 			patch("atlas.vm.core.vm_service.VirtualMachineService", virtual_machine_service),
 		):
 			name = proxy_server_module.create(
@@ -141,6 +172,7 @@ class TestProxyServerCreate(UnitTestCase):
 					"vcpus": 2,
 					"memory_mib": 4096,
 					"disk_mib": 16384,
+					"server_ip_address": "203.0.113.9",
 				}
 			)
 
@@ -149,7 +181,22 @@ class TestProxyServerCreate(UnitTestCase):
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["tenant_id"], 0)
 		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_privileged"])
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["hostname"], "proxy-001")
+		self.assertEqual(virtual_machine_service.create.call_args.args[0]["server_ip_address"], "203.0.113.9")
 		proxy_server.enqueue_provisioning.assert_called_once()
+
+	def test_creation_needs_an_allocated_public_ipv4_address(self) -> None:
+		with (
+			patch.object(proxy_server_module.frappe, "only_for"),
+			self.assertRaisesRegex(frappe.ValidationError, "allocated public IPv4"),
+		):
+			proxy_server_module.create(
+				{
+					"virtual_machine_image": "image-1",
+					"vcpus": 2,
+					"memory_mib": 4096,
+					"disk_mib": 16384,
+				}
+			)
 
 	def test_pending_proxies_are_queued(self) -> None:
 		with (

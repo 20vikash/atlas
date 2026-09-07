@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import frappe
+import requests
 from frappe import _
 
 from atlas.atlas.core.artifacts import get_download_url
@@ -19,6 +21,12 @@ INSTALL_TIMEOUT_SECONDS = 1_800
 CONFIGURE_TIMEOUT_SECONDS = 300
 SSH_TIMEOUT_SECONDS = 600
 SSH_POLL_INTERVAL_SECONDS = 5
+CONTROL_READY_TIMEOUT_SECONDS = 120
+CONTROL_READY_POLL_INTERVAL_SECONDS = 1
+CONTROL_REQUEST_TIMEOUT_SECONDS = 2
+NODE_DNS_TTL_SECONDS = 3600
+REGIONAL_DNS_TTL_SECONDS = 120
+WILDCARD_DNS_TTL_SECONDS = 3600
 
 
 class ProxyServerProvisioner:
@@ -44,6 +52,9 @@ class ProxyServerProvisioner:
 			self.proxy_server.status = "Active"
 			self.proxy_server.is_provisioning_completed = 1
 			self.save_progress()
+			from atlas.service.core.proxy.configuration import push_configuration_to_active_proxies
+
+			push_configuration_to_active_proxies()
 		except Exception as error:
 			self.proxy_server.status = "Failed"
 			self.proxy_server.failure_message = f"{phase}: {error}"
@@ -65,6 +76,9 @@ class ProxyServerProvisioner:
 			("secure-shell", self.wait_for_ssh),
 			("package", self.install_package),
 			("configuration", self.push_configuration),
+			("cluster-membership", self.push_cluster_membership),
+			("control-readiness", self.wait_for_control_readiness),
+			("global-dns", self.update_global_dns_record),
 		)
 
 	@property
@@ -111,8 +125,61 @@ class ProxyServerProvisioner:
 			frappe.throw(_("Proxy Server {0} has no public IPv4 address.").format(self.proxy_server.name))
 
 		settings = frappe.get_single("Atlas Settings")
-		settings.dns_provider_controller.upsert_a_record(self.proxy_server.get_domain(), address)
+		settings.dns_provider_controller.upsert_a_record(
+			self.proxy_server.get_domain(), address, ttl=NODE_DNS_TTL_SECONDS
+		)
 		self.save_progress(save)
+
+	def update_global_dns_record(self, save: bool = True) -> None:
+		"""Publish this proxy as a health-checked regional endpoint."""
+		address = self.proxy_server.public_ipv4
+		if not address:
+			frappe.throw(_("Proxy Server {0} has no public IPv4 address.").format(self.proxy_server.name))
+
+		settings = frappe.get_single("Atlas Settings")
+		provider = settings.dns_provider_controller
+		if not self.proxy_server.dns_health_check_id:
+			self.proxy_server.dns_health_check_id = provider.create_https_health_check(
+				address,
+				self.proxy_server.get_domain(),
+				"/healthz",
+			)
+		provider.upsert_multivalue_a_record(
+			f"proxy.{settings.wildcard_domain}",
+			self.proxy_server.name,
+			address,
+			self.proxy_server.dns_health_check_id,
+			ttl=REGIONAL_DNS_TTL_SECONDS,
+		)
+		provider.upsert_cname_record(
+			f"*.{settings.wildcard_domain}",
+			f"proxy.{settings.wildcard_domain}",
+			ttl=WILDCARD_DNS_TTL_SECONDS,
+		)
+		self.save_progress(save)
+
+	def push_cluster_membership(self, save: bool = True) -> None:
+		"""Send the new peer list to each active proxy before DNS publication."""
+		for name in frappe.get_all("Proxy Server", filters={"status": "Active"}, pluck="name"):
+			if name == self.proxy_server.name:
+				continue
+			proxy_server = frappe.get_doc("Proxy Server", name)
+			ProxyServerProvisioner(proxy_server).push_configuration()
+		self.save_progress(save)
+
+	def wait_for_control_readiness(self, save: bool = True) -> None:
+		"""Wait until the node has synchronized and OpenResty is ready."""
+		deadline = time.monotonic() + CONTROL_READY_TIMEOUT_SECONDS
+		url = f"https://{self.proxy_server.get_domain()}/readyz"
+		while time.monotonic() < deadline:
+			try:
+				if requests.get(url, timeout=CONTROL_REQUEST_TIMEOUT_SECONDS).status_code == 204:
+					self.save_progress(save)
+					return
+			except requests.RequestException:
+				pass
+			time.sleep(CONTROL_READY_POLL_INTERVAL_SECONDS)
+		frappe.throw(_("Proxy Server {0} did not become ready.").format(self.proxy_server.name))
 
 	def wait_for_ssh(self, save: bool = True) -> None:
 		"""Wait until the guest answers as root on its public address."""

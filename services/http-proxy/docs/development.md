@@ -23,9 +23,10 @@ control/
     main.py                       FastAPI map API and startup wiring.
     config.py                     Read /etc/atlas/proxy-control.toml.
     apply.py                      The proxy-control command. Install the certificate.
-    auth.py                       Password and JWKS bearer token authentication.
+    auth.py                       JWKS bearer token authentication.
     certificates.py               Validate and install wildcard certificates.
     client.py                     Send HTTP requests through the Unix socket.
+    cluster.py                    Elect the leader and replicate route generations.
     mappings.py                   Read and change route maps.
     server.py                     Start the IPv4 and IPv6 daemon listeners.
   tests/                          Unit tests for the control daemon.
@@ -49,9 +50,9 @@ tests/
 
 ## Change guide
 
-Change the matching file for API, configuration, authentication, map, or certificate changes:
+Change the matching file for API, cluster, configuration, authentication, map, or certificate changes:
 
-- `main.py`, `config.py`, `apply.py`, `auth.py`, `mappings.py`, or `certificates.py`
+- `main.py`, `cluster.py`, `config.py`, `apply.py`, `auth.py`, `mappings.py`, or `certificates.py`
 
 Change `config.py` and `docs/setup.md` together when you add a configuration key. Atlas renders the same file in `atlas/service/core/proxy/configuration.py`, so change that too.
 
@@ -98,6 +99,7 @@ Run a focused test for one area:
 python -m pytest -q control/tests/test_config.py
 python -m pytest -q control/tests/test_auth.py
 python -m pytest -q control/tests/test_apply.py
+python -m pytest -q control/tests/test_cluster.py
 ```
 
 ## Check a change
@@ -110,6 +112,6 @@ git diff --check
 
 ## Files that the proxy writes
 
-OpenResty writes route maps below `/var/lib/nginx`. Do not edit those map files while OpenResty runs.
+OpenResty writes route maps below `/var/lib/nginx`. The control daemon writes `cluster-state.json` in the same directory. Do not edit these files while the services run.
 
 The `proxy-control` command writes the region file and the wildcard certificate files. Change `/etc/atlas/proxy-control.toml` and run it again, rather than editing those files.

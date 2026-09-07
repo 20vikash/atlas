@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import tomllib
+from datetime import UTC, datetime, timedelta
 from string import Template
 from unittest.mock import patch
 
 import bcrypt
 from frappe.tests import UnitTestCase
+from frappe.utils import now_datetime
 
 import atlas.service.core.proxy.configuration as configuration_module
 from atlas.service.core.proxy.configuration import (
@@ -26,9 +28,12 @@ class _FakeSettings:
 		self.proxy_jwks_url = "https://issuer.example.com/jwks.json"
 		self.proxy_jwks_audience_id = "atlas-proxy-control"
 		self.wildcard_tls_expires_on = None
+		self.proxy_cluster_password_rotated_on = now_datetime() - timedelta(minutes=5)
 		self.passwords = {
 			"wildcard_tls_certificate": CERTIFICATE,
 			"wildcard_tls_private_key": PRIVATE_KEY,
+			"proxy_cluster_password": "a-control-password",
+			"previous_proxy_cluster_password": "previous-control-password",
 		}
 
 	def get_password(self, fieldname: str, raise_exception: bool = True) -> str | None:
@@ -45,15 +50,16 @@ class _FakeProxyServer:
 		return self.password
 
 	def get_domain(self) -> str:
-		return "proxy-001.example.com"
+		return "proxy-001.par-1.example.com"
 
 
 def _build(settings: _FakeSettings | None = None, password: str = "a-control-password"):
-	patched = patch(
-		"atlas.service.core.proxy.configuration.frappe.get_single", return_value=settings or _FakeSettings()
-	)
+	settings = settings or _FakeSettings()
+	settings.passwords["proxy_cluster_password"] = password
+	patched = patch("atlas.service.core.proxy.configuration.frappe.get_single", return_value=settings)
 	patched.start()
-	configuration = ProxyConfiguration(_FakeProxyServer(password))
+	proxy_server = _FakeProxyServer(password)
+	configuration = ProxyConfiguration(proxy_server, [proxy_server])
 	patched.stop()
 	return configuration
 
@@ -62,21 +68,45 @@ class TestProxyConfiguration(UnitTestCase):
 	def test_the_file_is_valid_toml_with_every_section(self) -> None:
 		document = tomllib.loads(_build().content)
 
-		self.assertEqual(document["control"]["domain"], "proxy-001.example.com")
+		self.assertEqual(document["control"]["domain"], "proxy.par-1.example.com")
+		self.assertEqual(document["control"]["node_domain"], "proxy-001.par-1.example.com")
 		self.assertEqual(document["tls"]["wildcard_domain"], "*.par-1.example.com")
 		self.assertEqual(document["tls"]["fullchain_pem"].strip(), CERTIFICATE)
 		self.assertEqual(document["tls"]["private_key_pem"].strip(), PRIVATE_KEY)
 		self.assertEqual(document["auth"]["jwks_audience_id"], "atlas-proxy-control")
+		self.assertTrue(bcrypt.checkpw(b"a-control-password", document["auth"]["password_hash"].encode()))
+		self.assertEqual(document["cluster"]["node_id"], "proxy-001")
+		self.assertEqual(document["cluster"]["password"], "a-control-password")
+		self.assertEqual(document["cluster"]["peers"][0]["node_id"], "proxy-001")
 
-	# Atlas keeps the password and the proxy keeps the hash.
-	def test_the_file_carries_a_hash_and_never_the_password(self) -> None:
+	def test_the_file_configures_public_and_cluster_passwords(self) -> None:
 		configuration = _build(password="a-control-password")
 
-		content = configuration.content
+		document = tomllib.loads(configuration.content)
 
-		document = tomllib.loads(content)
-		self.assertNotIn("a-control-password", content)
 		self.assertTrue(bcrypt.checkpw(b"a-control-password", document["auth"]["password_hash"].encode()))
+		self.assertTrue(
+			bcrypt.checkpw(b"previous-control-password", document["auth"]["previous_password_hash"].encode())
+		)
+		self.assertGreater(document["auth"]["previous_password_valid_until"], 0)
+		self.assertEqual(
+			document["cluster"]["previous_password_valid_until"],
+			document["auth"]["previous_password_valid_until"],
+		)
+		self.assertEqual(document["auth"]["jwks_url"], "https://issuer.example.com/jwks.json")
+		self.assertEqual(document["auth"]["jwks_audience_id"], "atlas-proxy-control")
+		self.assertEqual(document["cluster"]["password"], "a-control-password")
+		self.assertEqual(document["cluster"]["previous_password"], "previous-control-password")
+
+	def test_the_previous_password_expires_10_minutes_after_rotation(self) -> None:
+		settings = _FakeSettings()
+		settings.proxy_cluster_password_rotated_on = datetime(2026, 9, 8, 12, 0)
+
+		with patch.object(configuration_module, "get_system_timezone", return_value="UTC"):
+			valid_until = _build(settings).previous_password_valid_until
+
+		expected = int(datetime(2026, 9, 8, 12, 10, tzinfo=UTC).timestamp())
+		self.assertEqual(valid_until, expected)
 
 	def test_a_missing_certificate_is_refused(self) -> None:
 		settings = _FakeSettings()
@@ -85,15 +115,14 @@ class TestProxyConfiguration(UnitTestCase):
 		with self.assertRaises(Exception):
 			_build(settings).content
 
-	def test_a_missing_control_password_is_refused(self) -> None:
+	def test_a_missing_cluster_password_is_refused(self) -> None:
 		with self.assertRaises(Exception):
 			_build(password="").content
 
-	# The hash is salted, so the file differs every time. The digest must not.
-	def test_the_digest_is_stable_while_the_inputs_are(self) -> None:
+	def test_the_content_and_digest_are_stable_while_the_inputs_are(self) -> None:
 		configuration = _build()
 
-		self.assertNotEqual(configuration.content, configuration.content)
+		self.assertEqual(configuration.content, configuration.content)
 		self.assertEqual(configuration.digest, configuration.digest)
 
 	def test_the_digest_follows_a_changed_certificate(self) -> None:
@@ -119,9 +148,9 @@ class TestProxyConfiguration(UnitTestCase):
 	def test_the_write_command_installs_the_file_with_a_private_mode(self) -> None:
 		command = _build().get_write_command()
 
-		self.assertIn(f"install -m 0600 /dev/null {CONFIG_PATH}", command)
-		self.assertIn(f"cat > {CONFIG_PATH} <<'ATLAS_PROXY_CONFIG_END'", command)
-		self.assertTrue(command.rstrip().endswith("ATLAS_PROXY_CONFIG_END"))
+		self.assertIn(f"install -m 0600 /dev/null {CONFIG_PATH}.tmp", command)
+		self.assertIn(f"cat > {CONFIG_PATH}.tmp <<'ATLAS_PROXY_CONFIG_END'", command)
+		self.assertTrue(command.rstrip().endswith(f"mv -f {CONFIG_PATH}.tmp {CONFIG_PATH}"))
 
 	# The task records its command, so it must not contain a secret.
 	def test_the_apply_command_holds_no_secret(self) -> None:
@@ -130,7 +159,7 @@ class TestProxyConfiguration(UnitTestCase):
 		self.assertIn(APPLY_COMMAND, command)
 		self.assertNotIn(CERTIFICATE, command)
 		self.assertNotIn(PRIVATE_KEY, command)
-		self.assertNotIn("password_hash", command)
+		self.assertNotIn("cluster_password", command)
 
 	# The setup script leaves the daemon stopped, so this step has to start it.
 	def test_the_apply_command_starts_the_daemon(self) -> None:

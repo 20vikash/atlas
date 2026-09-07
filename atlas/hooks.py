@@ -87,10 +87,12 @@ app_license = "agpl-3.0"
 
 # before_install = "atlas.install.before_install"
 after_install = [
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
 after_migrate = [
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
@@ -195,10 +197,14 @@ scheduler_events = {
 			# Remove the published files that a newer build replaced.
 			"atlas.atlas.core.artifacts.delete_unlinked_files",
 		],
+		"0 */12 * * *": [
+			"atlas.atlas.doctype.atlas_settings.atlas_settings.rotate_proxy_cluster_password",
+		],
 		"* * * * *": [
 			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
+			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],
 	},
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],

@@ -1,17 +1,34 @@
 # Atlas HTTP proxy
 
-Atlas HTTP proxy runs on one virtual machine for one region. It routes site and custom-domain traffic to site VMs over IPv6.
+Atlas HTTP proxy is a regional cluster of one to five proxy virtual machines. Every ready proxy serves site and custom-domain traffic. The cluster replicates ordered route-map generations between nodes.
 
-Atlas installs it and pushes `/etc/atlas/proxy-control.toml` over SSH. The control daemon reads that file and serves the site and custom-domain maps. It binds `127.0.0.1` only, and the proxy routes its own control domain to it, so the API answers on port `443` with the regional wildcard certificate.
+Clients and Atlas use `proxy.<wildcard-domain>` as the regional control address. Route 53 normally returns ready cluster members. It returns every member when all health checks fail. Each member also has a stable `proxy-NNN.<wildcard-domain>` address for peer communication and operations.
+
+Atlas installs the component and writes `/etc/atlas/proxy-control.toml` over SSH. The file contains the regional certificate, external authentication settings, cluster credentials, and the complete peer list. A joining node gets route state from the peer with the highest generation. Atlas does not copy route maps to a joining node.
 
 Read these documents in this order:
 
-1. [Setup](docs/setup.md)
-2. [Control daemon](docs/control-daemon.md)
-3. [OpenResty](docs/openresty.md)
-4. [Development](docs/development.md)
+1. [Setup and configuration](docs/setup.md)
+2. [High-availability design](docs/high-availability.md)
+3. [Control daemon API](docs/control-daemon.md)
+4. [OpenResty data plane](docs/openresty.md)
+5. [Development](docs/development.md)
 
-The control daemon is the public API and it serves the maps only. Every other setting comes from the configuration file. OpenResty uses a private Unix socket. Do not expose it to a network.
+## Request path
+
+```text
+Atlas or API client
+        |
+        v
+proxy.<wildcard-domain> through health-checked DNS
+        |
+        v
+any ready proxy -> elected leader -> acknowledgement threshold -> response
+```
+
+The selected proxy handles reads locally. It forwards a mutation to the elected leader when required. The leader applies the mutation, assigns its generation, sends it to peers concurrently, and responds after the configured acknowledgement threshold is met.
+
+OpenResty handles public traffic and exposes the control daemon through the regional wildcard certificate. The daemon listens on `127.0.0.1:9000`. OpenResty and the daemon exchange map data through private Unix sockets.
 
 ## Main paths
 
@@ -20,12 +37,11 @@ nginx/setup.sh                  Install the proxy on an Ubuntu VM.
 nginx/nginx.conf                Configure OpenResty.
 nginx/lua/http/                 Route HTTP traffic and store HTTP maps.
 nginx/lua/stream/               Route TLS traffic by SNI.
-nginx/pages/                    Store the HTML error pages.
 nginx/systemd/                  Store the systemd units.
-control/proxy_control/          Store the control daemon package.
-control/pyproject.toml          Define Python packages for the daemon.
+control/proxy_control/          Store the control daemon and cluster code.
+control/tests/                  Store control daemon unit tests.
 docs/                           Store operator and developer guides.
-tests/                          Store the Python test suites.
+tests/                          Store data-plane tests.
 ```
 
 ## Quick start
@@ -34,15 +50,11 @@ tests/                          Store the Python test suites.
 sudo ./nginx/setup.sh
 ```
 
-The script installs OpenResty and the control daemon, enables both units, and applies the certificate the configuration file carries. Run it again after you change the configuration file, or run `/opt/atlas/proxy-control/bin/proxy-control` for the certificate alone.
+The script installs OpenResty and the control daemon. A fresh install has an empty configuration file and a placeholder certificate. The daemon becomes ready after Atlas sends a complete configuration and the node restores its cluster state.
 
-A fresh install has an empty configuration file and a placeholder certificate. The control daemon starts after Atlas sends the wildcard certificate and credentials.
-
-Follow the [setup guide](docs/setup.md) to configure the proxy.
+Follow the [setup guide](docs/setup.md) for the required configuration.
 
 ## Local development
-
-Install the control package with its test dependencies, then run the control daemon tests:
 
 ```sh
 python3 -m venv .venv
@@ -51,8 +63,8 @@ python -m pip install --editable 'control[test]'
 python -m pytest -q control/tests
 ```
 
-Install the full proxy on Ubuntu 24.04 with the [setup guide](docs/setup.md). Use the [development guide](docs/development.md) to change the package or run the daemon locally.
+Use the [development guide](docs/development.md) for the complete checks.
 
 ## License
 
-Atlas WG Mesh is licensed under [AGPL-3.0](../../license.txt).
+Atlas HTTP proxy is licensed under [AGPL-3.0](../../license.txt).

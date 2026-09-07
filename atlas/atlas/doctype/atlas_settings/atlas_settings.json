@@ -65,9 +65,13 @@
   "column_break_wtls",
   "wildcard_tls_expires_on",
   "http_proxy_section",
+  "proxy_cluster_password",
+  "previous_proxy_cluster_password",
+  "proxy_cluster_password_rotated_on",
+  "column_break_hpkg",
   "proxy_jwks_url",
   "proxy_jwks_audience_id",
-  "column_break_hpkg",
+  "column_break_mosu",
   "http_proxy_package_file",
   "http_proxy_package_hash",
   "storage_tab",
@@ -492,14 +496,36 @@
    "fieldtype": "Data",
    "label": "JWKS Audience ID",
    "mandatory_depends_on": "eval: doc.proxy_jwks_url"
+  },
+  {
+   "fieldname": "proxy_cluster_password",
+   "fieldtype": "Password",
+   "label": "Cluster Password",
+   "read_only": 1
+  },
+  {
+   "fieldname": "previous_proxy_cluster_password",
+   "fieldtype": "Password",
+   "label": "Previous Cluster Password",
+   "read_only": 1
+  },
+  {
+   "fieldname": "proxy_cluster_password_rotated_on",
+   "fieldtype": "Datetime",
+   "label": "Cluster Password Rotated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_mosu",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-07 18:36:17.773793",
- "modified_by": "Administrator",
+ "modified": "2026-09-08 00:10:05.469534",
+ "modified_by": "test@gmail.com",
  "module": "Atlas",
  "name": "Atlas Settings",
  "owner": "Administrator",

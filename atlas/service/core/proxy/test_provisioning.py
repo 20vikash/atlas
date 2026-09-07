@@ -22,6 +22,7 @@ def _proxy_server(**values) -> SimpleNamespace:
 		"installed_package_hash": None,
 		"pushed_config_hash": None,
 		"tls_expires_on": None,
+		"dns_health_check_id": None,
 		"is_provisioning_completed": 0,
 		"failure_message": None,
 		"save": Mock(),
@@ -35,7 +36,19 @@ class TestProvisioningSequence(UnitTestCase):
 		"""One setup run installs the command that applies the configuration."""
 		phases = [phase for phase, _operation in ProxyServerProvisioner(_proxy_server()).steps]
 
-		self.assertEqual(phases, ["virtual-machine", "dns", "secure-shell", "package", "configuration"])
+		self.assertEqual(
+			phases,
+			[
+				"virtual-machine",
+				"dns",
+				"secure-shell",
+				"package",
+				"configuration",
+				"cluster-membership",
+				"control-readiness",
+				"global-dns",
+			],
+		)
 
 	def test_a_failed_step_records_its_phase_and_stops(self) -> None:
 		proxy_server = _proxy_server()
@@ -87,6 +100,36 @@ class TestProvisioningSequence(UnitTestCase):
 
 
 class TestApplySteps(UnitTestCase):
+	def test_readiness_is_confirmed_before_dns_publication(self) -> None:
+		proxy_server = _proxy_server()
+		provisioner = ProxyServerProvisioner(proxy_server)
+		responses = [SimpleNamespace(status_code=503), SimpleNamespace(status_code=204)]
+
+		with (
+			patch.object(provisioning.requests, "get", side_effect=responses) as request,
+			patch.object(provisioning.time, "sleep"),
+		):
+			provisioner.wait_for_control_readiness()
+
+		self.assertEqual(request.call_count, 2)
+		request.assert_called_with("https://proxy-001.example.com/readyz", timeout=2)
+		proxy_server.save.assert_called_once_with(ignore_permissions=True)
+
+	def test_cluster_membership_reaches_active_peers(self) -> None:
+		joining_proxy = _proxy_server(name="proxy-003")
+		active_proxy = _proxy_server(name="proxy-001", status="Active")
+		provisioner = ProxyServerProvisioner(joining_proxy)
+
+		with (
+			patch.object(provisioning.frappe, "get_all", return_value=["proxy-001"]),
+			patch.object(provisioning.frappe, "get_doc", return_value=active_proxy),
+			patch.object(ProxyServerProvisioner, "push_configuration") as push_configuration,
+		):
+			provisioner.push_cluster_membership()
+
+		push_configuration.assert_called_once()
+		joining_proxy.save.assert_called_once_with(ignore_permissions=True)
+
 	def test_an_unchanged_configuration_is_not_sent_again(self) -> None:
 		proxy_server = _proxy_server(pushed_config_hash="digest-1")
 		provisioner = ProxyServerProvisioner(proxy_server)
@@ -171,7 +214,10 @@ class TestDNSRecord(UnitTestCase):
 			patch.object(
 				provisioning.frappe,
 				"get_single",
-				return_value=SimpleNamespace(dns_provider_controller=self.provider),
+				return_value=SimpleNamespace(
+					dns_provider_controller=self.provider,
+					wildcard_domain="example.com",
+				),
 			),
 			patch.object(provisioning.frappe, "get_doc", return_value=proxy_server),
 		)
@@ -185,7 +231,9 @@ class TestDNSRecord(UnitTestCase):
 
 		provisioner.update_dns_record()
 
-		self.provider.upsert_a_record.assert_called_once_with("proxy-001.example.com", "203.0.113.9")
+		self.provider.upsert_a_record.assert_called_once_with(
+			"proxy-001.example.com", "203.0.113.9", ttl=3600
+		)
 
 	def test_a_missing_address_fails_loudly(self) -> None:
 		_proxy, provisioner = self.build(public_ipv4=None)
@@ -202,3 +250,20 @@ class TestDNSRecord(UnitTestCase):
 
 		self.assertIs(provisioner.proxy_server, proxy_server)
 		self.provider.upsert_a_record.assert_not_called()
+
+	def test_the_global_record_has_a_health_check(self) -> None:
+		proxy_server, provisioner = self.build(public_ipv4="203.0.113.9")
+		self.provider.create_https_health_check.return_value = "health-1"
+
+		provisioner.update_global_dns_record()
+
+		self.provider.create_https_health_check.assert_called_once_with(
+			"203.0.113.9", "proxy-001.example.com", "/healthz"
+		)
+		self.provider.upsert_multivalue_a_record.assert_called_once_with(
+			"proxy.example.com", "proxy-001", "203.0.113.9", "health-1", ttl=120
+		)
+		self.provider.upsert_cname_record.assert_called_once_with(
+			"*.example.com", "proxy.example.com", ttl=3600
+		)
+		self.assertEqual(proxy_server.dns_health_check_id, "health-1")

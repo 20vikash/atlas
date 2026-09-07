@@ -155,11 +155,8 @@ fi
 # Apply the certificate the configuration file carries. The daemon refuses to
 # start without one, so an empty file waits for Atlas to write the real one.
 if [ -d /run/systemd/system ]; then
-	if systemctl is-active --quiet openresty.service; then
-		systemctl reload openresty.service
-	else
-		systemctl start openresty.service
-	fi
+	# The package can start OpenResty before Atlas installs its systemd override.
+	systemctl restart openresty.service
 	if [ -s "$CONFIG_FILE" ]; then
 		/opt/atlas/proxy-control/bin/proxy-control
 		systemctl restart atlas-proxy-control.service

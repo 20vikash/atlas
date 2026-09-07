@@ -20,12 +20,15 @@ if TYPE_CHECKING:
 	from atlas.atlas.object_storage import ObjectStorageClient
 
 WILDCARD_TLS_RENEWAL_WINDOW_DAYS = 30
+PROXY_CLUSTER_PASSWORD_LENGTH = 48
 # A change to one of these reaches every active proxy through its own job.
 PROXY_CONFIGURATION_FIELDS = (
 	"wildcard_tls_certificate",
 	"wildcard_tls_private_key",
 	"proxy_jwks_url",
 	"proxy_jwks_audience_id",
+	"proxy_cluster_password",
+	"previous_proxy_cluster_password",
 )
 
 
@@ -58,8 +61,11 @@ class AtlasSettings(Document):
 		object_storage_region: DF.Data | None
 		object_storage_secret_access_key: DF.Password | None
 		object_storage_signed_url_expiry: DF.Int
+		previous_proxy_cluster_password: DF.Password | None
 		private_network_cidr: DF.Data
 		private_network_mtu: DF.Int
+		proxy_cluster_password: DF.Password | None
+		proxy_cluster_password_rotated_on: DF.Datetime | None
 		proxy_jwks_audience_id: DF.Data | None
 		proxy_jwks_url: DF.Data | None
 		public_ssh_key: DF.SmallText
@@ -135,6 +141,10 @@ class AtlasSettings(Document):
 			signed_url_expiry=self.object_storage_signed_url_expiry or 86400,
 		)
 
+	def before_validate(self) -> None:
+		"""Create the regional proxy password when it is missing."""
+		self.initialize_proxy_cluster_password()
+
 	def validate(self) -> None:
 		"""Reject settings that would leave Atlas unable to reach a provider."""
 		if self.is_setup_completed and not (
@@ -155,6 +165,29 @@ class AtlasSettings(Document):
 		self.region_name = self.region_name.strip().lower()
 
 		self.validate_wildcard_certificate()
+
+	def on_update(self) -> None:
+		"""Skip provider checks when the empty settings document is created."""
+		if self.flags.in_insert:
+			return
+
+		if any(self.has_value_changed(field) for field in self.server_provider_controller.credential_fields):
+			self.server_provider_controller.validate_credentials()
+
+		if any(self.has_value_changed(field) for field in self.dns_provider_controller.credential_fields):
+			self.dns_provider_controller.validate_credentials()
+
+		if any(self.has_value_changed(field) for field in PROXY_CONFIGURATION_FIELDS):
+			push_configuration_to_active_proxies()
+
+	def before_save(self) -> None:
+		"""Apply provider setup when the credentials change."""
+		if (
+			self.is_dns_setup_completed
+			and self.is_server_provider_setup_completed
+			and not self.is_setup_completed
+		):
+			self.is_setup_completed = True
 
 	def validate_wildcard_certificate(self) -> None:
 		"""Keep the stored certificate, its private key, and the expiry consistent."""
@@ -184,29 +217,6 @@ class AtlasSettings(Document):
 			)
 
 		self.wildcard_tls_expires_on = convert_utc_to_system_timezone(details.expires_on).replace(tzinfo=None)
-
-	def on_update(self) -> None:
-		"""Skip provider checks when the empty settings document is created."""
-		if self.flags.in_insert:
-			return
-
-		if any(self.has_value_changed(field) for field in self.server_provider_controller.credential_fields):
-			self.server_provider_controller.validate_credentials()
-
-		if any(self.has_value_changed(field) for field in self.dns_provider_controller.credential_fields):
-			self.dns_provider_controller.validate_credentials()
-
-		if any(self.has_value_changed(field) for field in PROXY_CONFIGURATION_FIELDS):
-			push_configuration_to_active_proxies()
-
-	def before_save(self) -> None:
-		"""Apply provider setup when the credentials change."""
-		if (
-			self.is_dns_setup_completed
-			and self.is_server_provider_setup_completed
-			and not self.is_setup_completed
-		):
-			self.is_setup_completed = True
 
 	@frappe.whitelist(methods=["POST"])
 	def setup_server_provider(self) -> None:
@@ -243,11 +253,6 @@ class AtlasSettings(Document):
 		)
 		frappe.msgprint(_("Metal Server sizes sync has been queued. Please check after some time."))
 
-	def _sync_server_sizes(self) -> None:
-		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
-
-		CatalogSynchronizer(self.server_provider_controller).sync_server_sizes()
-
 	@frappe.whitelist(methods=["POST"])
 	def sync_server_images(self) -> None:
 		"""Refresh the Metal Server Image catalog from the provider."""
@@ -266,17 +271,46 @@ class AtlasSettings(Document):
 		)
 		frappe.msgprint(_("Metal Server images sync has been queued. Please check after some time."))
 
-	def _sync_server_images(self) -> None:
-		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
-
-		CatalogSynchronizer(self.server_provider_controller).sync_server_images()
-
 	@frappe.whitelist(methods=["POST"])
 	def renew_wildcard_certificate(self) -> None:
 		"""Issue a new wildcard certificate from Let's Encrypt."""
 		frappe.only_for("System Manager")
 		self.enqueue_wildcard_certificate_renewal()
 		frappe.msgprint(_("Wildcard TLS certificate renewal has been queued. Please check after some time."))
+
+	@frappe.whitelist(methods=["POST"])
+	def view_proxy_cluster_password(self) -> None:
+		"""Show the current regional proxy password to a System Manager."""
+		frappe.only_for("System Manager")
+		password = self.get_password("proxy_cluster_password", raise_exception=False)
+		if not password:
+			frappe.throw(_("The proxy cluster password is not set."))
+		frappe.msgprint(_("The current proxy cluster password is: {0}").format(password))
+
+	@frappe.whitelist(methods=["POST"])
+	def rotate_proxy_cluster_password(self) -> None:
+		"""Let a System Manager rotate the regional proxy password."""
+		frappe.only_for("System Manager")
+		self._rotate_proxy_cluster_password()
+		frappe.msgprint(_("The proxy cluster password was rotated."))
+
+	def initialize_proxy_cluster_password(self, persist: bool = False) -> bool:
+		"""Create the regional proxy password when it is missing."""
+		if self.get_password("proxy_cluster_password", raise_exception=False):
+			return False
+		password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
+		self.proxy_cluster_password = password
+		self.proxy_cluster_password_rotated_on = now_datetime()
+		if persist:
+			from frappe.utils.password import set_encrypted_password
+
+			set_encrypted_password(self.doctype, self.name, password, "proxy_cluster_password")
+			frappe.db.set_single_value(
+				self.doctype,
+				"proxy_cluster_password_rotated_on",
+				self.proxy_cluster_password_rotated_on,
+			)
+		return True
 
 	def enqueue_wildcard_certificate_renewal(self) -> None:
 		"""Queue one issuance. A wildcard order waits for DNS, so it cannot run in a request."""
@@ -293,6 +327,29 @@ class AtlasSettings(Document):
 			deduplicate=True,
 			enqueue_after_commit=True,
 		)
+
+	# Internal methods
+
+	def _sync_server_images(self) -> None:
+		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
+
+		CatalogSynchronizer(self.server_provider_controller).sync_server_images()
+
+	def _sync_server_sizes(self) -> None:
+		from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
+
+		CatalogSynchronizer(self.server_provider_controller).sync_server_sizes()
+
+	def _rotate_proxy_cluster_password(self) -> None:
+		"""Rotate the regional proxy password and retain the previous value."""
+		current_password = self.get_password("proxy_cluster_password", raise_exception=False)
+		if not current_password:
+			self.initialize_proxy_cluster_password()
+		else:
+			self.previous_proxy_cluster_password = current_password
+			self.proxy_cluster_password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
+			self.proxy_cluster_password_rotated_on = now_datetime()
+		self.save(ignore_permissions=True)
 
 	def _renew_wildcard_certificate(self) -> None:
 		issued = self.letsencrypt_controller.issue_wildcard_certificate()
@@ -312,3 +369,13 @@ def renew_expiring_wildcard_certificate() -> None:
 		return
 
 	settings.enqueue_wildcard_certificate_renewal()
+
+
+def initialize_proxy_cluster_password() -> None:
+	"""Create the regional proxy password after schema migration."""
+	frappe.get_single("Atlas Settings").initialize_proxy_cluster_password(persist=True)
+
+
+def rotate_proxy_cluster_password() -> None:
+	"""Rotate the regional proxy password on schedule."""
+	frappe.get_single("Atlas Settings")._rotate_proxy_cluster_password()

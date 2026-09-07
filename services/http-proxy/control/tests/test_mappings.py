@@ -41,13 +41,15 @@ def test_the_reserved_key_is_matched_without_case():
 	assert client.requests == []
 
 
-# One bad key must not stop a controller resynchronizing every other site.
-def test_a_full_replace_drops_the_reserved_key():
+# A full replacement must not hide an invalid controller route.
+def test_a_full_replace_rejects_the_reserved_key():
 	store, client = _store()
 
-	asyncio.run(store.replace("sites", {"erp": "2001:db8::1", "proxy-001": "2001:db8::2"}))
+	with pytest.raises(HTTPException) as raised:
+		asyncio.run(store.replace("sites", {"erp": "2001:db8::1", "proxy-001": "2001:db8::2"}))
 
-	assert client.requests == [("PUT", "/v1/sites", {"erp": "2001:db8::1"})]
+	assert raised.value.status_code == 409
+	assert client.requests == []
 
 
 # Only a site subdomain can collide. A custom domain is a complete name.
@@ -59,9 +61,39 @@ def test_a_custom_domain_of_the_same_name_is_allowed():
 	assert client.requests[0][1] == "/v1/domains/proxy-001"
 
 
-def test_nothing_is_reserved_without_a_control_domain():
+def test_proxy_prefix_is_reserved_without_a_control_domain():
 	store, client = _store(reserved="")
 
-	asyncio.run(store.update("sites", "proxy-001", "2001:db8::1"))
+	with pytest.raises(HTTPException):
+		asyncio.run(store.update("sites", "proxy-001", "2001:db8::1"))
 
-	assert client.requests[0][1] == "/v1/sites/proxy-001"
+	assert client.requests == []
+
+
+def test_proxy_name_is_reserved_without_a_control_domain():
+	store, client = _store(reserved="")
+
+	with pytest.raises(HTTPException):
+		asyncio.run(store.update("sites", "proxy", "2001:db8::1"))
+
+	assert client.requests == []
+
+
+def test_wildcard_subdomain_is_rejected_from_domains():
+	client = _RecordingClient()
+	store = MappingStore(client, wildcard_domain="*.par-1.example.com")
+
+	with pytest.raises(HTTPException) as raised:
+		asyncio.run(store.update("domains", "shop.par-1.example.com", "2001:db8::1"))
+
+	assert raised.value.status_code == 409
+	assert client.requests == []
+
+
+def test_external_custom_domain_is_allowed():
+	client = _RecordingClient()
+	store = MappingStore(client, wildcard_domain="*.par-1.example.com")
+
+	asyncio.run(store.update("domains", "shop.example.net", "2001:db8::1"))
+
+	assert client.requests[0][1] == "/v1/domains/shop.example.net"

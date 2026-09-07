@@ -43,6 +43,11 @@ class Route53Provider(DnsProvider):
 	def bootstrap(self) -> None:
 		"""Set up the Route53 resources used by Atlas."""
 		self.settings.route53_dns_zone_id = self.create_zone(self.domain_name)
+		self.upsert_cname_record(
+			f"*.{self.domain_name}",
+			f"proxy.{self.domain_name}",
+			ttl=3600,
+		)
 
 		self.settings.is_dns_setup_completed = 1
 		self.settings.save()
@@ -99,7 +104,68 @@ class Route53Provider(DnsProvider):
 		values = [record["Value"] for record in existing["ResourceRecords"]]
 		self._change_record("DELETE", record_type, name, values, existing["TTL"])
 
-	# Internal methods
+	@override
+	def create_https_health_check(self, ip_address: str, domain: str, path: str) -> str:
+		"""Create the HTTPS health check for one proxy."""
+		try:
+			result = self.client.create_health_check(
+				CallerReference=str(uuid4()),
+				HealthCheckConfig={
+					"IPAddress": ip_address,
+					"Port": 443,
+					"Type": "HTTPS",
+					"ResourcePath": path,
+					"FullyQualifiedDomainName": domain,
+					"RequestInterval": 30,
+					"FailureThreshold": 2,
+					"EnableSNI": True,
+				},
+			)
+		except (BotoCoreError, ClientError) as error:
+			raise Route53Error(f"Failed to create health check for {domain}: {error}") from error
+		return result["HealthCheck"]["Id"]
+
+	@override
+	def remove_health_check(self, health_check_id: str) -> None:
+		"""Remove one proxy health check."""
+		try:
+			self.client.delete_health_check(HealthCheckId=health_check_id)
+		except ClientError as error:
+			if error.response.get("Error", {}).get("Code") == "NoSuchHealthCheck":
+				return
+			raise Route53Error(f"Failed to remove health check {health_check_id}: {error}") from error
+		except BotoCoreError as error:
+			raise Route53Error(f"Failed to remove health check {health_check_id}: {error}") from error
+
+	@override
+	def upsert_multivalue_a_record(
+		self,
+		name: str,
+		identifier: str,
+		ip_address: str,
+		health_check_id: str,
+		ttl: int = 120,
+	) -> None:
+		"""Create or update one health-checked multivalue A record."""
+		self._change_multivalue_a_record("UPSERT", name, identifier, ip_address, health_check_id, ttl)
+
+	@override
+	def remove_multivalue_a_record(
+		self,
+		name: str,
+		identifier: str,
+	) -> None:
+		"""Remove one health-checked multivalue A record."""
+		record = self._get_multivalue_a_record(name, identifier)
+		if record is None:
+			return
+		try:
+			self.client.change_resource_record_sets(
+				HostedZoneId=self.create_zone(self.domain_name),
+				ChangeBatch={"Changes": [{"Action": "DELETE", "ResourceRecordSet": record}]},
+			)
+		except (BotoCoreError, ClientError) as error:
+			raise Route53Error(f"Failed to delete proxy record {name}: {error}") from error
 
 	def _change_record(self, action: str, record_type: str, name: str, values: list[str], ttl: int) -> None:
 		zone_id = self.create_zone(self.domain_name)
@@ -123,6 +189,33 @@ class Route53Provider(DnsProvider):
 		except (BotoCoreError, ClientError) as error:
 			raise Route53Error(f"Failed to {action.lower()} {record_type} record {name}: {error}") from error
 
+	def _change_multivalue_a_record(
+		self,
+		action: str,
+		name: str,
+		identifier: str,
+		ip_address: str,
+		health_check_id: str,
+		ttl: int,
+	) -> None:
+		zone_id = self.create_zone(self.domain_name)
+		record = {
+			"Name": name,
+			"Type": "A",
+			"SetIdentifier": identifier,
+			"MultiValueAnswer": True,
+			"TTL": ttl,
+			"ResourceRecords": [{"Value": ip_address}],
+			"HealthCheckId": health_check_id,
+		}
+		try:
+			self.client.change_resource_record_sets(
+				HostedZoneId=zone_id,
+				ChangeBatch={"Changes": [{"Action": action, "ResourceRecordSet": record}]},
+			)
+		except (BotoCoreError, ClientError) as error:
+			raise Route53Error(f"Failed to {action.lower()} proxy record {name}: {error}") from error
+
 	def _get_record(self, record_type: str, name: str) -> dict | None:
 		zone_id = self.create_zone(self.domain_name)
 		try:
@@ -143,6 +236,29 @@ class Route53Provider(DnsProvider):
 		if record["Type"] != record_type or record["Name"].rstrip(".") != name.rstrip("."):
 			return None
 		return record
+
+	def _get_multivalue_a_record(self, name: str, identifier: str) -> dict | None:
+		zone_id = self.create_zone(self.domain_name)
+		try:
+			result = self.client.list_resource_record_sets(
+				HostedZoneId=zone_id,
+				StartRecordName=name,
+				StartRecordType="A",
+				MaxItems="100",
+			)
+		except (BotoCoreError, ClientError) as error:
+			raise Route53Error(f"Failed to list proxy records for {name}: {error}") from error
+
+		return next(
+			(
+				record
+				for record in result.get("ResourceRecordSets", [])
+				if record["Name"].rstrip(".") == name.rstrip(".")
+				and record["Type"] == "A"
+				and record.get("SetIdentifier") == identifier
+			),
+			None,
+		)
 
 	def _validate_zone(self, zone_id: str, domain: str) -> None:
 		try:

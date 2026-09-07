@@ -1,10 +1,10 @@
 # Copyright (c) 2026, Frappe and Contributors
 # See license.txt
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils import add_days, now_datetime
 
 from atlas.atlas.core.tls.certificate import create_private_key, serialize_private_key
@@ -15,6 +15,33 @@ from atlas.atlas.core.tls.test_certificate import self_signed_certificate
 # Use these module variables to add/remove to/from that list
 EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
+
+
+class TestProxyClusterPassword(UnitTestCase):
+	def test_rotation_action_checks_the_system_manager_role(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		settings = MagicMock()
+		with (
+			patch("frappe.only_for") as only_for,
+			patch("frappe.msgprint"),
+		):
+			AtlasSettings.rotate_proxy_cluster_password(settings)
+
+		only_for.assert_called_once_with("System Manager")
+		settings._rotate_proxy_cluster_password.assert_called_once()
+
+	def test_rotation_retains_one_previous_password(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		settings = MagicMock()
+		settings.get_password.return_value = "current-password"
+		with patch("frappe.generate_hash", return_value="new-password"):
+			AtlasSettings._rotate_proxy_cluster_password(settings)
+
+		self.assertEqual(settings.previous_proxy_cluster_password, "current-password")
+		self.assertEqual(settings.proxy_cluster_password, "new-password")
+		settings.save.assert_called_once_with(ignore_permissions=True)
 
 
 class IntegrationTestAtlasSettings(IntegrationTestCase):

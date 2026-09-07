@@ -1,30 +1,32 @@
-# HTTP Proxy Component Specification
+# HTTP proxy component specification
 
 [Root specification](../../SPEC.md)
 
 ## Purpose
 
-The HTTP proxy runs on one regional VM and routes site traffic to site VMs over IPv6. Atlas owns its configuration and writes `/etc/atlas/proxy-control.toml` over SSH.
+The HTTP proxy runs as a regional cluster of one to five virtual machines. Each node routes site traffic to site VMs over IPv6 and keeps a local copy of the regional route maps.
 
 ## Layout
 
 ```text
-control/       Python control daemon
-nginx/         OpenResty, Lua, and systemd units
-tests/         Component tests
-docs/          Setup and operation guides
+control/       Python control daemon and cluster coordinator
+nginx/         OpenResty and Lua data plane
+tests/         Data-plane and package tests
+docs/          Setup, operation, and development guides
 ```
 
 ## Interfaces
 
+- `proxy.<wildcard-domain>` is the health-checked regional control address.
+- `proxy-NNN.<wildcard-domain>` is one node address. Peers use these addresses for HTTPS communication.
 - The control daemon serves `127.0.0.1:9000`. `atlas-proxy-control.socket` holds the port during daemon restarts.
-- OpenResty routes `control.domain` to the daemon before it reads the site map. That subdomain is reserved.
-- The public API is available through HTTPS on port `443`.
-- OpenResty and the daemon use a private Unix socket.
+- OpenResty sends both control names to the daemon before it reads the site map.
+- OpenResty and the daemon use private Unix sockets for map operations.
+- Atlas writes `/etc/atlas/proxy-control.toml`. The file is the source for node membership, credentials, and TLS configuration.
 
 ## Ownership
 
-Keep control code in `control/` and data-plane code in `nginx/`. The proxy manages regional traffic only. It does not manage VM lifecycle or private VM networking.
+Keep control and cluster code in `control/`. Keep data-plane code in `nginx/`. Atlas owns VM lifecycle, DNS records, credentials, peer membership, and the regional wildcard certificate.
 
 ## Validation
 
@@ -32,4 +34,4 @@ From this directory, run `python -m pip install --editable 'control[test]'` and 
 
 ## Documentation
 
-Read [`README.md`](README.md), then the relevant guide in [`docs/`](docs/).
+Read [`README.md`](README.md), then the relevant guide in [`docs/`](docs/). See [`docs/high-availability.md`](docs/high-availability.md) for the cluster design and state.

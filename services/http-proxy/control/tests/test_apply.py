@@ -84,6 +84,33 @@ def test_apply_installs_the_certificate_from_the_config_file(tmp_path: Path, mon
 	assert (tmp_path / "region").read_text() == "par-1.example.com\n"
 
 
+def test_apply_writes_global_and_node_control_labels(tmp_path: Path, monkeypatch):
+	certificate, private_key = _key_and_certificate()
+	cert_dir = tmp_path / "certs"
+	_write_config(
+		tmp_path,
+		monkeypatch,
+		f"""
+[control]
+domain = "proxy.par-1.example.com"
+node_domain = "proxy-001.par-1.example.com"
+cert_dir = "{cert_dir}"
+
+[tls]
+wildcard_domain = "{WILDCARD}"
+fullchain_pem = '''
+{certificate.strip()}
+'''
+private_key_pem = '''
+{private_key.strip()}
+'''
+""",
+	)
+
+	assert apply.main() == 0
+	assert (tmp_path / "control-subdomain").read_text() == "proxy,proxy-001\n"
+
+
 def test_apply_refuses_a_key_that_does_not_match(tmp_path: Path, monkeypatch):
 	certificate, _ = _key_and_certificate()
 	_, other_key = _key_and_certificate()
@@ -107,7 +134,11 @@ def test_apply_refuses_a_tls_enabled_flag(tmp_path: Path, monkeypatch):
 
 # An empty file is a configuration fault.
 def test_apply_reports_a_missing_certificate(tmp_path: Path, monkeypatch):
-	_write_config(tmp_path, monkeypatch, '[auth]\npassword_hash = "$2b$12$hash"\n')
+	_write_config(
+		tmp_path,
+		monkeypatch,
+		'[auth]\njwks_url = "https://issuer.example.com/jwks.json"\n',
+	)
 
 	assert apply.main() == 2
 
