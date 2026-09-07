@@ -77,28 +77,13 @@ func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, 
 	}
 }
 
-// Start boots a VM. It tries three sources in order: a VM-local memory snapshot,
-// the shared warm image, and a cold boot. A VM-local snapshot is the most
-// specific saved state, so a warm-stopped VM and a warm-image clone both resume
-// through this one path. Warm boot is an optimization, so any warm failure falls
-// back to a cold boot, which is the reliable path.
+// Start boots a VM with the shared warm image if the image asks for it, and
+// falls back to a cold boot, because warm boot is an optimization and cold boot
+// is the reliable path. It never resumes a VM-local snapshot on its own: a resume
+// happens only through StartFromSleepSnapshot, which the manager selects when the
+// VM was warm-stopped. So a VM stopped outside the API cold boots. A failed warm
+// boot releases the disk it prepared before starting again.
 func (m *machine) Start(ctx context.Context) error {
-	restored, err := m.restoreSnapshot(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// The VM disk holds the snapshot-consistent state, so a failed restore
-		// cold boots from it. It does not release the disk or try the warm image.
-		m.runtime.logger.Warn("snapshot restore failed, using cold boot", "virtual_machine_id", m.input.ID, "error", err)
-		return m.coldBoot(ctx)
-	}
-	if restored {
-		m.recordImageUse()
-		return nil
-	}
-
 	if m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
 		err := m.runtime.launchWarmImage(ctx, m.input, m.input.Specification.Image.Name)
 		if err == nil {
