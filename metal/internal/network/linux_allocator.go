@@ -41,8 +41,9 @@ type LinuxAllocator struct {
 }
 
 // NewLinuxAllocator returns a Linux network allocator. It attaches activity
-// tracking on every VM tap0, so a sleepy host never runs without it.
-func NewLinuxAllocator(mesh *Mesh, activity activityAttacher) *LinuxAllocator {
+// tracking on every VM tap0, so a sleepy host never runs without it. The mesh
+// registrar can be a real Mesh or DisabledMesh for a host without Atlas WG Mesh.
+func NewLinuxAllocator(mesh meshRegistrar, activity activityAttacher) *LinuxAllocator {
 	return &LinuxAllocator{mesh: mesh, activity: activity}
 }
 

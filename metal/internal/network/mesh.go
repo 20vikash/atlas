@@ -60,6 +60,26 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	}, nil
 }
 
+// DisabledMesh is a mesh registrar that does nothing. It lets a development or
+// test host run without Atlas WG Mesh. A VM gets no mesh connectivity, so use it
+// only where mesh routing is not needed, such as an uplink-egress boot test.
+type DisabledMesh struct{}
+
+// A real Mesh and a DisabledMesh both satisfy the allocator's registrar.
+var (
+	_ meshRegistrar = (*Mesh)(nil)
+	_ meshRegistrar = DisabledMesh{}
+)
+
+// Add does nothing.
+func (DisabledMesh) Add(context.Context, string, string) error { return nil }
+
+// Remove does nothing.
+func (DisabledMesh) Remove(context.Context, string, string) error { return nil }
+
+// ApplyPrivilegedAddresses does nothing.
+func (DisabledMesh) ApplyPrivilegedAddresses(context.Context, []string) error { return nil }
+
 // EnsureHost configures Atlas WG Mesh when this host has no configuration, and
 // rejects a configuration that discovers on another interface.
 func (mesh *Mesh) EnsureHost(ctx context.Context) error {
