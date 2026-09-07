@@ -201,8 +201,8 @@
  "links": [
   {
    "group": "Logs",
-   "link_doctype": "Metal Server SSH Task",
-   "link_fieldname": "server"
+   "link_doctype": "SSH Task",
+   "link_fieldname": "target"
   },
   {
    "group": "Logs",

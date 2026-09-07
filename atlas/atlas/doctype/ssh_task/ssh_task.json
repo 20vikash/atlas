@@ -4,7 +4,8 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "server",
+  "target_type",
+  "target",
   "status",
   "column_break_status",
   "port",
@@ -19,17 +20,29 @@
   "section_break_output",
   "output",
   "section_break_script",
+  "script_path",
   "script",
   "environment"
  ],
  "fields": [
   {
-   "fieldname": "server",
-   "fieldtype": "Link",
+   "default": "Metal Server",
+   "fieldname": "target_type",
+   "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Server",
-   "options": "Metal Server",
+   "label": "Target Type",
+   "options": "Metal Server\nVirtual Machine",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "target",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Target",
+   "options": "target_type",
    "reqd": 1,
    "search_index": 1,
    "set_only_once": 1
@@ -134,13 +147,23 @@
   {
    "fieldname": "column_break_visc",
    "fieldtype": "Column Break"
+  },
+  {
+   "description": "The script file this task ran, or custom_script for a plain command.",
+   "fieldname": "script_path",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Script Path",
+   "read_only": 1,
+   "set_only_once": 1
   }
  ],
  "links": [],
- "modified": "2026-09-02 00:07:57.747086",
+ "modified": "2026-09-06 21:00:00.000000",
  "modified_by": "Administrator",
- "module": "Metal Server",
- "name": "Metal Server SSH Task",
+ "module": "Atlas",
+ "name": "SSH Task",
  "owner": "Administrator",
  "permissions": [
   {

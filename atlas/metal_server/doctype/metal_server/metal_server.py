@@ -13,6 +13,7 @@ from frappe.model.naming import make_autoname
 from frappe.utils.background_jobs import is_job_enqueued
 
 from atlas.atlas.core.server_providers.base import ServerCreateRequest, ServerPowerAction
+from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.metal_server.core.disk_inventory import DiskInventory
 from atlas.metal_server.core.host_installation import (
 	METALD_INSTALL_TIMEOUT_SECONDS,
@@ -20,7 +21,6 @@ from atlas.metal_server.core.host_installation import (
 	HostInstallation,
 )
 from atlas.metal_server.core.provisioning import ServerProvisioner
-from atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task import MetalServerSSHTask
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -56,6 +56,14 @@ class MetalServer(Document):
 		wireguard_ip_address: DF.Data | None
 		wireguard_public_key: DF.Data | None
 	# end: auto-generated types
+
+	@property
+	def ssh_host(self) -> str:
+		"""Return the address an SSH Task connects to."""
+		if not self.public_ipv4_address:
+			frappe.throw(_("Metal Server {0} has no public IPv4 address.").format(self.name))
+
+		return self.public_ipv4_address
 
 	@property
 	def settings(self) -> AtlasSettings:
@@ -126,12 +134,10 @@ class MetalServer(Document):
 		if self.status != "Running":
 			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
 
-		ssh_task_name = MetalServerSSHTask.create_for_script_file(
-			server=self.name, script_path="ping-server.sh"
+		ssh_task_name = SSHTask.create_for_script_file(
+			target_type=self.doctype, target=self.name, script_path="ping-server.sh"
 		).name
-		frappe.msgprint(
-			_("Check the ping status <a href='/app/server-ssh-task/{0}'>here</a>").format(ssh_task_name)
-		)
+		frappe.msgprint(_("Check the ping status <a href='/app/ssh-task/{0}'>here</a>").format(ssh_task_name))
 		return ssh_task_name
 
 	@frappe.whitelist(methods=["POST"])

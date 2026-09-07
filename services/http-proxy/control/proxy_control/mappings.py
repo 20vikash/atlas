@@ -6,10 +6,19 @@ from .client import ProxyClient
 
 
 class MappingStore:
-	"""Read and change site and custom-domain maps in OpenResty."""
+	"""Manage OpenResty maps."""
 
-	def __init__(self, client: ProxyClient):
+	def __init__(
+		self,
+		client: ProxyClient,
+		reserved_subdomains: tuple[str, ...] | str = (),
+		wildcard_domain: str = "",
+	):
 		self.client = client
+		if isinstance(reserved_subdomains, str):
+			reserved_subdomains = (reserved_subdomains,) if reserved_subdomains else ()
+		self.reserved_subdomains = {value.lower() for value in reserved_subdomains}
+		self.wildcard_zone = wildcard_domain.lower().removeprefix("*.").rstrip(".")
 
 	async def get(self, kind: str) -> dict[str, str]:
 		self._validate_kind(kind)
@@ -20,16 +29,47 @@ class MappingStore:
 		return body
 
 	async def replace(self, kind: str, values: dict[str, str]) -> dict[str, Any]:
+		"""Replace one complete map."""
 		self._validate_kind(kind)
-		return await self._forward("PUT", f"/v1/{kind}", values)
+		return await self._forward("PUT", f"/v1/{kind}", self._without_reserved(kind, values))
 
 	async def update(self, kind: str, key: str, address: str) -> dict[str, Any]:
 		self._validate_kind(kind)
+		self._validate_key(kind, key)
 		return await self._forward("PATCH", f"/v1/{kind}/{key}", {"address": address})
 
 	async def delete(self, kind: str, key: str) -> None:
 		self._validate_kind(kind)
+		self._validate_key(kind, key)
 		await self._forward("DELETE", f"/v1/{kind}/{key}")
+
+	def is_reserved(self, kind: str, key: str) -> bool:
+		"""Report whether a key is the control subdomain."""
+		if kind != "sites":
+			return False
+		name = key.lower()
+		return name == "proxy" or name.startswith("proxy-") or name in self.reserved_subdomains
+
+	def without_reserved(self, kind: str, values: dict[str, str]) -> dict[str, str]:
+		"""Return a map without control subdomains."""
+		return self._without_reserved(kind, values)
+
+	def _validate_key(self, kind: str, key: str) -> None:
+		if self.is_reserved(kind, key):
+			raise HTTPException(status_code=409, detail=f"{key} is reserved for the proxy control daemon")
+		if kind == "domains" and self._is_wildcard_subdomain(key):
+			raise HTTPException(status_code=409, detail=f"{key} belongs in the site map")
+
+	def _without_reserved(self, kind: str, values: dict[str, str]) -> dict[str, str]:
+		for key in values:
+			self._validate_key(kind, key)
+		return values
+
+	def _is_wildcard_subdomain(self, key: str) -> bool:
+		if not self.wildcard_zone:
+			return False
+		name = key.lower().rstrip(".")
+		return name == self.wildcard_zone or name.endswith(f".{self.wildcard_zone}")
 
 	async def _forward(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
 		status, response_body = await self.client.request(method, path, body)

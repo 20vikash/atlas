@@ -142,10 +142,35 @@ func connectMesh(o opts) (*network.Mesh, error) {
 	return mesh, nil
 }
 
+// adoptConsoles restores consoles after a metald restart.
+func adoptConsoles(
+	ctx context.Context,
+	logger *slog.Logger,
+	serialBroker *console.SerialBroker,
+	units *platform.DBus,
+	descriptorStoreAvailable bool,
+) error {
+	runningVirtualMachineIDs, err := units.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list virtual machine units: %w", err)
+	}
+
+	logger.Info(
+		"adopted serial consoles",
+		"adopted_console_count", serialBroker.Adopt(runningVirtualMachineIDs),
+		"running_unit_count", len(runningVirtualMachineIDs),
+		"descriptor_store_available", descriptorStoreAvailable,
+	)
+
+	return nil
+}
+
 func serve(o opts, logger *slog.Logger) (serveError error) {
 	if o.authTokenHash == "" {
 		return fmt.Errorf("metald.auth_token_hash is required")
 	}
+
+	// Connect required host services.
 	// Atlas WG Mesh is required, so fail before metald builds anything.
 	mesh, err := connectMesh(o)
 	if err != nil {
@@ -159,9 +184,11 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		return fmt.Errorf("connect systemd: %w", err)
 	}
 
+	// Create resources that metald owns.
 	daemonContext, cancelDaemon := context.WithCancel(context.Background())
 	stores := storage.NewStores(daemonContext, o.pool, o.imagesDir, logger)
-	serialBroker := console.NewSerialBroker(filepath.Join(o.cfg.SocketsDir, "consoles"))
+	descriptorStore := platform.NewFileDescriptorStore()
+	serialBroker := console.NewSerialBroker(filepath.Join(o.cfg.SocketsDir, "consoles"), descriptorStore)
 	daemon := newDaemon(daemonContext, cancelDaemon, logger, stores.Snapshots, serialBroker, units)
 	defer func() {
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
@@ -169,6 +196,12 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		serveError = errors.Join(serveError, daemon.Shutdown(shutdownContext))
 	}()
 
+	// Restore consoles for running virtual machines.
+	if err := adoptConsoles(daemonContext, logger, serialBroker, units, descriptorStore.IsAvailable()); err != nil {
+		return err
+	}
+
+	// Create virtual machine and API services.
 	wireGuardManager, err := network.NewWireGuardManager(network.WireGuardConfig{
 		InterfaceName: o.wireGuardName,
 		StatePath:     filepath.Join(o.baseDir, "wireguard-peers.json"),
@@ -238,6 +271,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		return fmt.Errorf("configure API: %w", err)
 	}
 
+	// Start workers and serve the API.
 	listener, err := listen(o.listen)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", o.listen, err)

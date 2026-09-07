@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 
+class VirtualMachineCreateError(frappe.ValidationError):
+	"""Report a failed create and the draft that records it."""
+
+	def __init__(self, virtual_machine_name: str, error: MetalClientError) -> None:
+		super().__init__(_("Metal request failed: {0}").format(error))
+		self.virtual_machine_name = virtual_machine_name
+
+
 class VirtualMachineService:
 	"""Own Atlas orchestration for one virtual machine."""
 
@@ -53,7 +61,7 @@ class VirtualMachineService:
 		except MetalClientError as error:
 			if error.uncertain:
 				return {"name": virtual_machine_name, "is_draft": True}
-			cls.raise_metal_error(error)
+			raise VirtualMachineCreateError(virtual_machine_name, error) from error
 
 		virtual_machine.is_draft = 0
 		virtual_machine.save(ignore_permissions=True)

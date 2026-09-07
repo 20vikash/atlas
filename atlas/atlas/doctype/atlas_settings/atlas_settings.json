@@ -44,7 +44,7 @@
   "scaleway_ssh_key_id",
   "scaleway_vpc_id",
   "scaleway_private_network_id",
-  "dns_tab",
+  "proxy_tab",
   "dns_provider",
   "column_break_caqd",
   "wildcard_domain",
@@ -53,6 +53,27 @@
   "route53_dns_zone_id",
   "column_break_bbav",
   "route53_access_key_secret",
+  "letsencrypt_section",
+  "letsencrypt_email",
+  "letsencrypt_config_directory",
+  "column_break_lenc",
+  "is_letsencrypt_staging",
+  "is_wildcard_tls_auto_renew_enabled",
+  "wildcard_tls_section",
+  "wildcard_tls_certificate",
+  "wildcard_tls_private_key",
+  "column_break_wtls",
+  "wildcard_tls_expires_on",
+  "http_proxy_section",
+  "proxy_cluster_password",
+  "previous_proxy_cluster_password",
+  "proxy_cluster_password_rotated_on",
+  "column_break_hpkg",
+  "proxy_jwks_url",
+  "proxy_jwks_audience_id",
+  "column_break_mosu",
+  "http_proxy_package_file",
+  "http_proxy_package_hash",
   "storage_tab",
   "object_storage_section",
   "object_storage_bucket",
@@ -195,11 +216,6 @@
    "options": "Scaleway",
    "read_only_depends_on": "eval: doc.is_server_provider_setup_completed",
    "reqd": 1
-  },
-  {
-   "fieldname": "dns_tab",
-   "fieldtype": "Tab Break",
-   "label": "DNS"
   },
   {
    "fieldname": "dns_provider",
@@ -379,13 +395,136 @@
   {
    "fieldname": "column_break_bgjv",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "proxy_tab",
+   "fieldtype": "Tab Break",
+   "label": "Proxy"
+  },
+  {
+   "fieldname": "letsencrypt_section",
+   "fieldtype": "Section Break",
+   "label": "Let's Encrypt"
+  },
+  {
+   "description": "Let's Encrypt sends certificate expiry notices to this address.",
+   "fieldname": "letsencrypt_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email",
+   "reqd": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "description": "Holds the ACME account key. Leave blank to use the letsencrypt folder of the site.",
+   "fieldname": "letsencrypt_config_directory",
+   "fieldtype": "Data",
+   "label": "Config Directory",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "column_break_lenc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_letsencrypt_staging",
+   "fieldtype": "Check",
+   "label": "Use Staging Environment"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_wildcard_tls_auto_renew_enabled",
+   "fieldtype": "Check",
+   "label": "Auto Renew",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "wildcard_tls_section",
+   "fieldtype": "Section Break",
+   "label": "Wildcard TLS Certificate"
+  },
+  {
+   "fieldname": "wildcard_tls_certificate",
+   "fieldtype": "Password",
+   "label": "Certificate Chain"
+  },
+  {
+   "fieldname": "wildcard_tls_private_key",
+   "fieldtype": "Password",
+   "label": "Private Key"
+  },
+  {
+   "fieldname": "column_break_wtls",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "wildcard_tls_expires_on",
+   "fieldtype": "Datetime",
+   "label": "Expires On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "http_proxy_section",
+   "fieldtype": "Section Break",
+   "label": "HTTP Proxy"
+  },
+  {
+   "fieldname": "http_proxy_package_file",
+   "fieldtype": "Link",
+   "label": "Package",
+   "options": "File",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_hpkg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "http_proxy_package_hash",
+   "fieldtype": "Data",
+   "label": "Package SHA-256",
+   "read_only": 1
+  },
+  {
+   "fieldname": "proxy_jwks_url",
+   "fieldtype": "Data",
+   "label": "JWKS URL"
+  },
+  {
+   "fieldname": "proxy_jwks_audience_id",
+   "fieldtype": "Data",
+   "label": "JWKS Audience ID",
+   "mandatory_depends_on": "eval: doc.proxy_jwks_url"
+  },
+  {
+   "fieldname": "proxy_cluster_password",
+   "fieldtype": "Password",
+   "label": "Cluster Password",
+   "read_only": 1
+  },
+  {
+   "fieldname": "previous_proxy_cluster_password",
+   "fieldtype": "Password",
+   "label": "Previous Cluster Password",
+   "read_only": 1
+  },
+  {
+   "fieldname": "proxy_cluster_password_rotated_on",
+   "fieldtype": "Datetime",
+   "label": "Cluster Password Rotated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_mosu",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-05 17:28:42.151965",
+ "modified": "2026-09-08 00:10:05.469534",
  "modified_by": "test@gmail.com",
  "module": "Atlas",
  "name": "Atlas Settings",

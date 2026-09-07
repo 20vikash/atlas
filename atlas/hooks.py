@@ -86,8 +86,16 @@ app_license = "agpl-3.0"
 # ------------
 
 # before_install = "atlas.install.before_install"
-after_install = "atlas.atlas.core.host_binaries.publish_host_binaries"
-after_migrate = "atlas.atlas.core.host_binaries.publish_host_binaries"
+after_install = [
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
+	"atlas.atlas.core.host_binaries.publish_host_binaries",
+	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+]
+after_migrate = [
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
+	"atlas.atlas.core.host_binaries.publish_host_binaries",
+	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+]
 
 # Uninstallation
 # ------------
@@ -181,16 +189,26 @@ scheduler_events = {
 			"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.enqueue_pending_ip_address_reconcilation",
 			"atlas.metal_server.usage.enqueue_server_syncs",
 		],
-		# Poll and advance in-progress Machine image uploads every 30 seconds.
 		"* * * * * */30": [
+			# Poll and advance in-progress Machine image uploads every 30 seconds.
 			"atlas.vm.core.image_transfer.enqueue_pending_machine_image_transfers",
 		],
+		"*/15 * * * *": [
+			# Remove the published files that a newer build replaced.
+			"atlas.atlas.core.artifacts.delete_unlinked_files",
+		],
+		"0 */12 * * *": [
+			"atlas.atlas.doctype.atlas_settings.atlas_settings.rotate_proxy_cluster_password",
+		],
 		"* * * * *": [
-			"atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task.mark_timed_out_ssh_tasks",
+			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
+			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
+			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],
 	},
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],
+	"daily": ["atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate"],
 }
 
 # Testing

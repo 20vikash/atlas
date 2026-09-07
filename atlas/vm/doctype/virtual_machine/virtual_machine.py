@@ -9,6 +9,7 @@ from frappe.model.document import Document
 from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.parsing import strict_bool
+from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import EGRESS_MODES
@@ -64,6 +65,7 @@ class VirtualMachine(Document):
 	def on_trash(self) -> None:
 		"""Delete only after Metal confirms that the VM is absent."""
 		VirtualMachineService(self).validate_deletion()
+		delete_tasks_for_target(self.doctype, self.name)
 
 	@property
 	def current_state(self) -> str:
@@ -118,6 +120,18 @@ class VirtualMachine(Document):
 		"""Return the attached public IPv4 address, when there is one."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.public_ipv4 if information else None
+
+	@property
+	def ssh_host(self) -> str:
+		"""Return the address an SSH Task connects to."""
+		if not self.public_ipv4:
+			frappe.throw(
+				_("Virtual Machine {0} has no public IPv4 address. Attach one and use uplink egress.").format(
+					self.name
+				)
+			)
+
+		return self.public_ipv4
 
 	@property
 	def disk_throughput_mibps(self) -> int:

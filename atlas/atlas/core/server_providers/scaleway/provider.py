@@ -285,7 +285,7 @@ class ScalewayProvider(ServerProvider):
 
 	def run_setup_script(
 		self,
-		server: "Metal Server",
+		server: MetalServer,
 		script: str,
 		*,
 		ssh_user: str = "root",
@@ -293,10 +293,11 @@ class ScalewayProvider(ServerProvider):
 		timeout_seconds: int = 120,
 	) -> None:
 		"""Run one packaged setup script through Secure Shell."""
-		from atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task import MetalServerSSHTask
+		from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
-		task = MetalServerSSHTask.create_for_script_file(
-			server=server.name,
+		task = SSHTask.create_for_script_file(
+			target_type=server.doctype,
+			target=server.name,
 			script_path=script,
 			ssh_user=ssh_user,
 			environment=environment,

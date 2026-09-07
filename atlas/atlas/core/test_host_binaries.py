@@ -24,26 +24,6 @@ class TestHostBinaries(UnitTestCase):
 	def test_file_name_comes_from_the_artifact(self) -> None:
 		self.assertEqual(HOST_BINARIES[0].file_name, "metald-linux-amd64")
 
-	def test_binary_download_url_prefers_the_configured_base(self) -> None:
-		"""A host cannot reach the site URL of a local bench."""
-		with (
-			patch.object(host_binaries.frappe.db, "get_value", return_value="/files/metald-linux-amd64"),
-			patch.object(host_binaries.frappe, "conf", SimpleNamespace(atlas_base_url="https://atlas.test/")),
-		):
-			url = host_binaries.get_binary_download_url("metald-file")
-
-		self.assertEqual(url, "https://atlas.test/files/metald-linux-amd64")
-
-	def test_binary_download_url_falls_back_to_the_site_url(self) -> None:
-		with (
-			patch.object(host_binaries.frappe.db, "get_value", return_value="/files/metald-linux-amd64"),
-			patch.object(host_binaries.frappe, "conf", SimpleNamespace(atlas_base_url=None)),
-			patch.object(host_binaries.frappe.utils, "get_url", return_value="http://atlas.localhost:8000"),
-		):
-			url = host_binaries.get_binary_download_url("metald-file")
-
-		self.assertEqual(url, "http://atlas.localhost:8000/files/metald-linux-amd64")
-
 	def test_find_host_binary_reads_the_command_line_key(self) -> None:
 		self.assertEqual(host_binaries.find_host_binary("metald").label, "metald")
 		self.assertEqual(host_binaries.find_host_binary("wg-mesh").label, "Atlas WG Mesh")

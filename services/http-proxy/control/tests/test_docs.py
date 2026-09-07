@@ -1,0 +1,70 @@
+import importlib
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+def _client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+	"""Import the app with a configuration file the test controls."""
+	path = tmp_path / "proxy-control.toml"
+	path.write_text(
+		"""[control]
+domain = "proxy-001.par-1.example.com"
+
+[tls]
+wildcard_domain = "*.par-1.example.com"
+fullchain_pem = "leaf"
+private_key_pem = "key"
+"""
+	)
+	monkeypatch.setenv("ATLAS_PROXY_CONTROL_CONFIG", str(path))
+	sys.modules.pop("proxy_control.main", None)
+	return TestClient(importlib.import_module("proxy_control.main").app)
+
+
+def test_the_reference_page_and_the_schema_are_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	client = _client(tmp_path, monkeypatch)
+
+	assert client.get("/docs").status_code == 200
+	assert client.get("/docs/swagger.json").status_code == 200
+	assert client.get("/v1/sites").status_code == 401
+	assert client.get("/v1/domains").status_code == 401
+
+
+def test_the_schema_lists_the_mapping_routes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	client = _client(tmp_path, monkeypatch)
+
+	schema = client.get("/docs/swagger.json").json()
+	paths = schema["paths"]
+
+	assert sorted(paths["/v1/sites"]) == ["get", "put"]
+	assert sorted(paths["/v1/domains"]) == ["get", "put"]
+	assert sorted(paths["/v1/sites/{name}"]) == ["delete", "patch"]
+	assert sorted(paths["/v1/domains/{domain}"]) == ["delete", "patch"]
+	assert "/v1/state" not in paths
+	assert "/docs" not in paths
+	assert schema["components"]["securitySchemes"]["BearerAuth"]["scheme"] == "bearer"
+	assert schema["components"]["securitySchemes"]["BearerAuth"]["bearerFormat"] == "password or JWT"
+
+	for path, methods in paths.items():
+		for operation in methods.values():
+			assert operation["summary"]
+			assert operation["description"]
+			if path not in {"/healthz", "/readyz"}:
+				assert operation["security"] == [{"BearerAuth": []}]
+
+	assert paths["/v1/sites"]["put"]["summary"] == "Sync site routes"
+	assert paths["/v1/sites/{name}"]["patch"]["summary"] == "Update site route"
+	assert paths["/v1/domains/{domain}"]["patch"]["summary"] == "Update domain route"
+	assert "erp" in paths["/v1/sites/{name}"]["patch"]["description"]
+
+
+def test_the_reference_does_not_persist_credentials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	page = _client(tmp_path, monkeypatch).get("/docs").text
+
+	assert "persistAuth: false" in page
+	assert 'preferredSecurityScheme: "BearerAuth"' in page
+	assert 'defaultHttpClient: { targetKey: "shell", clientKey: "curl" }' in page
+	assert "hiddenClients" not in page

@@ -66,4 +66,4 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 sudo ip netns exec metal-<id> ssh -i /tmp/metald/keys/id_ed25519 root@172.16.0.2
 ```
 
-Use `journalctl -fu metal-vm@<id>.service` to read the guest console.
+Read the guest console with `GET /v1/vms/{id}/console`. Use `journalctl -fu metal-vm@<id>.service` for jailer and Firecracker errors.

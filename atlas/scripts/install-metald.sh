@@ -194,15 +194,15 @@ ExecStartPre=/usr/local/lib/metal/network-setup
 ExecStart=/usr/bin/metald serve --config $config_file
 Restart=on-failure
 RestartSec=1
+# Keep PTY masters across a metald restart.
+NotifyAccess=main
+FileDescriptorStoreMax=1024
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-if [ -f /etc/systemd/system/metal-vm@.service ]; then
-	skip "metal-vm@.service"
-else
-	cat > /etc/systemd/system/metal-vm@.service <<EOF
+cat > /etc/systemd/system/metal-vm@.service <<EOF
 [Unit]
 Description=metal microVM %i
 After=network.target
@@ -219,7 +219,6 @@ TTYReset=yes
 TTYVHangup=yes
 Restart=no
 EOF
-fi
 
 
 step "enable IP forwarding"

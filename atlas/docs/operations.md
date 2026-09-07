@@ -2,6 +2,22 @@
 
 Use Frappe Desk Error Log and the named documents first. Keep the durable Atlas record until the external owner confirms the result.
 
+## Proxy cluster cannot accept writes
+
+- Symptom: The proxy API returns `503`, or `/readyz` returns `503` on several nodes. The nodes still answer `/healthz` and route traffic.
+- Safe checks: Call `GET /v1/cluster/status` on node addresses. Compare `leader_id`, `term`, `generation`, `members`, and `ready`. Check `atlas-proxy-control.service` logs.
+- Expected evidence: A ready majority has one leader and matching generations. A five-node cluster needs three write acknowledgements.
+- Safe recovery: Restore enough configured peers for the required acknowledgement count. Retry the same desired map mutation after connectivity returns.
+- Do not: Do not edit `cluster-state.json` or reduce a generation by hand.
+
+## Proxy node stays outside regional DNS
+
+- Symptom: A Proxy Server is Failed, or its address is absent from `proxy.<wildcard-domain>`.
+- Safe checks: Read the failed provisioning phase. Check the node A record, `/readyz`, its `/healthz` health check, and configuration push tasks on active peers.
+- Expected evidence: Atlas publishes regional DNS only after the node is ready. Route 53 normally omits an unhealthy node and returns all records if every health check fails.
+- Safe recovery: Correct the failed phase and select Re-provision. Atlas repeats safe steps and reconciles active node configurations every minute.
+- Do not: Do not add an unready node to regional DNS by hand.
+
 ## Atlas cannot reach Metal
 
 - Symptom: A virtual machine read fails, or Metal Server synchronization writes a Metal connection Error Log.

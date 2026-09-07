@@ -1,19 +1,26 @@
+import time
 from pathlib import Path
 from typing import Annotated, ClassVar
 
 import bcrypt
 import jwt
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
+
+from .config import AuthConfig, ConfigError, load
+
+CONTROL_BEARER_SCHEME = "BearerAuth"
+bearer = HTTPBearer(
+	scheme_name=CONTROL_BEARER_SCHEME,
+	bearerFormat="password or JWT",
+	description="Use the regional proxy password or a valid JWT.",
+	auto_error=False,
+)
 
 
 class Authentication:
-	"""Check a bearer token: a password against a bcrypt hash, or a JWT against JWKS.
-
-	The password hash comes from the htpasswd file only. JWKS is asymmetric only,
-	so a published public key can never double as an HMAC secret. It applies only
-	when both a JWKS URL and an audience are configured.
-	"""
+	"""Authenticate bearer passwords and JWTs."""
 
 	_JWKS_ALGORITHMS: ClassVar[tuple[str, ...]] = (
 		"RS256",
@@ -28,73 +35,79 @@ class Authentication:
 		"EdDSA",
 	)
 
-	def __init__(
-		self,
-		path: Path,
-		jwks_url: str | None = None,
-		jwks_audience: str | None = None,
-	) -> None:
+	def __init__(self, path: Path | None = None) -> None:
 		self.path = path
-		self.jwks_url = jwks_url
-		self.jwks_audience = jwks_audience
 		self._jwks_client: PyJWKClient | None = None
+		self._jwks_url = ""
 
 	def require(self, authorization: Annotated[str | None, Header()] = None) -> None:
 		scheme, _, token = (authorization or "").partition(" ")
 		if scheme.lower() != "bearer" or not token:
 			raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-		if self._matches_password(token) or self._matches_jwks(token):
+
+		auth = self._auth()
+		if self._matches_password(auth, token) or self._matches_jwks(auth, token):
 			return
+
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
-	def _matches_password(self, password: str) -> bool:
-		password_hash = self._file_password_hash()
-		if not password_hash:
-			return False
-		try:
-			return bcrypt.checkpw(password.encode(), password_hash.encode())
-		except ValueError:
-			return False
+	def require_request(
+		self, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+	) -> None:
+		"""Authenticate one API request."""
+		authorization = f"{credentials.scheme} {credentials.credentials}" if credentials else None
+		self.require(authorization)
 
-	def _file_password_hash(self) -> str | None:
+	def _auth(self) -> AuthConfig:
+		"""Return the current credentials."""
 		try:
-			line = next(
-				line
-				for line in self.path.read_text().splitlines()
-				if line.strip() and not line.lstrip().startswith("#")
-			)
-		except OSError, StopIteration:
-			return None
-		_, separator, password_hash = line.partition(":")
-		return password_hash if separator and password_hash else None
+			return load(self.path).auth
+		except ConfigError:
+			return AuthConfig()
 
-	def _matches_jwks(self, token: str) -> bool:
-		if not self.jwks_url or not self.jwks_audience:
+	def _matches_password(self, auth: AuthConfig, password: str) -> bool:
+		password_hashes = [auth.password_hash]
+		if time.time() <= auth.previous_password_valid_until:
+			password_hashes.append(auth.previous_password_hash)
+
+		for password_hash in password_hashes:
+			if not password_hash:
+				continue
+			try:
+				if bcrypt.checkpw(password.encode(), password_hash.encode()):
+					return True
+			except ValueError:
+				continue
+
+		return False
+
+	def _matches_jwks(self, auth: AuthConfig, token: str) -> bool:
+		if not auth.jwks_url or not auth.jwks_audience_id:
 			return False
 		try:
 			kid = jwt.get_unverified_header(token).get("kid")
 			if not isinstance(kid, str):
 				return False
-			signing_key = PyJWKClient.match_kid(self._jwks_client_instance().get_signing_keys(), kid)
+
+			signing_key = PyJWKClient.match_kid(self._jwks_client_instance(auth).get_signing_keys(), kid)
 			if signing_key is None:
 				return False
+
 			jwt.decode(
 				token,
 				signing_key.key,
 				algorithms=self._JWKS_ALGORITHMS,
-				audience=self.jwks_audience,
+				audience=auth.jwks_audience_id,
 				options={"require": ["exp", "aud"], "verify_aud": True},
 			)
 			return True
 		except jwt.PyJWTError:
 			return False
 
-	def _jwks_client_instance(self) -> PyJWKClient:
-		if self._jwks_client is None:
-			if self.jwks_url is None:
-				raise RuntimeError("JWKS URL is not configured")
-			self._jwks_client = PyJWKClient(
-				self.jwks_url,
-				headers={"User-Agent": "atlas-proxy-control"},
-			)
+	def _jwks_client_instance(self, auth: AuthConfig) -> PyJWKClient:
+		"""Return a JWKS client for the configured URL."""
+		if self._jwks_client is None or self._jwks_url != auth.jwks_url:
+			self._jwks_client = PyJWKClient(auth.jwks_url, headers={"User-Agent": "atlas-proxy-control"})
+			self._jwks_url = auth.jwks_url
+
 		return self._jwks_client
