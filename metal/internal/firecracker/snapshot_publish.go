@@ -76,6 +76,15 @@ func (runtime *Runtime) publishPendingSnapshot(machine vm.RuntimeMachine, genera
 	}, generation)
 }
 
+// purgeSnapshots removes every published snapshot of one VM. It accepts an
+// absent directory, so a VM that never published a snapshot is fine.
+func (runtime *Runtime) purgeSnapshots(id string) error {
+	if err := os.RemoveAll(runtime.configuration.snapshotRoot(id)); err != nil {
+		return fmt.Errorf("remove VM snapshots: %w", err)
+	}
+	return nil
+}
+
 // statArtifact confirms a snapshot file is a regular, non-empty file and returns
 // its size.
 func statArtifact(path string) (int64, error) {

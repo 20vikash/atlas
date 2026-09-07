@@ -180,7 +180,9 @@ func (m *machine) startFromSnapshot(ctx context.Context) error {
 	return nil
 }
 
-// Stop shuts the guest down and clears the unit failure the exit records.
+// Stop shuts the guest down and clears the unit failure the exit records. It also
+// discards any memory snapshot, so a later start cold boots instead of resuming a
+// state the caller asked to leave.
 func (m *machine) Stop(ctx context.Context) error {
 	if err := m.shutdownGuest(ctx); err != nil {
 		return err
@@ -189,6 +191,10 @@ func (m *machine) Stop(ctx context.Context) error {
 		return err
 	}
 	_ = m.runtime.serialBroker.Close(m.input.ID)
+
+	if err := m.runtime.purgeSnapshots(m.input.ID); err != nil {
+		return err
+	}
 
 	// An intentional stop leaves the unit failed, because the process was killed.
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)

@@ -147,6 +147,9 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	if err := os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(input.ID))); err != nil {
 		return fmt.Errorf("remove Firecracker jail: %w", err)
 	}
+	if err := runtime.purgeSnapshots(input.ID); err != nil {
+		return err
+	}
 
 	return nil
 }

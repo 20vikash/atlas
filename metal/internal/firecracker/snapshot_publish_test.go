@@ -83,6 +83,42 @@ func warmStopMachine(t *testing.T, configuration Config, onRequest func()) *mach
 	}
 }
 
+func TestRemovePurgesSnapshots(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir(), SocketsDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
+	runtime := &Runtime{configuration: configuration, units: &stubUnits{}, serialBroker: &stubSerialBroker{}}
+	if err := os.MkdirAll(configuration.snapshotGenerationDirectory("vm-1", 1), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runtime.Remove(context.Background(), vm.RuntimeMachine{ID: "vm-1", UserID: 100001}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(configuration.snapshotRoot("vm-1")); !os.IsNotExist(err) {
+		t.Error("Remove did not purge the snapshots")
+	}
+}
+
+func TestStopPurgesSnapshots(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir(), SocketsDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
+	units := &stubUnits{active: true}
+	m := &machine{
+		runtime:     &Runtime{configuration: configuration, units: units, serialBroker: &stubSerialBroker{}},
+		input:       vm.RuntimeMachine{ID: "vm-1", UserID: 100001},
+		api:         api.New(fcSocket(t, units.shutdown)),
+		stopTimeout: time.Minute,
+	}
+	if err := os.MkdirAll(configuration.snapshotGenerationDirectory("vm-1", 1), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(configuration.snapshotRoot("vm-1")); !os.IsNotExist(err) {
+		t.Error("Stop did not purge the snapshots")
+	}
+}
+
 func TestWarmStopRecoveryResumesAndRemovesPending(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	resumeRequested := false
