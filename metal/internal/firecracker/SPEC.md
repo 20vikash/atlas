@@ -57,7 +57,9 @@ A memory snapshot restores only into the Firecracker build that wrote it. The bi
 
 ## Memory snapshots
 
-A memory snapshot is one full Firecracker snapshot: a `state` file and a `memory` file. Warm images and sleepy VMs share one create and publish path, so the snapshot bytes and format are the same in both.
+A memory snapshot is one full Firecracker snapshot: a `state` file and a `memory` file. Any VM can be snapshotted, not only a warm image builder or a sleepy VM. The create and publish path is the same for every VM, so the snapshot bytes and format are the same whatever the caller does with the result.
+
+Resuming from a memory snapshot is likewise available to any VM. A VM whose image provides a memory snapshot resumes from it on the normal start path, independent of the sleep policy.
 
 ```text
 pause the guest
@@ -68,10 +70,12 @@ publish              -> move to machines/<id>/snapshots/generations/<n>/{state,m
 
 The manifest is the only signal that a generation is complete. It records the VM ID, user ID, the specification and restart generations, the Firecracker build, the creation time, the fixed file names, and the file sizes. A restore derives every path from the VM ID and never takes a path from the manifest. A new generation is used for every publish, so a live process never has its memory file overwritten.
 
-Warm image building and sleep differ only in what happens after publish:
+A published snapshot has more than one use. Two exist today, and both use the same create and publish path:
 
-- Warm building runs on a throwaway builder VM. It publishes a snapshot, then promotes the files into the image store, keyed by image, shape, and build, so every VM of that image reuses them. The builder VM and its snapshot are then removed.
-- A sleepy VM publishes the snapshot under its own directory and keeps it. It is never promoted and never leaves the host.
+- Warm image building runs on a throwaway builder VM. It publishes a snapshot, then promotes the files into the image store, keyed by image, shape, and build, so every VM of that image reuses them. The builder VM and its snapshot are then removed.
+- A sleepy VM publishes the snapshot under its own directory and keeps it, so a later start can resume it. It is never promoted and never leaves the host.
+
+A throwaway builder VM is one caller of this path, not a limit on it. The same path can snapshot any VM.
 
 ## State
 
