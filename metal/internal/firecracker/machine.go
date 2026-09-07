@@ -2,7 +2,9 @@ package firecracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"syscall"
 	"time"
 
@@ -128,11 +130,13 @@ func (m *machine) warmStop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	pausedByThisCall := false
 	switch state {
 	case vm.StateRunning:
 		if err := m.api.Pause(ctx); err != nil {
 			return fmt.Errorf("pause for warm stop: %w", err)
 		}
+		pausedByThisCall = true
 	case vm.StatePaused:
 		// An already paused guest needs no second pause.
 	default:
@@ -140,9 +144,26 @@ func (m *machine) warmStop(ctx context.Context) error {
 	}
 
 	if _, err := m.runtime.createAndPublishSnapshot(ctx, m.input); err != nil {
-		return err
+		return m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
 	}
 	return nil
+}
+
+// recoverFailedWarmStop cleans up a failed warm stop. It removes the current
+// pending generation and resumes the guest only when this call paused it, so an
+// originally paused VM stays paused. It joins any cleanup or resume error with
+// the original failure.
+func (m *machine) recoverFailedWarmStop(ctx context.Context, pausedByThisCall bool, cause error) error {
+	recovery := []error{cause}
+	if err := os.RemoveAll(m.runtime.configuration.pendingSnapshotDirectory(m.input.ID)); err != nil {
+		recovery = append(recovery, fmt.Errorf("remove pending snapshot: %w", err))
+	}
+	if pausedByThisCall {
+		if err := m.api.Resume(ctx); err != nil {
+			recovery = append(recovery, fmt.Errorf("resume after failed warm stop: %w", err))
+		}
+	}
+	return errors.Join(recovery...)
 }
 
 // Pause halts the guest virtual CPUs.
