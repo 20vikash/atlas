@@ -99,13 +99,13 @@ def test_apply_refuses_a_certificate_for_another_domain(tmp_path: Path, monkeypa
 	assert apply.main() == 1
 
 
-def test_apply_does_nothing_when_tls_is_off(tmp_path: Path, monkeypatch):
+def test_apply_refuses_a_tls_enabled_flag(tmp_path: Path, monkeypatch):
 	_write_config(tmp_path, monkeypatch, "[tls]\nenabled = false\n")
 
-	assert apply.main() == 0
+	assert apply.main() == 2
 
 
-# TLS is on by default, so an empty file is a configuration fault.
+# An empty file is a configuration fault.
 def test_apply_reports_a_missing_certificate(tmp_path: Path, monkeypatch):
 	_write_config(tmp_path, monkeypatch, '[auth]\npassword_hash = "$2b$12$hash"\n')
 

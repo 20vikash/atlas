@@ -36,7 +36,7 @@ An empty configuration file stops the script before it applies anything and befo
 
 ```toml
 [control]
-port = 9000
+domain = "proxy-001.par-1.example.com"
 admin_socket = "/run/nginx/admin.sock"
 cert_dir = "/var/lib/nginx/certs"
 
@@ -46,7 +46,6 @@ jwks_url = "https://issuer.example.com/jwks.json"
 jwks_audience_id = "atlas-proxy-control"
 
 [tls]
-enabled = true
 wildcard_domain = "*.par-1.example.com"
 fullchain_pem = '''
 -----BEGIN CERTIFICATE-----
@@ -62,11 +61,13 @@ private_key_pem = '''
 
 `[control]` and `[auth]` are optional. Without credentials the daemon serves `/healthz` and refuses every protected request.
 
-TLS is on unless you set `enabled = false`, so a proxy without a certificate refuses to start rather than serving its placeholder to real traffic. The daemon exits, `proxy-control` exits `2`, and both name the missing values. `[tls]` needs `wildcard_domain`, `fullchain_pem`, and `private_key_pem` together.
-
-Use `enabled = false` only to run the data plane without a wildcard certificate, such as a custom-domain-only proxy or a test host. The proxy then keeps the self-signed placeholder.
+`[tls]` is required. A proxy without a valid wildcard certificate refuses to configure. The daemon and `proxy-control` name missing values.
 
 `wildcard_domain` also sets the region. The apply step writes it to `/var/lib/nginx/region`, which is what separates a site subdomain from a custom domain.
+
+`control.domain` is the name that reaches this daemon. It must sit one label below the wildcard name, so the certificate covers it and its first label is the reserved subdomain. The apply step writes that label to `/var/lib/nginx/control-subdomain`.
+
+The daemon binds `127.0.0.1` only. OpenResty routes the control domain to it on port 443, so every request carries the wildcard certificate and no port has to be open to a network. A site map may not use the reserved subdomain: `PATCH` and `DELETE` on it return `409`, and a full `PUT` installs every other entry and skips it.
 
 Use a PEM literal string with `'''`. PEM text contains no `'''`, so no value needs escaping.
 
@@ -78,9 +79,9 @@ Write the new file, then apply it:
 sudo /opt/atlas/proxy-control/bin/proxy-control
 ```
 
-The command installs the certificate, writes the region file, and reloads OpenResty. It does nothing when TLS is off. It exits non-zero when the certificate is missing, when the certificate and the key do not match, or when the certificate does not cover the wildcard domain.
+The command installs the certificate, writes the region file, and reloads OpenResty. It exits non-zero when the certificate is missing, when the certificate and the key do not match, or when the certificate does not cover the wildcard domain.
 
-The daemon reads its credentials on each request, so a credential change needs no restart. A `port` change needs `systemctl restart atlas-proxy-control.service`.
+The daemon reads its credentials on each request, so a credential change needs no restart. It always listens on `127.0.0.1:9000`.
 
 ## Configure the maps
 

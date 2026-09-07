@@ -6,7 +6,12 @@ from unittest.mock import patch
 import bcrypt
 from frappe.tests import UnitTestCase
 
-from atlas.service.core.configuration import APPLY_COMMAND, CONFIG_PATH, ProxyConfiguration
+from atlas.service.core.proxy.configuration import (
+	APPLY_COMMAND,
+	CONFIG_PATH,
+	DAEMON_UNIT,
+	ProxyConfiguration,
+)
 
 CERTIFICATE = "-----BEGIN CERTIFICATE-----\nleaf\n-----END CERTIFICATE-----"
 PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----"
@@ -36,10 +41,13 @@ class _FakeProxyServer:
 	def get_password(self, fieldname: str, raise_exception: bool = True) -> str | None:
 		return self.password
 
+	def get_domain(self) -> str:
+		return "proxy-001.example.com"
+
 
 def _build(settings: _FakeSettings | None = None, password: str = "a-control-password"):
 	patched = patch(
-		"atlas.service.core.configuration.frappe.get_single", return_value=settings or _FakeSettings()
+		"atlas.service.core.proxy.configuration.frappe.get_single", return_value=settings or _FakeSettings()
 	)
 	patched.start()
 	configuration = ProxyConfiguration(_FakeProxyServer(password))
@@ -51,6 +59,7 @@ class TestProxyConfiguration(UnitTestCase):
 	def test_the_file_is_valid_toml_with_every_section(self) -> None:
 		document = tomllib.loads(_build().content)
 
+		self.assertEqual(document["control"]["domain"], "proxy-001.example.com")
 		self.assertEqual(document["tls"]["wildcard_domain"], "*.par-1.example.com")
 		self.assertEqual(document["tls"]["enabled"], True)
 		self.assertEqual(document["tls"]["fullchain_pem"].strip(), CERTIFICATE)
@@ -107,10 +116,18 @@ class TestProxyConfiguration(UnitTestCase):
 		# The apply step must run after the heredoc closes, not inside it.
 		self.assertLess(command.rindex("ATLAS_PROXY_CONFIG_END"), command.index(f"\n{APPLY_COMMAND}"))
 
+	# The setup script leaves the daemon stopped, so this step has to start it.
+	def test_the_push_command_starts_the_daemon(self) -> None:
+		command = _build().get_push_command()
+
+		self.assertIn(f"systemctl enable --now {DAEMON_UNIT}", command)
+		self.assertIn(f"systemctl restart {DAEMON_UNIT}", command)
+		self.assertLess(command.index(APPLY_COMMAND), command.index(f"enable --now {DAEMON_UNIT}"))
+
 
 class TestPushToActiveProxies(UnitTestCase):
 	def test_only_active_proxies_are_queued(self) -> None:
-		from atlas.service.core import configuration
+		import atlas.service.core.proxy.configuration as configuration
 
 		with (
 			patch.object(configuration.frappe, "get_all", return_value=["proxy-001"]) as get_all,

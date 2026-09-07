@@ -101,10 +101,12 @@ install -d -m 0755 "$LOG_DIR"
 install -d -m 0750 "$STATE_DIR/certs"
 install -d -o root -g nginx -m 0770 "$STATE_DIR"
 install -d -o root -g nginx -m 0750 "$STATE_DIR/acme"
-# The placeholder certificate makes first boot possible before cloud-init pushes
-# the real region and wildcard certificate.
+# Keep placeholder state until Atlas pushes the configuration.
 if [ ! -e "$STATE_DIR/region" ]; then
 	: > "$STATE_DIR/region"
+fi
+if [ ! -e "$STATE_DIR/control-subdomain" ]; then
+	: > "$STATE_DIR/control-subdomain"
 fi
 install -d -m 0750 "$STATE_DIR/certs/_placeholder"
 if [ ! -f "$STATE_DIR/certs/_placeholder/fullchain.pem" ] || [ ! -f "$STATE_DIR/certs/_placeholder/privkey.pem" ]; then

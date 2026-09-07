@@ -53,7 +53,7 @@ Change the matching file for API, configuration, authentication, map, or certifi
 
 - `main.py`, `config.py`, `apply.py`, `auth.py`, `mappings.py`, or `certificates.py`
 
-Change `config.py` and `docs/setup.md` together when you add a configuration key. Atlas renders the same file in `atlas/service/core/configuration.py`, so change that too.
+Change `config.py` and `docs/setup.md` together when you add a configuration key. Atlas renders the same file in `atlas/service/core/proxy/configuration.py`, so change that too.
 
 Change `nginx/lua/http/admin.lua` when you change map storage or the private OpenResty API.
 

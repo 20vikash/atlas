@@ -11,6 +11,12 @@ frappe.ui.form.on("Proxy Server", {
 			[__("Provision"), "provision", frm.doc.status !== "Archived", "Actions"],
 			[__("Push configuration"), "push_configuration", frm.doc.virtual_machine, "Actions"],
 			[__("Install package"), "install_package", frm.doc.virtual_machine, "Actions"],
+			[
+				__("Update DNS record"),
+				"update_dns_record",
+				frm.doc.status !== "Archived" && frm.doc.server_ip_address,
+				"Actions",
+			],
 			[__("Archive"), "archive", frm.doc.status !== "Archived", "Dangerous Actions"],
 		].forEach(([label, method, condition, group]) => {
 			if (!condition) {

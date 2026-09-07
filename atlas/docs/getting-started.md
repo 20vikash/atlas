@@ -93,12 +93,11 @@ Open **Atlas Settings**, select **Actions**, and click **Renew TLS certificate**
 
 Open **Proxy Server** and create a record. Select the Ubuntu image and keep the default size.
 
-Atlas reserves a public IPv4 address, creates the virtual machine with your public SSH key, installs the HTTP proxy package, and pushes its configuration. Wait for the status to become `Active`. Open its linked **SSH Task** records to see the install output.
+Wait for the status to become `Active`. Open its linked **SSH Task** records to see the install output. See [Proxy Server](proxy-server.md) for engineering details.
 
 ## Next steps
 
 - [Virtual machine control plane](vm-control-plane.md) explains placement and request recovery.
 - [Metal Server lifecycle](metal-server-lifecycle.md) explains host provisioning.
-- [Proxy Server](proxy-server.md) explains the proxy lifecycle and its configuration file.
 - [Wildcard TLS](wildcard-tls.md) explains certificate issuance and renewal.
 - [Atlas operations](operations.md) lists safe checks when setup or provisioning fails.

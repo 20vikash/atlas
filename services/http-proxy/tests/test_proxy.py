@@ -915,3 +915,23 @@ def exec_proxy_text(*argv: str, check: bool = True) -> subprocess.CompletedProce
 def _proxy_master_pid() -> str:
 	"""The PID of the nginx master, which shows that there was no reload."""
 	return compose_exec("proxy", "cat", "/run/nginx.pid").stdout.strip()
+
+
+# The control daemon binds loopback, so the proxy is the one route to it. The
+# daemon is not running in this stack, so a 502 proves the route, not the app.
+def test_the_control_subdomain_never_reaches_a_site():
+	set_site("proxy-001", "fd00:a71a:5::a")
+
+	status, body = terminator("proxy-001.test.x.frappe.dev")
+
+	assert status == "502"
+	assert "vm-a" not in body
+
+
+def test_another_subdomain_still_reaches_its_site():
+	set_site("erp", "fd00:a71a:5::a")
+
+	status, body = terminator("erp.test.x.frappe.dev")
+
+	assert status == "200"
+	assert "vm-a" in body

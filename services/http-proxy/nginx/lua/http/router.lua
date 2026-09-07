@@ -20,6 +20,12 @@ if not subdomain or subdomain == "" then
 	return pages.serve("not_found", ngx.HTTP_NOT_FOUND)
 end
 
+-- Route the reserved control subdomain before the site map.
+if atlas_control_subdomain and atlas_control_subdomain ~= "" and subdomain == atlas_control_subdomain then
+	ngx.var.vm_upstream = "http://127.0.0.1:9000"
+	return
+end
+
 local address = sites:get(subdomain)
 if not address then
 	return pages.serve("not_found", ngx.HTTP_NOT_FOUND)

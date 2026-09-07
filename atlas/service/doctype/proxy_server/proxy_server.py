@@ -16,11 +16,7 @@ CONTROL_API_PASSWORD_LENGTH = 48
 
 
 class ProxyServer(Document):
-	"""One regional HTTP proxy, and the virtual machine Atlas runs it on.
-
-	The record owns its virtual machine. Provisioning creates it, installs the
-	published package, and pushes the configuration file.
-	"""
+	"""One regional HTTP proxy and its virtual machine."""
 
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
@@ -47,17 +43,32 @@ class ProxyServer(Document):
 	# end: auto-generated types
 
 	def before_insert(self) -> None:
-		"""Create the credential the control API accepts. Atlas is its only holder."""
+		"""Create the control API credential."""
 		self.control_api_password = frappe.generate_hash(length=CONTROL_API_PASSWORD_LENGTH)
 
 	def validate(self) -> None:
-		"""Reject a shape the proxy cannot run on."""
+		"""Validate the proxy shape."""
 		if self.vcpus < 1 or self.memory_mib < 1 or self.disk_mib < 1:
 			frappe.throw(_("A Proxy Server needs a positive CPU, memory, and disk size."))
+
+	def get_domain(self) -> str:
+		"""Return the name of this proxy below the Atlas wildcard domain."""
+		wildcard_domain = frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
+		return f"{self.name}.{wildcard_domain}"
+
+	@property
+	def public_ipv4(self) -> str | None:
+		"""Return this proxy's reserved public IPv4 address."""
+		return self.server_ip_address
 
 	def after_insert(self) -> None:
 		"""Build the proxy as soon as Frappe records it."""
 		self.enqueue_provisioning()
+
+	def on_update(self) -> None:
+		"""Queue a DNS update after an address change."""
+		if not self.flags.in_insert and self.has_value_changed("server_ip_address"):
+			self.enqueue_dns_update()
 
 	def on_trash(self) -> None:
 		"""Refuse deletion while the virtual machine exists."""
@@ -111,22 +122,65 @@ class ProxyServer(Document):
 		frappe.msgprint(_("The package install has been queued. Please check after some time."))
 
 	@frappe.whitelist(methods=["POST"])
-	def archive(self) -> None:
-		"""Terminate the virtual machine and release its address."""
+	def update_dns_record(self) -> None:
+		"""Point the proxy name at its current address."""
 		frappe.only_for("System Manager")
-		if self.virtual_machine and frappe.db.exists("Virtual Machine", self.virtual_machine):
-			frappe.get_doc("Virtual Machine", self.virtual_machine).terminate()
+		if self.status == "Archived":
+			frappe.throw(_("Proxy Server {0} is archived.").format(self.name))
 
-		self.db_set({"status": "Archived", "is_provisioning_completed": 0})
-		frappe.msgprint(_("Proxy Server {0} is archived.").format(self.name))
+		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
+
+		provisioner = ProxyServerProvisioner(self)
+		provisioner.update_dns_record()
+		if provisioner.proxy_server.status == "Archived":
+			frappe.throw(_("Proxy Server {0} is archived.").format(self.name))
+
+		provisioner.save_progress()
+		frappe.msgprint(
+			_("{0} now points at {1}.").format(
+				provisioner.proxy_server.get_domain(), provisioner.proxy_server.public_ipv4
+			)
+		)
+
+	@frappe.whitelist(methods=["POST"])
+	def archive(self) -> None:
+		"""Terminate the virtual machine, release its address, and remove its name."""
+		frappe.only_for("System Manager")
+		proxy_server = frappe.get_doc(self.doctype, self.name, for_update=True)
+		if proxy_server.status == "Archived":
+			return
+
+		proxy_server.remove_dns_record()
+		if proxy_server.virtual_machine and frappe.db.exists("Virtual Machine", proxy_server.virtual_machine):
+			frappe.get_doc("Virtual Machine", proxy_server.virtual_machine).terminate()
+
+		proxy_server.db_set({"status": "Archived", "is_provisioning_completed": 0})
+		frappe.msgprint(_("Proxy Server {0} is archived.").format(proxy_server.name))
+
+	def remove_dns_record(self) -> None:
+		"""Remove the proxy DNS record before its address is released."""
+		frappe.get_single("Atlas Settings").dns_provider_controller.remove_a_record(self.get_domain())
 
 	def validate_is_reachable(self) -> None:
 		"""Reject an action that needs a running virtual machine."""
 		if not self.virtual_machine:
 			frappe.throw(_("Proxy Server {0} has no virtual machine yet.").format(self.name))
 
+	def enqueue_dns_update(self) -> None:
+		"""Queue a DNS update."""
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_update_dns_record",
+			queue="short",
+			timeout=300,
+			job_id=f"atlas||proxy-server||dns||{self.name}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
 	def enqueue_provisioning(self) -> None:
-		"""Queue one setup run. Every phase in it is safe to repeat."""
+		"""Queue proxy setup."""
 		frappe.enqueue_doc(
 			self.doctype,
 			self.name,
@@ -139,19 +193,27 @@ class ProxyServer(Document):
 		)
 
 	def _provision(self) -> None:
-		from atlas.service.core.provisioning import ProxyServerProvisioner
+		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 
 		ProxyServerProvisioner(self).run()
 
+	def _update_dns_record(self) -> None:
+		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
+
+		provisioner = ProxyServerProvisioner(self)
+		provisioner.update_dns_record()
+		if provisioner.proxy_server.status != "Archived":
+			provisioner.save_progress()
+
 	def _push_configuration(self) -> None:
-		from atlas.service.core.provisioning import ProxyServerProvisioner
+		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 
 		provisioner = ProxyServerProvisioner(self)
 		provisioner.push_configuration()
 		provisioner.save_progress()
 
 	def _install_package(self) -> None:
-		from atlas.service.core.provisioning import ProxyServerProvisioner
+		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 
 		provisioner = ProxyServerProvisioner(self)
 		provisioner.install_package()

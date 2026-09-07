@@ -4,19 +4,19 @@ import socket
 import uvicorn
 from fastapi import FastAPI
 
+from .config import LISTEN_ADDRESS
 
-def run(app: FastAPI, port: int) -> None:
+CONTROL_PORT = 9000
+
+def run(app: FastAPI) -> None:
 	try:
-		asyncio.run(_serve(app, port))
+		asyncio.run(_serve(app))
 	except KeyboardInterrupt:
 		pass
 
 
-async def _serve(app: FastAPI, port: int) -> None:
-	listeners = [
-		_listener(socket.AF_INET, "0.0.0.0", port),
-		_listener(socket.AF_INET6, "::", port),
-	]
+async def _serve(app: FastAPI) -> None:
+	listeners = [_listener(socket.AF_INET, LISTEN_ADDRESS, CONTROL_PORT)]
 	try:
 		await uvicorn.Server(uvicorn.Config(app, log_level="info")).serve(sockets=listeners)
 	finally:

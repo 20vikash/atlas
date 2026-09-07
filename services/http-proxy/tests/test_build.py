@@ -155,8 +155,8 @@ def test_control_daemon_is_installed():
 def test_the_apply_command_refuses_an_unconfigured_proxy():
 	"""Atlas runs this over SSH after it writes the configuration file.
 
-	The image ships an empty file, and TLS is on by default, so the command must
-	report the missing certificate instead of leaving the placeholder in place.
+	The image ships an empty file, so the command must report the missing
+	certificate instead of leaving the placeholder in place.
 	"""
 	res = exec_proxy("/opt/atlas/proxy-control/bin/proxy-control", check=False)
 

@@ -27,7 +27,9 @@ The control daemon uses Python 3.14. The data plane uses OpenResty, Nginx, Lua, 
 
 ## Interfaces
 
-The control daemon uses TCP port `9000` by default. OpenResty uses a private Unix socket. Do not expose the socket to a network.
+The control daemon binds `127.0.0.1:9000`. `control.domain` is one label below the wildcard domain. OpenResty routes that label to the daemon before it reads the site map. The site map cannot use that label. The API is available on port `443`, and the daemon needs no open port.
+
+OpenResty uses a private Unix socket. Do not expose the socket to a network.
 
 `nginx/setup.sh` is the only installer. It runs on a plain Ubuntu 24.04 virtual machine and is safe to repeat.
 

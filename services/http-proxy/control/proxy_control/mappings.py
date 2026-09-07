@@ -6,10 +6,11 @@ from .client import ProxyClient
 
 
 class MappingStore:
-	"""Read and change site and custom-domain maps in OpenResty."""
+	"""Read and change OpenResty maps without the control subdomain."""
 
-	def __init__(self, client: ProxyClient):
+	def __init__(self, client: ProxyClient, reserved_subdomain: str = ""):
 		self.client = client
+		self.reserved_subdomain = reserved_subdomain
 
 	async def get(self, kind: str) -> dict[str, str]:
 		self._validate_kind(kind)
@@ -20,16 +21,30 @@ class MappingStore:
 		return body
 
 	async def replace(self, kind: str, values: dict[str, str]) -> dict[str, Any]:
+		"""Replace one complete map."""
 		self._validate_kind(kind)
-		return await self._forward("PUT", f"/v1/{kind}", values)
+		return await self._forward("PUT", f"/v1/{kind}", self._without_reserved(kind, values))
 
 	async def update(self, kind: str, key: str, address: str) -> dict[str, Any]:
 		self._validate_kind(kind)
+		self._validate_key(kind, key)
 		return await self._forward("PATCH", f"/v1/{kind}/{key}", {"address": address})
 
 	async def delete(self, kind: str, key: str) -> None:
 		self._validate_kind(kind)
+		self._validate_key(kind, key)
 		await self._forward("DELETE", f"/v1/{kind}/{key}")
+
+	def is_reserved(self, kind: str, key: str) -> bool:
+		"""Report whether a key names this daemon. Only a site subdomain can."""
+		return bool(self.reserved_subdomain) and kind == "sites" and key.lower() == self.reserved_subdomain
+
+	def _validate_key(self, kind: str, key: str) -> None:
+		if self.is_reserved(kind, key):
+			raise HTTPException(status_code=409, detail=f"{key} is reserved for the proxy control daemon")
+
+	def _without_reserved(self, kind: str, values: dict[str, str]) -> dict[str, str]:
+		return {key: value for key, value in values.items() if not self.is_reserved(kind, key)}
 
 	async def _forward(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
 		status, response_body = await self.client.request(method, path, body)

@@ -26,7 +26,7 @@ except ConfigError as error:
 
 auth = Authentication()
 proxy = ProxyClient(_config.admin_socket)
-maps = MappingStore(proxy)
+maps = MappingStore(proxy, _config.reserved_subdomain)
 
 
 @asynccontextmanager
@@ -83,4 +83,4 @@ async def delete_mapping(kind: str, key: str) -> Response:
 
 
 if __name__ == "__main__":
-	run(app, _config.port)
+	run(app)

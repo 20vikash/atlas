@@ -47,7 +47,7 @@ Use the staging environment while testing. A staging certificate is not trusted 
 
 ## Distribution
 
-A change to the certificate or its private key queues a configuration push to every Active Proxy Server. An automatic renewal and a certificate an operator pastes in both take that path, so no proxy keeps an expired certificate after Atlas replaces it. See [proxy-server.md](proxy-server.md).
+A certificate change updates every Active Proxy Server. See the [Proxy Server specification](../service/doctype/proxy_server/SPEC.md).
 
 ## Related
 

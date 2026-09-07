@@ -10,8 +10,8 @@ from frappe import _
 from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.ssh import SSHRunner, wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
-from atlas.service.core.configuration import ProxyConfiguration
 from atlas.service.core.http_proxy_package import SETTINGS_FILE_FIELD, SETTINGS_HASH_FIELD
+from atlas.service.core.proxy.configuration import ProxyConfiguration
 
 if TYPE_CHECKING:
 	from atlas.service.doctype.proxy_server.proxy_server import ProxyServer
@@ -23,22 +23,7 @@ SSH_POLL_INTERVAL_SECONDS = 5
 
 
 class ProxyServerProvisioner:
-	"""Own the safe proxy setup sequence and its durable progress.
-
-	Every phase is safe to repeat. A failed run resumes at the phase that failed
-	instead of building a second virtual machine.
-	"""
-
-	progress_fields = (
-		"status",
-		"virtual_machine",
-		"server_ip_address",
-		"installed_package_hash",
-		"pushed_config_hash",
-		"tls_expires_on",
-		"is_provisioning_completed",
-		"failure_message",
-	)
+	"""Run proxy setup and store its progress."""
 
 	def __init__(self, proxy_server: "ProxyServer") -> None:
 		self.proxy_server = proxy_server
@@ -61,6 +46,7 @@ class ProxyServerProvisioner:
 			self.proxy_server.status = "Failed"
 			self.proxy_server.failure_message = f"{phase}: {error}"
 			self.save_progress()
+			frappe.db.commit()  # nosemgrep
 			self.logger.exception(
 				"Proxy provisioning failed",
 				extra={"resource": self.proxy_server.name, "operation": "provision", "phase": phase},
@@ -70,13 +56,10 @@ class ProxyServerProvisioner:
 
 	@property
 	def steps(self) -> tuple[tuple[str, Callable[[], None]], ...]:
-		"""Return the proxy setup steps in execution order.
-
-		The package installs `proxy-control`. The configuration step then applies
-		the wildcard certificate and credentials.
-		"""
+		"""Return setup steps in execution order."""
 		return (
 			("virtual-machine", self.create_virtual_machine),
+			("dns", self.update_dns_record),
 			("secure-shell", self.wait_for_ssh),
 			("package", self.install_package),
 			("configuration", self.push_configuration),
@@ -92,12 +75,7 @@ class ProxyServerProvisioner:
 		self.save_progress()
 
 	def create_virtual_machine(self) -> None:
-		"""Create the virtual machine that runs the proxy, and give Atlas access to it.
-
-		The Atlas public key goes in at create time, so the controller can reach
-		the guest as soon as it boots. A proxy serves public traffic, so it needs
-		a public IPv4 address and uplink egress anyway.
-		"""
+		"""Create the proxy virtual machine."""
 		if self.proxy_server.virtual_machine:
 			if not frappe.db.exists("Virtual Machine", self.proxy_server.virtual_machine):
 				self.proxy_server.virtual_machine = None
@@ -141,13 +119,25 @@ class ProxyServerProvisioner:
 		self.proxy_server.virtual_machine = result["name"]
 		self.save_progress()
 
-		# Metal never confirmed the create, so the VM reconciler settles it first.
 		if result["is_draft"]:
 			frappe.throw(
 				_("Metal did not confirm Virtual Machine {0}. Provision again after it settles.").format(
 					result["name"]
 				)
 			)
+
+	def update_dns_record(self) -> None:
+		"""Point the proxy domain at its public IPv4 address."""
+		self.proxy_server = frappe.get_doc("Proxy Server", self.proxy_server.name, for_update=True)
+		if self.proxy_server.status == "Archived":
+			return
+
+		address = self.proxy_server.public_ipv4
+		if not address:
+			frappe.throw(_("Proxy Server {0} has no public IPv4 address.").format(self.proxy_server.name))
+
+		settings = frappe.get_single("Atlas Settings")
+		settings.dns_provider_controller.upsert_a_record(self.proxy_server.get_domain(), address)
 
 	def wait_for_ssh(self) -> None:
 		"""Wait until the guest answers as root on its public address."""
@@ -159,12 +149,7 @@ class ProxyServerProvisioner:
 		)
 
 	def push_configuration(self) -> None:
-		"""Write the configuration file and apply it.
-
-		This does not use an `SSH Task`, because the payload carries the wildcard
-		private key and the control credential, and a task stores its script as
-		plain text. Only the outcome is recorded.
-		"""
+		"""Write and apply the proxy configuration."""
 		configuration = ProxyConfiguration(self.proxy_server)
 		if self.proxy_server.pushed_config_hash == configuration.digest:
 			return
@@ -213,6 +198,5 @@ class ProxyServerProvisioner:
 		return virtual_machine.ssh_host
 
 	def save_progress(self) -> None:
-		"""Store the current fields and commit, so a failed run resumes from disk."""
-		self.proxy_server.db_set({field: self.proxy_server.get(field) for field in self.progress_fields})
-		frappe.db.commit()  # nosemgrep
+		"""Store the current proxy state."""
+		self.proxy_server.save(ignore_permissions=True)

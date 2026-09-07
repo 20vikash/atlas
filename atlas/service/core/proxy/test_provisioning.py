@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, Mock, patch
 import frappe
 from frappe.tests import UnitTestCase
 
+import atlas.service.core.proxy.provisioning as provisioning
 from atlas.atlas.core.ssh import SSHResult
-from atlas.service.core import provisioning
-from atlas.service.core.provisioning import ProxyServerProvisioner
+from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.vm_service import VirtualMachineCreateError
 
@@ -21,6 +21,8 @@ def _proxy_server(**values) -> SimpleNamespace:
 		"virtual_machine": None,
 		"virtual_machine_image": "image-1",
 		"server_ip_address": None,
+		"public_ipv4": None,
+		"get_domain": lambda: "proxy-001.example.com",
 		"vcpus": 2,
 		"memory_mib": 4096,
 		"disk_mib": 16384,
@@ -30,8 +32,7 @@ def _proxy_server(**values) -> SimpleNamespace:
 		"tls_expires_on": None,
 		"is_provisioning_completed": 0,
 		"failure_message": None,
-		"db_set": Mock(),
-		"get": lambda field: getattr(proxy_server, field),
+		"save": Mock(),
 	}
 	proxy_server = SimpleNamespace(**(defaults | values))
 	return proxy_server
@@ -42,7 +43,7 @@ class TestProvisioningSequence(UnitTestCase):
 		"""One setup run installs the command that applies the configuration."""
 		phases = [phase for phase, _operation in ProxyServerProvisioner(_proxy_server()).steps]
 
-		self.assertEqual(phases, ["virtual-machine", "secure-shell", "package", "configuration"])
+		self.assertEqual(phases, ["virtual-machine", "dns", "secure-shell", "package", "configuration"])
 
 	def test_a_failed_step_records_its_phase_and_stops(self) -> None:
 		proxy_server = _proxy_server()
@@ -59,6 +60,7 @@ class TestProvisioningSequence(UnitTestCase):
 					)
 				),
 			),
+			patch.object(provisioning.frappe.db, "commit"),
 			patch.object(provisioning.frappe, "log_error"),
 			patch.object(provisioner, "save_progress"),
 			self.assertRaises(RuntimeError),
@@ -197,3 +199,45 @@ class TestApplySteps(UnitTestCase):
 		with patch.object(provisioning.frappe, "get_single", return_value={}):
 			with self.assertRaises(frappe.ValidationError):
 				provisioner.install_package()
+
+
+class TestDNSRecord(UnitTestCase):
+	def build(self, **values):
+		proxy_server = _proxy_server(**values)
+		provisioner = ProxyServerProvisioner(proxy_server)
+		self.provider = MagicMock()
+		patches = (
+			patch.object(
+				provisioning.frappe,
+				"get_single",
+				return_value=SimpleNamespace(dns_provider_controller=self.provider),
+			),
+			patch.object(provisioning.frappe, "get_doc", return_value=proxy_server),
+		)
+		for patched in patches:
+			patched.start()
+			self.addCleanup(patched.stop)
+		return proxy_server, provisioner
+
+	def test_the_name_points_at_the_reserved_address(self) -> None:
+		_, provisioner = self.build(public_ipv4="203.0.113.9")
+
+		provisioner.update_dns_record()
+
+		self.provider.upsert_a_record.assert_called_once_with("proxy-001.example.com", "203.0.113.9")
+
+	def test_a_missing_address_fails_loudly(self) -> None:
+		_proxy, provisioner = self.build(public_ipv4=None)
+
+		with self.assertRaises(frappe.ValidationError):
+			provisioner.update_dns_record()
+
+		self.provider.upsert_a_record.assert_not_called()
+
+	def test_an_archived_proxy_does_not_restore_its_record(self) -> None:
+		proxy_server, provisioner = self.build(status="Archived", public_ipv4="203.0.113.9")
+
+		provisioner.update_dns_record()
+
+		self.assertIs(provisioner.proxy_server, proxy_server)
+		self.provider.upsert_a_record.assert_not_called()

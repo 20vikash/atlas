@@ -11,7 +11,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, convert_utc_to_system_timezone, get_datetime, now_datetime
 
-from atlas.service.core.configuration import push_configuration_to_active_proxies
+from atlas.service.core.proxy.configuration import push_configuration_to_active_proxies
 
 if TYPE_CHECKING:
 	from atlas.atlas.core.dns_providers.base import DnsProvider

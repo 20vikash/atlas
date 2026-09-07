@@ -13,15 +13,11 @@ if TYPE_CHECKING:
 
 CONFIG_PATH = "/etc/atlas/proxy-control.toml"
 APPLY_COMMAND = "/opt/atlas/proxy-control/bin/proxy-control"
+DAEMON_UNIT = "atlas-proxy-control.service"
 
 
 class ProxyConfiguration:
-	"""Render the configuration file one Proxy Server needs.
-
-	The file carries the wildcard private key and the control credential, so the
-	caller writes it over SSH at mode 0600 and never through an `SSH Task`, whose
-	script and environment are stored as plain text.
-	"""
+	"""Render a Proxy Server configuration file."""
 
 	def __init__(self, proxy_server: "ProxyServer") -> None:
 		self.proxy_server = proxy_server
@@ -42,13 +38,15 @@ class ProxyConfiguration:
 
 		return "\n".join(
 			(
+				"[control]",
+				f'domain = "{self.proxy_server.get_domain()}"',
+				"",
 				"[auth]",
 				f'password_hash = "{self.password_hash}"',
 				f'jwks_url = "{self.settings.proxy_jwks_url or ""}"',
 				f'jwks_audience_id = "{self.settings.proxy_jwks_audience_id or ""}"',
 				"",
 				"[tls]",
-				"enabled = true",
 				f'wildcard_domain = "{self.wildcard_domain}"',
 				f"fullchain_pem = '''\n{certificate.strip()}\n'''",
 				f"private_key_pem = '''\n{private_key.strip()}\n'''",
@@ -58,11 +56,7 @@ class ProxyConfiguration:
 
 	@property
 	def password_hash(self) -> str:
-		"""Return the bcrypt hash of the control API password.
-
-		Atlas keeps the password and the proxy keeps the hash, so a host that is
-		read by an attacker gives up no credential.
-		"""
+		"""Return the bcrypt hash of the control password."""
 		password = self.proxy_server.get_password("control_api_password", raise_exception=False)
 		if not password:
 			frappe.throw(_("Proxy Server {0} has no control API password.").format(self.proxy_server.name))
@@ -71,13 +65,10 @@ class ProxyConfiguration:
 
 	@property
 	def digest(self) -> str:
-		"""Return the digest of everything the file carries except the password salt.
-
-		A bcrypt hash is salted, so the rendered file differs on every call. The
-		digest therefore covers the inputs, which is what decides a resend.
-		"""
+		"""Return the digest of the configuration inputs."""
 		password = self.proxy_server.get_password("control_api_password", raise_exception=False) or ""
 		values = (
+			self.proxy_server.get_domain(),
 			self.wildcard_domain,
 			password,
 			self.settings.proxy_jwks_url or "",
@@ -88,11 +79,7 @@ class ProxyConfiguration:
 		return hashlib.sha256("\0".join(values).encode()).hexdigest()
 
 	def get_push_command(self) -> str:
-		"""Return the remote command that writes the file and applies it.
-
-		The content arrives on stdin of the remote `cat`, so it never reaches the
-		process list of the host.
-		"""
+		"""Return commands to update the configuration."""
 		return "\n".join(
 			(
 				"set -eu",
@@ -101,17 +88,15 @@ class ProxyConfiguration:
 				f"cat > {CONFIG_PATH} <<'ATLAS_PROXY_CONFIG_END'",
 				self.content,
 				"ATLAS_PROXY_CONFIG_END",
-				f"{APPLY_COMMAND}",
+				APPLY_COMMAND,
+				f"systemctl enable --now {DAEMON_UNIT}",
+				f"systemctl restart {DAEMON_UNIT}",
 			)
 		)
 
 
 def push_configuration_to_active_proxies() -> None:
-	"""Send the current configuration to every active Proxy Server.
-
-	The wildcard certificate changes when Atlas renews it or when an operator
-	replaces it. Both paths reach the proxies through this function.
-	"""
+	"""Send the current configuration to each active Proxy Server."""
 	for name in frappe.get_all("Proxy Server", filters={"status": "Active"}, pluck="name"):
 		frappe.enqueue_doc(
 			"Proxy Server",

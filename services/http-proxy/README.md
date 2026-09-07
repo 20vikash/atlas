@@ -2,7 +2,7 @@
 
 Atlas HTTP proxy runs on one virtual machine for one region. It routes site and custom-domain traffic to site VMs over IPv6.
 
-Atlas installs it and pushes `/etc/atlas/proxy-control.toml` over SSH. The control daemon reads that file and serves the site and custom-domain maps on IPv4 and IPv6 port `9000`.
+Atlas installs it and pushes `/etc/atlas/proxy-control.toml` over SSH. The control daemon reads that file and serves the site and custom-domain maps. It binds `127.0.0.1` only, and the proxy routes its own control domain to it, so the API answers on port `443` with the regional wildcard certificate.
 
 Read these documents in this order:
 
@@ -36,7 +36,7 @@ sudo ./nginx/setup.sh
 
 The script installs OpenResty and the control daemon, enables both units, and applies the certificate the configuration file carries. Run it again after you change the configuration file, or run `/opt/atlas/proxy-control/bin/proxy-control` for the certificate alone.
 
-A fresh install has an empty configuration file. The proxy starts with a placeholder certificate. The control daemon serves `/healthz` and refuses protected requests until Atlas sends a credential.
+A fresh install has an empty configuration file and a placeholder certificate. The control daemon starts after Atlas sends the wildcard certificate and credentials.
 
 Follow the [setup guide](docs/setup.md) to configure the proxy.
 

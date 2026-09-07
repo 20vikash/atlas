@@ -2,14 +2,11 @@
 
 The control daemon serves the site and custom-domain maps. Every other setting comes from `/etc/atlas/proxy-control.toml`, which Atlas writes over SSH. See [Setup](setup.md#configuration-file).
 
-By default, it listens on these addresses:
-
-- IPv4: `0.0.0.0:9000`
-- IPv6: `[::]:9000`
+The daemon listens on `127.0.0.1:9000` only. Reach it through the proxy at `https://<control.domain>/`, which OpenResty routes to the loopback port. Every request therefore carries the regional wildcard certificate.
 
 The daemon reads the OpenResty maps through a Unix socket. The daemon does not store a second copy of the maps.
 
-CAUTION: Allow port `9000` only from the controller network. The daemon can change proxy routes.
+The control domain is reserved in the site map. `PATCH` and `DELETE` on its subdomain return `409`, and a full `PUT` skips it, so a mapping can never take the name. The route is decided before the map is read, so an entry could not take effect even if one existed.
 
 ## Authentication
 
@@ -26,7 +23,7 @@ Send the raw password in a bearer token. The daemon checks it against `auth.pass
 
 ```sh
 export ATLAS_PROXY_CONTROL_PASSWORD='replace-with-the-raw-password'
-export ATLAS_PROXY_CONTROL_URL='http://[2001:db8::1]:9000'
+export ATLAS_PROXY_CONTROL_URL='https://proxy-001.iad.frappe.dev'
 curl \
   -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" \
   "$ATLAS_PROXY_CONTROL_URL/v1/state"
@@ -63,7 +60,7 @@ curl \
 
 A request is authorized when it matches the password or a valid JWKS token.
 
-Use this API only on a trusted controller or WireGuard network. The bearer password travels over HTTP and can be replayed by anyone who observes it.
+The bearer password can be replayed by anyone who observes it, so send it only over the HTTPS control domain.
 
 ## Health endpoints
 
@@ -202,5 +199,6 @@ Do not use this for a custom-domain certificate. Install a custom-domain certifi
 | ------ | ----------------------------------------------------------------- |
 | `400`  | The request data is not valid.                                    |
 | `401`  | The password is not valid, and no valid JWKS token was presented. |
+| `409`  | The key is reserved for the control daemon.                       |
 | `502`  | The daemon cannot use the OpenResty admin API.                    |
 | `503`  | OpenResty is not ready.                                           |

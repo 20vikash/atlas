@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 CONFIG_PATH = Path("/etc/atlas/proxy-control.toml")
-DEFAULT_PORT = 9000
 DEFAULT_ADMIN_SOCKET = "/run/nginx/admin.sock"
 DEFAULT_CERT_DIR = Path("/var/lib/nginx/certs")
+LISTEN_ADDRESS = "127.0.0.1"
 
 
 class ConfigError(Exception):
@@ -29,18 +29,22 @@ class TLSConfig:
 	wildcard_domain: str
 	fullchain_pem: str
 	private_key_pem: str
-	enabled: bool = True
 
 
 @dataclass(frozen=True)
 class ControlConfig:
 	"""Everything the control daemon and the apply command read."""
 
-	port: int = DEFAULT_PORT
+	tls: TLSConfig
 	admin_socket: str = DEFAULT_ADMIN_SOCKET
 	cert_dir: Path = DEFAULT_CERT_DIR
+	domain: str = ""
 	auth: AuthConfig = AuthConfig()
-	tls: TLSConfig | None = None
+
+	@property
+	def reserved_subdomain(self) -> str:
+		"""Return the label OpenResty routes to this daemon, and no map may hold."""
+		return self.domain.partition(".")[0]
 
 
 def config_path() -> Path:
@@ -51,25 +55,40 @@ def config_path() -> Path:
 def load(path: Path | None = None) -> ControlConfig:
 	"""Read the configuration file.
 
-	A missing file gives the defaults with no credentials, and TLS stays on, so
-	an unconfigured proxy fails here instead of serving its placeholder
-	certificate to real traffic.
+	A missing file has no wildcard certificate, so the proxy refuses to start.
 	"""
 	document = _read(path or config_path())
 	control = _section(document, "control")
 	auth = _section(document, "auth")
+	if "port" in control:
+		raise ConfigError("control.port is fixed at 9000")
 
+	tls = _tls(_section(document, "tls"))
 	return ControlConfig(
-		port=_integer(control, "port", DEFAULT_PORT),
 		admin_socket=_text(control, "admin_socket") or DEFAULT_ADMIN_SOCKET,
 		cert_dir=Path(_text(control, "cert_dir") or DEFAULT_CERT_DIR),
+		domain=_domain(_text(control, "domain"), tls),
 		auth=AuthConfig(
 			password_hash=_text(auth, "password_hash"),
 			jwks_url=_text(auth, "jwks_url"),
 			jwks_audience_id=_text(auth, "jwks_audience_id"),
 		),
-		tls=_tls(_section(document, "tls")),
+		tls=tls,
 	)
+
+
+def _domain(domain: str, tls: TLSConfig) -> str:
+	"""Validate the control domain against the wildcard certificate."""
+	if not domain:
+		return ""
+
+	domain = domain.lower()
+	zone = tls.wildcard_domain.lower().removeprefix("*.")
+	label, separator, rest = domain.partition(".")
+	if not label or not separator or rest != zone:
+		raise ConfigError(f"control.domain {domain} must be one label below {zone}")
+
+	return domain
 
 
 def _read(path: Path) -> dict[str, object]:
@@ -84,23 +103,16 @@ def _read(path: Path) -> dict[str, object]:
 		raise ConfigError(f"{path} is not valid TOML: {error}") from error
 
 
-def _tls(section: dict[str, object]) -> TLSConfig | None:
-	"""Return the certificate, or None when TLS is off.
-
-	TLS is on unless the file turns it off, so a proxy without a certificate
-	refuses to start instead of serving its placeholder to real traffic.
-	"""
-	if not _boolean(section, "enabled", True):
-		return None
+def _tls(section: dict[str, object]) -> TLSConfig:
+	"""Return the required wildcard certificate."""
+	if "enabled" in section:
+		raise ConfigError("tls.enabled is not supported")
 
 	wildcard_domain = _text(section, "wildcard_domain")
 	fullchain_pem = _text(section, "fullchain_pem")
 	private_key_pem = _text(section, "private_key_pem")
 	if not (wildcard_domain and fullchain_pem and private_key_pem):
-		raise ConfigError(
-			"[tls] needs wildcard_domain, fullchain_pem, and private_key_pem. "
-			"Set enabled = false to run without a wildcard certificate."
-		)
+		raise ConfigError("[tls] needs wildcard_domain, fullchain_pem, and private_key_pem")
 
 	return TLSConfig(wildcard_domain, fullchain_pem, private_key_pem)
 
@@ -117,17 +129,3 @@ def _text(section: dict[str, object], key: str) -> str:
 	if not isinstance(value, str):
 		raise ConfigError(f"{key} must be a string")
 	return value.strip()
-
-
-def _integer(section: dict[str, object], key: str, default: int) -> int:
-	value = section.get(key, default)
-	if not isinstance(value, int) or isinstance(value, bool):
-		raise ConfigError(f"{key} must be an integer")
-	return value
-
-
-def _boolean(section: dict[str, object], key: str, default: bool) -> bool:
-	value = section.get(key, default)
-	if not isinstance(value, bool):
-		raise ConfigError(f"{key} must be true or false")
-	return value

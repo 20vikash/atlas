@@ -18,7 +18,7 @@ AUDIENCE = "atlas-proxy-control"
 
 def write_config(path: Path, password: str = "", jwks: bool = False) -> Path:
 	"""Write a configuration file with the credentials a test needs."""
-	lines = ["[tls]", "enabled = false", "", "[auth]"]
+	lines = ["[tls]", 'wildcard_domain = "*.par-1.example.com"', 'fullchain_pem = "leaf"', 'private_key_pem = "key"', "", "[auth]"]
 	if password:
 		lines.append(f'password_hash = "{bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()}"')
 	if jwks:
@@ -67,8 +67,7 @@ def test_require_rejects_a_malformed_config_file(tmp_path):
 		Authentication(path).require(authorization=f"Bearer {PASSWORD}")
 
 
-# nginx/setup.sh writes an empty placeholder file, so the daemon can start before
-# Atlas sends a credential.
+# An empty configuration authorizes nobody.
 def test_require_rejects_file_with_no_credentials(tmp_path):
 	path = tmp_path / "proxy-control.toml"
 	path.write_text("")
