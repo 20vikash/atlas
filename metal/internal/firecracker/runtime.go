@@ -92,9 +92,20 @@ func (runtime *Runtime) Inspect(ctx context.Context, input vm.RuntimeMachine) (v
 	return vm.RuntimeStatus{State: state}, nil
 }
 
-// Start launches a stopped Firecracker virtual machine.
-func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) error {
-	return runtime.newMachine(input).Start(ctx)
+// Start launches a Firecracker virtual machine. StartNormal keeps the current
+// warm-image and cold-boot behavior. The sleep snapshot modes are not
+// implemented yet.
+func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode vm.StartMode) error {
+	switch mode {
+	case vm.StartNormal:
+		return runtime.newMachine(input).Start(ctx)
+	case vm.StartFromSleepSnapshot:
+		return fmt.Errorf("start from sleep snapshot is not implemented")
+	case vm.StartFromSleepSnapshotPaused:
+		return fmt.Errorf("start from sleep snapshot paused is not implemented")
+	default:
+		return fmt.Errorf("unknown start mode %d", mode)
+	}
 }
 
 // Stop stops a Firecracker virtual machine. StopShutdown keeps the current

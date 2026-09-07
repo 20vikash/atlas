@@ -2,6 +2,18 @@ package vm
 
 import "context"
 
+// StartMode selects how Runtime.Start brings up a virtual machine.
+type StartMode int
+
+const (
+	// StartNormal keeps the current warm-image and cold-boot behavior.
+	StartNormal StartMode = iota
+	// StartFromSleepSnapshot restores the VM-local sleep snapshot and resumes it.
+	StartFromSleepSnapshot
+	// StartFromSleepSnapshotPaused restores the snapshot without running the vCPUs.
+	StartFromSleepSnapshotPaused
+)
+
 // StopMode selects how Runtime.Stop ends a virtual machine.
 type StopMode int
 
@@ -16,7 +28,7 @@ const (
 // Runtime controls virtual machine processes and guest-facing operations.
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
-	Start(context.Context, RuntimeMachine) error
+	Start(context.Context, RuntimeMachine, StartMode) error
 	Stop(context.Context, RuntimeMachine, StopMode) error
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error

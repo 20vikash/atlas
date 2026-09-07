@@ -11,6 +11,7 @@ import (
 type fakeRuntime struct {
 	state        State
 	starts       int
+	startMode    StartMode
 	stops        int
 	stopMode     StopMode
 	pauses       int
@@ -25,8 +26,9 @@ func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeSta
 	return RuntimeStatus{State: runtime.state}, runtime.inspectError
 }
 
-func (runtime *fakeRuntime) Start(context.Context, RuntimeMachine) error {
+func (runtime *fakeRuntime) Start(_ context.Context, _ RuntimeMachine, mode StartMode) error {
 	runtime.starts++
+	runtime.startMode = mode
 	runtime.state = StateRunning
 	return nil
 }
