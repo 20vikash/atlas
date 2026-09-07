@@ -19,8 +19,6 @@ const (
 	sleepDirectoryName       = "sleep"
 	sleepGenerationsDirName  = "generations"
 	pendingSnapshotDirName   = "sleep-pending"
-	snapshotStateFileName    = "state"
-	snapshotMemoryFileName   = "memory"
 	snapshotManifestFileName = "manifest.json"
 )
 
