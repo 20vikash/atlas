@@ -51,7 +51,7 @@ wait for the API socket       the process belongs to systemd, so this is the onl
 
 A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
 
-Warm launch is attempted only when the image asks for it and the VM shape matches the snapshot exactly. Any failure falls back to a cold boot, so warm boot can never make a VM unstartable. A restored guest receives its metadata before it resumes, so it never reads the values of the VM the snapshot came from.
+A start tries three sources in order: the VM's own memory snapshot, the shared warm image, and a cold boot. A VM-local snapshot is the most specific saved state, so a warm-stopped VM and a warm-image clone resume through this one start path. Warm launch is attempted only when the image asks for it and the VM shape matches the snapshot exactly. Any failure falls back to a cold boot, so warm boot can never make a VM unstartable. A restored guest receives its metadata before it resumes, so it never reads the values of the VM the snapshot came from.
 
 A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
 
@@ -70,12 +70,14 @@ publish              -> move to machines/<id>/snapshots/generations/<n>/{state,m
 
 The manifest is the only signal that a generation is complete. It records the VM ID, user ID, the specification and restart generations, the Firecracker build, the creation time, the fixed file names, and the file sizes. A restore derives every path from the VM ID and never takes a path from the manifest. A new generation is used for every publish, so a live process never has its memory file overwritten.
 
-A published snapshot has more than one use. Two exist today, and both use the same create and publish path:
+A published snapshot has more than one use. All uses share the same create and publish path:
 
 - Warm image building runs on a throwaway builder VM. It publishes a snapshot, then promotes the files into the image store, keyed by image, shape, and build, so every VM of that image reuses them. The builder VM and its snapshot are then removed.
-- A sleepy VM publishes the snapshot under its own directory and keeps it, so a later start can resume it. It is never promoted and never leaves the host.
+- A warm stop publishes the snapshot under the VM's own directory and keeps it, so a later start resumes it. It is never promoted and never leaves the host. The controller asks for a warm stop through the power API. Automatic sleep uses the same warm stop for an idle VM.
 
 A throwaway builder VM is one caller of this path, not a limit on it. The same path can snapshot any VM.
+
+A warm stop pauses the guest, publishes the snapshot, then terminates Firecracker. Publication before termination keeps an interrupted warm stop recoverable, because a later start restores the published snapshot. A normal start restores the newest valid snapshot for the VM and then removes that external generation, because the jail holds its own copy. A plain stop, a restart, and a remove discard every snapshot, so a start after them cold boots. A generation change also invalidates an old snapshot, because its manifest no longer matches the desired generation.
 
 ## State
 
@@ -92,9 +94,9 @@ active -> Firecracker instance state
 
 Anything else reads as `unknown`, and an API fault returns `unknown` with an error rather than a guess.
 
-Stop asks the guest to power off and kills it when it does not answer, because a guest with no ACPI handler never will. An intentional stop leaves the unit failed, so the state is cleared afterwards.
+Stop asks the guest to power off and kills it when it does not answer, because a guest with no ACPI handler never will. An intentional stop leaves the unit failed, so the state is cleared afterwards. A plain stop also discards the VM memory snapshot. A warm stop is the other stop mode, which keeps a snapshot.
 
-`Remove` stops the unit and removes runtime-owned files. The manager releases network and storage.
+`Remove` stops the unit and removes runtime-owned files, including every VM memory snapshot. The manager releases network and storage.
 
 ## Guest metadata
 

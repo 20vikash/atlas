@@ -18,11 +18,17 @@ runtime error -> failed
 
 Create reserves the supplied VM ID and requests `running`. It does not wait for Firecracker to start. Every mutation returns before the host is touched, so a caller polls until the desired and observed generations match.
 
-Metal does not support in-place snapshot restore or promotion.
+The image snapshot API only stages a VM disk for upload. It does not restore a VM or promote an image in place.
 
 ## Cold boot vs warm start
 
-Cold boot clones an image disk, links the kernel, configures Firecracker, and starts the guest. Warm boot restores host-local disk, memory, and Firecracker state for an exact image and VM shape. Warm boot is an optimization: any failure falls back to cold boot.
+Cold boot clones an image disk, links the kernel, configures Firecracker, and starts the guest. Warm boot restores host-local disk, memory, and Firecracker state. Warm boot is an optimization: any failure falls back to cold boot.
+
+A start tries three sources in order: the VM's own memory snapshot, the shared warm image for its exact image and shape, and a cold boot. So a warm-stopped VM and a warm-image clone resume through the same start path.
+
+## Warm stop
+
+A power request may carry `warm`, valid only with a `stopped` state: `PUT /v1/vms/{id}/power` with the body `{"state":"stopped","warm":true}`. A warm stop saves a memory snapshot and terminates the process, so a later start resumes the guest instead of cold booting. A plain stop, a restart, or a specification change discards the snapshot, so the next start cold boots. The snapshot stays on the host and is never uploaded.
 
 Records, generations, reconciliation, and cleanup: [internal/vm/SPEC.md](../internal/vm/SPEC.md). Boot and stop mechanics: [internal/firecracker/SPEC.md](../internal/firecracker/SPEC.md).
 
