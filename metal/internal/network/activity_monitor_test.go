@@ -1,13 +1,30 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
+
+// activityRequest is the read request used by the time-conversion tests.
+var activityRequest = vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: 100001}
+
+// readMonitor builds a monitor with a fixed wall clock and one attached VM.
+func readMonitor(t *testing.T, wallNow time.Time, monotonicNow uint64) (*ActivityMonitor, *fakeActivityMap) {
+	t.Helper()
+	loader := &fakeActivityLoader{}
+	monitor := newTestMonitor(t, loader)
+	monitor.wallClock = func() time.Time { return wallNow }
+	monitor.monotonicClock = func() (uint64, error) { return monotonicNow, nil }
+	monitor.attachments["vm-1"] = &attachment{userID: 100001, baseline: wallNow}
+	return monitor, loader.createdMap
+}
 
 // fakeActivityMap records how the monitor reads, closes, and clears the map.
 type fakeActivityMap struct {
@@ -318,4 +335,170 @@ func TestCloseReleasesEveryAttachment(t *testing.T) {
 	if !loader.createdMap.closed {
 		t.Error("the shared map was not closed")
 	}
+}
+
+func TestLastNetworkActivityReturnsBaselineBeforeTheFirstPacket(t *testing.T) {
+	baseline := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	monitor, sharedMap := readMonitor(t, baseline, 1_000_000_000)
+	sharedMap.lookupFound = false
+
+	activity, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activity.HasBeenSeen {
+		t.Error("a VM with no packet must report HasBeenSeen false")
+	}
+	if !activity.LastSeenAt.Equal(baseline) {
+		t.Errorf("last seen = %v, want the baseline %v", activity.LastSeenAt, baseline)
+	}
+}
+
+func TestLastNetworkActivityConvertsTheAgeToWallClock(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	monitor, sharedMap := readMonitor(t, now, 1_000_000_000)
+	sharedMap.lookupFound = true
+	sharedMap.lookupValue = 400_000_000 // 600 ms before the current monotonic time
+
+	activity, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activity.HasBeenSeen {
+		t.Error("a VM with a packet must report HasBeenSeen true")
+	}
+	if want := now.Add(-600 * time.Millisecond); !activity.LastSeenAt.Equal(want) {
+		t.Errorf("last seen = %v, want %v", activity.LastSeenAt, want)
+	}
+}
+
+func TestLastNetworkActivityLaterPacketIsMoreRecent(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	monitor, sharedMap := readMonitor(t, now, 10_000_000_000)
+	sharedMap.lookupFound = true
+
+	sharedMap.lookupValue = 2_000_000_000 // 8 s old
+	older, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedMap.lookupValue = 6_000_000_000 // 4 s old
+	newer, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !newer.LastSeenAt.After(older.LastSeenAt) {
+		t.Errorf("later packet %v is not after earlier packet %v", newer.LastSeenAt, older.LastSeenAt)
+	}
+}
+
+func TestLastNetworkActivityUsesMonotonicAgeNotWallClock(t *testing.T) {
+	// The map holds a monotonic time. A wall clock that moved backward must give
+	// the same age, so it can never inflate idle time and cause an early sleep.
+	monitor, sharedMap := readMonitor(t, time.Time{}, 5_000_000_000)
+	sharedMap.lookupFound = true
+	sharedMap.lookupValue = 3_000_000_000 // 2 s of age
+
+	forward := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	monitor.wallClock = func() time.Time { return forward }
+	forwardActivity, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	backward := forward.Add(-time.Hour)
+	monitor.wallClock = func() time.Time { return backward }
+	backwardActivity, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if forward.Sub(forwardActivity.LastSeenAt) != backward.Sub(backwardActivity.LastSeenAt) {
+		t.Error("a backward wall clock changed the computed age")
+	}
+}
+
+func TestLastNetworkActivityClampsAFutureMapValue(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	monitor, sharedMap := readMonitor(t, now, 1_000_000_000)
+	sharedMap.lookupFound = true
+	sharedMap.lookupValue = 2_000_000_000 // ahead of the current monotonic time
+
+	activity, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activity.LastSeenAt.Equal(now) {
+		t.Errorf("last seen = %v, want the current time %v", activity.LastSeenAt, now)
+	}
+}
+
+func TestLastNetworkActivityReturnsNotFoundWithoutAnAttachment(t *testing.T) {
+	loader := &fakeActivityLoader{}
+	monitor := newTestMonitor(t, loader)
+
+	_, err := monitor.LastNetworkActivity(context.Background(), vm.NetworkActivityRequest{VirtualMachineID: "missing", UserID: 1})
+	if !errors.Is(err, vm.ErrNotFound) {
+		t.Fatalf("error = %v, want vm.ErrNotFound", err)
+	}
+}
+
+func TestLastNetworkActivityReturnsNotFoundAfterRelease(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+	if err := monitor.ReleaseAttachment("vm-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if !errors.Is(err, vm.ErrNotFound) {
+		t.Fatalf("error = %v, want vm.ErrNotFound after release", err)
+	}
+}
+
+func TestLastNetworkActivityWrapsTheLookupErrorWithContext(t *testing.T) {
+	monitor, sharedMap := readMonitor(t, time.Now(), 1)
+	sharedMap.lookupErr = errors.New("map read failed")
+
+	_, err := monitor.LastNetworkActivity(context.Background(), activityRequest)
+	if err == nil || !strings.Contains(err.Error(), "vm-1") || !strings.Contains(err.Error(), "100001") {
+		t.Fatalf("error = %v, want the VM and user ID context", err)
+	}
+}
+
+func TestConcurrentActivityReadsAndReplacement(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+	loader.createdMap.lookupFound = true
+	loader.createdMap.lookupValue = 1
+
+	var group sync.WaitGroup
+	for reader := 0; reader < 8; reader++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for i := 0; i < 200; i++ {
+				_, _ = monitor.LastNetworkActivity(context.Background(), activityRequest)
+			}
+		}()
+	}
+	// One replacer, so the fake loader has a single writer.
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		for i := 0; i < 100; i++ {
+			loader.resolveIndex = 5 + i%2 // alternate to force some replacements
+			loader.attachIndex = loader.resolveIndex
+			_ = monitor.EnsureAttachment(request)
+		}
+	}()
+	group.Wait()
 }
