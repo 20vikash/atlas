@@ -180,7 +180,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure activity monitor: %w", err)
 	}
-	defer func() { serveError = errors.Join(serveError, activityMonitor.Close()) }()
+	daemon.OwnActivityMonitor(activityMonitor)
 	networkManager := network.NewLinuxAllocator(mesh, activityMonitor)
 	virtualMachineRuntime := firecracker.NewRuntime(
 		o.cfg,
