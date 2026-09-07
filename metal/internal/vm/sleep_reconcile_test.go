@@ -114,6 +114,40 @@ func TestAutomaticSleepStaysAsleep(t *testing.T) {
 	}
 }
 
+func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+		t.Fatal(err)
+	}
+	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The idle check and the sample before the warm stop see idle activity. The
+	// sample after the warm stop sees a newer packet, so the sleep aborts.
+	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
+	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true}
+	monitor.sequence = []NetworkActivity{idle, idle, advanced}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.stopMode != StopWithSleepSnapshot {
+		t.Fatalf("stop mode = %d, want a warm stop attempt", runtime.stopMode)
+	}
+	if runtime.startMode != StartFromSleepSnapshot {
+		t.Fatalf("start mode = %d, want a snapshot restore on abort", runtime.startMode)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateRunning || observed.Sleep != nil {
+		t.Fatalf("observed after abort = %+v, want running with no sleep", observed)
+	}
+}
+
 func TestActiveSleepyVMStaysRunning(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
 	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {

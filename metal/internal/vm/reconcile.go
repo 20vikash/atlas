@@ -124,6 +124,7 @@ func (manager *Manager) reconcileActive(
 			EligibleAt:            decision.Activity.LastSeenAt.Add(manager.configuration.Sleep.IdleTimeout),
 			RequestedAt:           now,
 			LastNetworkActivityAt: decision.Activity.LastSeenAt,
+			AbortOnTraffic:        true,
 		})
 	}
 

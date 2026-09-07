@@ -8,11 +8,14 @@ import (
 
 // sleepRequest carries why a VM enters sleep. RequestedAt is when the sleep
 // operation started. EligibleAt and LastNetworkActivityAt come from an automatic
-// idle decision. They stay zero for a manual warm stop.
+// idle decision. They stay zero for a manual warm stop. AbortOnTraffic makes an
+// automatic sleep restore the VM when a packet arrives during the warm stop. A
+// manual warm stop leaves it false, because the operator asked for the stop.
 type sleepRequest struct {
 	EligibleAt            time.Time
 	RequestedAt           time.Time
 	LastNetworkActivityAt time.Time
+	AbortOnTraffic        bool
 }
 
 // enterSleep warm-stops a live guest and publishes the sleeping observed state.
@@ -38,6 +41,8 @@ func (manager *Manager) enterSleep(
 		return err
 	}
 
+	before, beforeError := manager.sampleActivityForAbort(ctx, desired, request)
+
 	var outcome StopOutcome
 	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseSleepSnapshot, func() error {
 		var stopError error
@@ -49,15 +54,33 @@ func (manager *Manager) enterSleep(
 	if outcome.SnapshotGeneration == 0 {
 		return fmt.Errorf("warm stop for VM %s published no snapshot generation", desired.ID)
 	}
-
 	observed.Sleep.SnapshotGeneration = outcome.SnapshotGeneration
 	observed.Sleep.SnapshotCreatedAt = outcome.SnapshotCreatedAt
+
+	// A packet during the warm stop aborts an automatic sleep. The just-created
+	// snapshot is restored, so the VM keeps running with the new traffic.
+	after, afterError := manager.sampleActivityForAbort(ctx, desired, request)
+	if request.AbortOnTraffic && beforeError == nil && afterError == nil && after.LastSeenAt.After(before.LastSeenAt) {
+		manager.logger.Info("automatic sleep aborted by traffic",
+			"component", "vm", "vm_id", desired.ID)
+		return manager.resumeFromSleep(ctx, desired, machine, observed, operationID)
+	}
+
 	observed.State = StateSleeping
 	observed.Generation = desired.Generation
 	observed.RestartGeneration = desired.RestartGeneration
 	observed.completeOperation()
 
 	return manager.store.writeObserved(desired.ID, *observed)
+}
+
+// sampleActivityForAbort reads activity only for an automatic sleep. It returns a
+// zero value and no error for a manual warm stop, which never aborts on traffic.
+func (manager *Manager) sampleActivityForAbort(ctx context.Context, desired DesiredRecord, request sleepRequest) (NetworkActivity, error) {
+	if !request.AbortOnTraffic {
+		return NetworkActivity{}, nil
+	}
+	return manager.sampleNetworkActivity(ctx, desired)
 }
 
 // reconcileSleeping decides what to do with a VM that is already asleep. It holds
