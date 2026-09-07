@@ -111,12 +111,28 @@ func (c *console) attach(ctx context.Context, client io.ReadWriter, resize <-cha
 
 // close releases the PTY master and removes the slave link.
 func (c *console) close() error {
+	err := c.release()
+
+	if removeErr := os.Remove(c.link); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
+		err = removeErr
+	}
+
+	return err
+}
+
+// release disconnects viewers and stops the drain. It keeps the slave link so
+// the next process can adopt the console.
+func (c *console) release() error {
 	c.mutex.Lock()
 	if c.closed {
 		c.mutex.Unlock()
 		return nil
 	}
 	c.closed = true
+	for attached := range c.viewers {
+		delete(c.viewers, attached)
+		close(attached.dropped)
+	}
 	c.mutex.Unlock()
 
 	err := c.master.Close()
@@ -125,10 +141,6 @@ func (c *console) close() error {
 	select {
 	case <-c.drainDone:
 	case <-time.After(drainStopTimeout):
-	}
-
-	if removeErr := os.Remove(c.link); removeErr != nil && !os.IsNotExist(removeErr) && err == nil {
-		err = removeErr
 	}
 
 	return err
@@ -199,17 +211,6 @@ func (c *console) addViewer() (*viewer, []byte, error) {
 	c.viewers[attached] = struct{}{}
 
 	return attached, history, nil
-}
-
-// detachViewers disconnects viewers and keeps the PTY master open.
-func (c *console) detachViewers() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	for attached := range c.viewers {
-		delete(c.viewers, attached)
-		close(attached.dropped)
-	}
 }
 
 // removeViewer stops delivery to one viewer.

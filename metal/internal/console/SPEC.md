@@ -34,9 +34,9 @@ Firecracker --writes--> PTY slave <--symlink-- <sockets>/consoles/<id>
                   ringBuffer   viewers --> API WebSocket
 ```
 
-`Open` stores the master and starts the drain. `Close` releases it. `Attach` adds a viewer. `Shutdown` disconnects viewers and keeps masters. `Adopt` restores stored masters after metald restarts.
+`Open` stores the master and starts the drain. `Close` releases it. `Attach` adds a viewer. `Shutdown` releases the masters that this process holds. `Adopt` restores stored masters after metald restarts.
 
-Linux destroys a PTY when its master closes. The systemd descriptor store keeps the masters until the next metald process adopts them. `NotifyAccess` and `FileDescriptorStoreMax` enable the store.
+Linux destroys a PTY when its master closes. The systemd descriptor store keeps the masters until the next metald process adopts them. A master is non-blocking, so a release stops the drain read at once and one drain at a time reads a PTY. `NotifyAccess` and `FileDescriptorStoreMax` enable the store.
 
 ## Backpressure
 

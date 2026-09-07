@@ -6,12 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/creack/pty"
 )
 
-// fakeDescriptorStore retains descriptors for a simulated restart.
+// fakeDescriptorStore retains a duplicate of each descriptor for a simulated restart, as systemd does.
 type fakeDescriptorStore struct {
 	descriptorsByName map[string][]*os.File
 }
@@ -21,11 +22,16 @@ func newFakeDescriptorStore() *fakeDescriptorStore {
 }
 
 func (s *fakeDescriptorStore) Store(name string, file *os.File) error {
-	s.descriptorsByName[name] = append(s.descriptorsByName[name], file)
+	duplicate, err := duplicateDescriptor(file)
+	if err != nil {
+		return err
+	}
+	s.descriptorsByName[name] = append(s.descriptorsByName[name], duplicate)
 	return nil
 }
 
 func (s *fakeDescriptorStore) Remove(name string) error {
+	closeFiles(s.descriptorsByName[name])
 	delete(s.descriptorsByName, name)
 	return nil
 }
@@ -34,6 +40,16 @@ func (s *fakeDescriptorStore) TakeFiles() map[string][]*os.File {
 	storedDescriptors := s.descriptorsByName
 	s.descriptorsByName = make(map[string][]*os.File)
 	return storedDescriptors
+}
+
+// duplicateDescriptor copies a descriptor into an independent file.
+func duplicateDescriptor(file *os.File) (*os.File, error) {
+	duplicate, err := syscall.Dup(int(file.Fd()))
+	if err != nil {
+		return nil, err
+	}
+
+	return os.NewFile(uintptr(duplicate), file.Name()), nil
 }
 
 // expectConsoleOutput waits for console text.

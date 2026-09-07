@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/creack/pty"
 )
@@ -73,6 +74,11 @@ func (b *SerialBroker) Open(id string) error {
 	}
 	// Keep only the master. systemd reopens the slave through the link.
 	defer slave.Close()
+
+	master, err = newNonBlockingMaster(master)
+	if err != nil {
+		return err
+	}
 
 	link := filepath.Join(b.directory, id)
 	if err := b.linkSlave(slave.Name(), link); err != nil {
@@ -145,7 +151,7 @@ func (b *SerialBroker) Attach(ctx context.Context, id string, client io.ReadWrit
 	return openConsole.attach(ctx, client, resize)
 }
 
-// Shutdown disconnects viewers and keeps stored PTY masters open.
+// Shutdown releases every console. The stored descriptors keep the PTYs open.
 func (b *SerialBroker) Shutdown() {
 	b.mutex.Lock()
 	openConsoles := b.consoles
@@ -153,8 +159,25 @@ func (b *SerialBroker) Shutdown() {
 	b.mutex.Unlock()
 
 	for _, openConsole := range openConsoles {
-		openConsole.detachViewers()
+		_ = openConsole.release()
 	}
+}
+
+// newNonBlockingMaster returns master as a non-blocking file. The Go runtime
+// then interrupts a blocked drain read when the console releases the master.
+func newNonBlockingMaster(master *os.File) (*os.File, error) {
+	defer master.Close()
+
+	duplicate, _, errorNumber := syscall.Syscall(syscall.SYS_FCNTL, master.Fd(), syscall.F_DUPFD_CLOEXEC, 0)
+	if errorNumber != 0 {
+		return nil, fmt.Errorf("duplicate console master: %w", errorNumber)
+	}
+	if err := syscall.SetNonblock(int(duplicate), true); err != nil {
+		_ = syscall.Close(int(duplicate))
+		return nil, fmt.Errorf("set console master non-blocking: %w", err)
+	}
+
+	return os.NewFile(duplicate, master.Name()), nil
 }
 
 // closeFailedConsole removes a failed console setup.
