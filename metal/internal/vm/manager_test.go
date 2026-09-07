@@ -213,6 +213,45 @@ func TestMutationGenerationChangesOnlyForNewValues(t *testing.T) {
 	}
 }
 
+func TestStopWarmStoresTheWarmStopIntent(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	// A repeat with the same intent must not change the record.
+	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	record, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.State != StateStopped || !record.WarmStop {
+		t.Fatalf("desired record = %+v", record)
+	}
+	if record.Generation != 2 {
+		t.Fatalf("generation = %d, want 2", record.Generation)
+	}
+
+	// A plain stop clears the warm intent and raises the generation.
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateStopped); err != nil {
+		t.Fatal(err)
+	}
+	record, err = manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.WarmStop {
+		t.Error("a plain stop did not clear the warm intent")
+	}
+	if record.Generation != 3 {
+		t.Fatalf("generation = %d, want 3", record.Generation)
+	}
+}
+
 func TestSetComputeRequestsRunningState(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {

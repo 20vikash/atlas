@@ -7,16 +7,36 @@ import (
 	"slices"
 )
 
-// SetPowerState stores a requested power state.
+// SetPowerState stores a requested power state. A plain power request clears any
+// warm-stop intent, so the next stop shuts the guest down and the next start
+// discards the snapshot.
 func (manager *Manager) SetPowerState(ctx context.Context, identifier string, state State) error {
 	if state != StateRunning && state != StateStopped && state != StatePaused {
 		return ErrConflict
 	}
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		if record.State == state {
+		if record.State == state && !record.WarmStop {
 			return false, nil
 		}
 		record.State = state
+		record.WarmStop = false
+		return true, nil
+	})
+}
+
+// StopWarm stores a stop that saves a memory snapshot. The VM state becomes
+// stopped and a later start resumes from the snapshot. It raises the generation
+// only when the intent changes.
+func (manager *Manager) StopWarm(ctx context.Context, identifier string) error {
+	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
+		if record.State == StateDestroyed {
+			return false, ErrConflict
+		}
+		if record.State == StateStopped && record.WarmStop {
+			return false, nil
+		}
+		record.State = StateStopped
+		record.WarmStop = true
 		return true, nil
 	})
 }

@@ -50,6 +50,7 @@ type VirtualMachineManager interface {
 	Information(context.Context, string) (vm.Information, error)
 	List(context.Context) ([]vm.Information, error)
 	SetPowerState(context.Context, string, vm.State) error
+	StopWarm(context.Context, string) error
 	RequestRestart(context.Context, string) error
 	SetCompute(context.Context, string, int, int) error
 	SetDisk(context.Context, string, int, vm.Disk) error

@@ -91,6 +91,17 @@ func (manager *fakeVirtualMachineManager) SetPowerState(_ context.Context, id st
 	return nil
 }
 
+func (manager *fakeVirtualMachineManager) StopWarm(_ context.Context, id string) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
+
+	virtualMachine.info.DesiredState = vm.StateStopped
+	virtualMachine.info.DesiredGeneration++
+	return nil
+}
+
 func (manager *fakeVirtualMachineManager) ReplaceSSHKeys(
 	_ context.Context,
 	id string,
@@ -505,6 +516,16 @@ func TestMutationRequestsRejectUnknownAndTrailingJSON(t *testing.T) {
 
 	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped","unknown":true}`, http.StatusBadRequest)
 	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped"}{}`, http.StatusBadRequest)
+}
+
+func TestWarmStopPowerRequest(t *testing.T) {
+	server := newTestServer(t)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	// A warm stop is accepted.
+	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped","warm":true}`, http.StatusAccepted)
+	// Warm is valid only with a stopped state.
+	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"running","warm":true}`, http.StatusBadRequest)
 }
 
 func TestCreateRejectsLongID(t *testing.T) {

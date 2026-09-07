@@ -112,9 +112,12 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
-// powerRequest is the desired power state.
+// powerRequest is the desired power state. Warm asks a stop to save a memory
+// snapshot instead of shutting the guest down. It is valid only with a stopped
+// state. A later start resumes the VM from the snapshot.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
+	Warm  bool   `json:"warm"`
 }
 
 // sleepPolicyRequest is the complete sleep policy. It carries only is_sleepy.

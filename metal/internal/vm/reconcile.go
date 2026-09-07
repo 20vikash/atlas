@@ -79,7 +79,7 @@ func (manager *Manager) reconcileActive(
 		}
 		observed.RestartGeneration = desired.RestartGeneration
 	}
-	status, err = manager.applyDesiredState(ctx, desired.ID, machine, status, desired.State, &observed, operationID)
+	status, err = manager.applyDesiredState(ctx, desired.ID, machine, status, desired.State, desired.WarmStop, &observed, operationID)
 	if err != nil {
 		return err
 	}
@@ -158,6 +158,7 @@ func (manager *Manager) applyDesiredState(
 	machine RuntimeMachine,
 	status RuntimeStatus,
 	desiredState State,
+	warmStop bool,
 	observed *ObservedRecord,
 	operationID string,
 ) (RuntimeStatus, error) {
@@ -184,10 +185,14 @@ func (manager *Manager) applyDesiredState(
 		}
 	case StateStopped:
 		if status.State != StateStopped {
-			stopNormally := func(ctx context.Context, machine RuntimeMachine) error {
-				return manager.runtime.Stop(ctx, machine, StopShutdown)
+			stopMode := StopShutdown
+			if warmStop {
+				stopMode = StopWithSleepSnapshot
 			}
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopNormally)
+			stop := func(ctx context.Context, machine RuntimeMachine) error {
+				return manager.runtime.Stop(ctx, machine, stopMode)
+			}
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stop)
 		}
 	default:
 		return status, &TransitionError{DesiredState: desiredState, ObservedState: status.State}

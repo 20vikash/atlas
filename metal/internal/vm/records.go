@@ -28,15 +28,19 @@ const (
 
 // DesiredRecord stores the complete desired state of one virtual machine.
 type DesiredRecord struct {
-	SchemaVersion     int           `json:"schema_version"`
-	ID                string        `json:"id"`
-	UserID            uint32        `json:"user_id"`
-	GroupID           uint32        `json:"group_id"`
-	CreateFingerprint string        `json:"create_fingerprint"`
-	Generation        uint64        `json:"generation"`
-	RestartGeneration uint64        `json:"restart_generation"`
-	State             State         `json:"state"`
-	Specification     Specification `json:"specification"`
+	SchemaVersion     int    `json:"schema_version"`
+	ID                string `json:"id"`
+	UserID            uint32 `json:"user_id"`
+	GroupID           uint32 `json:"group_id"`
+	CreateFingerprint string `json:"create_fingerprint"`
+	Generation        uint64 `json:"generation"`
+	RestartGeneration uint64 `json:"restart_generation"`
+	State             State  `json:"state"`
+	// WarmStop asks a stop to save a memory snapshot instead of shutting the
+	// guest down. It is meaningful only when State is stopped. A later start
+	// resumes from the snapshot. It defaults false, so an old record stops cold.
+	WarmStop      bool          `json:"warm_stop,omitempty"`
+	Specification Specification `json:"specification"`
 }
 
 // ObservedRecord stores reconciliation progress and observed state.
