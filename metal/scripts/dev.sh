@@ -3,6 +3,9 @@
 # Uses an Ubuntu cloud image and the Firecracker metadata service.
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+IMAGE_BUILDER=$SCRIPT_DIR/../../atlas/vm/scripts/build_ubuntu_server_image.sh
+
 # Keep external settings in the environment.
 WORKDIR=${METALD_WORKDIR:-/tmp/metald}
 BULK=${METALD_BULK_DIR:-$WORKDIR}
@@ -17,7 +20,6 @@ BIN=$WORKDIR/bin
 KEYDIR=$WORKDIR/keys
 CONFIG=$WORKDIR/metald.toml
 ARCH=$(uname -m)
-CI=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$ARCH
 
 case $ARCH in
 	x86_64) IMAGE_ARCHITECTURE=amd64 ;;
@@ -30,12 +32,6 @@ esac
 [[ $EUID -eq 0 ]] || { echo "metald dev script: must run as root" >&2; exit 1; }
 
 step() { echo "==> $*"; }
-
-fetch() {
-	[[ -f $2 ]] && return 0
-	echo "    downloading $(basename "$2")"
-	curl -fL --progress-bar -o "$2.part" "$1" && mv "$2.part" "$2"
-}
 
 mkdir -p "$WORKDIR" "$BIN" "$IMAGE_DIR/ubuntu" "$BULK/downloads" "$KEYDIR" \
 	"$VAR_DIR" "$(dirname "$CONFIG")"
@@ -58,14 +54,18 @@ if [[ ! -x $BIN/firecracker || ! -x $BIN/jailer ]]; then
 	chmod +x "$BIN/firecracker" "$BIN/jailer"
 fi
 
-step "guest kernel"
-fetch "$CI/vmlinux-5.10.223" "$IMAGE_DIR/ubuntu/vmlinux"
+step "Atlas guest image (ssh key command, cloud-init datasource, metadata service)"
+rootfs=$BULK/downloads/ubuntu.ext4
+IMAGE_VERSION=${METALD_IMAGE_VERSION:-22.04}
+# The builder bakes the guest bits a VM needs: the sshd AuthorizedKeysCommand that
+# reads MMDS, the cloud-init datasource, the network, and the metadata service. It
+# is slow, so it runs only when the image is absent.
+if [[ ! -f $rootfs || ! -f $IMAGE_DIR/ubuntu/vmlinux ]]; then
+	"$IMAGE_BUILDER" --output "$rootfs" --kernel-output "$IMAGE_DIR/ubuntu/vmlinux" \
+		--platform "$IMAGE_ARCHITECTURE" --version "$IMAGE_VERSION"
+fi
 # The image is a partitionless ext4 file system on /dev/vda.
 echo "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw" > "$IMAGE_DIR/ubuntu/boot-args"
-
-step "Ubuntu file system"
-rootfs=$BULK/downloads/ubuntu.ext4
-fetch "$CI/ubuntu-22.04.ext4" "$rootfs"
 rootfs_sha256=$(sha256sum "$rootfs" | cut -d " " -f 1)
 kernel_sha256=$(sha256sum "$IMAGE_DIR/ubuntu/vmlinux" | cut -d " " -f 1)
 

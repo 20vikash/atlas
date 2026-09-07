@@ -9,7 +9,6 @@ listen_address=${METALD_ADDR:-127.0.0.1:8080}
 private_key=${METALD_KEY:-$work_directory/keys/id_ed25519}
 ssh_user=${METALD_SSH_USER:-root}
 authentication_token=${METALD_AUTH_TOKEN:-metal-development-token}
-bulk_directory=${METALD_BULK_DIR:-$work_directory}
 host_architecture=$(uname -m)
 image_base_url=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$host_architecture
 
@@ -19,10 +18,13 @@ case $host_architecture in
 	*) echo "unsupported architecture: $host_architecture" >&2; exit 1 ;;
 esac
 
+# The image is built and imported locally, so the digests come from the manifest
+# dev.sh wrote. metald reuses the cached image and never fetches these URLs.
+manifest=$work_directory/images/ubuntu/manifest.json
 image_url=${METALD_IMAGE_URL:-$image_base_url/ubuntu-22.04.ext4}
-image_sha256=${METALD_IMAGE_SHA256:-$(sha256sum "$bulk_directory/downloads/ubuntu.ext4" | cut -d " " -f 1)}
+image_sha256=${METALD_IMAGE_SHA256:-$(jq -r .rootfs_sha256 "$manifest")}
 kernel_url=${METALD_KERNEL_URL:-$image_base_url/vmlinux-5.10.223}
-kernel_sha256=${METALD_KERNEL_SHA256:-$(sha256sum "$work_directory/images/ubuntu/vmlinux" | cut -d " " -f 1)}
+kernel_sha256=${METALD_KERNEL_SHA256:-$(jq -r .kernel_sha256 "$manifest")}
 architecture=${METALD_ARCHITECTURE:-$default_architecture}
 
 call_metal() { curl -sS "http://$listen_address$1" -H "Authorization: Bearer $authentication_token" "${@:2}"; }

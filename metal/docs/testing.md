@@ -14,7 +14,7 @@ sudo metal/dist/metald serve --config /tmp/metald/metald.toml
 Run the script again when required. It performs these actions:
 
 - Downloads Firecracker and Jailer.
-- Downloads and imports a test image with its manifest.
+- Builds the Atlas guest image with `build_ubuntu_server_image.sh` and imports it with its manifest. The image bakes the sshd `AuthorizedKeysCommand`, the cloud-init datasource, the network, and the metadata service, so a VM reads its per-VM SSH key from MMDS. Set `METALD_IMAGE_VERSION` to pick 22.04 or 24.04.
 - Creates the ZFS pool and parent datasets.
 - Creates a Secure Shell key.
 - Installs the systemd template unit.
@@ -76,6 +76,7 @@ These tests create a temporary namespace and a `tap0`, attach the eBPF program, 
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
 | `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
 | `METALD_WG_MESH_ENABLED` | `false` | Write `wg_mesh.enabled`. The development host boots without the mesh CLI by default. |
+| `METALD_IMAGE_VERSION` | `22.04` | Ubuntu version the guest image builder uses. |
 
 ## Manual access
 
