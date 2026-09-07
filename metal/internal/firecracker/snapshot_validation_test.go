@@ -57,6 +57,28 @@ func TestValidateSnapshotGenerationAcceptsAValidSnapshot(t *testing.T) {
 	}
 }
 
+func TestLatestValidSnapshotValidatesTheNewestGeneration(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir()}
+	layDownGeneration(t, configuration, 2)
+	layDownGeneration(t, configuration, 5)
+
+	got, err := configuration.latestValidSnapshot(validRequirement())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Generation != 5 {
+		t.Errorf("generation = %d, want 5", got.Generation)
+	}
+}
+
+func TestLatestValidSnapshotReportsNotFoundWithoutAGeneration(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir()}
+
+	if _, err := configuration.latestValidSnapshot(validRequirement()); !errors.Is(err, errSnapshotNotFound) {
+		t.Fatalf("error = %v, want errSnapshotNotFound", err)
+	}
+}
+
 func TestValidateSnapshotGenerationReportsNotFoundWithoutAManifest(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	// Lay down the artifacts but remove the manifest, so the snapshot is absent.

@@ -43,19 +43,20 @@ func (configuration Config) pendingSnapshotDirectory(id string) string {
 	return filepath.Join(configuration.chrootRoot(id), pendingSnapshotDirName)
 }
 
-// nextSnapshotGeneration returns one more than the highest published generation. It
-// returns 1 when none exist. It ignores a directory name that is not a
+// latestSnapshotGeneration returns the highest published generation and true, or
+// zero and false when none exist. It ignores a directory name that is not a
 // canonical positive base-10 number.
-func (configuration Config) nextSnapshotGeneration(id string) (uint64, error) {
+func (configuration Config) latestSnapshotGeneration(id string) (uint64, bool, error) {
 	entries, err := os.ReadDir(configuration.snapshotGenerationsDirectory(id))
 	if errors.Is(err, fs.ErrNotExist) {
-		return 1, nil
+		return 0, false, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("list snapshot generations: %w", err)
+		return 0, false, fmt.Errorf("list snapshot generations: %w", err)
 	}
 
 	var highest uint64
+	found := false
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -66,7 +67,18 @@ func (configuration Config) nextSnapshotGeneration(id string) (uint64, error) {
 		}
 		if generation > highest {
 			highest = generation
+			found = true
 		}
+	}
+	return highest, found, nil
+}
+
+// nextSnapshotGeneration returns one more than the highest published generation.
+// It returns 1 when none exist.
+func (configuration Config) nextSnapshotGeneration(id string) (uint64, error) {
+	highest, _, err := configuration.latestSnapshotGeneration(id)
+	if err != nil {
+		return 0, err
 	}
 	return highest + 1, nil
 }
@@ -91,6 +103,22 @@ type validatedSnapshot struct {
 	Manifest   snapshotManifest
 	StatePath  string
 	MemoryPath string
+}
+
+// latestValidSnapshot validates the newest published snapshot against the
+// requirement. It returns errSnapshotNotFound when no generation exists. metald
+// always restores the newest generation, because a new generation is used for
+// every publish.
+func (configuration Config) latestValidSnapshot(requirement snapshotRequirement) (validatedSnapshot, error) {
+	generation, found, err := configuration.latestSnapshotGeneration(requirement.VirtualMachineID)
+	if err != nil {
+		return validatedSnapshot{}, err
+	}
+	if !found {
+		return validatedSnapshot{}, errSnapshotNotFound
+	}
+
+	return configuration.validateSnapshotGeneration(requirement, generation)
 }
 
 // validateSnapshotGeneration validates the published snapshot of one generation. It

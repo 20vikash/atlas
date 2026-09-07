@@ -52,3 +52,28 @@ func TestNextSnapshotGenerationUsesTheHighestValidName(t *testing.T) {
 		t.Errorf("generation = %d, want 6", generation)
 	}
 }
+
+func TestLatestSnapshotGenerationReportsAbsence(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir()}
+	if _, found, err := configuration.latestSnapshotGeneration("vm-1"); err != nil || found {
+		t.Fatalf("latest = (found %v, err %v), want not found", found, err)
+	}
+}
+
+func TestLatestSnapshotGenerationReturnsTheHighestValidName(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir()}
+	generations := configuration.snapshotGenerationsDirectory("vm-1")
+	for _, name := range []string{"1", "4", "2", "07", "junk"} {
+		if err := os.MkdirAll(filepath.Join(generations, name), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	generation, found, err := configuration.latestSnapshotGeneration("vm-1")
+	if err != nil || !found {
+		t.Fatalf("latest = (found %v, err %v)", found, err)
+	}
+	if generation != 4 {
+		t.Errorf("generation = %d, want 4", generation)
+	}
+}
