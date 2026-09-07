@@ -139,7 +139,7 @@ func (manager *Manager) applyRestart(
 		return status, nil
 	}
 	err := manager.runOperation(ctx, identifier, observed, operationID, phaseRestart, func() error {
-		if err := manager.runtime.Stop(ctx, machine, StopShutdown); err != nil {
+		if _, err := manager.runtime.Stop(ctx, machine, StopShutdown); err != nil {
 			return err
 		}
 		return manager.runtime.Start(ctx, machine, StartNormal)
@@ -204,7 +204,8 @@ func (manager *Manager) applyDesiredState(
 		if warmStop {
 			if status.State == StateRunning || status.State == StatePaused {
 				warmStopRuntime := func(ctx context.Context, machine RuntimeMachine) error {
-					return manager.runtime.Stop(ctx, machine, StopWithSleepSnapshot)
+					_, err := manager.runtime.Stop(ctx, machine, StopWithSleepSnapshot)
+					return err
 				}
 				result, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, warmStopRuntime)
 				if err == nil {
@@ -218,7 +219,8 @@ func (manager *Manager) applyDesiredState(
 		}
 		if status.State != StateStopped {
 			stopShutdown := func(ctx context.Context, machine RuntimeMachine) error {
-				return manager.runtime.Stop(ctx, machine, StopShutdown)
+				_, err := manager.runtime.Stop(ctx, machine, StopShutdown)
+				return err
 			}
 			result, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopShutdown)
 			if err == nil {

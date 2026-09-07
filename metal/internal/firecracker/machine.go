@@ -155,11 +155,14 @@ func (m *machine) restoreSnapshot(ctx context.Context, resume bool) (bool, error
 	return true, nil
 }
 
-// hasCompleteSnapshot reports whether a valid published snapshot exists for this
-// VM at its current generations and Firecracker build.
-func (m *machine) hasCompleteSnapshot() bool {
-	_, err := m.runtime.configuration.latestValidSnapshot(m.snapshotRequirement())
-	return err == nil
+// latestSnapshot returns the newest valid published snapshot for this VM and
+// true, or a zero value and false when none validates.
+func (m *machine) latestSnapshot() (validatedSnapshot, bool) {
+	snapshot, err := m.runtime.configuration.latestValidSnapshot(m.snapshotRequirement())
+	if err != nil {
+		return validatedSnapshot{}, false
+	}
+	return snapshot, true
 }
 
 // startFromSnapshot restores the VM-local snapshot and requires one to exist. It
@@ -202,25 +205,29 @@ func (m *machine) Stop(ctx context.Context) error {
 // warmStop pauses the guest, publishes a full snapshot, and terminates
 // Firecracker, so a later start can resume it. The snapshot is published before
 // termination, so an interrupted warm stop stays recoverable: a later start
-// restores the published snapshot. The VM must be running or paused.
-func (m *machine) warmStop(ctx context.Context) error {
+// restores the published snapshot. The VM must be running or paused. It reports
+// the published snapshot generation and its creation time.
+func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
 	state, err := m.status(ctx)
 	if err != nil {
-		return err
+		return vm.StopOutcome{}, err
 	}
 
 	// Recover a warm stop that already published a snapshot. metald may have
 	// crashed after publication but before termination.
-	if m.hasCompleteSnapshot() {
+	if snapshot, ok := m.latestSnapshot(); ok {
 		switch state {
 		case vm.StateStopped:
-			return nil
+			return stopOutcome(snapshot), nil
 		case vm.StatePaused:
-			return m.kill(ctx)
+			if err := m.kill(ctx); err != nil {
+				return vm.StopOutcome{}, err
+			}
+			return stopOutcome(snapshot), nil
 		default:
 			// A running VM with a complete snapshot is inconsistent: a successful
 			// warm stop leaves the process paused or gone, never running.
-			return vm.ErrConflict
+			return vm.StopOutcome{}, vm.ErrConflict
 		}
 	}
 
@@ -228,20 +235,33 @@ func (m *machine) warmStop(ctx context.Context) error {
 	switch state {
 	case vm.StateRunning:
 		if err := m.api.Pause(ctx); err != nil {
-			return fmt.Errorf("pause for warm stop: %w", err)
+			return vm.StopOutcome{}, fmt.Errorf("pause for warm stop: %w", err)
 		}
 		pausedByThisCall = true
 	case vm.StatePaused:
 		// An already paused guest needs no second pause.
 	default:
-		return vm.ErrConflict
+		return vm.StopOutcome{}, vm.ErrConflict
 	}
 
-	if _, err := m.runtime.createAndPublishSnapshot(ctx, m.input); err != nil {
-		return m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
+	published, err := m.runtime.createAndPublishSnapshot(ctx, m.input)
+	if err != nil {
+		return vm.StopOutcome{}, m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
 	}
 
-	return m.kill(ctx)
+	if err := m.kill(ctx); err != nil {
+		return vm.StopOutcome{}, err
+	}
+
+	return stopOutcome(published), nil
+}
+
+// stopOutcome reports the published generation and creation time of a snapshot.
+func stopOutcome(snapshot validatedSnapshot) vm.StopOutcome {
+	return vm.StopOutcome{
+		SnapshotGeneration: snapshot.Generation,
+		SnapshotCreatedAt:  snapshot.Manifest.CreatedAt,
+	}
 }
 
 // recoverFailedWarmStop cleans up a failed warm stop. It removes the current

@@ -22,7 +22,7 @@ func TestWarmStopRejectsANonRunningVM(t *testing.T) {
 	units := &stubUnits{active: false} // inactive reports stopped
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	if err := m.warmStop(context.Background()); !errors.Is(err, vm.ErrConflict) {
+	if _, err := m.warmStop(context.Background()); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
 }

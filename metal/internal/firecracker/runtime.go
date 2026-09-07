@@ -110,15 +110,17 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode
 }
 
 // Stop stops a Firecracker virtual machine. StopShutdown keeps the current
-// Ctrl+Alt+Del and bounded kill. StopWithSleepSnapshot is not implemented yet.
-func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) error {
+// Ctrl+Alt+Del and bounded kill. StopWithSleepSnapshot pauses the guest,
+// publishes a full snapshot, and terminates the process. A warm stop reports the
+// published snapshot generation and its creation time.
+func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) (vm.StopOutcome, error) {
 	switch mode {
 	case vm.StopShutdown:
-		return runtime.newMachine(input).Stop(ctx)
+		return vm.StopOutcome{}, runtime.newMachine(input).Stop(ctx)
 	case vm.StopWithSleepSnapshot:
 		return runtime.newMachine(input).warmStop(ctx)
 	default:
-		return fmt.Errorf("unknown stop mode %d", mode)
+		return vm.StopOutcome{}, fmt.Errorf("unknown stop mode %d", mode)
 	}
 }
 

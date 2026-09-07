@@ -37,7 +37,7 @@ func TestRuntimeStartFromSleepSnapshotWithoutASnapshot(t *testing.T) {
 func TestRuntimeStopRejectsAnUnknownMode(t *testing.T) {
 	runtime := &Runtime{}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
-	err := runtime.Stop(context.Background(), input, vm.StopMode(99))
+	_, err := runtime.Stop(context.Background(), input, vm.StopMode(99))
 	if err == nil || !strings.Contains(err.Error(), "unknown stop mode") {
 		t.Errorf("Stop(unknown mode) error = %v, want an unknown stop mode error", err)
 	}

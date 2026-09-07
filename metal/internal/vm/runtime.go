@@ -1,6 +1,9 @@
 package vm
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // StartMode selects how Runtime.Start brings up a virtual machine.
 type StartMode int
@@ -25,11 +28,18 @@ const (
 	StopWithSleepSnapshot
 )
 
+// StopOutcome reports what a stop produced. A warm stop fills the published
+// snapshot generation and its creation time. A shutdown leaves both zero.
+type StopOutcome struct {
+	SnapshotGeneration uint64
+	SnapshotCreatedAt  time.Time
+}
+
 // Runtime controls virtual machine processes and guest-facing operations.
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
 	Start(context.Context, RuntimeMachine, StartMode) error
-	Stop(context.Context, RuntimeMachine, StopMode) error
+	Stop(context.Context, RuntimeMachine, StopMode) (StopOutcome, error)
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error

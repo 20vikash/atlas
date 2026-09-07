@@ -23,6 +23,9 @@ type fakeRuntime struct {
 	// startFromSnapshotError makes a StartFromSleepSnapshot fail, so a test can
 	// drive the cold-boot fallback.
 	startFromSnapshotError error
+	// stopOutcome is returned by a warm stop, so a test can set the published
+	// snapshot generation.
+	stopOutcome StopOutcome
 }
 
 func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error) {
@@ -39,11 +42,11 @@ func (runtime *fakeRuntime) Start(_ context.Context, _ RuntimeMachine, mode Star
 	return nil
 }
 
-func (runtime *fakeRuntime) Stop(_ context.Context, _ RuntimeMachine, mode StopMode) error {
+func (runtime *fakeRuntime) Stop(_ context.Context, _ RuntimeMachine, mode StopMode) (StopOutcome, error) {
 	runtime.stops++
 	runtime.stopMode = mode
 	runtime.state = StateStopped
-	return nil
+	return runtime.stopOutcome, nil
 }
 
 func (runtime *fakeRuntime) Pause(context.Context, RuntimeMachine) error {

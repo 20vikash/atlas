@@ -87,7 +87,7 @@ func TestWarmStopRecognizesACompletedStop(t *testing.T) {
 	}
 
 	m := &machine{runtime: runtime, input: input, api: api.New(fcSocket(t, nil)), stopTimeout: time.Minute}
-	if err := m.warmStop(context.Background()); err != nil {
+	if _, err := m.warmStop(context.Background()); err != nil {
 		t.Fatalf("warm stop recovery = %v, want nil", err)
 	}
 	if _, kills, _ := units.counts(); kills != 0 {
