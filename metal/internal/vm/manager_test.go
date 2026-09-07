@@ -219,6 +219,50 @@ func TestMutationGenerationChangesOnlyForNewValues(t *testing.T) {
 	}
 }
 
+func TestSpecificationGenerationTracksShapeNotPower(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	base, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A warm stop and a start move the desired generation but must leave the
+	// specification generation alone, so the snapshot stays valid across them.
+	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	afterPower, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterPower.SpecificationGeneration != base.SpecificationGeneration {
+		t.Errorf("power change moved specification generation %d to %d", base.SpecificationGeneration, afterPower.SpecificationGeneration)
+	}
+	if afterPower.Generation == base.Generation {
+		t.Error("power change did not raise the desired generation")
+	}
+
+	// A shape change raises the specification generation.
+	configuration := testSpecification().Network
+	configuration.PublicNetworkThroughputMiBps = 500
+	if err := manager.SetNetwork(context.Background(), "machine-1", configuration); err != nil {
+		t.Fatal(err)
+	}
+	afterShape, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterShape.SpecificationGeneration <= afterPower.SpecificationGeneration {
+		t.Error("a network change did not raise the specification generation")
+	}
+}
+
 func TestStopWarmStoresTheWarmStopIntent(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {

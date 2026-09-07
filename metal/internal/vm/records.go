@@ -35,7 +35,11 @@ type DesiredRecord struct {
 	CreateFingerprint string `json:"create_fingerprint"`
 	Generation        uint64 `json:"generation"`
 	RestartGeneration uint64 `json:"restart_generation"`
-	State             State  `json:"state"`
+	// SpecificationGeneration bumps only when the compute, disk, or network shape
+	// changes. It stays stable across power and warm-stop changes, so a memory
+	// snapshot keyed on it survives a stop and start.
+	SpecificationGeneration uint64 `json:"specification_generation,omitempty"`
+	State                   State  `json:"state"`
 	// WarmStop asks a stop to save a memory snapshot instead of shutting the
 	// guest down. It is meaningful only when State is stopped. A later start
 	// resumes from the snapshot. It defaults false, so an old record stops cold.

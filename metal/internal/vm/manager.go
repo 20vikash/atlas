@@ -135,13 +135,14 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, err
 	}
 	desired := DesiredRecord{
-		ID:                identifier,
-		UserID:            userID,
-		GroupID:           userID,
-		CreateFingerprint: fingerprint,
-		Generation:        1,
-		State:             StateRunning,
-		Specification:     cloneSpecification(specification),
+		ID:                      identifier,
+		UserID:                  userID,
+		GroupID:                 userID,
+		CreateFingerprint:       fingerprint,
+		Generation:              1,
+		SpecificationGeneration: 1,
+		State:                   StateRunning,
+		Specification:           cloneSpecification(specification),
 	}
 	observed := ObservedRecord{State: StateUnknown, UpdatedAt: time.Now().UTC()}
 	if err := manager.store.writeDesired(desired); err != nil {

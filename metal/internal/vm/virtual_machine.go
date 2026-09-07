@@ -53,7 +53,7 @@ func runtimeMachine(record DesiredRecord, networkInterface NetworkInterface) Run
 		GroupID:                 record.GroupID,
 		Specification:           cloneSpecification(record.Specification),
 		NetworkInterface:        networkInterface,
-		SpecificationGeneration: record.Generation,
+		SpecificationGeneration: record.SpecificationGeneration,
 		RestartGeneration:       record.RestartGeneration,
 	}
 }

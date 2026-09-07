@@ -91,6 +91,7 @@ func (manager *Manager) SetCompute(ctx context.Context, identifier string, virtu
 		}
 		record.Specification.VirtualCPUCount = virtualCPUCount
 		record.Specification.MemoryMiB = memoryMiB
+		record.SpecificationGeneration++
 		record.State = StateRunning
 		return true, nil
 	})
@@ -107,6 +108,7 @@ func (manager *Manager) SetDisk(ctx context.Context, identifier string, diskMiB 
 		}
 		record.Specification.DiskMiB = diskMiB
 		record.Specification.Disk = limits
+		record.SpecificationGeneration++
 		return true, nil
 	})
 }
@@ -133,6 +135,7 @@ func (manager *Manager) SetNetwork(ctx context.Context, identifier string, confi
 		return ErrConflict
 	}
 	record.Specification.Network = configuration
+	record.SpecificationGeneration++
 	record.Generation++
 	return manager.store.writeDesired(record)
 }
