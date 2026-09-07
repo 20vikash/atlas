@@ -54,6 +54,12 @@ A console outlives its viewers. It exists from VM launch to VM stop, so output p
 
 Linux reports EIO on a PTY master while no slave is open. That is the normal state between `Open` and the unit start, so the drain treats EIO as idle until the console is closed.
 
+## Surviving a metald restart
+
+metald holds the master. When metald stops, the master closes and the slave hangs up, which sends SIGHUP to the VM process that owns the slave as its controlling terminal. A stateless daemon must not kill guests, so the `metal-vm@` unit runs the jailer through a wrapper that ignores SIGHUP. The ignored disposition survives the exec into Firecracker, so a metald restart leaves running guests alone. See [internal/firecracker/SPEC.md](../firecracker/SPEC.md).
+
+The trade is that the console does not reconnect on its own. The restarted metald opens a new PTY, but Firecracker still writes to the old slave, so live console output is lost until the VM restarts. SSH is unaffected.
+
 ## Related
 
 - [docs/api.md](../../docs/api.md) documents the console WebSocket endpoint.
