@@ -255,6 +255,26 @@ func TestSetComputeRejectedWhileSleeping(t *testing.T) {
 	}
 }
 
+func TestDestroyWhileSleepingRemovesArtifacts(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	autoSleepToSleeping(t, manager, monitor)
+
+	// A destroy removes the runtime, which drops the sleep snapshot, then the
+	// network and storage, and finally the records.
+	if err := manager.Delete(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.removes != 1 {
+		t.Fatalf("removes = %d, want the runtime removed once", runtime.removes)
+	}
+	if _, err := manager.store.readDesired("machine-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("records remain after destroy: %v", err)
+	}
+}
+
 // warmStopToSleeping creates a VM, boots it, and warm-stops it to the sleeping
 // state through the manual power path.
 func warmStopToSleeping(t *testing.T, manager *Manager) {
