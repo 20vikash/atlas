@@ -21,6 +21,21 @@ func (manager *Manager) SetPowerState(ctx context.Context, identifier string, st
 	})
 }
 
+// SetSleepPolicy stores whether the host can sleep an idle VM. It raises the
+// generation only when the value changes and keeps the desired power state.
+func (manager *Manager) SetSleepPolicy(ctx context.Context, identifier string, isSleepy bool) error {
+	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
+		if record.State == StateDestroyed {
+			return false, ErrConflict
+		}
+		if record.Specification.IsSleepy == isSleepy {
+			return false, nil
+		}
+		record.Specification.IsSleepy = isSleepy
+		return true, nil
+	})
+}
+
 // RequestRestart stores durable restart intent.
 func (manager *Manager) RequestRestart(ctx context.Context, identifier string) error {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)

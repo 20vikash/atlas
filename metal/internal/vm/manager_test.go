@@ -232,6 +232,54 @@ func TestSetComputeRequestsRunningState(t *testing.T) {
 	}
 }
 
+func TestSetSleepPolicyRaisesGenerationOnlyOnChange(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetSleepPolicy(context.Background(), "machine-1", true); err != nil {
+		t.Fatal(err)
+	}
+	// A repeat with the same value must not change the record.
+	if err := manager.SetSleepPolicy(context.Background(), "machine-1", true); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.Specification.IsSleepy {
+		t.Error("is_sleepy was not stored")
+	}
+	if record.State != StateRunning {
+		t.Errorf("power state changed to %s", record.State)
+	}
+	if record.Generation != 2 {
+		t.Fatalf("generation = %d, want 2", record.Generation)
+	}
+}
+
+func TestSetSleepPolicyRejectsAMissingVirtualMachine(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if err := manager.SetSleepPolicy(context.Background(), "missing", true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetSleepPolicyConflictsWithADestroyedVirtualMachine(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Delete(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.SetSleepPolicy(context.Background(), "machine-1", true); !errors.Is(err, ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+}
+
 func TestNewManagerRejectsUnknownAndTrailingRecordData(t *testing.T) {
 	for _, data := range []string{
 		`{"schema_version":1,"id":"machine-1","unknown":true}`,
