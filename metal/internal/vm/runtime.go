@@ -51,6 +51,10 @@ type Runtime interface {
 	// ErrNotFound when none exists and an error when a manifest is present but
 	// invalid.
 	InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error)
+	// DiscardSleepSnapshot removes the sleep snapshot of a stopped VM and clears
+	// the runtime unit, so a later start cold boots. It accepts a VM with no
+	// snapshot.
+	DiscardSleepSnapshot(context.Context, RuntimeMachine) error
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error

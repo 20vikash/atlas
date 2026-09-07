@@ -31,6 +31,8 @@ type fakeRuntime struct {
 	// can model a present, absent, or invalid sleep snapshot.
 	sleepSnapshot      SleepSnapshot
 	sleepSnapshotError error
+	// discards counts DiscardSleepSnapshot calls.
+	discards int
 }
 
 func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error) {
@@ -84,6 +86,12 @@ func (runtime *fakeRuntime) RefreshDisk(context.Context, RuntimeMachine) error {
 
 func (runtime *fakeRuntime) InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error) {
 	return runtime.sleepSnapshot, runtime.sleepSnapshotError
+}
+
+func (runtime *fakeRuntime) DiscardSleepSnapshot(context.Context, RuntimeMachine) error {
+	runtime.discards++
+	runtime.state = StateStopped
+	return nil
 }
 
 func (runtime *fakeRuntime) ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error) {

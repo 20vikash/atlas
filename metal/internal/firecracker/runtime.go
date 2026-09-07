@@ -140,6 +140,15 @@ func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.Runtime
 	return vm.SleepSnapshot{Generation: snapshot.Generation, CreatedAt: snapshot.Manifest.CreatedAt}, nil
 }
 
+// DiscardSleepSnapshot clears the runtime unit of a warm-stopped VM and removes
+// its sleep snapshots, so a later start cold boots with the current shape.
+func (runtime *Runtime) DiscardSleepSnapshot(ctx context.Context, input vm.RuntimeMachine) error {
+	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
+		return fmt.Errorf("discard sleep snapshot: %w", err)
+	}
+	return runtime.purgeSnapshots(input.ID)
+}
+
 // Pause pauses a running Firecracker virtual machine.
 func (runtime *Runtime) Pause(ctx context.Context, input vm.RuntimeMachine) error {
 	return runtime.newMachine(input).Pause(ctx)
