@@ -147,6 +147,7 @@ class TestProxyServerCreate(UnitTestCase):
 		self.assertEqual(name, {"name": "proxy-001", "is_draft": False})
 		self.assertEqual(proxy_server.virtual_machine, "vm-00001")
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["tenant_id"], 0)
+		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_privileged"])
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["hostname"], "proxy-001")
 		proxy_server.enqueue_provisioning.assert_called_once()
 

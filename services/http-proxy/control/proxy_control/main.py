@@ -1,4 +1,3 @@
-import asyncio
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -33,23 +32,6 @@ class Health(BaseModel):
 	"""Daemon health."""
 
 	ok: bool
-
-
-class State(BaseModel):
-	"""The site map and the custom-domain map."""
-
-	model_config = ConfigDict(
-		json_schema_extra={"example": {"sites": SITE_MAP_EXAMPLE, "domains": DOMAIN_MAP_EXAMPLE}}
-	)
-
-	sites: dict[str, str] = Field(
-		examples=[SITE_MAP_EXAMPLE],
-		description="Site subdomains and their backend addresses.",
-	)
-	domains: dict[str, str] = Field(
-		examples=[DOMAIN_MAP_EXAMPLE],
-		description="Custom domains and their backend addresses.",
-	)
 
 
 class MapReplaced(BaseModel):
@@ -99,7 +81,8 @@ app = FastAPI(
 	openapi_url=None,
 	openapi_tags=[
 		{"name": "Health", "description": "Use these routes for liveness and readiness checks."},
-		{"name": "Routing", "description": "Route sites and custom domains to backend IPv6 addresses."},
+		{"name": "Sites", "description": "Route wildcard subdomains to backend IPv6 addresses."},
+		{"name": "Domains", "description": "Route custom domains to backend IPv6 addresses."},
 	],
 )
 protected = [Depends(auth.require_request)]
@@ -133,21 +116,20 @@ async def readyz() -> Response:
 
 
 @app.get(
-	"/v1/state",
+	"/v1/sites",
 	dependencies=protected,
-	tags=["Routing"],
-	summary="Read routes",
-	description="Read the current routes during reconciliation. The response includes site and custom-domain maps.",
+	tags=["Sites"],
+	summary="List site routes",
+	description="Read site routes during reconciliation.",
 )
-async def get_state() -> State:
-	sites, domains = await asyncio.gather(maps.get("sites"), maps.get("domains"))
-	return State(sites=sites, domains=domains)
+async def get_sites() -> dict[str, str]:
+	return await maps.get("sites")
 
 
 @app.put(
 	"/v1/sites",
 	dependencies=protected,
-	tags=["Routing"],
+	tags=["Sites"],
 	summary="Sync site routes",
 	description="Replace every site route after a controller restart or full reconciliation. Example: `erp` routes to `2001:db8::10`.",
 )
@@ -160,10 +142,21 @@ async def replace_sites(
 	return await maps.replace("sites", values)
 
 
+@app.get(
+	"/v1/domains",
+	dependencies=protected,
+	tags=["Domains"],
+	summary="List domain routes",
+	description="Read custom-domain routes during reconciliation.",
+)
+async def get_domains() -> dict[str, str]:
+	return await maps.get("domains")
+
+
 @app.put(
 	"/v1/domains",
 	dependencies=protected,
-	tags=["Routing"],
+	tags=["Domains"],
 	summary="Sync domain routes",
 	description="Replace every custom-domain route after a controller restart or full reconciliation. Example: `www.example.com` routes to `2001:db8::20`.",
 )
@@ -179,8 +172,8 @@ async def replace_domains(
 @app.patch(
 	"/v1/sites/{name}",
 	dependencies=protected,
-	tags=["Routing"],
-	summary="Route a site",
+	tags=["Sites"],
+	summary="Update site route",
 	description="Add or change one site route without changing other sites. Example: route `erp` to `2001:db8::10`.",
 )
 async def patch_site(
@@ -192,9 +185,9 @@ async def patch_site(
 @app.delete(
 	"/v1/sites/{name}",
 	dependencies=protected,
-	tags=["Routing"],
+	tags=["Sites"],
 	status_code=status.HTTP_204_NO_CONTENT,
-	summary="Remove a site",
+	summary="Remove site route",
 	description="Remove one site route when it no longer needs proxy traffic. This succeeds when the site is absent.",
 )
 async def delete_site(name: Annotated[str, Path(description="The site subdomain.")]) -> Response:
@@ -205,8 +198,8 @@ async def delete_site(name: Annotated[str, Path(description="The site subdomain.
 @app.patch(
 	"/v1/domains/{domain}",
 	dependencies=protected,
-	tags=["Routing"],
-	summary="Route a domain",
+	tags=["Domains"],
+	summary="Update domain route",
 	description="Add or change one custom-domain route without changing other domains. Example: route `www.example.com` to `2001:db8::20`.",
 )
 async def patch_domain(
@@ -218,9 +211,9 @@ async def patch_domain(
 @app.delete(
 	"/v1/domains/{domain}",
 	dependencies=protected,
-	tags=["Routing"],
+	tags=["Domains"],
 	status_code=status.HTTP_204_NO_CONTENT,
-	summary="Remove a domain",
+	summary="Remove domain route",
 	description="Remove one custom-domain route when it no longer needs proxy traffic. This succeeds when the domain is absent.",
 )
 async def delete_domain(domain: Annotated[str, Path(description="The complete custom domain.")]) -> Response:

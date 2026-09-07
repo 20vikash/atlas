@@ -4,7 +4,6 @@ import pytest
 
 from proxy_control.config import (
 	DEFAULT_ADMIN_SOCKET,
-	DEFAULT_CERT_DIR,
 	ConfigError,
 	load,
 )
@@ -43,7 +42,7 @@ def test_a_missing_file_is_refused(tmp_path: Path):
 
 def test_a_missing_tls_section_is_refused(tmp_path: Path):
 	path = tmp_path / "proxy-control.toml"
-	path.write_text("[auth]\npassword_hash = \"hash\"\n")
+	path.write_text('[auth]\npassword_hash = "hash"\n')
 
 	with pytest.raises(ConfigError):
 		load(path)

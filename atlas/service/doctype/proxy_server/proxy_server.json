@@ -94,14 +94,8 @@
   }
  ],
  "index_web_pages_for_search": 1,
- "links": [
-  {
-   "group": "Logs",
-   "link_doctype": "SSH Task",
-   "link_fieldname": "target"
-  }
- ],
- "modified": "2026-09-07 19:11:35.433426",
+ "links": [],
+ "modified": "2026-09-07 22:00:30.092532",
  "modified_by": "Administrator",
  "module": "Service",
  "name": "Proxy Server",

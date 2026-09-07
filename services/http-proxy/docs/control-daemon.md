@@ -13,7 +13,7 @@ Every route except `GET /healthz`, `GET /docs`, and `GET /docs/swagger.json` nee
 ```sh
 export ATLAS_PROXY_CONTROL_URL='https://proxy-001.iad.frappe.dev'
 export ATLAS_PROXY_CONTROL_PASSWORD='replace-with-the-raw-password'
-curl -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" "$ATLAS_PROXY_CONTROL_URL/v1/state"
+curl -H "Authorization: Bearer $ATLAS_PROXY_CONTROL_PASSWORD" "$ATLAS_PROXY_CONTROL_URL/v1/sites"
 ```
 
 The daemon reads the `[auth]` configuration for each request. A password or JWKS change needs no daemon restart.
@@ -31,24 +31,9 @@ The reference gives request fields, response fields, and examples. It selects cU
 | `GET /healthz` | No | Check that the daemon runs. | `200` |
 | `GET /readyz` | Yes | Check that OpenResty accepts control requests. | `204` |
 
-## Routing maps
+## Sites
 
-Use `GET /v1/state` to read both maps during reconciliation.
-
-| Route | Use |
-| --- | --- |
-| `PUT /v1/sites` | Replace every site route after a controller restart or full reconciliation. |
-| `PATCH /v1/sites/<name>` | Add or change one site route. |
-| `DELETE /v1/sites/<name>` | Remove one site route. It succeeds when the site is absent. |
-| `PUT /v1/domains` | Replace every custom-domain route after a controller restart or full reconciliation. |
-| `PATCH /v1/domains/<domain>` | Add or change one custom-domain route. |
-| `DELETE /v1/domains/<domain>` | Remove one custom-domain route. It succeeds when the domain is absent. |
-
-All routing routes need `BearerAuth`. `PUT` replaces the complete map, so entries absent from the request are removed. `PATCH` changes one route and keeps all other routes.
-
-### Site routes
-
-A site name is one label below the wildcard domain. For example, `erp` routes `erp.iad.frappe.dev` when the wildcard is `*.iad.frappe.dev`.
+A site name is one label below the wildcard domain. For example, `erp` routes `erp.iad.frappe.dev` when the wildcard is `*.iad.frappe.dev`. Use `GET /v1/sites` to read the map, `PUT /v1/sites` to replace it, and `PATCH` or `DELETE` on `/v1/sites/<name>` to change one site.
 
 ```sh
 curl -X PUT \
@@ -66,9 +51,9 @@ curl -X PATCH \
 
 Use `"-"` as a site address to return `503` for that site. Do not use an empty address.
 
-### Custom-domain routes
+## Domains
 
-A custom-domain key is a complete customer domain, such as `www.example.com`. The proxy sends its TLS traffic to the site VM without TLS termination.
+A custom-domain key is a complete customer domain, such as `www.example.com`. The proxy sends its TLS traffic to the site VM without TLS termination. Use `GET /v1/domains` to read the map, `PUT /v1/domains` to replace it, and `PATCH` or `DELETE` on `/v1/domains/<domain>` to change one domain.
 
 ```sh
 curl -X PUT \

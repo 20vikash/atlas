@@ -159,6 +159,7 @@ def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
 		"memory_mib": values.get("memory_mib"),
 		"disk_mib": values.get("disk_mib"),
 		"tenant_id": 0,
+		"is_privileged": True,
 		"hostname": proxy_server.name,
 		"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 		"egress": "uplink",
