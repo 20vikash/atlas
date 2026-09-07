@@ -36,6 +36,16 @@ Use the `METALD_IMAGE_URL`, digest, kernel, and architecture variables to test a
 
 The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2` in the VM namespace. It requests termination when the test ends.
 
+## Network activity tests
+
+The packet activity tests need root, the `ip` command, and a host kernel with TCX support, Linux 6.6 or newer. Run them while no other test holds the same namespaces:
+
+```sh
+sudo -E go test -tags integration -v ./internal/network/
+```
+
+These tests create a temporary namespace and a `tap0`, attach the eBPF program, and confirm the last-seen time advances for a frame in each direction. One test confirms the egress hook still runs with no tap reader, which network wake depends on. The test logs the host kernel and result.
+
 ## Configuration
 
 | Key | Default | Meaning |

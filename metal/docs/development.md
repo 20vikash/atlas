@@ -28,6 +28,8 @@ git diff --exit-code -- internal/network
 
 Generation needs Clang 12 or newer. The vendored headers under `internal/network/bpf/headers/` remove the dependency on host kernel headers.
 
+Running the programs needs a host kernel with TCX support, Linux 6.6 or newer. The privileged activity tests need root. See [integration testing](testing.md).
+
 ## Package changes
 
 Read the nearest `SPEC.md` before a structural change. Keep interfaces small and define them in the consuming package. Add package and exported declaration comments.

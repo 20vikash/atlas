@@ -54,6 +54,12 @@ A VM learns its address from MMDS. `atlas-metadata.service` in the guest reads `
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
+## Packet activity
+
+Metal records the last packet time of each VM, so a sleepy VM can sleep after an idle timeout. One eBPF program hooks `tap0` ingress and egress inside the namespace and stores the time in a map keyed by VM user ID. The program only observes and never changes a packet.
+
+Every Ethernet frame counts, including ARP and neighbour discovery, so the first frame can wake a sleeping VM before the first IP packet. A daemon restart starts a new safe baseline, which can delay sleep by one idle timeout but never causes an early sleep. Detail: [internal/network/SPEC.md](../internal/network/SPEC.md).
+
 ## WireGuard peers
 
 `POST /v1/sync` supplies the complete managed peer set. Metal applies it to `wg0` and records what it applied, so it never disturbs peers added by other tools.
