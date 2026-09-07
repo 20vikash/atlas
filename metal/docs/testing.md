@@ -76,6 +76,8 @@ These tests create a temporary namespace and a `tap0`, attach the eBPF program, 
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
 | `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
 | `METALD_WG_MESH_ENABLED` | `false` | Write `wg_mesh.enabled`. The development host boots without the mesh CLI by default. |
+| `METALD_SLEEP_ENABLED` | `false` | Write `sleep.enabled`. Turn on automatic sleep for a development test. |
+| `METALD_SLEEP_IDLE_TIMEOUT` | `30m` | Write `sleep.idle_timeout`. Use a short value such as `1m` to watch a VM sleep. |
 | `METALD_IMAGE_VERSION` | `22.04` | Ubuntu version the guest image builder uses. |
 
 ## Manual access
