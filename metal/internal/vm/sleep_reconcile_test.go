@@ -149,6 +149,55 @@ func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 	}
 }
 
+// autoSleepToSleeping creates a sleepy VM, boots it, and lets it auto-sleep by
+// reporting idle activity.
+func autoSleepToSleeping(t *testing.T, manager *Manager, monitor *fakeNetworkActivityMonitor) {
+	t.Helper()
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+		t.Fatal(err)
+	}
+	monitor.activity = NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateSleeping {
+		t.Fatalf("setup did not reach sleeping: %+v", observed)
+	}
+}
+
+func TestRestartWhileSleepingColdBoots(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	autoSleepToSleeping(t, manager, monitor)
+
+	if err := manager.RequestRestart(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.discards != 1 || runtime.startMode != StartNormal {
+		t.Fatalf("discards = %d start mode = %d, want a discard and a cold boot", runtime.discards, runtime.startMode)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateRunning || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want running with no sleep", observed)
+	}
+	if observed.RestartGeneration != desired.RestartGeneration {
+		t.Fatalf("restart generation = %d, want %d", observed.RestartGeneration, desired.RestartGeneration)
+	}
+}
+
 // warmStopToSleeping creates a VM, boots it, and warm-stops it to the sleeping
 // state through the manual power path.
 func warmStopToSleeping(t *testing.T, manager *Manager) {

@@ -135,6 +135,11 @@ func (manager *Manager) reconcileSleeping(
 	observed *ObservedRecord,
 	operationID string,
 ) error {
+	// A restart wants a fresh guest, so discard the snapshot and cold reboot.
+	if observed.RestartGeneration < desired.RestartGeneration {
+		return manager.restartFromSleep(ctx, desired, machine, observed, operationID)
+	}
+
 	caughtUp := observed.Generation == desired.Generation && observed.RestartGeneration == desired.RestartGeneration
 
 	switch desired.State {
@@ -153,6 +158,32 @@ func (manager *Manager) reconcileSleeping(
 	default:
 		return &TransitionError{DesiredState: desired.State, ObservedState: StateSleeping}
 	}
+}
+
+// restartFromSleep discards the snapshot and cold boots the guest, so an explicit
+// restart of a sleeping VM reboots instead of resuming the saved memory.
+func (manager *Manager) restartFromSleep(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseRestart, func() error {
+		if err := manager.runtime.DiscardSleepSnapshot(ctx, machine); err != nil {
+			return err
+		}
+		return manager.runtime.Start(ctx, machine, StartNormal)
+	}); err != nil {
+		return err
+	}
+
+	observed.Sleep = nil
+	observed.State = StateRunning
+	observed.RestartGeneration = desired.RestartGeneration
+	observed.completeOperation()
+
+	return manager.store.writeObserved(desired.ID, *observed)
 }
 
 // holdSleeping keeps a VM asleep for another pass. It does not copy generations,
