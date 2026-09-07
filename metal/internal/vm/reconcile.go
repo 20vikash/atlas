@@ -151,7 +151,9 @@ func (manager *Manager) applyRestart(
 }
 
 // applyDesiredState moves the runtime to the requested power state. Reaching
-// paused from a stopped VM needs a start first.
+// paused from a stopped VM needs a start first. A start resumes the memory
+// snapshot only when observed.WarmStopped records a deliberate warm stop, so a VM
+// that stopped outside the API cold boots instead of resuming a stale snapshot.
 func (manager *Manager) applyDesiredState(
 	ctx context.Context,
 	identifier string,
@@ -162,8 +164,18 @@ func (manager *Manager) applyDesiredState(
 	observed *ObservedRecord,
 	operationID string,
 ) (RuntimeStatus, error) {
-	startNormally := func(ctx context.Context, machine RuntimeMachine) error {
-		return manager.runtime.Start(ctx, machine, StartNormal)
+	start := func(ctx context.Context, machine RuntimeMachine) error {
+		if !observed.WarmStopped {
+			return manager.runtime.Start(ctx, machine, StartNormal)
+		}
+		// A warm-stopped VM resumes its snapshot. A missing or incompatible
+		// snapshot cold boots, the same fallback a warm image uses.
+		if err := manager.runtime.Start(ctx, machine, StartFromSleepSnapshot); err != nil {
+			manager.logger.Warn("snapshot resume failed, cold booting",
+				"component", "vm", "vm_id", identifier, "error", err)
+			return manager.runtime.Start(ctx, machine, StartNormal)
+		}
+		return nil
 	}
 	switch desiredState {
 	case StateRunning:
@@ -171,29 +183,52 @@ func (manager *Manager) applyDesiredState(
 			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseResume, StateRunning, manager.runtime.Resume)
 		}
 		if status.State != StateRunning {
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, startNormally)
+			result, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start)
+			if err == nil {
+				observed.WarmStopped = false
+			}
+			return result, err
 		}
 	case StatePaused:
 		if status.State != StateRunning && status.State != StatePaused {
-			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, startNormally); err != nil {
+			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start); err != nil {
 				return status, err
 			}
+			observed.WarmStopped = false
 			status.State = StateRunning
 		}
 		if status.State == StateRunning {
 			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phasePause, StatePaused, manager.runtime.Pause)
 		}
 	case StateStopped:
-		if status.State != StateStopped {
-			stopMode := StopShutdown
-			if warmStop {
-				stopMode = StopWithSleepSnapshot
+		if warmStop {
+			if status.State == StateRunning || status.State == StatePaused {
+				warmStopRuntime := func(ctx context.Context, machine RuntimeMachine) error {
+					return manager.runtime.Stop(ctx, machine, StopWithSleepSnapshot)
+				}
+				result, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, warmStopRuntime)
+				if err == nil {
+					observed.WarmStopped = true
+				}
+				return result, err
 			}
-			stop := func(ctx context.Context, machine RuntimeMachine) error {
-				return manager.runtime.Stop(ctx, machine, stopMode)
-			}
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stop)
+			// The VM is already down. A running process is needed to snapshot, so
+			// this pass keeps the existing warm-stop marker and adds nothing.
+			return RuntimeStatus{State: StateStopped}, nil
 		}
+		if status.State != StateStopped {
+			stopShutdown := func(ctx context.Context, machine RuntimeMachine) error {
+				return manager.runtime.Stop(ctx, machine, StopShutdown)
+			}
+			result, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopShutdown)
+			if err == nil {
+				observed.WarmStopped = false
+			}
+			return result, err
+		}
+		// A plain stop of an already stopped VM discards any warm-stop marker, so
+		// a later start cold boots.
+		observed.WarmStopped = false
 	default:
 		return status, &TransitionError{DesiredState: desiredState, ObservedState: status.State}
 	}
