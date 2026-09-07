@@ -6,7 +6,7 @@ from .client import ProxyClient
 
 
 class MappingStore:
-	"""Read and change OpenResty maps without the control subdomain."""
+	"""Manage OpenResty maps."""
 
 	def __init__(self, client: ProxyClient, reserved_subdomain: str = ""):
 		self.client = client
@@ -36,7 +36,7 @@ class MappingStore:
 		await self._forward("DELETE", f"/v1/{kind}/{key}")
 
 	def is_reserved(self, kind: str, key: str) -> bool:
-		"""Report whether a key names this daemon. Only a site subdomain can."""
+		"""Report whether a key is the control subdomain."""
 		return bool(self.reserved_subdomain) and kind == "sites" and key.lower() == self.reserved_subdomain
 
 	def _validate_key(self, kind: str, key: str) -> None:

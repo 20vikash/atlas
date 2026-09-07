@@ -67,8 +67,8 @@
   "http_proxy_section",
   "proxy_jwks_url",
   "proxy_jwks_audience_id",
-  "http_proxy_package_file",
   "column_break_hpkg",
+  "http_proxy_package_file",
   "http_proxy_package_hash",
   "storage_tab",
   "object_storage_section",
@@ -483,7 +483,6 @@
    "read_only": 1
   },
   {
-   "description": "The proxy control API also accepts a JWT from this issuer.",
    "fieldname": "proxy_jwks_url",
    "fieldtype": "Data",
    "label": "JWKS URL"
@@ -499,7 +498,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-07 10:00:00.000000",
+ "modified": "2026-09-07 18:36:17.773793",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",

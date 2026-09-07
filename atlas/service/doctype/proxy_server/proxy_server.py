@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import frappe
 from frappe import _
@@ -27,48 +27,39 @@ class ProxyServer(Document):
 		from frappe.types import DF
 
 		control_api_password: DF.Password | None
-		disk_mib: DF.Int
 		failure_message: DF.SmallText | None
 		installed_package_hash: DF.Data | None
 		is_provisioning_completed: DF.Check
-		memory_mib: DF.Int
 		pushed_config_hash: DF.Data | None
-		server_ip_address: DF.Link | None
 		status: DF.Literal["Pending", "Provisioning", "Active", "Failed", "Archived"]
-		tenant_id: DF.Int
 		tls_expires_on: DF.Datetime | None
-		vcpus: DF.Int
 		virtual_machine: DF.Link | None
-		virtual_machine_image: DF.Link
 	# end: auto-generated types
 
-	def before_insert(self) -> None:
-		"""Create the control API credential."""
-		self.control_api_password = frappe.generate_hash(length=CONTROL_API_PASSWORD_LENGTH)
+	@property
+	def public_ipv4(self) -> str | None:
+		"""Return the public IPv4 address of the proxy virtual machine."""
+		if not self.virtual_machine:
+			return None
 
-	def validate(self) -> None:
-		"""Validate the proxy shape."""
-		if self.vcpus < 1 or self.memory_mib < 1 or self.disk_mib < 1:
-			frappe.throw(_("A Proxy Server needs a positive CPU, memory, and disk size."))
+		return frappe.get_doc("Virtual Machine", self.virtual_machine).public_ipv4
+
+	def before_insert(self) -> None:
+		"""Reject records created outside the Proxy Server API."""
+		if not getattr(self.flags, "created_by_proxy_server_api", False):
+			frappe.throw(_("Create Proxy Servers from the Proxy Server list."))
+
+		self.control_api_password = frappe.generate_hash(length=CONTROL_API_PASSWORD_LENGTH)
 
 	def get_domain(self) -> str:
 		"""Return the name of this proxy below the Atlas wildcard domain."""
 		wildcard_domain = frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
 		return f"{self.name}.{wildcard_domain}"
 
-	@property
-	def public_ipv4(self) -> str | None:
-		"""Return this proxy's reserved public IPv4 address."""
-		return self.server_ip_address
-
 	def after_insert(self) -> None:
-		"""Build the proxy as soon as Frappe records it."""
-		self.enqueue_provisioning()
-
-	def on_update(self) -> None:
-		"""Queue a DNS update after an address change."""
-		if not self.flags.in_insert and self.has_value_changed("server_ip_address"):
-			self.enqueue_dns_update()
+		"""Queue proxy setup after Frappe records the proxy."""
+		if not getattr(self.flags, "skip_initial_provisioning", False):
+			self.enqueue_provisioning()
 
 	def on_trash(self) -> None:
 		"""Refuse deletion while the virtual machine exists."""
@@ -135,7 +126,6 @@ class ProxyServer(Document):
 		if provisioner.proxy_server.status == "Archived":
 			frappe.throw(_("Proxy Server {0} is archived.").format(self.name))
 
-		provisioner.save_progress()
 		frappe.msgprint(
 			_("{0} now points at {1}.").format(
 				provisioner.proxy_server.get_domain(), provisioner.proxy_server.public_ipv4
@@ -166,55 +156,83 @@ class ProxyServer(Document):
 		if not self.virtual_machine:
 			frappe.throw(_("Proxy Server {0} has no virtual machine yet.").format(self.name))
 
-	def enqueue_dns_update(self) -> None:
-		"""Queue a DNS update."""
-		frappe.enqueue_doc(
-			self.doctype,
-			self.name,
-			"_update_dns_record",
-			queue="short",
-			timeout=300,
-			job_id=f"atlas||proxy-server||dns||{self.name}",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
-
 	def enqueue_provisioning(self) -> None:
 		"""Queue proxy setup."""
-		frappe.enqueue_doc(
-			self.doctype,
-			self.name,
-			"_provision",
-			queue="long",
-			timeout=3_600,
-			job_id=f"atlas||proxy-server||provision||{self.name}",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
+		enqueue_proxy_provisioning(self.name)
 
 	def _provision(self) -> None:
 		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 
 		ProxyServerProvisioner(self).run()
 
-	def _update_dns_record(self) -> None:
-		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
-
-		provisioner = ProxyServerProvisioner(self)
-		provisioner.update_dns_record()
-		if provisioner.proxy_server.status != "Archived":
-			provisioner.save_progress()
-
 	def _push_configuration(self) -> None:
 		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 
-		provisioner = ProxyServerProvisioner(self)
-		provisioner.push_configuration()
-		provisioner.save_progress()
+		ProxyServerProvisioner(self).push_configuration()
 
 	def _install_package(self) -> None:
 		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
 
-		provisioner = ProxyServerProvisioner(self)
-		provisioner.install_package()
-		provisioner.save_progress()
+		ProxyServerProvisioner(self).install_package()
+
+
+@frappe.whitelist(methods=["POST"])
+def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
+	"""Create a Proxy Server and its virtual machine."""
+	frappe.only_for("System Manager")
+	values = frappe.parse_json(request) if isinstance(request, str) else request
+	if not isinstance(values, dict):
+		frappe.throw(_("Proxy Server creation data must be an object."))
+
+	proxy_server = frappe.new_doc("Proxy Server")
+	proxy_server.flags.created_by_proxy_server_api = True
+	proxy_server.flags.skip_initial_provisioning = True
+	proxy_server.insert(ignore_permissions=True)
+
+	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import reserve
+	from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
+
+	virtual_machine_request = {
+		"virtual_machine_image": values.get("virtual_machine_image"),
+		"vcpus": values.get("vcpus"),
+		"memory_mib": values.get("memory_mib"),
+		"disk_mib": values.get("disk_mib"),
+		"tenant_id": 0,
+		"hostname": proxy_server.name,
+		"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
+		"egress": "uplink",
+		"server_ip_address": reserve(),
+	}
+	try:
+		result = VirtualMachineService.create(virtual_machine_request)
+		proxy_server.virtual_machine = result["name"]
+		is_draft = bool(result["is_draft"])
+	except VirtualMachineCreateError as error:
+		proxy_server.virtual_machine = error.virtual_machine_name
+		proxy_server.status = "Failed"
+		proxy_server.failure_message = f"virtual-machine: {error}"
+		is_draft = True
+
+	proxy_server.save(ignore_permissions=True)
+	proxy_server.enqueue_provisioning()
+	return {"name": proxy_server.name, "is_draft": is_draft}
+
+
+def enqueue_pending_proxies_provisioning() -> None:
+	"""Queue setup for every pending Proxy Server."""
+	for name in frappe.get_all("Proxy Server", filters={"status": "Pending"}, pluck="name"):
+		enqueue_proxy_provisioning(name, enqueue_after_commit=False)
+
+
+def enqueue_proxy_provisioning(proxy_server_name: str, enqueue_after_commit: bool = True) -> None:
+	"""Queue setup for one Proxy Server."""
+	frappe.enqueue_doc(
+		"Proxy Server",
+		proxy_server_name,
+		"_provision",
+		queue="long",
+		timeout=3_600,
+		job_id=f"atlas||proxy-server||provision||{proxy_server_name}",
+		deduplicate=True,
+		enqueue_after_commit=enqueue_after_commit,
+	)

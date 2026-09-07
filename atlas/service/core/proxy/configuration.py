@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from string import Template
 from typing import TYPE_CHECKING
 
 import bcrypt
@@ -14,6 +15,38 @@ if TYPE_CHECKING:
 CONFIG_PATH = "/etc/atlas/proxy-control.toml"
 APPLY_COMMAND = "/opt/atlas/proxy-control/bin/proxy-control"
 DAEMON_UNIT = "atlas-proxy-control.service"
+
+CONFIG_TEMPLATE = Template(
+	"""[control]
+domain = "$domain"
+
+[auth]
+password_hash = "$password_hash"
+jwks_url = "$jwks_url"
+jwks_audience_id = "$jwks_audience_id"
+
+[tls]
+wildcard_domain = "$wildcard_domain"
+fullchain_pem = '''
+$certificate
+'''
+private_key_pem = '''
+$private_key
+'''
+"""
+)
+
+PUSH_COMMAND_TEMPLATE = Template(
+	"""set -eu
+install -d -m 0750 /etc/atlas
+install -m 0600 /dev/null $config_path
+cat > $config_path <<'ATLAS_PROXY_CONFIG_END'
+$content
+ATLAS_PROXY_CONFIG_END
+$apply_command
+systemctl enable --now $daemon_unit
+systemctl restart $daemon_unit"""
+)
 
 
 class ProxyConfiguration:
@@ -36,22 +69,14 @@ class ProxyConfiguration:
 		if not certificate or not private_key:
 			frappe.throw(_("Atlas Settings holds no wildcard TLS certificate to send to a proxy."))
 
-		return "\n".join(
-			(
-				"[control]",
-				f'domain = "{self.proxy_server.get_domain()}"',
-				"",
-				"[auth]",
-				f'password_hash = "{self.password_hash}"',
-				f'jwks_url = "{self.settings.proxy_jwks_url or ""}"',
-				f'jwks_audience_id = "{self.settings.proxy_jwks_audience_id or ""}"',
-				"",
-				"[tls]",
-				f'wildcard_domain = "{self.wildcard_domain}"',
-				f"fullchain_pem = '''\n{certificate.strip()}\n'''",
-				f"private_key_pem = '''\n{private_key.strip()}\n'''",
-				"",
-			)
+		return CONFIG_TEMPLATE.substitute(
+			domain=self.proxy_server.get_domain(),
+			password_hash=self.password_hash,
+			jwks_url=self.settings.proxy_jwks_url or "",
+			jwks_audience_id=self.settings.proxy_jwks_audience_id or "",
+			wildcard_domain=self.wildcard_domain,
+			certificate=certificate.strip(),
+			private_key=private_key.strip(),
 		)
 
 	@property
@@ -80,18 +105,11 @@ class ProxyConfiguration:
 
 	def get_push_command(self) -> str:
 		"""Return commands to update the configuration."""
-		return "\n".join(
-			(
-				"set -eu",
-				"install -d -m 0750 /etc/atlas",
-				f"install -m 0600 /dev/null {CONFIG_PATH}",
-				f"cat > {CONFIG_PATH} <<'ATLAS_PROXY_CONFIG_END'",
-				self.content,
-				"ATLAS_PROXY_CONFIG_END",
-				APPLY_COMMAND,
-				f"systemctl enable --now {DAEMON_UNIT}",
-				f"systemctl restart {DAEMON_UNIT}",
-			)
+		return PUSH_COMMAND_TEMPLATE.substitute(
+			config_path=CONFIG_PATH,
+			content=self.content,
+			apply_command=APPLY_COMMAND,
+			daemon_unit=DAEMON_UNIT,
 		)
 
 

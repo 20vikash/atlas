@@ -198,6 +198,7 @@ scheduler_events = {
 		"* * * * *": [
 			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
+			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
 		],
 	},
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],

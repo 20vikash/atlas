@@ -6,11 +6,7 @@ import frappe
 
 
 def publish_public_file(file_name: str, label: str, content: bytes) -> str:
-	"""Insert a public File for one build and return its document name.
-
-	Read its URL with `get_download_url`. Frappe adds a suffix when the stored
-	name is still taken, so the URL is not stable across builds.
-	"""
+	"""Publish a public build file and return its document name."""
 	file_doc = frappe.get_doc(
 		{
 			"doctype": "File",
@@ -38,14 +34,19 @@ def delete_unlinked_files() -> None:
 
 
 def get_unlinked_files() -> list[str]:
-	"""Return every Atlas Settings File that no Link field names any more."""
+	"""Return Atlas Settings files with no links."""
 	linked_files = get_linked_files()
-	attached_files = frappe.get_all("File", filters={"attached_to_doctype": "Atlas Settings"}, pluck="name")
-	return [file_name for file_name in attached_files if file_name not in linked_files]
+	return [
+		file_name
+		for file_name in frappe.get_all(
+			"File", filters={"attached_to_doctype": "Atlas Settings"}, pluck="name"
+		)
+		if file_name not in linked_files
+	]
 
 
 def get_linked_files() -> set[str]:
-	"""Return every File that an Atlas Settings Link field names."""
+	"""Return files linked from Atlas Settings."""
 	settings = frappe.get_single("Atlas Settings")
 	link_fields = settings.meta.get("fields", {"fieldtype": "Link", "options": "File"})
 	return {value for field in link_fields if (value := settings.get(field.fieldname))}

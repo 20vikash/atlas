@@ -9,8 +9,6 @@ from frappe.tests import UnitTestCase
 import atlas.service.core.proxy.provisioning as provisioning
 from atlas.atlas.core.ssh import SSHResult
 from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
-from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.vm_service import VirtualMachineCreateError
 
 
 def _proxy_server(**values) -> SimpleNamespace:
@@ -18,15 +16,9 @@ def _proxy_server(**values) -> SimpleNamespace:
 		"doctype": "Proxy Server",
 		"name": "proxy-001",
 		"status": "Pending",
-		"virtual_machine": None,
-		"virtual_machine_image": "image-1",
-		"server_ip_address": None,
+		"virtual_machine": "vm-00001",
 		"public_ipv4": None,
 		"get_domain": lambda: "proxy-001.example.com",
-		"vcpus": 2,
-		"memory_mib": 4096,
-		"disk_mib": 16384,
-		"tenant_id": 0,
 		"installed_package_hash": None,
 		"pushed_config_hash": None,
 		"tls_expires_on": None,
@@ -50,12 +42,13 @@ class TestProvisioningSequence(UnitTestCase):
 		provisioner = ProxyServerProvisioner(proxy_server)
 		later_step = Mock()
 		with (
+			patch.object(ProxyServerProvisioner, "is_virtual_machine_ready", new=property(lambda self: True)),
 			patch.object(
 				ProxyServerProvisioner,
 				"steps",
 				new=property(
 					lambda self: (
-						("virtual-machine", Mock(side_effect=RuntimeError("no capacity"))),
+						("virtual-machine", Mock(side_effect=RuntimeError("not ready"))),
 						("secure-shell", later_step),
 					)
 				),
@@ -71,82 +64,26 @@ class TestProvisioningSequence(UnitTestCase):
 		self.assertIn("virtual-machine", proxy_server.failure_message)
 		later_step.assert_not_called()
 
-
-class TestCreateVirtualMachine(UnitTestCase):
-	def build(self, create_result: dict, **values):
-		proxy_server = _proxy_server(**values)
+	def test_a_step_defers_its_save_to_the_provisioning_sequence(self) -> None:
+		proxy_server = _proxy_server()
 		provisioner = ProxyServerProvisioner(proxy_server)
-		self.service = MagicMock()
-		self.service.create.return_value = create_result
-		patches = (
-			patch.object(provisioner, "save_progress"),
-			patch.object(
-				provisioning.frappe,
-				"get_single",
-				return_value=SimpleNamespace(public_ssh_key="ssh-ed25519 AAAA atlas"),
-			),
-			patch("atlas.vm.core.vm_service.VirtualMachineService", self.service),
-			patch(
-				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.reserve",
-				return_value="203.0.113.9",
-			),
-		)
-		for patched in patches:
-			patched.start()
-			self.addCleanup(patched.stop)
-		return proxy_server, provisioner
+		operation = Mock()
 
-	def test_the_machine_carries_the_atlas_key_and_a_public_address(self) -> None:
-		proxy_server, provisioner = self.build({"name": "vm-00001", "is_draft": False})
+		provisioner.run_step("package", operation)
 
-		provisioner.create_virtual_machine()
+		operation.assert_called_once_with(save=False)
+		proxy_server.save.assert_called_once_with(ignore_permissions=True)
 
-		request = self.service.create.call_args.args[0]
-		self.assertEqual(request["ssh_keys"], "ssh-ed25519 AAAA atlas")
-		self.assertEqual(request["egress"], "uplink")
-		self.assertEqual(request["server_ip_address"], "203.0.113.9")
-		self.assertEqual(request["hostname"], "proxy-001")
-		self.assertEqual(proxy_server.virtual_machine, "vm-00001")
-
-	# Metal never confirmed the create, so the VM reconciler settles it first.
-	def test_an_uncertain_create_records_the_name_and_stops(self) -> None:
-		proxy_server, provisioner = self.build({"name": "vm-00002", "is_draft": True})
-
-		with self.assertRaises(frappe.ValidationError):
-			provisioner.create_virtual_machine()
-
-		self.assertEqual(proxy_server.virtual_machine, "vm-00002")
-
-	def test_a_confirmed_create_failure_records_the_draft_name(self) -> None:
-		proxy_server, provisioner = self.build({})
-		self.service.create.side_effect = VirtualMachineCreateError("vm-00002", MetalClientError("rejected"))
-
-		with self.assertRaises(VirtualMachineCreateError):
-			provisioner.create_virtual_machine()
-
-		self.assertEqual(proxy_server.virtual_machine, "vm-00002")
-
-	def test_an_existing_machine_is_not_built_again(self) -> None:
-		_proxy, provisioner = self.build({}, virtual_machine="vm-00003")
-		with (
-			patch.object(provisioning.frappe.db, "exists", return_value=True),
-			patch.object(provisioning.frappe, "get_doc", return_value=SimpleNamespace(is_draft=False)),
+	def test_a_draft_virtual_machine_keeps_provisioning_pending(self) -> None:
+		proxy_server = _proxy_server()
+		provisioner = ProxyServerProvisioner(proxy_server)
+		with patch.object(
+			provisioning.frappe, "get_doc", return_value=SimpleNamespace(name="vm-00001", is_draft=True)
 		):
-			provisioner.create_virtual_machine()
+			provisioner.run()
 
-		self.service.create.assert_not_called()
-
-	def test_a_missing_reconciled_machine_is_created_again(self) -> None:
-		proxy_server, provisioner = self.build(
-			{"name": "vm-00004", "is_draft": False},
-			virtual_machine="vm-00003",
-			server_ip_address="203.0.113.9",
-		)
-		with patch.object(provisioning.frappe.db, "exists", return_value=False):
-			provisioner.create_virtual_machine()
-
-		self.assertEqual(proxy_server.virtual_machine, "vm-00004")
-		self.assertEqual(self.service.create.call_args.args[0]["server_ip_address"], "203.0.113.9")
+		self.assertEqual(proxy_server.status, "Pending")
+		proxy_server.save.assert_not_called()
 
 
 class TestApplySteps(UnitTestCase):
@@ -162,6 +99,7 @@ class TestApplySteps(UnitTestCase):
 			provisioner.push_configuration()
 
 		ssh_runner.assert_not_called()
+		proxy_server.save.assert_called_once_with(ignore_permissions=True)
 
 	def test_a_rejected_configuration_fails_loudly(self) -> None:
 		proxy_server = _proxy_server()
@@ -193,6 +131,7 @@ class TestApplySteps(UnitTestCase):
 			provisioner.install_package()
 
 		create_task.assert_not_called()
+		proxy_server.save.assert_called_once_with(ignore_permissions=True)
 
 	def test_a_missing_package_fails_loudly(self) -> None:
 		provisioner = ProxyServerProvisioner(_proxy_server())

@@ -6,25 +6,15 @@
  "engine": "InnoDB",
  "field_order": [
   "status",
-  "column_break_status",
   "is_provisioning_completed",
-  "machine_section",
-  "virtual_machine_image",
-  "vcpus",
-  "memory_mib",
-  "column_break_machine",
-  "disk_mib",
-  "tenant_id",
-  "runtime_section",
+  "column_break_status",
   "virtual_machine",
-  "server_ip_address",
-  "column_break_runtime",
+  "runtime_section",
   "control_api_password",
-  "state_section",
+  "tls_expires_on",
+  "column_break_runtime",
   "installed_package_hash",
   "pushed_config_hash",
-  "column_break_state",
-  "tls_expires_on",
   "failure_section",
   "failure_message"
  ],
@@ -51,58 +41,6 @@
    "read_only": 1
   },
   {
-   "collapsible": 1,
-   "fieldname": "machine_section",
-   "fieldtype": "Section Break",
-   "label": "Virtual Machine"
-  },
-  {
-   "fieldname": "virtual_machine_image",
-   "fieldtype": "Link",
-   "label": "Image",
-   "options": "Virtual Machine Image",
-   "reqd": 1,
-   "set_only_once": 1
-  },
-  {
-   "default": "2",
-   "fieldname": "vcpus",
-   "fieldtype": "Int",
-   "label": "vCPUs",
-   "reqd": 1
-  },
-  {
-   "default": "4096",
-   "fieldname": "memory_mib",
-   "fieldtype": "Int",
-   "label": "Memory (MiB)",
-   "reqd": 1
-  },
-  {
-   "fieldname": "column_break_machine",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "16384",
-   "fieldname": "disk_mib",
-   "fieldtype": "Int",
-   "label": "Disk (MiB)",
-   "reqd": 1
-  },
-  {
-   "default": "0",
-   "fieldname": "tenant_id",
-   "fieldtype": "Int",
-   "label": "Tenant ID",
-   "reqd": 1,
-   "set_only_once": 1
-  },
-  {
-   "fieldname": "runtime_section",
-   "fieldtype": "Section Break",
-   "label": "Runtime"
-  },
-  {
    "fieldname": "virtual_machine",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -111,11 +49,9 @@
    "read_only": 1
   },
   {
-   "fieldname": "server_ip_address",
-   "fieldtype": "Link",
-   "label": "Public IPv4 Address",
-   "options": "Metal Server IP Address",
-   "read_only": 1
+   "fieldname": "runtime_section",
+   "fieldtype": "Section Break",
+   "label": "Runtime"
   },
   {
    "fieldname": "column_break_runtime",
@@ -128,11 +64,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "state_section",
-   "fieldtype": "Section Break",
-   "label": "Applied State"
-  },
-  {
    "fieldname": "installed_package_hash",
    "fieldtype": "Data",
    "label": "Installed Package SHA-256",
@@ -143,10 +74,6 @@
    "fieldtype": "Data",
    "label": "Pushed Configuration Digest",
    "read_only": 1
-  },
-  {
-   "fieldname": "column_break_state",
-   "fieldtype": "Column Break"
   },
   {
    "fieldname": "tls_expires_on",
@@ -174,15 +101,14 @@
    "link_fieldname": "target"
   }
  ],
- "modified": "2026-09-07 02:23:01.788769",
- "modified_by": "test@gmail.com",
+ "modified": "2026-09-07 19:11:35.433426",
+ "modified_by": "Administrator",
  "module": "Service",
  "name": "Proxy Server",
  "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1,
    "delete": 1,
    "read": 1,
    "role": "System Manager",

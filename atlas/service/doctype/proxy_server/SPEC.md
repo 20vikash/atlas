@@ -4,21 +4,23 @@
 
 ## Purpose
 
-Proxy Server owns one regional HTTP proxy and its virtual machine.
+Proxy Server owns one regional HTTP proxy and its virtual machine. It stores only the virtual machine link. The creation dialog collects the VM image and size, then creates the VM before it starts proxy setup.
 
 ## Lifecycle
 
 ```text
-reserve an address -> create the VM -> update DNS -> wait for SSH -> install the package -> push the configuration
+create the VM -> update DNS -> wait for SSH -> install the package -> push the configuration
 ```
 
-Atlas saves the VM name before it sends the create request to Metal. Metal can return a draft VM. The reconciler settles it before another Provision action continues.
+Atlas creates the Proxy Server record before it sends the VM request to Metal, then saves the VM name. Metal can return a draft VM. The reconciler settles it before another Provision action continues.
+
+Atlas queues a setup job for each Pending Proxy Server every minute. A proxy remains Pending while its VM is a draft, so setup resumes after VM reconciliation. A failed setup changes the status to Failed and needs a Provision action.
 
 Atlas points `<proxy-name>.<wildcard-domain>` at the reserved address. DNS updates and Archive lock the Proxy Server record. Archive removes the DNS record before it releases the address.
 
 ## Configuration
 
-Atlas connects through the public IPv4 address and adds its public key when it creates the VM. Atlas uses `SSHRunner` to write the configuration because it contains a private key and a control credential. An `SSH Task` stores its script as plain text.
+Atlas reserves the public IPv4 address and adds its public key when it creates the VM. Atlas uses `SSHRunner` to write the configuration because it contains a private key and a control credential. An `SSH Task` stores its script as plain text.
 
 ## Package
 

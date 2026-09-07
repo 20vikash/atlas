@@ -10,7 +10,6 @@ from frappe import _
 from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.ssh import SSHRunner, wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
-from atlas.service.core.http_proxy_package import SETTINGS_FILE_FIELD, SETTINGS_HASH_FIELD
 from atlas.service.core.proxy.configuration import ProxyConfiguration
 
 if TYPE_CHECKING:
@@ -31,6 +30,9 @@ class ProxyServerProvisioner:
 
 	def run(self) -> None:
 		"""Run each proxy setup step in order."""
+		if not self.is_virtual_machine_ready:
+			return
+
 		phase = "start"
 		self.proxy_server.status = "Provisioning"
 		self.proxy_server.failure_message = None
@@ -55,78 +57,50 @@ class ProxyServerProvisioner:
 			raise
 
 	@property
-	def steps(self) -> tuple[tuple[str, Callable[[], None]], ...]:
+	def steps(self) -> tuple[tuple[str, Callable[[bool], None]], ...]:
 		"""Return setup steps in execution order."""
 		return (
-			("virtual-machine", self.create_virtual_machine),
+			("virtual-machine", self.validate_virtual_machine),
 			("dns", self.update_dns_record),
 			("secure-shell", self.wait_for_ssh),
 			("package", self.install_package),
 			("configuration", self.push_configuration),
 		)
 
-	def run_step(self, phase: str, operation: Callable[[], None]) -> None:
+	@property
+	def is_virtual_machine_ready(self) -> bool:
+		"""Report whether the proxy virtual machine left the draft state."""
+		if not self.proxy_server.virtual_machine:
+			return False
+
+		virtual_machine = frappe.get_doc("Virtual Machine", self.proxy_server.virtual_machine)
+		return not virtual_machine.is_draft
+
+	def run_step(self, phase: str, operation: Callable[[bool], None]) -> None:
 		"""Run one setup step and save its resulting Proxy Server fields."""
 		self.logger.info(
 			"Proxy provisioning step started",
 			extra={"resource": self.proxy_server.name, "operation": "provision", "phase": phase},
 		)
-		operation()
+		operation(save=False)
 		self.save_progress()
 
-	def create_virtual_machine(self) -> None:
-		"""Create the proxy virtual machine."""
-		if self.proxy_server.virtual_machine:
-			if not frappe.db.exists("Virtual Machine", self.proxy_server.virtual_machine):
-				self.proxy_server.virtual_machine = None
-				self.save_progress()
-			else:
-				virtual_machine = frappe.get_doc("Virtual Machine", self.proxy_server.virtual_machine)
-				if virtual_machine.is_draft:
-					frappe.throw(
-						_(
-							"Wait for Virtual Machine {0} creation reconciliation before you provision again."
-						).format(virtual_machine.name)
-					)
-				return
+	def validate_virtual_machine(self, save: bool = True) -> None:
+		"""Confirm that the proxy virtual machine is ready."""
+		if not self.proxy_server.virtual_machine:
+			frappe.throw(_("Proxy Server {0} has no virtual machine.").format(self.proxy_server.name))
 
-		from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import reserve
-		from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
-
-		settings = frappe.get_single("Atlas Settings")
-		if not self.proxy_server.server_ip_address:
-			self.proxy_server.server_ip_address = reserve()
-			self.save_progress()
-
-		try:
-			result = VirtualMachineService.create(
-				{
-					"virtual_machine_image": self.proxy_server.virtual_machine_image,
-					"vcpus": self.proxy_server.vcpus,
-					"memory_mib": self.proxy_server.memory_mib,
-					"disk_mib": self.proxy_server.disk_mib,
-					"tenant_id": self.proxy_server.tenant_id,
-					"hostname": self.proxy_server.name,
-					"ssh_keys": settings.public_ssh_key,
-					"egress": "uplink",
-					"server_ip_address": self.proxy_server.server_ip_address,
-				}
-			)
-		except VirtualMachineCreateError as error:
-			self.proxy_server.virtual_machine = error.virtual_machine_name
-			self.save_progress()
-			raise
-		self.proxy_server.virtual_machine = result["name"]
-		self.save_progress()
-
-		if result["is_draft"]:
+		virtual_machine = frappe.get_doc("Virtual Machine", self.proxy_server.virtual_machine)
+		if virtual_machine.is_draft:
 			frappe.throw(
-				_("Metal did not confirm Virtual Machine {0}. Provision again after it settles.").format(
-					result["name"]
+				_("Wait for Virtual Machine {0} creation reconciliation before you provision again.").format(
+					virtual_machine.name
 				)
 			)
 
-	def update_dns_record(self) -> None:
+		self.save_progress(save)
+
+	def update_dns_record(self, save: bool = True) -> None:
 		"""Point the proxy domain at its public IPv4 address."""
 		self.proxy_server = frappe.get_doc("Proxy Server", self.proxy_server.name, for_update=True)
 		if self.proxy_server.status == "Archived":
@@ -138,8 +112,9 @@ class ProxyServerProvisioner:
 
 		settings = frappe.get_single("Atlas Settings")
 		settings.dns_provider_controller.upsert_a_record(self.proxy_server.get_domain(), address)
+		self.save_progress(save)
 
-	def wait_for_ssh(self) -> None:
+	def wait_for_ssh(self, save: bool = True) -> None:
 		"""Wait until the guest answers as root on its public address."""
 		wait_for_server(
 			host=self.ssh_host,
@@ -147,11 +122,13 @@ class ProxyServerProvisioner:
 			timeout_seconds=SSH_TIMEOUT_SECONDS,
 			poll_interval_seconds=SSH_POLL_INTERVAL_SECONDS,
 		)
+		self.save_progress(save)
 
-	def push_configuration(self) -> None:
+	def push_configuration(self, save: bool = True) -> None:
 		"""Write and apply the proxy configuration."""
 		configuration = ProxyConfiguration(self.proxy_server)
 		if self.proxy_server.pushed_config_hash == configuration.digest:
+			self.save_progress(save)
 			return
 
 		result = SSHRunner(self.ssh_host).run_command(
@@ -162,16 +139,18 @@ class ProxyServerProvisioner:
 
 		self.proxy_server.pushed_config_hash = configuration.digest
 		self.proxy_server.tls_expires_on = frappe.get_single("Atlas Settings").wildcard_tls_expires_on
+		self.save_progress(save)
 
-	def install_package(self) -> None:
+	def install_package(self, save: bool = True) -> None:
 		"""Download the published package and run the proxy setup script."""
 		settings = frappe.get_single("Atlas Settings")
-		package_file = settings.get(SETTINGS_FILE_FIELD)
-		package_hash = settings.get(SETTINGS_HASH_FIELD)
+		package_file = settings.get("http_proxy_package_file")
+		package_hash = settings.get("http_proxy_package_hash")
 		if not package_file or not package_hash:
 			frappe.throw(_("Atlas Settings holds no HTTP proxy package. Run build-http-proxy-package."))
 
 		if self.proxy_server.installed_package_hash == package_hash:
+			self.save_progress(save)
 			return
 
 		task = SSHTask.create_for_script_file(
@@ -190,6 +169,7 @@ class ProxyServerProvisioner:
 			frappe.throw(_("The HTTP proxy install failed. See SSH Task {0}.").format(task.name))
 
 		self.proxy_server.installed_package_hash = package_hash
+		self.save_progress(save)
 
 	@property
 	def ssh_host(self) -> str:
@@ -197,6 +177,7 @@ class ProxyServerProvisioner:
 		virtual_machine = frappe.get_doc("Virtual Machine", self.proxy_server.virtual_machine)
 		return virtual_machine.ssh_host
 
-	def save_progress(self) -> None:
+	def save_progress(self, save: bool = True) -> None:
 		"""Store the current proxy state."""
-		self.proxy_server.save(ignore_permissions=True)
+		if save:
+			self.proxy_server.save(ignore_permissions=True)

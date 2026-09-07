@@ -8,11 +8,7 @@ CONTROL_SUBDOMAIN_FILE = "control-subdomain"
 
 
 def main() -> int:
-	"""Apply the parts of the configuration file that need a running OpenResty.
-
-	The daemon reads its own credentials on each request, so only the certificate
-	needs this command. Atlas writes the file and then runs it over SSH.
-	"""
+	"""Apply the certificate and control subdomain."""
 	try:
 		config = load()
 	except ConfigError as error:

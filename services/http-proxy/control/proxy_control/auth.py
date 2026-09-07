@@ -10,13 +10,7 @@ from .config import AuthConfig, ConfigError, load
 
 
 class Authentication:
-	"""Check a bearer token: a password against a bcrypt hash, or a JWT against JWKS.
-
-	Both credentials come from the configuration file, which is read on each
-	request. A pushed credential change therefore applies without a restart.
-	JWKS is asymmetric only, so a published public key can never double as an
-	HMAC secret. It applies only when both a JWKS URL and an audience are set.
-	"""
+	"""Authenticate bearer passwords and JWTs."""
 
 	_JWKS_ALGORITHMS: ClassVar[tuple[str, ...]] = (
 		"RS256",
@@ -48,7 +42,7 @@ class Authentication:
 		raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
 	def _auth(self) -> AuthConfig:
-		"""Return the current credentials. A broken file authorizes nobody."""
+		"""Return the current credentials."""
 		try:
 			return load(self.path).auth
 		except ConfigError:
@@ -86,7 +80,7 @@ class Authentication:
 			return False
 
 	def _jwks_client_instance(self, auth: AuthConfig) -> PyJWKClient:
-		"""Return the client for the configured URL, and rebuild it when the URL changes."""
+		"""Return a JWKS client for the configured URL."""
 		if self._jwks_client is None or self._jwks_url != auth.jwks_url:
 			self._jwks_client = PyJWKClient(auth.jwks_url, headers={"User-Agent": "atlas-proxy-control"})
 			self._jwks_url = auth.jwks_url

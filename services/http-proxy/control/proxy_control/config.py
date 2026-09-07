@@ -10,12 +10,12 @@ LISTEN_ADDRESS = "127.0.0.1"
 
 
 class ConfigError(Exception):
-	"""Raised when the configuration file cannot be read or has the wrong shape."""
+	"""The configuration is invalid."""
 
 
 @dataclass(frozen=True)
 class AuthConfig:
-	"""The credentials a caller can present. An empty value disables that method."""
+	"""Caller credentials."""
 
 	password_hash: str = ""
 	jwks_url: str = ""
@@ -24,7 +24,7 @@ class AuthConfig:
 
 @dataclass(frozen=True)
 class TLSConfig:
-	"""The regional wildcard certificate. Atlas pushes the PEM text in the file."""
+	"""Wildcard certificate configuration."""
 
 	wildcard_domain: str
 	fullchain_pem: str
@@ -33,7 +33,7 @@ class TLSConfig:
 
 @dataclass(frozen=True)
 class ControlConfig:
-	"""Everything the control daemon and the apply command read."""
+	"""Control daemon configuration."""
 
 	tls: TLSConfig
 	admin_socket: str = DEFAULT_ADMIN_SOCKET
@@ -43,20 +43,17 @@ class ControlConfig:
 
 	@property
 	def reserved_subdomain(self) -> str:
-		"""Return the label OpenResty routes to this daemon, and no map may hold."""
+		"""Return the control subdomain."""
 		return self.domain.partition(".")[0]
 
 
 def config_path() -> Path:
-	"""Return the configuration path. `ATLAS_PROXY_CONTROL_CONFIG` overrides the default."""
+	"""Return the configuration path."""
 	return Path(os.environ.get("ATLAS_PROXY_CONTROL_CONFIG") or CONFIG_PATH)
 
 
 def load(path: Path | None = None) -> ControlConfig:
-	"""Read the configuration file.
-
-	A missing file has no wildcard certificate, so the proxy refuses to start.
-	"""
+	"""Load the control configuration."""
 	document = _read(path or config_path())
 	control = _section(document, "control")
 	auth = _section(document, "auth")
@@ -78,7 +75,7 @@ def load(path: Path | None = None) -> ControlConfig:
 
 
 def _domain(domain: str, tls: TLSConfig) -> str:
-	"""Validate the control domain against the wildcard certificate."""
+	"""Validate the control domain."""
 	if not domain:
 		return ""
 

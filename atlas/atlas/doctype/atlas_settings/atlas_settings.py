@@ -59,9 +59,9 @@ class AtlasSettings(Document):
 		object_storage_secret_access_key: DF.Password | None
 		object_storage_signed_url_expiry: DF.Int
 		private_network_cidr: DF.Data
+		private_network_mtu: DF.Int
 		proxy_jwks_audience_id: DF.Data | None
 		proxy_jwks_url: DF.Data | None
-		private_network_mtu: DF.Int
 		public_ssh_key: DF.SmallText
 		region_id: DF.Int
 		region_name: DF.Data

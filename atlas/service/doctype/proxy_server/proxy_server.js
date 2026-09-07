@@ -3,6 +3,7 @@
 
 frappe.ui.form.on("Proxy Server", {
 	refresh(frm) {
+		frm.disable_save();
 		if (frm.is_new()) {
 			return;
 		}
@@ -14,7 +15,7 @@ frappe.ui.form.on("Proxy Server", {
 			[
 				__("Update DNS record"),
 				"update_dns_record",
-				frm.doc.status !== "Archived" && frm.doc.server_ip_address,
+				frm.doc.status !== "Archived" && frm.doc.virtual_machine,
 				"Actions",
 			],
 			[__("Archive"), "archive", frm.doc.status !== "Archived", "Dangerous Actions"],

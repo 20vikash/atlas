@@ -15,12 +15,10 @@ COMPONENT_DIRECTORY = "services/http-proxy"
 ARCHIVE_ROOT = "http-proxy"
 PACKAGE_FILE_NAME = "http-proxy.tar"
 PACKAGE_LABEL = "HTTP proxy package"
-SETTINGS_FILE_FIELD = "http_proxy_package_file"
-SETTINGS_HASH_FIELD = "http_proxy_package_hash"
 
 
 def publish_http_proxy_package() -> None:
-	"""Publish the component when its sources changed. Runs from `after_migrate`."""
+	"""Publish the package when its sources changed."""
 	archive = build_archive()
 	digest = hashlib.sha256(archive).hexdigest()
 	if is_published(digest):
@@ -32,34 +30,25 @@ def publish_http_proxy_package() -> None:
 
 
 def publish_package(archive: bytes, digest: str) -> str:
-	"""Attach the component archive as a File and link it in Atlas Settings."""
+	"""Publish the archive and link it from Atlas Settings."""
 	file_name = publish_public_file(PACKAGE_FILE_NAME, PACKAGE_LABEL, archive)
-	frappe.db.set_single_value("Atlas Settings", SETTINGS_FILE_FIELD, file_name)
-	frappe.db.set_single_value("Atlas Settings", SETTINGS_HASH_FIELD, digest)
+	frappe.db.set_single_value("Atlas Settings", "http_proxy_package_file", file_name)
+	frappe.db.set_single_value("Atlas Settings", "http_proxy_package_hash", digest)
 	return file_name
 
 
 def is_published(digest: str) -> bool:
-	"""Report whether the linked File already holds this archive."""
+	"""Report whether the linked archive has this digest."""
 	settings = frappe.get_cached_doc("Atlas Settings")
-	file_name = settings.get(SETTINGS_FILE_FIELD)
-	if not file_name or settings.get(SETTINGS_HASH_FIELD) != digest:
+	file_name = settings.get("http_proxy_package_file")
+	if not file_name or settings.get("http_proxy_package_hash") != digest:
 		return False
 
 	return bool(frappe.db.exists("File", file_name))
 
 
 def build_archive() -> bytes:
-	"""Return an uncompressed archive of the component, rooted at `http-proxy/`.
-
-	The archive is reproducible: the entries are sorted, and each one carries a
-	fixed timestamp, mode, and owner, so an unchanged tree gives the same bytes
-	and its digest does not publish a second File.
-
-	Only regular files go in, and every name is built here. A symbolic link, a
-	device, or an absolute name could write outside the directory a host unpacks
-	into.
-	"""
+	"""Return a reproducible archive of regular component files."""
 	component = component_path()
 	buffer = io.BytesIO()
 	with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
@@ -77,11 +66,7 @@ def build_archive() -> bytes:
 
 
 def source_paths() -> list[Path]:
-	"""Return every component file that belongs in the archive, in a stable order.
-
-	Git decides what belongs, because it already reads `.gitignore`. A cache, a
-	build directory, or a local environment never reaches a host.
-	"""
+	"""Return unignored component files in a stable order."""
 	component = component_path()
 	result = subprocess.run(
 		["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -99,5 +84,5 @@ def source_paths() -> list[Path]:
 
 
 def component_path() -> Path:
-	"""Return the directory that holds the HTTP proxy component."""
+	"""Return the HTTP proxy component directory."""
 	return Path(frappe.get_app_path("atlas")).parent / COMPONENT_DIRECTORY
