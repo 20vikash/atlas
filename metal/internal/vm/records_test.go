@@ -1,9 +1,63 @@
 package vm
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// writeStatusFile places a hand-written status.json, so a test can simulate an
+// old or corrupt on-disk record.
+func writeStatusFile(t *testing.T, directory, identifier, body string) string {
+	t.Helper()
+	machineDirectory := filepath.Join(directory, identifier)
+	if err := os.MkdirAll(machineDirectory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(machineDirectory, "status.json")
+	if err := os.WriteFile(path, []byte(body), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestReadObservedLoadsAnOldRecordWithoutASleepObject(t *testing.T) {
+	directory := t.TempDir()
+	store := newRecordStore(directory)
+	// A schema version 1 record written before the sleep feature has no sleep key.
+	writeStatusFile(t, directory, "vm-1", `{"schema_version":1,"generation":1,"state":"running","updated_at":"2026-01-01T00:00:00Z"}`)
+
+	got, err := store.readObserved("vm-1")
+	if err != nil {
+		t.Fatalf("old record did not load: %v", err)
+	}
+	if got.Sleep != nil {
+		t.Error("an old record must read back with no sleep progress")
+	}
+	if got.State != StateRunning {
+		t.Errorf("state = %s, want running", got.State)
+	}
+}
+
+func TestReadObservedPreservesACorruptRecord(t *testing.T) {
+	directory := t.TempDir()
+	store := newRecordStore(directory)
+	// sleeping with no sleep object is corrupt and must not be repaired.
+	corrupt := `{"schema_version":1,"generation":1,"state":"sleeping","updated_at":"2026-01-01T00:00:00Z"}`
+	path := writeStatusFile(t, directory, "vm-1", corrupt)
+
+	if _, err := store.readObserved("vm-1"); err == nil {
+		t.Fatal("want a validation error")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != corrupt {
+		t.Error("the corrupt record was changed; it must be kept for diagnosis")
+	}
+}
 
 func newTestObserved(state State) ObservedRecord {
 	return ObservedRecord{State: state, Generation: 1, UpdatedAt: time.Now().UTC()}
