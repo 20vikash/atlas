@@ -117,6 +117,12 @@ type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
 }
 
+// sleepPolicyRequest is the complete sleep policy. It carries only is_sleepy.
+// The idle timeout is one Metal-wide host value and is not part of this request.
+type sleepPolicyRequest struct {
+	IsSleepy bool `json:"is_sleepy"`
+}
+
 // validate checks every group and the guest values a create carries.
 func (request createRequest) validate() error {
 	if err := request.Compute.validate(); err != nil {

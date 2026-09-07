@@ -132,6 +132,19 @@ func (manager *fakeVirtualMachineManager) SetNetwork(_ context.Context, id strin
 	return nil
 }
 
+func (manager *fakeVirtualMachineManager) SetSleepPolicy(_ context.Context, id string, isSleepy bool) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
+	if virtualMachine.info.IsSleepy == isSleepy {
+		return nil
+	}
+	virtualMachine.info.IsSleepy = isSleepy
+	virtualMachine.info.DesiredGeneration++
+	return nil
+}
+
 func (manager *fakeVirtualMachineManager) SetDisk(_ context.Context, id string, diskMiB int, limits vm.Disk) error {
 	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
@@ -609,6 +622,52 @@ func TestCreateDefaultsToNonSleepy(t *testing.T) {
 	if response.Desired.IsSleepy {
 		t.Fatal("desired.is_sleepy = true, want false for a request without the field")
 	}
+}
+
+func TestSetSleepPolicyUpdatesTheFlag(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Desired.IsSleepy {
+		t.Fatal("desired.is_sleepy = false, want true")
+	}
+}
+
+func TestSetSleepPolicyIsIdempotent(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	first := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
+	second := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
+
+	var firstResponse, secondResponse virtualMachineResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResponse); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondResponse); err != nil {
+		t.Fatal(err)
+	}
+	if firstResponse.Desired.Generation != secondResponse.Desired.Generation {
+		t.Fatalf("generation changed on a repeat: %d then %d", firstResponse.Desired.Generation, secondResponse.Desired.Generation)
+	}
+}
+
+func TestSetSleepPolicyRejectsAnIdleTimeoutField(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	// The idle timeout is a host value, so it is an unknown field here.
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true,"idle_timeout":"30m"}`, http.StatusBadRequest)
+}
+
+func TestSetSleepPolicyReturnsNotFoundForAMissingVirtualMachine(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/missing/sleep-policy", `{"is_sleepy":true}`, http.StatusNotFound)
 }
 
 func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {

@@ -54,6 +54,7 @@ type VirtualMachineManager interface {
 	SetCompute(context.Context, string, int, int) error
 	SetDisk(context.Context, string, int, vm.Disk) error
 	SetNetwork(context.Context, string, vm.NetworkConfiguration) error
+	SetSleepPolicy(context.Context, string, bool) error
 	ReplaceSSHKeys(context.Context, string, []string) (bool, error)
 	ReplaceMetadata(context.Context, string, map[string]string) (bool, error)
 	Delete(context.Context, string) error

@@ -22,6 +22,7 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	virtualMachineRoutes.PUT("/:id/compute", s.setVirtualMachineCompute)
 	virtualMachineRoutes.PUT("/:id/disk", s.setVirtualMachineDisk)
 	virtualMachineRoutes.PUT("/:id/network", s.setVirtualMachineNetwork)
+	virtualMachineRoutes.PUT("/:id/sleep-policy", s.setVirtualMachineSleepPolicy)
 	virtualMachineRoutes.PUT("/:id/ssh-keys", s.replaceVirtualMachineSSHKeys)
 	virtualMachineRoutes.PUT("/:id/metadata", s.replaceVirtualMachineMetadata)
 	virtualMachineRoutes.DELETE("/:id", s.deleteVirtualMachine)
