@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func validRequirement() sleepSnapshotRequirement {
-	return sleepSnapshotRequirement{
+func validRequirement() snapshotRequirement {
+	return snapshotRequirement{
 		VirtualMachineID:         "vm-1",
 		UserID:                   100001,
 		SpecificationGeneration:  4,
@@ -20,14 +20,14 @@ func validRequirement() sleepSnapshotRequirement {
 // layDownGeneration writes a valid published generation matching completeManifest.
 func layDownGeneration(t *testing.T, configuration Config, generation uint64) string {
 	t.Helper()
-	directory := configuration.sleepGenerationDirectory("vm-1", generation)
+	directory := configuration.snapshotGenerationDirectory("vm-1", generation)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	manifest := completeManifest()
 	writeFile(t, filepath.Join(directory, snapshotStateFileName), int(manifest.StateFileSizeBytes))
 	writeFile(t, filepath.Join(directory, snapshotMemoryFileName), int(manifest.MemoryFileSizeBytes))
-	data, err := encodeSleepManifest(manifest)
+	data, err := encodeSnapshotManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +44,11 @@ func writeFile(t *testing.T, path string, size int) {
 	}
 }
 
-func TestValidateSleepGenerationAcceptsAValidSnapshot(t *testing.T) {
+func TestValidateSnapshotGenerationAcceptsAValidSnapshot(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	layDownGeneration(t, configuration, 4)
 
-	got, err := configuration.validateSleepGeneration(validRequirement(), 4)
+	got, err := configuration.validateSnapshotGeneration(validRequirement(), 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestValidateSleepGenerationAcceptsAValidSnapshot(t *testing.T) {
 	}
 }
 
-func TestValidateSleepGenerationReportsNotFoundWithoutAManifest(t *testing.T) {
+func TestValidateSnapshotGenerationReportsNotFoundWithoutAManifest(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	// Lay down the artifacts but remove the manifest, so the snapshot is absent.
 	directory := layDownGeneration(t, configuration, 4)
@@ -65,29 +65,29 @@ func TestValidateSleepGenerationReportsNotFoundWithoutAManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := configuration.validateSleepGeneration(validRequirement(), 4)
-	if !errors.Is(err, errSleepSnapshotNotFound) {
-		t.Fatalf("error = %v, want errSleepSnapshotNotFound", err)
+	_, err := configuration.validateSnapshotGeneration(validRequirement(), 4)
+	if !errors.Is(err, errSnapshotNotFound) {
+		t.Fatalf("error = %v, want errSnapshotNotFound", err)
 	}
 }
 
-func TestValidateSleepGenerationRejectsInvalidSnapshots(t *testing.T) {
+func TestValidateSnapshotGenerationRejectsInvalidSnapshots(t *testing.T) {
 	cases := []struct {
 		name        string
-		requirement sleepSnapshotRequirement
+		requirement snapshotRequirement
 		mutate      func(t *testing.T, directory string)
 	}{
-		{name: "wrong compatibility", requirement: func() sleepSnapshotRequirement {
+		{name: "wrong compatibility", requirement: func() snapshotRequirement {
 			requirement := validRequirement()
 			requirement.FirecrackerCompatibility = "firecracker-9.9.9"
 			return requirement
 		}()},
-		{name: "wrong user id", requirement: func() sleepSnapshotRequirement {
+		{name: "wrong user id", requirement: func() snapshotRequirement {
 			requirement := validRequirement()
 			requirement.UserID = 200000
 			return requirement
 		}()},
-		{name: "wrong specification generation", requirement: func() sleepSnapshotRequirement {
+		{name: "wrong specification generation", requirement: func() snapshotRequirement {
 			requirement := validRequirement()
 			requirement.SpecificationGeneration = 99
 			return requirement
@@ -119,11 +119,11 @@ func TestValidateSleepGenerationRejectsInvalidSnapshots(t *testing.T) {
 				testCase.mutate(t, directory)
 			}
 
-			_, err := configuration.validateSleepGeneration(testCase.requirement, 4)
+			_, err := configuration.validateSnapshotGeneration(testCase.requirement, 4)
 			if err == nil {
 				t.Fatal("want an invalid-artifact error")
 			}
-			if errors.Is(err, errSleepSnapshotNotFound) {
+			if errors.Is(err, errSnapshotNotFound) {
 				t.Fatalf("error = %v, want an invalid-artifact error, not absence", err)
 			}
 		})

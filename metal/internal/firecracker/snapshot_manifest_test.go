@@ -7,8 +7,8 @@ import (
 )
 
 // completeManifest is a fully populated, valid manifest fixture.
-func completeManifest() sleepManifest {
-	return newSleepManifest(sleepManifest{
+func completeManifest() snapshotManifest {
+	return newSnapshotManifest(snapshotManifest{
 		VirtualMachineID:         "vm-1",
 		UserID:                   100001,
 		SpecificationGeneration:  4,
@@ -21,28 +21,28 @@ func completeManifest() sleepManifest {
 }
 
 // incompleteManifest omits the file sizes, which validation later rejects.
-func incompleteManifest() sleepManifest {
+func incompleteManifest() snapshotManifest {
 	manifest := completeManifest()
 	manifest.StateFileSizeBytes = 0
 	manifest.MemoryFileSizeBytes = 0
 	return manifest
 }
 
-func TestSleepManifestUsesFixedFileNames(t *testing.T) {
-	manifest := newSleepManifest(sleepManifest{StateFileName: "/etc/passwd", MemoryFileName: "../escape"})
+func TestSnapshotManifestUsesFixedFileNames(t *testing.T) {
+	manifest := newSnapshotManifest(snapshotManifest{StateFileName: "/etc/passwd", MemoryFileName: "../escape"})
 	if manifest.StateFileName != snapshotStateFileName || manifest.MemoryFileName != snapshotMemoryFileName {
 		t.Fatalf("file names = %q, %q; want the fixed names", manifest.StateFileName, manifest.MemoryFileName)
 	}
 }
 
-func TestSleepManifestRoundTrips(t *testing.T) {
+func TestSnapshotManifestRoundTrips(t *testing.T) {
 	original := completeManifest()
-	data, err := encodeSleepManifest(original)
+	data, err := encodeSnapshotManifest(original)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	decoded, err := decodeSleepManifest(data)
+	decoded, err := decodeSnapshotManifest(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,14 +55,14 @@ func TestSleepManifestRoundTrips(t *testing.T) {
 	}
 }
 
-func TestDecodeSleepManifestRejectsUnknownFields(t *testing.T) {
-	data, err := encodeSleepManifest(completeManifest())
+func TestDecodeSnapshotManifestRejectsUnknownFields(t *testing.T) {
+	data, err := encodeSnapshotManifest(completeManifest())
 	if err != nil {
 		t.Fatal(err)
 	}
 	withUnknown := strings.Replace(string(data), "{", `{"unexpected":true,`, 1)
 
-	if _, err := decodeSleepManifest([]byte(withUnknown)); err == nil {
+	if _, err := decodeSnapshotManifest([]byte(withUnknown)); err == nil {
 		t.Fatal("want an error for an unknown field")
 	}
 }

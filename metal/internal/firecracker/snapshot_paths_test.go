@@ -7,13 +7,13 @@ import (
 	"testing"
 )
 
-func TestSleepPathsStayBelowTheVMDirectory(t *testing.T) {
+func TestSnapshotPathsStayBelowTheVMDirectory(t *testing.T) {
 	configuration := Config{MachinesDir: "/var/lib/metal/machines", FirecrackerBin: "/usr/bin/firecracker"}
 	base := configuration.vmDir("vm-1") + string(filepath.Separator)
 	paths := []string{
-		configuration.sleepRoot("vm-1"),
-		configuration.sleepGenerationsDirectory("vm-1"),
-		configuration.sleepGenerationDirectory("vm-1", 3),
+		configuration.snapshotRoot("vm-1"),
+		configuration.snapshotGenerationsDirectory("vm-1"),
+		configuration.snapshotGenerationDirectory("vm-1", 3),
 		configuration.pendingSnapshotDirectory("vm-1"),
 	}
 	for _, path := range paths {
@@ -23,9 +23,9 @@ func TestSleepPathsStayBelowTheVMDirectory(t *testing.T) {
 	}
 }
 
-func TestNextSleepGenerationStartsAtOne(t *testing.T) {
+func TestNextSnapshotGenerationStartsAtOne(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
-	generation, err := configuration.nextSleepGeneration("vm-1")
+	generation, err := configuration.nextSnapshotGeneration("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +34,9 @@ func TestNextSleepGenerationStartsAtOne(t *testing.T) {
 	}
 }
 
-func TestNextSleepGenerationUsesTheHighestValidName(t *testing.T) {
+func TestNextSnapshotGenerationUsesTheHighestValidName(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
-	generations := configuration.sleepGenerationsDirectory("vm-1")
+	generations := configuration.snapshotGenerationsDirectory("vm-1")
 	// "01", "junk", and "0" are not canonical positive numbers and are ignored.
 	for _, name := range []string{"1", "2", "5", "01", "junk", "0"} {
 		if err := os.MkdirAll(filepath.Join(generations, name), 0o750); err != nil {
@@ -44,7 +44,7 @@ func TestNextSleepGenerationUsesTheHighestValidName(t *testing.T) {
 		}
 	}
 
-	generation, err := configuration.nextSleepGeneration("vm-1")
+	generation, err := configuration.nextSnapshotGeneration("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
