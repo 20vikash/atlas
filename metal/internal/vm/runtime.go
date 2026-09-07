@@ -2,11 +2,22 @@ package vm
 
 import "context"
 
+// StopMode selects how Runtime.Stop ends a virtual machine.
+type StopMode int
+
+const (
+	// StopShutdown ends the guest with the current Ctrl+Alt+Del and bounded kill.
+	StopShutdown StopMode = iota
+	// StopWithSleepSnapshot pauses the guest, saves a full snapshot, and
+	// terminates the Firecracker process without a guest shutdown.
+	StopWithSleepSnapshot
+)
+
 // Runtime controls virtual machine processes and guest-facing operations.
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
 	Start(context.Context, RuntimeMachine) error
-	Stop(context.Context, RuntimeMachine) error
+	Stop(context.Context, RuntimeMachine, StopMode) error
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error

@@ -12,6 +12,7 @@ type fakeRuntime struct {
 	state        State
 	starts       int
 	stops        int
+	stopMode     StopMode
 	pauses       int
 	resumes      int
 	removes      int
@@ -30,8 +31,9 @@ func (runtime *fakeRuntime) Start(context.Context, RuntimeMachine) error {
 	return nil
 }
 
-func (runtime *fakeRuntime) Stop(context.Context, RuntimeMachine) error {
+func (runtime *fakeRuntime) Stop(_ context.Context, _ RuntimeMachine, mode StopMode) error {
 	runtime.stops++
+	runtime.stopMode = mode
 	runtime.state = StateStopped
 	return nil
 }

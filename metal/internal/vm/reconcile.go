@@ -139,7 +139,7 @@ func (manager *Manager) applyRestart(
 		return status, nil
 	}
 	err := manager.runOperation(ctx, identifier, observed, operationID, phaseRestart, func() error {
-		if err := manager.runtime.Stop(ctx, machine); err != nil {
+		if err := manager.runtime.Stop(ctx, machine, StopShutdown); err != nil {
 			return err
 		}
 		return manager.runtime.Start(ctx, machine)
@@ -181,7 +181,10 @@ func (manager *Manager) applyDesiredState(
 		}
 	case StateStopped:
 		if status.State != StateStopped {
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, manager.runtime.Stop)
+			stopNormally := func(ctx context.Context, machine RuntimeMachine) error {
+				return manager.runtime.Stop(ctx, machine, StopShutdown)
+			}
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopNormally)
 		}
 	default:
 		return status, &TransitionError{DesiredState: desiredState, ObservedState: status.State}

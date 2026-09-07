@@ -97,9 +97,17 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) erro
 	return runtime.newMachine(input).Start(ctx)
 }
 
-// Stop stops a Firecracker virtual machine.
-func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine) error {
-	return runtime.newMachine(input).Stop(ctx)
+// Stop stops a Firecracker virtual machine. StopShutdown keeps the current
+// Ctrl+Alt+Del and bounded kill. StopWithSleepSnapshot is not implemented yet.
+func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) error {
+	switch mode {
+	case vm.StopShutdown:
+		return runtime.newMachine(input).Stop(ctx)
+	case vm.StopWithSleepSnapshot:
+		return fmt.Errorf("stop with sleep snapshot is not implemented")
+	default:
+		return fmt.Errorf("unknown stop mode %d", mode)
+	}
 }
 
 // Pause pauses a running Firecracker virtual machine.
