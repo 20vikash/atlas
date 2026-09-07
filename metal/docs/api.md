@@ -10,6 +10,8 @@ A mutation stores desired state and returns. It does not wait for the host. The 
 
 Each VM response nests `desired` and `observed`, so one read shows both what was asked for and what the host reached.
 
+`PUT /v1/vms/{id}/sleep-policy` sets the sleep policy with the body `{"is_sleepy": true|false}`. The idle timeout is a host value and is never part of the request. The desired response carries `is_sleepy`. The observed `state` can be `sleeping`, and the observed response reports `last_network_activity_at` and `sleeping_since` when they are known. It never carries a snapshot path or a timeout.
+
 Every `/v1` route needs a bearer token. Only liveness and the documentation are public.
 
 Routes, status codes, and error mapping: [internal/api/SPEC.md](../internal/api/SPEC.md).

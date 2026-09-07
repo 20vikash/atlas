@@ -30,7 +30,9 @@ Records, generations, reconciliation, and cleanup: [internal/vm/SPEC.md](../inte
 
 A VM specification has an `is_sleepy` flag. When it is set, and the host turns on automatic sleep, Metal can sleep the VM after an idle timeout. The create request and the sleep-policy endpoint carry only `is_sleepy`. The idle timeout is one Metal-wide host value and is never part of a VM request or record. See [testing.md](testing.md) for the `[sleep]` host configuration.
 
-The flag and the host configuration are the only parts of the sleepy VM feature in this state. Setting `is_sleepy` does not yet sleep a VM.
+`sleeping` is an observed state only. The controller cannot request it. When a VM is asleep, the observed response reports `state` as `sleeping`, and reports `last_network_activity_at` and `sleeping_since` when they are known. The response never carries a snapshot path or a timeout.
+
+Setting `is_sleepy` does not yet sleep a VM. The flag, the host configuration, the observed state, and the record fields are the parts of the feature in this state.
 
 ## Design notes
 

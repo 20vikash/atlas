@@ -28,7 +28,7 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 └── machines/                       derived from metald.base_dir
     └── <id>/                       one directory for each VM ID
         ├── config.json             versioned reservation and desired state
-        ├── status.json             versioned observed state and cleanup progress
+        ├── status.json             versioned observed state, cleanup, and sleep progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
         └── firecracker/            the executable name that jailer appends
             └── <id>/

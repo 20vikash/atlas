@@ -53,6 +53,8 @@ The create fingerprint identifies the reservation a create request asked for. It
 
 The daemon validates every record at startup and refuses to run on one it cannot read. It never repairs or removes a record: losing desired state is worse than failing to start.
 
+`sleeping` is an observed state only. A controller cannot request it. The observed record can carry a `sleep` object with safe times and generation numbers: `eligible_at`, `requested_at`, `snapshot_generation`, `snapshot_created_at`, and `last_network_activity_at`. It never carries an artifact path, because the Firecracker runtime derives every path from the VM ID. The object is additive, so an old record with no `sleep` key still loads. The reader rejects a partial or corrupt `sleep` object instead of repairing it.
+
 ## Reconciliation
 
 ```text

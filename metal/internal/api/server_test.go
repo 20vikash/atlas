@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/host"
@@ -621,6 +622,37 @@ func TestCreateDefaultsToNonSleepy(t *testing.T) {
 	}
 	if response.Desired.IsSleepy {
 		t.Fatal("desired.is_sleepy = true, want false for a request without the field")
+	}
+}
+
+func TestObservedResponseReportsSleepTimes(t *testing.T) {
+	activityAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	sleepingSince := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+	response := toVirtualMachine(vm.Information{
+		State:                 vm.StateSleeping,
+		LastNetworkActivityAt: activityAt,
+		SleepingSince:         sleepingSince,
+	})
+
+	if response.Observed.State != "sleeping" {
+		t.Errorf("state = %q, want sleeping", response.Observed.State)
+	}
+	if response.Observed.LastNetworkActivityAt != activityAt.Format(time.RFC3339) {
+		t.Errorf("last_network_activity_at = %q", response.Observed.LastNetworkActivityAt)
+	}
+	if response.Observed.SleepingSince != sleepingSince.Format(time.RFC3339) {
+		t.Errorf("sleeping_since = %q", response.Observed.SleepingSince)
+	}
+}
+
+func TestObservedResponseOmitsZeroSleepTimes(t *testing.T) {
+	response := toVirtualMachine(vm.Information{State: vm.StateRunning})
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "sleeping_since") || strings.Contains(string(data), "last_network_activity_at") {
+		t.Errorf("zero sleep times must be omitted: %s", data)
 	}
 }
 
