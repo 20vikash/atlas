@@ -19,6 +19,9 @@ type Specification struct {
 	Hostname        string               `json:"hostname"`
 	UserData        string               `json:"user_data"`
 	Metadata        map[string]string    `json:"metadata"`
+	// IsSleepy lets the host sleep an idle VM. The zero value keeps a VM awake, so
+	// old create requests stay non-sleepy.
+	IsSleepy bool `json:"is_sleepy"`
 }
 
 // Image identifies immutable boot files and their transport URLs.
@@ -71,6 +74,7 @@ func (specification Specification) SameReservation(other Specification) bool {
 		slices.Equal(specification.SSHKeys, other.SSHKeys) &&
 		specification.Hostname == other.Hostname &&
 		specification.UserData == other.UserData &&
+		specification.IsSleepy == other.IsSleepy &&
 		maps.Equal(specification.Metadata, other.Metadata)
 }
 
@@ -176,6 +180,7 @@ type Information struct {
 	SSHKeys                       []string
 	Hostname                      string
 	Metadata                      map[string]string
+	IsSleepy                      bool
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string

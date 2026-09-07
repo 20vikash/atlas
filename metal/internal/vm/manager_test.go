@@ -164,6 +164,19 @@ func TestCreateFingerprintAcceptsChangedSignedURLs(t *testing.T) {
 	}
 }
 
+func TestCreateFingerprintIncludesTheSleepyFlag(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	specification := testSpecification()
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+	// A create that only flips is_sleepy is a different reservation.
+	specification.IsSleepy = true
+	if _, err := manager.Create(context.Background(), "machine-1", specification); !errors.Is(err, ErrConflict) {
+		t.Fatalf("create error = %v, want conflict", err)
+	}
+}
+
 func TestCreateFingerprintRejectsDifferentFirstRequest(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	specification := testSpecification()

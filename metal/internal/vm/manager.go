@@ -305,6 +305,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		SSHKeys:                       slices.Clone(desired.Specification.SSHKeys),
 		Hostname:                      desired.Specification.Hostname,
 		Metadata:                      maps.Clone(desired.Specification.Metadata),
+		IsSleepy:                      desired.Specification.IsSleepy,
 		MAC:                           observed.NetworkInterface.MACAddress,
 		PublicIPv4:                    desired.Specification.Network.PublicIPv4,
 		WireGuardMeshIPv6:             desired.Specification.Network.WireGuardMeshIPv6,
