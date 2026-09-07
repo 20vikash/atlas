@@ -25,16 +25,23 @@ func (runtime *Runtime) Compatibility() string {
 
 // CreateMemorySnapshot writes Firecracker state and memory files for a warm image.
 func (runtime *Runtime) CreateMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine) (string, string, error) {
-	directory := filepath.Join(runtime.configuration.chrootRoot(machine.ID), warmSnapshotDirName)
+	return runtime.createFullSnapshot(ctx, machine, warmSnapshotDirName)
+}
+
+// createFullSnapshot writes a Full snapshot into a jail-relative directory and
+// returns the host paths of the state and memory files. The guest must already
+// be paused. Warm images and sleep snapshots share this primitive.
+func (runtime *Runtime) createFullSnapshot(ctx context.Context, machine vm.RuntimeMachine, relativeDirectory string) (string, string, error) {
+	directory := filepath.Join(runtime.configuration.chrootRoot(machine.ID), relativeDirectory)
 	if err := mkdirChown(directory, machine.UserID, machine.GroupID); err != nil {
 		return "", "", err
 	}
 	if err := api.New(runtime.configuration.socketPath(machine.ID)).CreateSnapshot(ctx, api.CreateSnapshotRequest{
 		SnapshotType: "Full",
-		SnapshotPath: filepath.Join(warmSnapshotDirName, snapshotStateFileName),
-		MemoryFile:   filepath.Join(warmSnapshotDirName, snapshotMemoryFileName),
+		SnapshotPath: filepath.Join(relativeDirectory, snapshotStateFileName),
+		MemoryFile:   filepath.Join(relativeDirectory, snapshotMemoryFileName),
 	}); err != nil {
-		return "", "", fmt.Errorf("create warm memory snapshot: %w", err)
+		return "", "", fmt.Errorf("create full snapshot: %w", err)
 	}
 	return filepath.Join(directory, snapshotStateFileName), filepath.Join(directory, snapshotMemoryFileName), nil
 }
