@@ -51,6 +51,7 @@ class ProxyServer(Document):
 
 		self.control_api_password = frappe.generate_hash(length=CONTROL_API_PASSWORD_LENGTH)
 
+	@frappe.whitelist()
 	def get_domain(self) -> str:
 		"""Return the name of this proxy below the Atlas wildcard domain."""
 		wildcard_domain = frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
@@ -68,8 +69,8 @@ class ProxyServer(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def provision(self) -> None:
-		"""Run the setup sequence again after a failure."""
-		frappe.only_for("System Manager")
+		"""Queue the complete setup sequence again."""
+		_validate_system_manager()
 		if self.status == "Archived":
 			frappe.throw(_("Proxy Server {0} is archived.").format(self.name))
 
@@ -77,45 +78,15 @@ class ProxyServer(Document):
 		frappe.msgprint(_("Proxy Server setup has been queued. Please check after some time."))
 
 	@frappe.whitelist(methods=["POST"])
-	def push_configuration(self) -> None:
-		"""Send the current credentials and wildcard certificate to the proxy."""
-		frappe.only_for("System Manager")
-		self.validate_is_reachable()
-
-		frappe.enqueue_doc(
-			self.doctype,
-			self.name,
-			"_push_configuration",
-			queue="long",
-			timeout=600,
-			job_id=f"atlas||proxy-server||configure||{self.name}",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
-		frappe.msgprint(_("The configuration push has been queued. Please check after some time."))
-
-	@frappe.whitelist(methods=["POST"])
-	def install_package(self) -> None:
-		"""Install the published HTTP proxy package again."""
-		frappe.only_for("System Manager")
-		self.validate_is_reachable()
-
-		frappe.enqueue_doc(
-			self.doctype,
-			self.name,
-			"_install_package",
-			queue="long",
-			timeout=1_800,
-			job_id=f"atlas||proxy-server||install||{self.name}",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
-		frappe.msgprint(_("The package install has been queued. Please check after some time."))
+	def get_control_api_password(self) -> str:
+		"""Return the control API password."""
+		_validate_system_manager()
+		return self.get_password("control_api_password", raise_exception=False) or ""
 
 	@frappe.whitelist(methods=["POST"])
 	def update_dns_record(self) -> None:
 		"""Point the proxy name at its current address."""
-		frappe.only_for("System Manager")
+		_validate_system_manager()
 		if self.status == "Archived":
 			frappe.throw(_("Proxy Server {0} is archived.").format(self.name))
 
@@ -135,7 +106,7 @@ class ProxyServer(Document):
 	@frappe.whitelist(methods=["POST"])
 	def archive(self) -> None:
 		"""Terminate the virtual machine, release its address, and remove its name."""
-		frappe.only_for("System Manager")
+		_validate_system_manager()
 		proxy_server = frappe.get_doc(self.doctype, self.name, for_update=True)
 		if proxy_server.status == "Archived":
 			return
@@ -165,21 +136,11 @@ class ProxyServer(Document):
 
 		ProxyServerProvisioner(self).run()
 
-	def _push_configuration(self) -> None:
-		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
-
-		ProxyServerProvisioner(self).push_configuration()
-
-	def _install_package(self) -> None:
-		from atlas.service.core.proxy.provisioning import ProxyServerProvisioner
-
-		ProxyServerProvisioner(self).install_package()
-
 
 @frappe.whitelist(methods=["POST"])
 def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
 	"""Create a Proxy Server and its virtual machine."""
-	frappe.only_for("System Manager")
+	_validate_system_manager()
 	values = frappe.parse_json(request) if isinstance(request, str) else request
 	if not isinstance(values, dict):
 		frappe.throw(_("Proxy Server creation data must be an object."))
@@ -216,6 +177,13 @@ def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
 	proxy_server.save(ignore_permissions=True)
 	proxy_server.enqueue_provisioning()
 	return {"name": proxy_server.name, "is_draft": is_draft}
+
+
+def _validate_system_manager() -> None:
+	frappe.only_for("System Manager")
+	user_type = frappe.get_cached_value("User", frappe.session.user, "user_type")
+	if user_type != "System User":
+		frappe.throw(_("Only System Users can manage Proxy Servers."), frappe.PermissionError)
 
 
 def enqueue_pending_proxies_provisioning() -> None:

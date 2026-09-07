@@ -81,6 +81,37 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			proxy_server.validate_is_reachable()
 
+	def test_reprovision_queues_the_complete_setup_sequence(self) -> None:
+		proxy_server = self.build(status="Failed")
+
+		with (
+			patch.object(proxy_server_module, "_validate_system_manager"),
+			patch.object(proxy_server, "enqueue_provisioning") as enqueue_provisioning,
+			patch.object(frappe, "msgprint"),
+		):
+			proxy_server.provision()
+
+		enqueue_provisioning.assert_called_once()
+
+	def test_a_system_manager_can_read_the_control_api_password(self) -> None:
+		proxy_server = self.build()
+
+		with (
+			patch.object(proxy_server_module, "_validate_system_manager"),
+			patch.object(proxy_server, "get_password", return_value="control-password"),
+		):
+			password = proxy_server.get_control_api_password()
+
+		self.assertEqual(password, "control-password")
+
+	def test_a_website_user_cannot_manage_proxies(self) -> None:
+		with (
+			patch.object(frappe, "only_for"),
+			patch.object(frappe, "get_cached_value", return_value="Website User"),
+			self.assertRaises(frappe.PermissionError),
+		):
+			proxy_server_module._validate_system_manager()
+
 
 class TestProxyServerCreate(UnitTestCase):
 	def test_the_creation_api_creates_a_proxy_for_the_new_vm(self) -> None:

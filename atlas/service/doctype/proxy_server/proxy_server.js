@@ -9,9 +9,7 @@ frappe.ui.form.on("Proxy Server", {
 		}
 
 		[
-			[__("Provision"), "provision", frm.doc.status !== "Archived", "Actions"],
-			[__("Push configuration"), "push_configuration", frm.doc.virtual_machine, "Actions"],
-			[__("Install package"), "install_package", frm.doc.virtual_machine, "Actions"],
+			[__("Re-provision"), "provision", frm.doc.status !== "Archived", "Actions"],
 			[
 				__("Update DNS record"),
 				"update_dns_record",
@@ -39,5 +37,24 @@ frappe.ui.form.on("Proxy Server", {
 				__(group)
 			);
 		});
+
+		frm.call("get_domain").then(({ message: domain }) => {
+			if (domain) {
+				frm.add_web_link(`https://${domain}`, __("Open proxy server"));
+			}
+		});
+
+		frm.add_custom_button(
+			__("Show control API password"),
+			() => {
+				frm.call("get_control_api_password").then(({ message: password }) => {
+					frappe.msgprint({
+						title: __("Control API password"),
+						message: `<code>${frappe.utils.escape_html(password)}</code>`,
+					});
+				});
+			},
+			__("Actions")
+		);
 	},
 });
