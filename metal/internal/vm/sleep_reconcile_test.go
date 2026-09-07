@@ -149,6 +149,75 @@ func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 	}
 }
 
+// warmStopToSleeping creates a VM, boots it, and warm-stops it to the sleeping
+// state through the manual power path.
+func warmStopToSleeping(t *testing.T, manager *Manager) {
+	t.Helper()
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateSleeping {
+		t.Fatalf("setup did not reach sleeping: %+v", observed)
+	}
+}
+
+func TestPausedWhileSleepingLoadsPaused(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	warmStopToSleeping(t, manager)
+
+	if err := manager.SetPowerState(context.Background(), "machine-1", StatePaused); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.startMode != StartFromSleepSnapshotPaused {
+		t.Fatalf("start mode = %d, want a paused snapshot load", runtime.startMode)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StatePaused || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want paused with no sleep", observed)
+	}
+}
+
+func TestPlainStopWhileSleepingDiscards(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	warmStopToSleeping(t, manager)
+
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateStopped); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.discards != 1 {
+		t.Fatalf("discards = %d, want the snapshot discarded once", runtime.discards)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateStopped || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want stopped with no sleep", observed)
+	}
+}
+
 // seedInterruptedSleep drives a running sleepy VM, then rewrites its observed
 // record to model a crash inside the sleep-snapshot phase: the process is gone
 // but the sleeping status was never written.

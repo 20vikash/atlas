@@ -125,9 +125,9 @@ func (manager *Manager) recoverInterruptedSleep(
 }
 
 // reconcileSleeping decides what to do with a VM that is already asleep. It holds
-// a caught-up sleeping VM whose desired state still wants sleep, and otherwise
-// resumes it from the snapshot. A later reconcile pass applies a stop or pause
-// from the running state. It never rewrites the snapshot and never cold boots.
+// a VM that still wants sleep, resumes one that wants running or paused, and
+// discards the snapshot for a plain stop. It never rewrites the snapshot and
+// never cold boots on a resume failure.
 func (manager *Manager) reconcileSleeping(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -136,16 +136,75 @@ func (manager *Manager) reconcileSleeping(
 	operationID string,
 ) error {
 	caughtUp := observed.Generation == desired.Generation && observed.RestartGeneration == desired.RestartGeneration
-	held := caughtUp &&
-		((desired.State == StateRunning && desired.Specification.IsSleepy) ||
-			(desired.State == StateStopped && desired.WarmStop))
-	if held {
-		observed.State = StateSleeping
-		observed.completeOperation()
-		return manager.store.writeObserved(desired.ID, *observed)
+
+	switch desired.State {
+	case StateRunning:
+		if desired.Specification.IsSleepy && caughtUp {
+			return manager.holdSleeping(desired, observed)
+		}
+		return manager.resumeFromSleep(ctx, desired, machine, observed, operationID)
+	case StatePaused:
+		return manager.loadPausedFromSleep(ctx, desired, machine, observed, operationID)
+	case StateStopped:
+		if desired.WarmStop {
+			return manager.holdSleeping(desired, observed)
+		}
+		return manager.discardSleepToStopped(ctx, desired, machine, observed, operationID)
+	default:
+		return &TransitionError{DesiredState: desired.State, ObservedState: StateSleeping}
+	}
+}
+
+// holdSleeping keeps a VM asleep for another pass. It does not copy generations,
+// so a pending change applies when the VM later resumes.
+func (manager *Manager) holdSleeping(desired DesiredRecord, observed *ObservedRecord) error {
+	observed.State = StateSleeping
+	observed.completeOperation()
+	return manager.store.writeObserved(desired.ID, *observed)
+}
+
+// loadPausedFromSleep restores a sleeping VM without running the vCPUs and reports
+// paused. It keeps the snapshot and the sleeping state on a load failure.
+func (manager *Manager) loadPausedFromSleep(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseStart, func() error {
+		return manager.runtime.Start(ctx, machine, StartFromSleepSnapshotPaused)
+	}); err != nil {
+		return err
 	}
 
-	return manager.resumeFromSleep(ctx, desired, machine, observed, operationID)
+	observed.Sleep = nil
+	observed.State = StatePaused
+	observed.completeOperation()
+
+	return manager.store.writeObserved(desired.ID, *observed)
+}
+
+// discardSleepToStopped drops the snapshot and reports stopped, so a plain stop
+// of a sleeping VM does not resume it.
+func (manager *Manager) discardSleepToStopped(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseStop, func() error {
+		return manager.runtime.DiscardSleepSnapshot(ctx, machine)
+	}); err != nil {
+		return err
+	}
+
+	observed.Sleep = nil
+	observed.State = StateStopped
+	observed.completeOperation()
+
+	return manager.store.writeObserved(desired.ID, *observed)
 }
 
 // resumeFromSleep restores a sleeping VM from its snapshot and reports running.
