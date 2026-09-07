@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -145,6 +146,100 @@ func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 	}
 	if observed.State != StateRunning || observed.Sleep != nil {
 		t.Fatalf("observed after abort = %+v, want running with no sleep", observed)
+	}
+}
+
+// seedInterruptedSleep drives a running sleepy VM, then rewrites its observed
+// record to model a crash inside the sleep-snapshot phase: the process is gone
+// but the sleeping status was never written.
+func seedInterruptedSleep(t *testing.T, manager *Manager, runtime *fakeRuntime, monitor *fakeNetworkActivityMonitor) {
+	t.Helper()
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+		t.Fatal(err)
+	}
+	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed.Phase = phaseSleepSnapshot
+	observed.Sleep = &SleepProgress{RequestedAt: time.Now().UTC()}
+	if err := manager.store.writeObserved("machine-1", observed); err != nil {
+		t.Fatal(err)
+	}
+	runtime.state = StateStopped
+}
+
+func TestRecoverInterruptedSleepPublishesSleeping(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	seedInterruptedSleep(t, manager, runtime, monitor)
+	runtime.sleepSnapshot = SleepSnapshot{Generation: 4, CreatedAt: time.Unix(2000, 0).UTC()}
+
+	// A daemon restart recovers the sleeping status from the valid snapshot.
+	recreated, err := NewManager(manager.configuration, ManagerDependencies{
+		Runtime:                runtime,
+		Network:                &fakeNetwork{},
+		Storage:                &fakeStorage{},
+		Snapshots:              fakeSnapshots{},
+		NetworkActivityMonitor: monitor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recreated.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.stops != 0 {
+		t.Fatalf("stops = %d, recovery must not snapshot again", runtime.stops)
+	}
+	observed, err := recreated.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.SnapshotGeneration != 4 {
+		t.Fatalf("observed = %+v, want sleeping from generation 4", observed)
+	}
+}
+
+func TestRecoverInterruptedSleepReportsInvalidSnapshot(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	seedInterruptedSleep(t, manager, runtime, monitor)
+	runtime.sleepSnapshotError = errors.New("corrupt manifest")
+
+	// An invalid snapshot is a failure. The VM must not cold boot.
+	if err := manager.Reconcile(context.Background(), "machine-1"); err == nil {
+		t.Fatal("expected an invalid snapshot to surface")
+	}
+	if runtime.startMode == StartNormal && runtime.starts > 1 {
+		t.Fatal("an invalid snapshot must not cold boot")
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State == StateSleeping || observed.Error == nil {
+		t.Fatalf("observed = %+v, want a recorded failure and no sleeping state", observed)
+	}
+}
+
+func TestRecoverInterruptedSleepWithoutSnapshotClears(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	seedInterruptedSleep(t, manager, runtime, monitor)
+	runtime.sleepSnapshotError = ErrNotFound
+
+	// No snapshot published, so the sleep intent clears and nothing stays pending.
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State == StateSleeping || observed.Sleep != nil || observed.Phase == phaseSleepSnapshot {
+		t.Fatalf("observed = %+v, want a cleared sleep intent", observed)
 	}
 }
 

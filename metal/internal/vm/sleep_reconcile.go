@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -81,6 +82,46 @@ func (manager *Manager) sampleActivityForAbort(ctx context.Context, desired Desi
 		return NetworkActivity{}, nil
 	}
 	return manager.sampleNetworkActivity(ctx, desired)
+}
+
+// recoverInterruptedSleep completes a warm stop that terminated the process but
+// did not record the sleeping state. It publishes sleeping from a valid snapshot
+// without making a new one. It reports a failure for an invalid snapshot and
+// clears the sleep intent when no snapshot published, so the VM boots normally.
+func (manager *Manager) recoverInterruptedSleep(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	snapshot, err := manager.runtime.InspectSleepSnapshot(ctx, machine)
+	if errors.Is(err, ErrNotFound) {
+		// The warm stop did not publish a snapshot. There is nothing to restore,
+		// so clear the sleep intent and let the normal flow start the VM.
+		observed.Sleep = nil
+		observed.Phase = ""
+		observed.OperationID = ""
+		return manager.store.writeObserved(desired.ID, *observed)
+	}
+	if err != nil {
+		// The snapshot is present but invalid. Keep the evidence and report it.
+		return manager.runOperation(ctx, desired.ID, observed, operationID, phaseSleepSnapshot, func() error {
+			return fmt.Errorf("recover sleep snapshot for VM %s: %w", desired.ID, err)
+		})
+	}
+
+	if observed.Sleep == nil {
+		observed.Sleep = &SleepProgress{}
+	}
+	observed.Sleep.SnapshotGeneration = snapshot.Generation
+	observed.Sleep.SnapshotCreatedAt = snapshot.CreatedAt
+	observed.State = StateSleeping
+	observed.Generation = desired.Generation
+	observed.RestartGeneration = desired.RestartGeneration
+	observed.completeOperation()
+
+	return manager.store.writeObserved(desired.ID, *observed)
 }
 
 // reconcileSleeping decides what to do with a VM that is already asleep. It holds

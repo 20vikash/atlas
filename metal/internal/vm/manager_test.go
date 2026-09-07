@@ -27,6 +27,10 @@ type fakeRuntime struct {
 	// stopOutcome is returned by a warm stop, so a test can set the published
 	// snapshot generation.
 	stopOutcome StopOutcome
+	// sleepSnapshot and sleepSnapshotError drive InspectSleepSnapshot, so a test
+	// can model a present, absent, or invalid sleep snapshot.
+	sleepSnapshot      SleepSnapshot
+	sleepSnapshotError error
 }
 
 func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error) {
@@ -76,6 +80,10 @@ func (runtime *fakeRuntime) RefreshMetadata(context.Context, RuntimeMachine) err
 func (runtime *fakeRuntime) RefreshDisk(context.Context, RuntimeMachine) error {
 	runtime.diskRefresh++
 	return nil
+}
+
+func (runtime *fakeRuntime) InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error) {
+	return runtime.sleepSnapshot, runtime.sleepSnapshotError
 }
 
 func (runtime *fakeRuntime) ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error) {

@@ -35,11 +35,22 @@ type StopOutcome struct {
 	SnapshotCreatedAt  time.Time
 }
 
+// SleepSnapshot describes a validated VM-local sleep snapshot. The manager reads
+// it to recover a sleep that terminated the process but did not record sleeping.
+type SleepSnapshot struct {
+	Generation uint64
+	CreatedAt  time.Time
+}
+
 // Runtime controls virtual machine processes and guest-facing operations.
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
 	Start(context.Context, RuntimeMachine, StartMode) error
 	Stop(context.Context, RuntimeMachine, StopMode) (StopOutcome, error)
+	// InspectSleepSnapshot returns the newest valid sleep snapshot. It returns
+	// ErrNotFound when none exists and an error when a manifest is present but
+	// invalid.
+	InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error)
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error

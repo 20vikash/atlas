@@ -3,6 +3,7 @@ package firecracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -122,6 +123,21 @@ func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode 
 	default:
 		return vm.StopOutcome{}, fmt.Errorf("unknown stop mode %d", mode)
 	}
+}
+
+// InspectSleepSnapshot returns the newest valid sleep snapshot for a VM. It
+// reports vm.ErrNotFound when none exists and preserves an invalid-manifest error
+// for an operator to inspect.
+func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.RuntimeMachine) (vm.SleepSnapshot, error) {
+	machine := runtime.newMachine(input)
+	snapshot, err := runtime.configuration.latestValidSnapshot(machine.snapshotRequirement())
+	if errors.Is(err, errSnapshotNotFound) {
+		return vm.SleepSnapshot{}, vm.ErrNotFound
+	}
+	if err != nil {
+		return vm.SleepSnapshot{}, err
+	}
+	return vm.SleepSnapshot{Generation: snapshot.Generation, CreatedAt: snapshot.Manifest.CreatedAt}, nil
 }
 
 // Pause pauses a running Firecracker virtual machine.

@@ -57,6 +57,10 @@ func (manager *Manager) reconcileActive(
 	observed ObservedRecord,
 	operationID string,
 ) error {
+	// Capture the pre-pass state before any operation overwrites the phase.
+	wasSleeping := observed.State == StateSleeping
+	interruptedSleep := observed.Phase == phaseSleepSnapshot
+
 	var networkInterface NetworkInterface
 	err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseNetwork, func() error {
 		var ensureError error
@@ -69,7 +73,6 @@ func (manager *Manager) reconcileActive(
 
 	observed.NetworkInterface = networkInterface
 	machine := runtimeMachine(desired, networkInterface)
-	wasSleeping := observed.State == StateSleeping
 	status, err := manager.inspect(ctx, desired.ID, machine, &observed, operationID)
 	if err != nil {
 		return err
@@ -79,6 +82,13 @@ func (manager *Manager) reconcileActive(
 	// stays asleep, resumes, or discards the snapshot.
 	if wasSleeping {
 		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID)
+	}
+
+	// A warm stop can terminate the process before the sleeping status is written.
+	// A stopped runtime that stopped inside the sleep-snapshot phase recovers to
+	// sleeping instead of cold booting.
+	if interruptedSleep && status.State == StateStopped {
+		return manager.recoverInterruptedSleep(ctx, desired, machine, &observed, operationID)
 	}
 
 	if observed.RestartGeneration < desired.RestartGeneration {
