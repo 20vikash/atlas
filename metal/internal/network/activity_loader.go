@@ -56,6 +56,9 @@ func (bpfActivityLoader) loadProgram(userID uint32, shared activityMap) (activit
 	if err != nil {
 		return nil, err
 	}
+	// The spec map keeps the small C capacity. Match it to the shared map, so the
+	// replacement passes the compatibility check.
+	spec.Maps["activity_by_user_id"].MaxEntries = sharedMap.kernelMap.MaxEntries()
 	if err := spec.Variables["virtual_machine_user_id"].Set(userID); err != nil {
 		return nil, fmt.Errorf("set user id constant: %w", err)
 	}
