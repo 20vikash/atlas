@@ -27,6 +27,14 @@ type ManagerConfig struct {
 	MachinesDirectory string
 	UserIDRange       UserIDRange
 	FastApplyTimeout  time.Duration
+	Sleep             SleepConfig
+}
+
+// SleepConfig is the Metal-wide automatic sleep policy. One idle timeout applies
+// to every sleepy VM on this host. It is not stored in any VM record.
+type SleepConfig struct {
+	Enabled     bool
+	IdleTimeout time.Duration
 }
 
 // ManagerDependencies contains the host services used by Manager.
@@ -68,6 +76,14 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	}
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
+	}
+	if configuration.Sleep.Enabled {
+		if configuration.Sleep.IdleTimeout <= 0 {
+			return nil, fmt.Errorf("automatic sleep needs a positive idle timeout")
+		}
+		if dependencies.NetworkActivityMonitor == nil {
+			return nil, fmt.Errorf("automatic sleep needs a network activity monitor")
+		}
 	}
 	if dependencies.Logger == nil {
 		dependencies.Logger = slog.Default()
