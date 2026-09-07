@@ -11,7 +11,12 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 # -trimpath drops build paths, -s -w drop the symbol table and DWARF.
 GO_BUILD_FLAGS := -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: build clean openapi version
+.PHONY: build clean openapi version generate-network
+
+# generate-network regenerates only the eBPF network activity artifacts. It
+# needs Clang. A normal build does not run it, because the results are committed.
+generate-network:
+	go generate ./internal/network/...
 
 build: openapi
 	mkdir -p $(OUTPUT_DIRECTORY)
