@@ -9,7 +9,9 @@ import (
 )
 
 // currentNamespacePath is the network namespace of the running thread.
-const currentNamespacePath = "/proc/self/ns/net"
+// /proc/thread-self points to the calling thread, not the main thread, so it is
+// correct after runtime.LockOSThread and after a Setns on this thread.
+const currentNamespacePath = "/proc/thread-self/ns/net"
 
 // namespaceSyscalls are the operations that enter and leave a network
 // namespace. A fake replaces them in unit tests, so the tests need no root.
