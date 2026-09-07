@@ -1,6 +1,7 @@
 package firecracker
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,21 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
+
+// createAndPublishSnapshot creates a Full snapshot of a paused VM and publishes
+// it as a new generation. The guest must already be paused. The create step
+// runs inside the jail, so it needs the daemon privileges. Warm image building
+// and warm stop share this path.
+func (runtime *Runtime) createAndPublishSnapshot(ctx context.Context, machine vm.RuntimeMachine) (validatedSnapshot, error) {
+	generation, err := runtime.configuration.nextSnapshotGeneration(machine.ID)
+	if err != nil {
+		return validatedSnapshot{}, err
+	}
+	if _, _, err := runtime.createFullSnapshot(ctx, machine, pendingSnapshotDirName); err != nil {
+		return validatedSnapshot{}, err
+	}
+	return runtime.publishPendingSnapshot(machine, generation)
+}
 
 // publishPendingSnapshot moves a complete pending directory to a new published
 // generation and writes the manifest last, so a generation is complete only

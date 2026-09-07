@@ -14,8 +14,6 @@ import (
 const (
 	snapshotStateFileName  = "state"
 	snapshotMemoryFileName = "memory"
-	// warmSnapshotDirName is the jail-relative directory for a warm image snapshot.
-	warmSnapshotDirName = "warm"
 )
 
 // Compatibility returns the Firecracker build identity for warm images.
@@ -23,9 +21,16 @@ func (runtime *Runtime) Compatibility() string {
 	return runtime.firecrackerCompatibility()
 }
 
-// CreateMemorySnapshot writes Firecracker state and memory files for a warm image.
+// CreateMemorySnapshot publishes a first-class VM-local snapshot and returns its
+// state and memory file paths. The warm image builder promotes those files into
+// the image store. The returned interface is unchanged, so warm image behavior
+// is the same as before.
 func (runtime *Runtime) CreateMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine) (string, string, error) {
-	return runtime.createFullSnapshot(ctx, machine, warmSnapshotDirName)
+	published, err := runtime.createAndPublishSnapshot(ctx, machine)
+	if err != nil {
+		return "", "", err
+	}
+	return published.StatePath, published.MemoryPath, nil
 }
 
 // createFullSnapshot writes a Full snapshot into a jail-relative directory and
