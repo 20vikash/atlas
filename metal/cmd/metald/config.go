@@ -23,8 +23,10 @@ type opts struct {
 	sleep           sleepOpts
 }
 
-// meshOpts configures the Atlas WG Mesh integration.
+// meshOpts configures the Atlas WG Mesh integration. Mesh is on by default. A
+// development or test host can turn it off, and then VMs get no mesh.
 type meshOpts struct {
+	enabled    bool
 	binaryPath string
 	uplinkName string
 }
@@ -46,7 +48,7 @@ func defaultOpts() opts {
 		pool:          "metal",
 		baseDir:       defaultBaseDir,
 		wireGuardName: "wg0",
-		mesh:          meshOpts{binaryPath: "/usr/local/bin/atlas-wg-mesh"},
+		mesh:          meshOpts{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
 		// TCP host:port by default; "unix:/path" for a unix socket instead.
 		listen: "127.0.0.1:8080",
 	}
@@ -116,6 +118,7 @@ type wireGuardFile struct {
 }
 
 type wgMeshFile struct {
+	Enabled    *bool  `toml:"enabled"`
 	BinaryPath string `toml:"binary_path"`
 	Uplink     string `toml:"uplink"`
 }
@@ -153,6 +156,9 @@ func applyFile(o *opts, path string) error {
 	overlay(&o.wireGuardName, fc.WireGuard.Interface)
 	overlay(&o.mesh.binaryPath, fc.WGMesh.BinaryPath)
 	overlay(&o.mesh.uplinkName, fc.WGMesh.Uplink)
+	if fc.WGMesh.Enabled != nil {
+		o.mesh.enabled = *fc.WGMesh.Enabled
+	}
 	o.sleep = sleepOpts{enabled: fc.Sleep.Enabled, idleTimeout: fc.Sleep.IdleTimeout.Duration}
 	if o.sleep.enabled && o.sleep.idleTimeout <= 0 {
 		return fmt.Errorf("config %s: [sleep] idle_timeout must be a positive duration when enabled", path)

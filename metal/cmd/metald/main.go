@@ -123,6 +123,26 @@ func makeDirs(o opts) error {
 	return nil
 }
 
+// meshProvider is the mesh behavior metald wires into the network allocator and
+// the host service. A real Mesh or a DisabledMesh satisfies it.
+type meshProvider interface {
+	Add(ctx context.Context, address, interfaceName string) error
+	Remove(ctx context.Context, address, interfaceName string) error
+	ApplyPrivilegedAddresses(ctx context.Context, desired []string) error
+}
+
+// setUpMesh prepares the Atlas WG Mesh integration, or a disabled no-op mesh when
+// the host turns it off. A disabled mesh gives VMs no mesh connectivity, so it is
+// for development and testing only.
+func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
+	if !o.mesh.enabled {
+		logger.Warn("Atlas WG Mesh is disabled; VMs have no mesh connectivity", "wg_mesh.enabled", false)
+		return network.DisabledMesh{}, nil
+	}
+
+	return connectMesh(o)
+}
+
 // connectMesh prepares the Atlas WG Mesh integration. It configures the host on
 // every start, so a reinstalled or reset host recovers without an operator.
 func connectMesh(o opts) (*network.Mesh, error) {
@@ -146,8 +166,8 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if o.authTokenHash == "" {
 		return fmt.Errorf("metald.auth_token_hash is required")
 	}
-	// Atlas WG Mesh is required, so fail before metald builds anything.
-	mesh, err := connectMesh(o)
+	// Set up Atlas WG Mesh before metald builds anything, so a bad mesh fails fast.
+	mesh, err := setUpMesh(o, logger)
 	if err != nil {
 		return err
 	}

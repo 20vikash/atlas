@@ -43,6 +43,29 @@ func TestLoadFileOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestMeshEnabledByDefaultAndDisabledByConfig(t *testing.T) {
+	if !defaultOpts().mesh.enabled {
+		t.Fatal("mesh must be enabled by default")
+	}
+
+	// An absent enabled key keeps the default; only an explicit false disables it.
+	present, err := load(writeConfig(t, "[wg_mesh]\nuplink = \"eth0\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !present.mesh.enabled {
+		t.Error("mesh became disabled without an explicit enabled=false")
+	}
+
+	off, err := load(writeConfig(t, "[wg_mesh]\nenabled = false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.mesh.enabled {
+		t.Error("enabled=false did not disable the mesh")
+	}
+}
+
 func TestLoadBaseDirMovesDerivedDirs(t *testing.T) {
 	path := writeConfig(t, "[metald]\nbase_dir = \"/srv/metal\"\n")
 	o, err := load(path)
