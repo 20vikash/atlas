@@ -211,13 +211,17 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		logger,
 	)
 	virtualMachineManager, err := vm.NewManager(
-		vm.ManagerConfig{MachinesDirectory: o.cfg.MachinesDir},
+		vm.ManagerConfig{
+			MachinesDirectory: o.cfg.MachinesDir,
+			Sleep:             vm.SleepConfig{Enabled: o.sleep.enabled, IdleTimeout: o.sleep.idleTimeout},
+		},
 		vm.ManagerDependencies{
-			Runtime:   virtualMachineRuntime,
-			Network:   networkManager,
-			Storage:   stores.VirtualMachines,
-			Snapshots: stores.Snapshots,
-			Logger:    logger,
+			Runtime:                virtualMachineRuntime,
+			Network:                networkManager,
+			Storage:                stores.VirtualMachines,
+			Snapshots:              stores.Snapshots,
+			NetworkActivityMonitor: networkManager,
+			Logger:                 logger,
 		},
 	)
 	if err != nil {
