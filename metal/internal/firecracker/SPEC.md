@@ -55,6 +55,24 @@ Warm launch is attempted only when the image asks for it and the VM shape matche
 
 A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
 
+## Memory snapshots
+
+A memory snapshot is one full Firecracker snapshot: a `state` file and a `memory` file. Warm images and sleepy VMs share one create and publish path, so the snapshot bytes and format are the same in both.
+
+```text
+pause the guest
+createFullSnapshot   -> jail/snapshot-pending/{state,memory}
+publish              -> move to machines/<id>/snapshots/generations/<n>/{state,memory}
+                        write manifest.json last, then read it back and validate
+```
+
+The manifest is the only signal that a generation is complete. It records the VM ID, user ID, the specification and restart generations, the Firecracker build, the creation time, the fixed file names, and the file sizes. A restore derives every path from the VM ID and never takes a path from the manifest. A new generation is used for every publish, so a live process never has its memory file overwritten.
+
+Warm image building and sleep differ only in what happens after publish:
+
+- Warm building runs on a throwaway builder VM. It publishes a snapshot, then promotes the files into the image store, keyed by image, shape, and build, so every VM of that image reuses them. The builder VM and its snapshot are then removed.
+- A sleepy VM publishes the snapshot under its own directory and keeps it. It is never promoted and never leaves the host.
+
 ## State
 
 State comes from two places. systemd owns whether the process runs, and Firecracker owns what the guest does inside it. Only an active unit is worth asking:

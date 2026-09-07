@@ -30,12 +30,16 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
         ├── config.json             versioned reservation and desired state
         ├── status.json             versioned observed state, cleanup, and sleep progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
+        ├── snapshots/              published memory snapshots for this VM
+        │   └── generations/
+        │       └── <n>/            state, memory, and manifest.json
         └── firecracker/            the executable name that jailer appends
             └── <id>/
                 └── root/           the VM sees this as /
                     ├── firecracker jailer copies the exec file in
                     ├── vmlinux     hard link to the kernel
                     ├── rootfs.img  block node for the VM zvol
+                    ├── snapshot-pending/  a snapshot being written, before publish
                     └── run/
                         └── firecracker.socket
 
