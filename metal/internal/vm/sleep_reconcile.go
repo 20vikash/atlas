@@ -57,6 +57,7 @@ func (manager *Manager) enterSleep(
 	}
 	observed.Sleep.SnapshotGeneration = outcome.SnapshotGeneration
 	observed.Sleep.SnapshotCreatedAt = outcome.SnapshotCreatedAt
+	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration
 
 	// A packet during the warm stop aborts an automatic sleep. The just-created
 	// snapshot is restored, so the VM keeps running with the new traffic.
@@ -116,6 +117,9 @@ func (manager *Manager) recoverInterruptedSleep(
 	}
 	observed.Sleep.SnapshotGeneration = snapshot.Generation
 	observed.Sleep.SnapshotCreatedAt = snapshot.CreatedAt
+	// InspectSleepSnapshot validated the snapshot against the current desired
+	// generations, so it matches the current specification generation.
+	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration
 	observed.State = StateSleeping
 	observed.Generation = desired.Generation
 	observed.RestartGeneration = desired.RestartGeneration
@@ -147,8 +151,14 @@ func (manager *Manager) reconcileSleeping(
 		if desired.Specification.IsSleepy && caughtUp {
 			return manager.holdSleeping(desired, observed)
 		}
+		if manager.isSnapshotStale(desired, observed) {
+			return manager.coldBootFromSleep(ctx, desired, machine, observed, operationID)
+		}
 		return manager.resumeFromSleep(ctx, desired, machine, observed, operationID)
 	case StatePaused:
+		if manager.isSnapshotStale(desired, observed) {
+			return manager.coldBootFromSleep(ctx, desired, machine, observed, operationID)
+		}
 		return manager.loadPausedFromSleep(ctx, desired, machine, observed, operationID)
 	case StateStopped:
 		if desired.WarmStop {
@@ -181,6 +191,37 @@ func (manager *Manager) restartFromSleep(
 	observed.Sleep = nil
 	observed.State = StateRunning
 	observed.RestartGeneration = desired.RestartGeneration
+	observed.completeOperation()
+
+	return manager.store.writeObserved(desired.ID, *observed)
+}
+
+// isSnapshotStale reports whether a specification shape change since the snapshot
+// makes it incompatible. Such a snapshot cannot be resumed and must cold boot.
+func (manager *Manager) isSnapshotStale(desired DesiredRecord, observed *ObservedRecord) bool {
+	return observed.Sleep != nil && observed.Sleep.SpecificationGeneration != desired.SpecificationGeneration
+}
+
+// coldBootFromSleep discards an incompatible snapshot and cold boots the guest
+// with the current shape. A later pass applies a pause from the running state.
+func (manager *Manager) coldBootFromSleep(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseStart, func() error {
+		if err := manager.runtime.DiscardSleepSnapshot(ctx, machine); err != nil {
+			return err
+		}
+		return manager.runtime.Start(ctx, machine, StartNormal)
+	}); err != nil {
+		return err
+	}
+
+	observed.Sleep = nil
+	observed.State = StateRunning
 	observed.completeOperation()
 
 	return manager.store.writeObserved(desired.ID, *observed)

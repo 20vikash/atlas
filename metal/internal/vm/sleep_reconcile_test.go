@@ -198,6 +198,63 @@ func TestRestartWhileSleepingColdBoots(t *testing.T) {
 	}
 }
 
+func TestDiskChangeWhileSleepingColdBoots(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	autoSleepToSleeping(t, manager, monitor)
+
+	// A disk grow changes the specification shape, so the snapshot is incompatible.
+	if err := manager.SetDisk(context.Background(), "machine-1", 8192, Disk{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.discards != 1 || runtime.startMode != StartNormal {
+		t.Fatalf("discards = %d start mode = %d, want a discard and a cold boot", runtime.discards, runtime.startMode)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateRunning || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want running with no sleep", observed)
+	}
+}
+
+func TestDisableSleepyWhileSleepingResumes(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	autoSleepToSleeping(t, manager, monitor)
+
+	// Disabling the policy keeps the shape, so the compatible snapshot resumes
+	// instead of cold booting.
+	if err := manager.SetSleepPolicy(context.Background(), "machine-1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.startMode != StartFromSleepSnapshot || runtime.discards != 0 {
+		t.Fatalf("start mode = %d discards = %d, want a snapshot resume", runtime.startMode, runtime.discards)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateRunning || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want running with no sleep", observed)
+	}
+}
+
+func TestSetComputeRejectedWhileSleeping(t *testing.T) {
+	manager, _, monitor := newSleepyManager(t, 30*time.Minute)
+	autoSleepToSleeping(t, manager, monitor)
+
+	// A compute change needs a stopped VM, so it is rejected while sleeping.
+	if err := manager.SetCompute(context.Background(), "machine-1", 4, 4096); !errors.Is(err, ErrConflict) {
+		t.Fatalf("SetCompute error = %v, want conflict", err)
+	}
+}
+
 // warmStopToSleeping creates a VM, boots it, and warm-stops it to the sleeping
 // state through the manual power path.
 func warmStopToSleeping(t *testing.T, manager *Manager) {

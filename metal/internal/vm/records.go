@@ -70,11 +70,15 @@ type ObservedRecord struct {
 // safe times and generation numbers. It never holds artifact paths, which the
 // Firecracker runtime derives from the VM ID.
 type SleepProgress struct {
-	EligibleAt            time.Time `json:"eligible_at,omitempty"`
-	RequestedAt           time.Time `json:"requested_at,omitempty"`
-	SnapshotGeneration    uint64    `json:"snapshot_generation,omitempty"`
-	SnapshotCreatedAt     time.Time `json:"snapshot_created_at,omitempty"`
-	LastNetworkActivityAt time.Time `json:"last_network_activity_at,omitempty"`
+	EligibleAt         time.Time `json:"eligible_at,omitempty"`
+	RequestedAt        time.Time `json:"requested_at,omitempty"`
+	SnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
+	SnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
+	// SpecificationGeneration is the desired specification generation the snapshot
+	// was made for. A later shape change makes the snapshot incompatible, so the
+	// VM cold boots instead of resuming.
+	SpecificationGeneration uint64    `json:"specification_generation,omitempty"`
+	LastNetworkActivityAt   time.Time `json:"last_network_activity_at,omitempty"`
 }
 
 // validate rejects a corrupt sleep object. A published snapshot needs both a
