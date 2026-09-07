@@ -24,11 +24,11 @@ The image snapshot API only stages a VM disk for upload. It does not restore a V
 
 Cold boot clones an image disk, links the kernel, configures Firecracker, and starts the guest. Warm boot restores host-local disk, memory, and Firecracker state. Warm boot is an optimization: any failure falls back to cold boot.
 
-A start tries three sources in order: the VM's own memory snapshot, the shared warm image for its exact image and shape, and a cold boot. So a warm-stopped VM and a warm-image clone resume through the same start path.
+A plain start uses the shared warm image for the VM's exact image and shape, or a cold boot. A start of a warm-stopped VM restores that VM's own memory snapshot. So the resume is deliberate, and a VM that stops outside Metal cold boots.
 
 ## Warm stop
 
-A power request may carry `warm`, valid only with a `stopped` state: `PUT /v1/vms/{id}/power` with the body `{"state":"stopped","warm":true}`. A warm stop saves a memory snapshot and terminates the process, so a later start resumes the guest instead of cold booting. A plain stop, a restart, or a specification change discards the snapshot, so the next start cold boots. The snapshot stays on the host and is never uploaded.
+A power request may carry `warm`, valid only with a `stopped` state: `PUT /v1/vms/{id}/power` with the body `{"state":"stopped","warm":true}`. A warm stop saves a memory snapshot and terminates the process, so a later start resumes the guest instead of cold booting. Metal marks the VM for resume, and only that mark leads to a resume. A VM that stops outside Metal, such as a guest power off or a crash, cold boots on the next start. A plain stop, a restart, or a specification change discards the snapshot. If the snapshot is missing or incompatible, the start cold boots. The snapshot stays on the host and is never uploaded.
 
 Records, generations, reconciliation, and cleanup: [internal/vm/SPEC.md](../internal/vm/SPEC.md). Boot and stop mechanics: [internal/firecracker/SPEC.md](../internal/firecracker/SPEC.md).
 

@@ -51,7 +51,7 @@ wait for the API socket       the process belongs to systemd, so this is the onl
 
 A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
 
-A start tries three sources in order: the VM's own memory snapshot, the shared warm image, and a cold boot. A VM-local snapshot is the most specific saved state, so a warm-stopped VM and a warm-image clone resume through this one start path. Warm launch is attempted only when the image asks for it and the VM shape matches the snapshot exactly. Any failure falls back to a cold boot, so warm boot can never make a VM unstartable. A restored guest receives its metadata before it resumes, so it never reads the values of the VM the snapshot came from.
+A start uses one of two modes the manager selects. A plain start tries the shared warm image, then a cold boot. A start of a warm-stopped VM restores that VM's own memory snapshot, and cold boots only if the snapshot is missing or incompatible. So a snapshot resume is deliberate, and a VM that stopped outside the manager cold boots. Warm launch is attempted only when the image asks for it and the VM shape matches the snapshot exactly. Any failure falls back to a cold boot, so warm boot can never make a VM unstartable. A restored guest receives its metadata before it resumes, so it never reads the values of the VM the snapshot came from.
 
 A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
 
@@ -77,7 +77,7 @@ A published snapshot has more than one use. All uses share the same create and p
 
 A throwaway builder VM is one caller of this path, not a limit on it. The same path can snapshot any VM.
 
-A warm stop pauses the guest, publishes the snapshot, then terminates Firecracker. Publication before termination keeps an interrupted warm stop recoverable, because a later start restores the published snapshot. A normal start restores the newest valid snapshot for the VM and then removes that external generation, because the jail holds its own copy. A plain stop, a restart, and a remove discard every snapshot, so a start after them cold boots. A generation change also invalidates an old snapshot, because its manifest no longer matches the desired generation.
+A warm stop pauses the guest, publishes the snapshot, then terminates Firecracker. Publication before termination keeps an interrupted warm stop recoverable, because a later start restores the published snapshot. The manager marks a VM warm-stopped and asks for a snapshot restore on the next start. The restore loads the newest valid snapshot, then removes that external generation, because the jail holds its own copy. A start with no warm-stop mark cold boots, so a VM stopped outside the manager does not resume a stale snapshot. A plain stop, a restart, and a remove discard every snapshot. A generation change also invalidates an old snapshot, because its manifest no longer matches the desired generation.
 
 ## State
 
