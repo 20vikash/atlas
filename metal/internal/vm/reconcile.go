@@ -113,6 +113,20 @@ func (manager *Manager) reconcileActive(
 		return err
 	}
 
+	// An idle sleepy VM warm-stops to the sleeping state.
+	now := time.Now().UTC()
+	decision, err := manager.evaluateSleepEligibility(ctx, desired, observed, status, now)
+	if err != nil {
+		return err
+	}
+	if decision.Eligible {
+		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{
+			EligibleAt:            decision.Activity.LastSeenAt.Add(manager.configuration.Sleep.IdleTimeout),
+			RequestedAt:           now,
+			LastNetworkActivityAt: decision.Activity.LastSeenAt,
+		})
+	}
+
 	observed.State = status.State
 	observed.completeOperation()
 
