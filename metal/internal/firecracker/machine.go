@@ -116,19 +116,25 @@ func (m *machine) coldBoot(ctx context.Context) error {
 	return nil
 }
 
-// restoreSnapshot restores the newest valid VM-local snapshot and reports
-// whether one was found. A restore reuses the VM disk, which Firecracker synced
-// during snapshot creation, so it does not clone a new one. After the load, the
-// jail holds its own copy of the memory file, so the external generation is no
-// longer the backing file and is removed.
-func (m *machine) restoreSnapshot(ctx context.Context) (bool, error) {
-	snapshot, err := m.runtime.configuration.latestValidSnapshot(snapshotRequirement{
+// snapshotRequirement is what this VM needs a published snapshot to be, for a
+// restore or a completion check.
+func (m *machine) snapshotRequirement() snapshotRequirement {
+	return snapshotRequirement{
 		VirtualMachineID:         m.input.ID,
 		UserID:                   m.input.UserID,
 		SpecificationGeneration:  m.input.SpecificationGeneration,
 		RestartGeneration:        m.input.RestartGeneration,
 		FirecrackerCompatibility: m.runtime.firecrackerCompatibility(),
-	})
+	}
+}
+
+// restoreSnapshot restores the newest valid VM-local snapshot and reports whether
+// one was found. A restore reuses the VM disk, which Firecracker synced during
+// snapshot creation, so it does not clone a new one. When resume is false the
+// guest is left paused. After a successful load the jail holds its own copy of
+// the memory file, so every external generation is removed.
+func (m *machine) restoreSnapshot(ctx context.Context, resume bool) (bool, error) {
+	snapshot, err := m.runtime.configuration.latestValidSnapshot(m.snapshotRequirement())
 	if errors.Is(err, errSnapshotNotFound) {
 		return false, nil
 	}
@@ -139,11 +145,11 @@ func (m *machine) restoreSnapshot(ctx context.Context) (bool, error) {
 	metadata := metadataServiceData(
 		m.input.ID, m.input.NetworkInterface.GuestIPAddress, m.input.NetworkInterface.MACAddress, m.input.Specification,
 	)
-	if err := m.runtime.launchSnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata); err != nil {
+	if err := m.runtime.launchSnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata, resume); err != nil {
 		return false, err
 	}
-	if err := os.RemoveAll(m.runtime.configuration.snapshotGenerationDirectory(m.input.ID, snapshot.Generation)); err != nil {
-		m.runtime.logger.Warn("remove restored snapshot generation failed", "virtual_machine_id", m.input.ID, "error", err)
+	if err := m.runtime.purgeSnapshots(m.input.ID); err != nil {
+		m.runtime.logger.Warn("remove restored snapshots failed", "virtual_machine_id", m.input.ID, "error", err)
 	}
 
 	return true, nil
@@ -151,9 +157,10 @@ func (m *machine) restoreSnapshot(ctx context.Context) (bool, error) {
 
 // startFromSnapshot restores the VM-local snapshot and requires one to exist. It
 // never falls back to a cold boot, because a caller that asked for a snapshot
-// restore must not silently lose the saved guest memory.
-func (m *machine) startFromSnapshot(ctx context.Context) error {
-	restored, err := m.restoreSnapshot(ctx)
+// restore must not silently lose the saved guest memory. When resume is false the
+// guest is left paused.
+func (m *machine) startFromSnapshot(ctx context.Context, resume bool) error {
+	restored, err := m.restoreSnapshot(ctx, resume)
 	if err != nil {
 		return err
 	}

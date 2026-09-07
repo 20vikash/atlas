@@ -9,31 +9,28 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// The dispatch for an unimplemented or unknown mode returns before touching the
-// machine, so a zero Runtime is enough to test it.
-func TestRuntimeStartRejectsUnimplementedAndUnknownModes(t *testing.T) {
+// The dispatch for an unknown mode returns before touching the machine, so a zero
+// Runtime is enough to test it.
+func TestRuntimeStartRejectsAnUnknownMode(t *testing.T) {
 	runtime := &Runtime{}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
-	cases := map[vm.StartMode]string{
-		vm.StartFromSleepSnapshotPaused: "not implemented",
-		vm.StartMode(99):                "unknown start mode",
-	}
-	for mode, want := range cases {
-		err := runtime.Start(context.Background(), input, mode)
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("Start(mode %d) error = %v, want %q", mode, err, want)
-		}
+
+	err := runtime.Start(context.Background(), input, vm.StartMode(99))
+	if err == nil || !strings.Contains(err.Error(), "unknown start mode") {
+		t.Errorf("Start(unknown mode) error = %v, want an unknown start mode error", err)
 	}
 }
 
-// StartFromSleepSnapshot requires a snapshot. With none published it reports the
-// not-found result rather than a cold boot.
+// The snapshot restore modes require a snapshot. With none published they report
+// the not-found result rather than a cold boot.
 func TestRuntimeStartFromSleepSnapshotWithoutASnapshot(t *testing.T) {
 	runtime := &Runtime{configuration: Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
 
-	if err := runtime.Start(context.Background(), input, vm.StartFromSleepSnapshot); !errors.Is(err, errSnapshotNotFound) {
-		t.Fatalf("error = %v, want errSnapshotNotFound", err)
+	for _, mode := range []vm.StartMode{vm.StartFromSleepSnapshot, vm.StartFromSleepSnapshotPaused} {
+		if err := runtime.Start(context.Background(), input, mode); !errors.Is(err, errSnapshotNotFound) {
+			t.Fatalf("Start(mode %d) error = %v, want errSnapshotNotFound", mode, err)
+		}
 	}
 }
 

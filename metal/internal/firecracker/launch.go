@@ -85,7 +85,8 @@ func (runtime *Runtime) relaunch(ctx context.Context, configuration vm.RuntimeMa
 
 // launchSnapshot restores a guest from a memory snapshot instead of booting it.
 // The guest is resumed only after the metadata is replaced, so it never reads the
-// values of the VM the snapshot came from.
+// values of the VM the snapshot came from. When resume is false the guest is left
+// paused, so a caller can restore state without running the vCPUs.
 func (runtime *Runtime) launchSnapshot(
 	ctx context.Context,
 	configuration vm.RuntimeMachine,
@@ -93,6 +94,7 @@ func (runtime *Runtime) launchSnapshot(
 	stateFile string,
 	memoryFile string,
 	metadata map[string]any,
+	resume bool,
 ) error {
 	_ = runtime.units.Stop(ctx, configuration.ID)
 	_ = os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(configuration.ID)))
@@ -150,6 +152,10 @@ func (runtime *Runtime) launchSnapshot(
 			runtime.logger.Error("MMDS refresh failed", "virtual_machine_id", configuration.ID, "error", err)
 		}
 	}
+	if !resume {
+		return nil
+	}
+
 	return client.Resume(ctx)
 }
 
@@ -184,6 +190,7 @@ func (runtime *Runtime) launchWarmImage(ctx context.Context, configuration vm.Ru
 		artifacts.StateFile,
 		artifacts.MemoryFile,
 		metadata,
+		true,
 	)
 }
 
