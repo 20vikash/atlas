@@ -66,3 +66,11 @@ func runOrSkip(t *testing.T, name string, args ...string) {
 		t.Skipf("setup command %s failed: %v: %s", name, err, output)
 	}
 }
+
+// runQuietly runs a command and ignores its result. It is used for cleanup and
+// for a packet send that is expected to get no reply.
+func runQuietly(name string, args ...string) error {
+	context, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(context, name, args...).Run()
+}
