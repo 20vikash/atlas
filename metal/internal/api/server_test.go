@@ -49,6 +49,7 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
+		IsSleepy:                      specification.IsSleepy,
 		DesiredGeneration:             1,
 	}}
 	manager.virtualMachines[id] = virtualMachine
@@ -580,6 +581,33 @@ func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 	}
 	if response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
 		t.Fatalf("public throughput = %+v", response.Desired.Network)
+	}
+}
+
+func TestCreateStoresAndReturnsTheSleepyFlag(t *testing.T) {
+	srv := newTestServer(t)
+	body := strings.Replace(validCreateRequest, `"guest":{`, `"is_sleepy":true,"guest":{`, 1)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
+
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Desired.IsSleepy {
+		t.Fatal("desired.is_sleepy = false, want true")
+	}
+}
+
+func TestCreateDefaultsToNonSleepy(t *testing.T) {
+	srv := newTestServer(t)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Desired.IsSleepy {
+		t.Fatal("desired.is_sleepy = true, want false for a request without the field")
 	}
 }
 

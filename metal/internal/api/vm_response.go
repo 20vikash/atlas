@@ -24,6 +24,7 @@ type desiredVirtualMachineResponse struct {
 	Image             virtualMachineImageResponse `json:"image"`
 	Network           networkResponse             `json:"network"`
 	Guest             guestResponse               `json:"guest"`
+	IsSleepy          bool                        `json:"is_sleepy"`
 }
 
 // observedVirtualMachineResponse is what the host reached, and the operation
@@ -142,6 +143,7 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 				SSHKeys:  append([]string{}, information.SSHKeys...),
 				Metadata: cloneMetadata(information.Metadata),
 			},
+			IsSleepy: information.IsSleepy,
 		},
 		Observed: observedVirtualMachineResponse{
 			Generation:        information.ObservedGeneration,

@@ -34,11 +34,12 @@ var (
 // createRequest is the complete desired specification of a new VM. Every group
 // is required, because a create stores state rather than merging into it.
 type createRequest struct {
-	Compute computeRequest `json:"compute"`
-	Disk    diskRequest    `json:"disk"`
-	Image   imageRequest   `json:"image"`
-	Network networkRequest `json:"network"`
-	Guest   guestRequest   `json:"guest"`
+	Compute  computeRequest `json:"compute"`
+	Disk     diskRequest    `json:"disk"`
+	Image    imageRequest   `json:"image"`
+	Network  networkRequest `json:"network"`
+	Guest    guestRequest   `json:"guest"`
+	IsSleepy bool           `json:"is_sleepy"`
 }
 
 // computeRequest is the complete CPU and memory shape.
@@ -150,6 +151,7 @@ func (request createRequest) specification() vm.Specification {
 		Hostname:        request.Guest.Hostname,
 		UserData:        request.Guest.UserData,
 		Metadata:        request.Guest.Metadata,
+		IsSleepy:        request.IsSleepy,
 	}
 }
 
