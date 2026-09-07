@@ -198,6 +198,8 @@ type Information struct {
 	OperationID                   string
 	OperationStartedAt            time.Time
 	UpdatedAt                     time.Time
+	LastNetworkActivityAt         time.Time
+	SleepingSince                 time.Time
 }
 
 // PublicOperationError contains safe reconciliation error data.

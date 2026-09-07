@@ -290,6 +290,11 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB
 	}
+	var lastNetworkActivityAt, sleepingSince time.Time
+	if observed.Sleep != nil {
+		lastNetworkActivityAt = observed.Sleep.LastNetworkActivityAt
+		sleepingSince = observed.Sleep.SnapshotCreatedAt
+	}
 	return Information{
 		ID:                            desired.ID,
 		State:                         observed.State,
@@ -320,6 +325,8 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		OperationID:                   observed.OperationID,
 		OperationStartedAt:            observed.OperationStartedAt,
 		UpdatedAt:                     observed.UpdatedAt,
+		LastNetworkActivityAt:         lastNetworkActivityAt,
+		SleepingSince:                 sleepingSince,
 	}
 }
 

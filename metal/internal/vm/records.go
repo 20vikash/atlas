@@ -55,6 +55,37 @@ type ObservedRecord struct {
 	StorageCleanupComplete bool             `json:"storage_cleanup_complete,omitempty"`
 	NetworkInterface       NetworkInterface `json:"network_interface,omitempty"`
 	Disk                   DiskUsage        `json:"disk,omitempty"`
+	Sleep                  *SleepProgress   `json:"sleep,omitempty"`
+}
+
+// SleepProgress records the automatic sleep operation of one VM. It holds only
+// safe times and generation numbers. It never holds artifact paths, which the
+// Firecracker runtime derives from the VM ID.
+type SleepProgress struct {
+	EligibleAt            time.Time `json:"eligible_at,omitempty"`
+	RequestedAt           time.Time `json:"requested_at,omitempty"`
+	SnapshotGeneration    uint64    `json:"snapshot_generation,omitempty"`
+	SnapshotCreatedAt     time.Time `json:"snapshot_created_at,omitempty"`
+	LastNetworkActivityAt time.Time `json:"last_network_activity_at,omitempty"`
+}
+
+// validate rejects a corrupt sleep object. A published snapshot needs both a
+// generation and a creation time, and a sleeping VM needs a published snapshot.
+func (record ObservedRecord) validateSleep() error {
+	if record.State == StateSleeping && record.Sleep == nil {
+		return errors.New("sleeping record has no sleep progress")
+	}
+	sleep := record.Sleep
+	if sleep == nil {
+		return nil
+	}
+	if (sleep.SnapshotGeneration == 0) != sleep.SnapshotCreatedAt.IsZero() {
+		return errors.New("sleep progress has a partial snapshot")
+	}
+	if record.State == StateSleeping && sleep.SnapshotGeneration == 0 {
+		return errors.New("sleeping record has no published snapshot")
+	}
+	return nil
 }
 
 // OperationError stores safe and local reconciliation error details. Message is
@@ -159,6 +190,9 @@ func (store *recordStore) readObserved(identifier string) (ObservedRecord, error
 	}
 	if !isObservedState(record.State) || record.UpdatedAt.IsZero() {
 		return ObservedRecord{}, fmt.Errorf("read %s: invalid observed record", store.observedPath(identifier))
+	}
+	if err := record.validateSleep(); err != nil {
+		return ObservedRecord{}, fmt.Errorf("read %s: %w", store.observedPath(identifier), err)
 	}
 	return record, nil
 }
