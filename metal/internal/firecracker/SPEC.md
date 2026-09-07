@@ -79,6 +79,8 @@ A throwaway builder VM is one caller of this path, not a limit on it. The same p
 
 A warm stop pauses the guest, publishes the snapshot, then terminates Firecracker. Publication before termination keeps an interrupted warm stop recoverable, because a later start restores the published snapshot. The manager marks a VM warm-stopped and asks for a snapshot restore on the next start. The restore loads the newest valid snapshot, then removes that external generation, because the jail holds its own copy. A start with no warm-stop mark cold boots, so a VM stopped outside the manager does not resume a stale snapshot. A plain stop, a restart, and a remove discard every snapshot. A generation change also invalidates an old snapshot, because its manifest no longer matches the desired generation.
 
+A warm stop is safe to repeat after an interruption. If a valid snapshot already exists, a stopped runtime is complete, a paused runtime only needs termination, and a running runtime is a conflict. A restore can also leave the guest paused, so a caller can bring back the state without running the vCPUs.
+
 ## State
 
 State comes from two places. systemd owns whether the process runs, and Firecracker owns what the guest does inside it. Only an active unit is worth asking:
