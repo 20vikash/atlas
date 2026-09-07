@@ -100,7 +100,7 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode
 	case vm.StartNormal:
 		return runtime.newMachine(input).Start(ctx)
 	case vm.StartFromSleepSnapshot:
-		return fmt.Errorf("start from sleep snapshot is not implemented")
+		return runtime.newMachine(input).startFromSnapshot(ctx)
 	case vm.StartFromSleepSnapshotPaused:
 		return fmt.Errorf("start from sleep snapshot paused is not implemented")
 	default:
