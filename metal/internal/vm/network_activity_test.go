@@ -7,11 +7,13 @@ import (
 
 // fakeNetworkActivityMonitor is the Phase 2 manager seam for activity reads.
 type fakeNetworkActivityMonitor struct {
-	activity NetworkActivity
-	err      error
+	activity    NetworkActivity
+	err         error
+	lastRequest NetworkActivityRequest
 }
 
-func (monitor *fakeNetworkActivityMonitor) LastNetworkActivity(context.Context, NetworkActivityRequest) (NetworkActivity, error) {
+func (monitor *fakeNetworkActivityMonitor) LastNetworkActivity(_ context.Context, request NetworkActivityRequest) (NetworkActivity, error) {
+	monitor.lastRequest = request
 	return monitor.activity, monitor.err
 }
 

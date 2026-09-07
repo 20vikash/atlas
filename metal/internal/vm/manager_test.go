@@ -126,7 +126,13 @@ func newTestManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetwork, *fakeSt
 	storage := &fakeStorage{}
 	manager, err := NewManager(
 		ManagerConfig{MachinesDirectory: t.TempDir(), UserIDRange: UserIDRange{Min: 1000, Max: 1010}},
-		ManagerDependencies{Runtime: runtime, Network: network, Storage: storage, Snapshots: fakeSnapshots{}},
+		ManagerDependencies{
+			Runtime:                runtime,
+			Network:                network,
+			Storage:                storage,
+			Snapshots:              fakeSnapshots{},
+			NetworkActivityMonitor: &fakeNetworkActivityMonitor{},
+		},
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -31,26 +31,28 @@ type ManagerConfig struct {
 
 // ManagerDependencies contains the host services used by Manager.
 type ManagerDependencies struct {
-	Runtime   Runtime
-	Network   Network
-	Storage   Storage
-	Snapshots Snapshots
-	Logger    *slog.Logger
+	Runtime                Runtime
+	Network                Network
+	Storage                Storage
+	Snapshots              Snapshots
+	NetworkActivityMonitor NetworkActivityMonitor
+	Logger                 *slog.Logger
 }
 
 // Manager owns virtual machine desired state and reconciliation.
 type Manager struct {
-	configuration        ManagerConfig
-	store                *recordStore
-	runtime              Runtime
-	network              Network
-	storage              Storage
-	snapshots            Snapshots
-	logger               *slog.Logger
-	operationLocks       keyedLocks
-	allocationMutex      sync.Mutex
-	temporaryUserIDs     map[uint32]bool
-	temporaryIdentifiers map[string]bool
+	configuration          ManagerConfig
+	store                  *recordStore
+	runtime                Runtime
+	network                Network
+	storage                Storage
+	snapshots              Snapshots
+	networkActivityMonitor NetworkActivityMonitor
+	logger                 *slog.Logger
+	operationLocks         keyedLocks
+	allocationMutex        sync.Mutex
+	temporaryUserIDs       map[uint32]bool
+	temporaryIdentifiers   map[string]bool
 }
 
 // NewManager validates all records and returns one host VM manager.
@@ -71,15 +73,16 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 		dependencies.Logger = slog.Default()
 	}
 	manager := &Manager{
-		configuration:        configuration,
-		store:                newRecordStore(configuration.MachinesDirectory),
-		runtime:              dependencies.Runtime,
-		network:              dependencies.Network,
-		storage:              dependencies.Storage,
-		snapshots:            dependencies.Snapshots,
-		logger:               dependencies.Logger,
-		temporaryUserIDs:     make(map[uint32]bool),
-		temporaryIdentifiers: make(map[string]bool),
+		configuration:          configuration,
+		store:                  newRecordStore(configuration.MachinesDirectory),
+		runtime:                dependencies.Runtime,
+		network:                dependencies.Network,
+		storage:                dependencies.Storage,
+		snapshots:              dependencies.Snapshots,
+		networkActivityMonitor: dependencies.NetworkActivityMonitor,
+		logger:                 dependencies.Logger,
+		temporaryUserIDs:       make(map[uint32]bool),
+		temporaryIdentifiers:   make(map[string]bool),
 	}
 	if err := manager.store.validateAll(); err != nil {
 		return nil, fmt.Errorf("validate VM records: %w", err)
