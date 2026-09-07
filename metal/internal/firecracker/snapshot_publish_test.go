@@ -72,6 +72,33 @@ func TestPublishPendingSnapshotRejectsAnIncompletePending(t *testing.T) {
 	}
 }
 
+// TestWarmStopRecognizesACompletedStop confirms that a warm stop with a valid
+// published snapshot and a stopped runtime is treated as already done: it returns
+// without a new snapshot or a kill.
+func TestWarmStopRecognizesACompletedStop(t *testing.T) {
+	configuration := Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
+	units := &stubUnits{active: false} // inactive reports stopped
+	runtime := &Runtime{configuration: configuration, units: units, serialBroker: &stubSerialBroker{}}
+	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
+
+	writePendingSnapshot(t, configuration, "vm-1", 2048, 4096)
+	if _, err := runtime.publishPendingSnapshot(input, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &machine{runtime: runtime, input: input, api: api.New(fcSocket(t, nil)), stopTimeout: time.Minute}
+	if err := m.warmStop(context.Background()); err != nil {
+		t.Fatalf("warm stop recovery = %v, want nil", err)
+	}
+	if _, kills, _ := units.counts(); kills != 0 {
+		t.Errorf("kills = %d, want 0 for an already completed warm stop", kills)
+	}
+	next, err := configuration.nextSnapshotGeneration("vm-1")
+	if err != nil || next != 2 {
+		t.Errorf("next generation = %d (err %v), want 2, so no second snapshot was made", next, err)
+	}
+}
+
 // warmStopMachine builds a machine with a configuration and a fake API socket.
 func warmStopMachine(t *testing.T, configuration Config, onRequest func()) *machine {
 	t.Helper()

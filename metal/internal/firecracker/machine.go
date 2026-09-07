@@ -155,6 +155,13 @@ func (m *machine) restoreSnapshot(ctx context.Context, resume bool) (bool, error
 	return true, nil
 }
 
+// hasCompleteSnapshot reports whether a valid published snapshot exists for this
+// VM at its current generations and Firecracker build.
+func (m *machine) hasCompleteSnapshot() bool {
+	_, err := m.runtime.configuration.latestValidSnapshot(m.snapshotRequirement())
+	return err == nil
+}
+
 // startFromSnapshot restores the VM-local snapshot and requires one to exist. It
 // never falls back to a cold boot, because a caller that asked for a snapshot
 // restore must not silently lose the saved guest memory. When resume is false the
@@ -201,6 +208,22 @@ func (m *machine) warmStop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Recover a warm stop that already published a snapshot. metald may have
+	// crashed after publication but before termination.
+	if m.hasCompleteSnapshot() {
+		switch state {
+		case vm.StateStopped:
+			return nil
+		case vm.StatePaused:
+			return m.kill(ctx)
+		default:
+			// A running VM with a complete snapshot is inconsistent: a successful
+			// warm stop leaves the process paused or gone, never running.
+			return vm.ErrConflict
+		}
+	}
+
 	pausedByThisCall := false
 	switch state {
 	case vm.StateRunning:
