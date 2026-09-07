@@ -18,9 +18,20 @@ func (m *fakeActivityMap) Close() error {
 	return nil
 }
 
-// fakeActivityProgram records whether the monitor closed the program.
+// fakeActivityProgram records how the monitor attaches and closes the program.
 type fakeActivityProgram struct {
-	closed bool
+	attachErr      error
+	attachedPaths  []string
+	interfaceIndex int
+	closed         bool
+}
+
+func (p *fakeActivityProgram) attach(namespacePath string) (int, error) {
+	if p.attachErr != nil {
+		return 0, p.attachErr
+	}
+	p.attachedPaths = append(p.attachedPaths, namespacePath)
+	return p.interfaceIndex, nil
 }
 
 func (p *fakeActivityProgram) Close() error {

@@ -40,9 +40,12 @@ type activityMap interface {
 	Close() error
 }
 
-// activityProgram is one loaded program instance for one VM. Later commits add
-// its TCX links. The monitor owns the handle and closes it.
+// activityProgram is one loaded program instance for one VM. The monitor owns
+// the handle and closes it, which also closes its TCX links.
 type activityProgram interface {
+	// attach hooks tap0 ingress and egress inside the VM network namespace and
+	// returns the resolved tap0 interface index.
+	attach(namespacePath string) (interfaceIndex int, err error)
 	Close() error
 }
 

@@ -1,9 +1,12 @@
 package network
 
 import (
+	"errors"
 	"fmt"
+	"net"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 )
 
 // bpfActivityLoader creates the real kernel objects with cilium/ebpf. It holds
@@ -51,7 +54,7 @@ func (bpfActivityLoader) loadProgram(userID uint32, shared activityMap) (activit
 		return nil, err
 	}
 
-	return &bpfActivityProgram{program: programs.RecordActivity}, nil
+	return &bpfActivityProgram{program: programs.RecordActivity, syscalls: osNamespaceSyscalls{}}, nil
 }
 
 // bpfActivityMap wraps the shared kernel map.
@@ -62,11 +65,62 @@ type bpfActivityMap struct {
 // Close releases the shared kernel map.
 func (handle *bpfActivityMap) Close() error { return handle.kernelMap.Close() }
 
-// bpfActivityProgram wraps one loaded program instance. Later commits add its
-// TCX links.
+// bpfActivityProgram wraps one loaded program instance and its TCX links.
 type bpfActivityProgram struct {
-	program *ebpf.Program
+	program  *ebpf.Program
+	syscalls namespaceSyscalls
+	ingress  link.Link
+	egress   link.Link
 }
 
-// Close releases the program instance.
-func (handle *bpfActivityProgram) Close() error { return handle.program.Close() }
+// attach hooks tap0 ingress and egress inside the VM network namespace. It
+// resolves tap0 inside the namespace and uses one program instance for both
+// links. It closes the ingress link when the egress attach fails.
+func (handle *bpfActivityProgram) attach(namespacePath string) (int, error) {
+	var interfaceIndex int
+	err := inNamespace(handle.syscalls, namespacePath, func() error {
+		device, err := net.InterfaceByName(tapName)
+		if err != nil {
+			return fmt.Errorf("resolve %s: %w", tapName, err)
+		}
+		interfaceIndex = device.Index
+
+		ingress, err := link.AttachTCX(link.TCXOptions{
+			Program:   handle.program,
+			Attach:    ebpf.AttachTCXIngress,
+			Interface: interfaceIndex,
+		})
+		if err != nil {
+			return fmt.Errorf("attach TCX ingress: %w", err)
+		}
+
+		egress, err := link.AttachTCX(link.TCXOptions{
+			Program:   handle.program,
+			Attach:    ebpf.AttachTCXEgress,
+			Interface: interfaceIndex,
+		})
+		if err != nil {
+			return errors.Join(fmt.Errorf("attach TCX egress: %w", err), ingress.Close())
+		}
+
+		handle.ingress, handle.egress = ingress, egress
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return interfaceIndex, nil
+}
+
+// Close releases the TCX links and the program instance.
+func (handle *bpfActivityProgram) Close() error {
+	var closeErrors []error
+	if handle.ingress != nil {
+		closeErrors = append(closeErrors, handle.ingress.Close())
+	}
+	if handle.egress != nil {
+		closeErrors = append(closeErrors, handle.egress.Close())
+	}
+	closeErrors = append(closeErrors, handle.program.Close())
+	return errors.Join(closeErrors...)
+}
