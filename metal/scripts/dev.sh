@@ -59,15 +59,29 @@ rootfs=$BULK/downloads/ubuntu.ext4
 IMAGE_VERSION=${METALD_IMAGE_VERSION:-22.04}
 # The builder bakes the guest bits a VM needs: the sshd AuthorizedKeysCommand that
 # reads MMDS, the cloud-init datasource, the network, and the metadata service. It
-# is slow, so it runs only when the image is absent.
-if [[ ! -f $rootfs || ! -f $IMAGE_DIR/ubuntu/vmlinux ]]; then
-	"$IMAGE_BUILDER" --output "$rootfs" --kernel-output "$IMAGE_DIR/ubuntu/vmlinux" \
+# is slow, so it runs only when the image is absent. Its Ubuntu kernel is discarded
+# below.
+if [[ ! -f $rootfs ]]; then
+	"$IMAGE_BUILDER" --output "$rootfs" --kernel-output "$BULK/downloads/ubuntu-vmlinux" \
 		--platform "$IMAGE_ARCHITECTURE" --version "$IMAGE_VERSION"
+fi
+
+step "guest kernel (firecracker CI build)"
+# Boot the firecracker CI kernel, not the Ubuntu one. The Ubuntu generic kernel is
+# not built for the firecracker device model: it hangs probing the CMOS RTC at
+# ports 0x70 and 0x71, which firecracker does not emulate. The CI kernel has virtio
+# and ext4 built in and needs no initramfs.
+kernel=$IMAGE_DIR/ubuntu/vmlinux
+if [[ ! -f $kernel ]]; then
+	echo "    downloading vmlinux-5.10.223"
+	curl -fL --progress-bar -o "$kernel.part" \
+		"https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$ARCH/vmlinux-5.10.223"
+	mv "$kernel.part" "$kernel"
 fi
 # The image is a partitionless ext4 file system on /dev/vda.
 echo "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw" > "$IMAGE_DIR/ubuntu/boot-args"
 rootfs_sha256=$(sha256sum "$rootfs" | cut -d " " -f 1)
-kernel_sha256=$(sha256sum "$IMAGE_DIR/ubuntu/vmlinux" | cut -d " " -f 1)
+kernel_sha256=$(sha256sum "$kernel" | cut -d " " -f 1)
 
 step "Secure Shell key pair"
 [[ -f $KEYDIR/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N "" -f "$KEYDIR/id_ed25519"
