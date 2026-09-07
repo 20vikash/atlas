@@ -120,6 +120,31 @@ func (m *machine) Stop(ctx context.Context) error {
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)
 }
 
+// warmStop pauses the guest and publishes a full snapshot, so a later start can
+// resume it. It leaves the Firecracker process paused. Termination of the
+// process is a separate step. The VM must be running or paused.
+func (m *machine) warmStop(ctx context.Context) error {
+	state, err := m.status(ctx)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case vm.StateRunning:
+		if err := m.api.Pause(ctx); err != nil {
+			return fmt.Errorf("pause for warm stop: %w", err)
+		}
+	case vm.StatePaused:
+		// An already paused guest needs no second pause.
+	default:
+		return vm.ErrConflict
+	}
+
+	if _, err := m.runtime.createAndPublishSnapshot(ctx, m.input); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Pause halts the guest virtual CPUs.
 func (m *machine) Pause(ctx context.Context) error {
 	state, err := m.status(ctx)

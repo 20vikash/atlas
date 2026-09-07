@@ -26,17 +26,11 @@ func TestRuntimeStartRejectsUnimplementedAndUnknownModes(t *testing.T) {
 	}
 }
 
-func TestRuntimeStopRejectsUnimplementedAndUnknownModes(t *testing.T) {
+func TestRuntimeStopRejectsAnUnknownMode(t *testing.T) {
 	runtime := &Runtime{}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
-	cases := map[vm.StopMode]string{
-		vm.StopWithSleepSnapshot: "not implemented",
-		vm.StopMode(99):          "unknown stop mode",
-	}
-	for mode, want := range cases {
-		err := runtime.Stop(context.Background(), input, mode)
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("Stop(mode %d) error = %v, want %q", mode, err, want)
-		}
+	err := runtime.Stop(context.Background(), input, vm.StopMode(99))
+	if err == nil || !strings.Contains(err.Error(), "unknown stop mode") {
+		t.Errorf("Stop(unknown mode) error = %v, want an unknown stop mode error", err)
 	}
 }

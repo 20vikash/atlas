@@ -115,7 +115,7 @@ func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode 
 	case vm.StopShutdown:
 		return runtime.newMachine(input).Stop(ctx)
 	case vm.StopWithSleepSnapshot:
-		return fmt.Errorf("stop with sleep snapshot is not implemented")
+		return runtime.newMachine(input).warmStop(ctx)
 	default:
 		return fmt.Errorf("unknown stop mode %d", mode)
 	}

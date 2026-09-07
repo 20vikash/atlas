@@ -2,6 +2,7 @@ package firecracker
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -14,6 +15,17 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
+
+// TestWarmStopRejectsANonRunningVM confirms the state guard rejects a VM that is
+// neither running nor paused, before it reaches the snapshot step.
+func TestWarmStopRejectsANonRunningVM(t *testing.T) {
+	units := &stubUnits{active: false} // inactive reports stopped
+	m := testMachine(units, fcSocket(t, nil), time.Minute)
+
+	if err := m.warmStop(context.Background()); !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("error = %v, want ErrConflict", err)
+	}
+}
 
 // stubUnits is a platform.UnitManager whose unit stays active until it is stopped or
 // killed. Wait blocks while the unit is active, like the D-Bus manager does.
