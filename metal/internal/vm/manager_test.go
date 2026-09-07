@@ -388,6 +388,10 @@ func TestRestartIntentSurvivesManagerRecreation(t *testing.T) {
 	if runtime.stops != 1 || runtime.starts != 2 {
 		t.Fatalf("restart calls = stops %d, starts %d", runtime.stops, runtime.starts)
 	}
+	// A guest restart is a normal shutdown followed by a normal start.
+	if runtime.stopMode != StopShutdown || runtime.startMode != StartNormal {
+		t.Fatalf("restart used stop mode %d and start mode %d, want shutdown then normal", runtime.stopMode, runtime.startMode)
+	}
 	observed, err := recreated.store.readObserved("machine-1")
 	if err != nil {
 		t.Fatal(err)
