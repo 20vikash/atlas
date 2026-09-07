@@ -57,6 +57,8 @@ These tests create a temporary namespace and a `tap0`, attach the eBPF program, 
 | `firecracker.sockets_dir` | `/run/metal` | Short VM socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
 | `zfs.pool` | `metal` | ZFS pool name. |
+| `wg_mesh.enabled` | `true` | Atlas WG Mesh integration. Set `false` for a test host with no mesh; VMs then get no mesh connectivity. |
+| `wg_mesh.uplink` | none | Discovery interface. Required when mesh is enabled. |
 | `sleep.enabled` | `false` | Turn on automatic sleep for sleepy VMs. |
 | `sleep.idle_timeout` | none | One Metal-wide idle timeout. Required and positive when enabled. |
 
@@ -73,6 +75,7 @@ These tests create a temporary namespace and a `tap0`, attach the eBPF program, 
 | `METALD_POOL` | `metal` | ZFS pool name. |
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
 | `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
+| `METALD_WG_MESH_ENABLED` | `false` | Write `wg_mesh.enabled`. The development host boots without the mesh CLI by default. |
 
 ## Manual access
 
