@@ -26,13 +26,23 @@ type meshRegistrar interface {
 	Remove(ctx context.Context, address, interfaceName string) error
 }
 
-// LinuxAllocator creates Linux network resources for virtual machines.
-type LinuxAllocator struct {
-	mesh meshRegistrar
+// activityAttacher attaches and releases VM packet activity tracking on tap0.
+type activityAttacher interface {
+	EnsureAttachment(request AttachmentRequest) error
+	ReleaseAttachment(virtualMachineID string) error
 }
 
-// NewLinuxAllocator returns a Linux network allocator.
-func NewLinuxAllocator(mesh *Mesh) *LinuxAllocator { return &LinuxAllocator{mesh: mesh} }
+// LinuxAllocator creates Linux network resources for virtual machines.
+type LinuxAllocator struct {
+	mesh     meshRegistrar
+	activity activityAttacher
+}
+
+// NewLinuxAllocator returns a Linux network allocator. It attaches activity
+// tracking on every VM tap0, so a sleepy host never runs without it.
+func NewLinuxAllocator(mesh *Mesh, activity activityAttacher) *LinuxAllocator {
+	return &LinuxAllocator{mesh: mesh, activity: activity}
+}
 
 // Ensure converges all host network resources to the requested state.
 func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkRequest) (vm.NetworkInterface, error) {
@@ -51,6 +61,13 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 	}
 	if err := allocator.converge(ctx, request); err != nil {
 		return vm.NetworkInterface{}, err
+	}
+	if err := allocator.activity.EnsureAttachment(AttachmentRequest{
+		VirtualMachineID: request.VirtualMachineID,
+		UserID:           request.UserID,
+		NamespacePath:    namespacePath(request.VirtualMachineID),
+	}); err != nil {
+		return vm.NetworkInterface{}, fmt.Errorf("attach activity tracking: %w", err)
 	}
 
 	return allocator.interfaceFor(request.VirtualMachineID), nil
@@ -153,20 +170,22 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 // registration names.
 func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
 	virtualMachineID := request.VirtualMachineID
+	// Release the TCX links before the namespace delete removes tap0.
+	activityError := allocator.activity.ReleaseAttachment(virtualMachineID)
 	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
 	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
 
 	exists, err := networkNamespaceExists(ctx, virtualMachineID)
 	if err != nil {
-		return errors.Join(meshError, rulesError, err)
+		return errors.Join(activityError, meshError, rulesError, err)
 	}
 	if !exists {
-		return errors.Join(meshError, rulesError)
+		return errors.Join(activityError, meshError, rulesError)
 	}
 	namespaceRulesError := removePublicIPv4NamespaceRules(ctx, virtualMachineID)
 
 	namespaceError := platform.Run(ctx, "ip", "netns", "del", namespaceName(virtualMachineID))
-	return errors.Join(meshError, rulesError, namespaceRulesError, namespaceError)
+	return errors.Join(activityError, meshError, rulesError, namespaceRulesError, namespaceError)
 }
 
 // addMeshRegistration routes the guest mesh address through the namespace and

@@ -79,7 +79,12 @@ func newManager(t *testing.T) *vm.Manager {
 	stores := storage.NewStores(t.Context(), env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"), nil)
 	serialBroker := console.NewSerialBroker(t.TempDir())
 	t.Cleanup(serialBroker.Shutdown)
-	networkManager := network.NewLinuxAllocator(integrationMesh(t))
+	activityMonitor, err := network.NewActivityMonitor(network.ActivityMonitorConfig{UserIDRange: vm.DefaultUserIDRange})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = activityMonitor.Close() })
+	networkManager := network.NewLinuxAllocator(integrationMesh(t), activityMonitor)
 	virtualMachineRuntime := NewRuntime(
 		DefaultConfig(),
 		units,

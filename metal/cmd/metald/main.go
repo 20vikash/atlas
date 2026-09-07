@@ -176,7 +176,12 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	networkManager := network.NewLinuxAllocator(mesh)
+	activityMonitor, err := network.NewActivityMonitor(network.ActivityMonitorConfig{UserIDRange: vm.DefaultUserIDRange})
+	if err != nil {
+		return fmt.Errorf("configure activity monitor: %w", err)
+	}
+	defer func() { serveError = errors.Join(serveError, activityMonitor.Close()) }()
+	networkManager := network.NewLinuxAllocator(mesh, activityMonitor)
 	virtualMachineRuntime := firecracker.NewRuntime(
 		o.cfg,
 		units,
