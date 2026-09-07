@@ -76,6 +76,19 @@ type bpfActivityMap struct {
 	kernelMap *ebpf.Map
 }
 
+// lookup returns the last monotonic packet time for one VM user ID.
+func (handle *bpfActivityMap) lookup(userID uint32) (uint64, bool, error) {
+	var value uint64
+	err := handle.kernelMap.Lookup(userID, &value)
+	if errors.Is(err, ebpf.ErrKeyNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return value, true, nil
+}
+
 // delete removes the activity value for one released VM user ID. An absent key
 // is not an error, because the map may have no entry yet.
 func (handle *bpfActivityMap) delete(userID uint32) error {

@@ -9,10 +9,17 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// fakeActivityMap records how the monitor closes and clears the shared map.
+// fakeActivityMap records how the monitor reads, closes, and clears the map.
 type fakeActivityMap struct {
+	lookupValue    uint64
+	lookupFound    bool
+	lookupErr      error
 	closed         bool
 	deletedUserIDs []uint32
+}
+
+func (m *fakeActivityMap) lookup(uint32) (uint64, bool, error) {
+	return m.lookupValue, m.lookupFound, m.lookupErr
 }
 
 func (m *fakeActivityMap) delete(userID uint32) error {

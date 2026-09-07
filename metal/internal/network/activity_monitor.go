@@ -1,9 +1,14 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -19,6 +24,11 @@ type ActivityMonitor struct {
 	loader   activityLoader
 	capacity uint32
 	shared   activityMap
+	logger   *slog.Logger
+
+	// wallClock and monotonicClock are seams. Tests replace them.
+	wallClock      func() time.Time
+	monotonicClock func() (uint64, error)
 
 	mu          sync.Mutex
 	attachments map[string]*attachment
@@ -30,7 +40,13 @@ type attachment struct {
 	namespacePath  string
 	interfaceIndex int
 	program        activityProgram
+	// baseline is the wall-clock attachment time. It is the safe last-seen value
+	// before the first packet.
+	baseline time.Time
 }
+
+// Compile-time proof that the monitor satisfies the manager seam.
+var _ vm.NetworkActivityMonitor = (*ActivityMonitor)(nil)
 
 // AttachmentRequest identifies one VM activity attachment.
 type AttachmentRequest struct {
@@ -43,6 +59,9 @@ type AttachmentRequest struct {
 type ActivityMonitorConfig struct {
 	// UserIDRange sets the shared map capacity. Every VM user ID must fit.
 	UserIDRange vm.UserIDRange
+	// Logger receives local warnings, such as a map time in the future. It
+	// defaults to slog.Default when nil.
+	Logger *slog.Logger
 }
 
 // capacity returns the number of user IDs the shared map must hold.
@@ -53,9 +72,12 @@ func (config ActivityMonitorConfig) capacity() uint32 {
 	return config.UserIDRange.Max - config.UserIDRange.Min + 1
 }
 
-// activityMap is the shared BPF map keyed by VM user ID. Later commits add a
-// read method. The monitor owns the handle and closes it.
+// activityMap is the shared BPF map keyed by VM user ID. The monitor owns the
+// handle and closes it.
 type activityMap interface {
+	// lookup returns the last monotonic packet time for one VM user ID. found is
+	// false when the VM has no packet entry yet.
+	lookup(userID uint32) (nanoseconds uint64, found bool, err error)
 	// delete removes the activity value for one released VM user ID.
 	delete(userID uint32) error
 	Close() error
@@ -99,12 +121,30 @@ func newActivityMonitor(config ActivityMonitorConfig, loader activityLoader) (*A
 		return nil, fmt.Errorf("create shared activity map: %w", err)
 	}
 
+	logger := config.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &ActivityMonitor{
-		loader:      loader,
-		capacity:    capacity,
-		shared:      shared,
-		attachments: map[string]*attachment{},
+		loader:         loader,
+		capacity:       capacity,
+		shared:         shared,
+		logger:         logger,
+		wallClock:      time.Now,
+		monotonicClock: readMonotonicNanoseconds,
+		attachments:    map[string]*attachment{},
 	}, nil
+}
+
+// readMonotonicNanoseconds reads CLOCK_MONOTONIC, the same clock as the eBPF
+// bpf_ktime_get_ns helper.
+func readMonotonicNanoseconds() (uint64, error) {
+	var now unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
+		return 0, err
+	}
+	return uint64(now.Sec)*uint64(time.Second/time.Nanosecond) + uint64(now.Nsec), nil
 }
 
 // loadProgram loads one program instance for a VM user ID with the shared map.
@@ -151,6 +191,7 @@ func (monitor *ActivityMonitor) EnsureAttachment(request AttachmentRequest) erro
 		namespacePath:  request.NamespacePath,
 		interfaceIndex: interfaceIndex,
 		program:        program,
+		baseline:       monitor.wallClock(),
 	}
 	monitor.mu.Unlock()
 
@@ -175,6 +216,45 @@ func (monitor *ActivityMonitor) ReleaseAttachment(virtualMachineID string) error
 	closeError := released.program.Close()
 	deleteError := monitor.shared.delete(released.userID)
 	return errors.Join(closeError, deleteError)
+}
+
+// LastNetworkActivity returns the last packet time for one VM. It returns the
+// attachment baseline with HasBeenSeen false before the first packet, and
+// vm.ErrNotFound when the VM has no attachment. It reads CLOCK_MONOTONIC right
+// after the map lookup and converts the age to a wall-clock time.
+func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
+	monitor.mu.Lock()
+	current := monitor.attachments[request.VirtualMachineID]
+	monitor.mu.Unlock()
+	if current == nil {
+		return vm.NetworkActivity{}, fmt.Errorf("activity for VM %s: %w", request.VirtualMachineID, vm.ErrNotFound)
+	}
+
+	value, found, err := monitor.shared.lookup(request.UserID)
+	if err != nil {
+		return vm.NetworkActivity{}, fmt.Errorf("read activity for VM %s user %d: %w", request.VirtualMachineID, request.UserID, err)
+	}
+	if !found {
+		return vm.NetworkActivity{LastSeenAt: current.baseline}, nil
+	}
+
+	nowMonotonic, err := monitor.monotonicClock()
+	if err != nil {
+		return vm.NetworkActivity{}, fmt.Errorf("read monotonic clock for VM %s: %w", request.VirtualMachineID, err)
+	}
+
+	var ageNanoseconds uint64
+	if nowMonotonic >= value {
+		ageNanoseconds = nowMonotonic - value
+	} else {
+		// A map time ahead of the clock must never read as fresh activity that
+		// could delay sleep. Clamp it to zero age and warn.
+		monitor.logger.Warn("activity time is in the future",
+			"virtual_machine_id", request.VirtualMachineID, "user_id", request.UserID)
+	}
+
+	lastSeenAt := monitor.wallClock().UTC().Add(-time.Duration(ageNanoseconds))
+	return vm.NetworkActivity{LastSeenAt: lastSeenAt, HasBeenSeen: true}, nil
 }
 
 // Close releases every attachment and the shared activity map. It is the one
