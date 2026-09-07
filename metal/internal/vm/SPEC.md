@@ -53,16 +53,20 @@ The create fingerprint identifies the reservation a create request asked for. It
 
 The daemon validates every record at startup and refuses to run on one it cannot read. It never repairs or removes a record: losing desired state is worse than failing to start.
 
-`sleeping` is an observed state only. A controller cannot request it. The observed record can carry a `sleep` object with safe times and generation numbers: `eligible_at`, `requested_at`, `snapshot_generation`, `snapshot_created_at`, and `last_network_activity_at`. It never carries an artifact path, because the Firecracker runtime derives every path from the VM ID. The object is additive, so an old record with no `sleep` key still loads. The reader rejects a partial or corrupt `sleep` object instead of repairing it.
+`sleeping` is an observed state only. A controller cannot request it. A warm stop and automatic sleep both reach it: the state means no Firecracker process, a valid memory snapshot, and a start that resumes. The observed record carries a `sleep` object with safe times and generation numbers: `eligible_at`, `requested_at`, `snapshot_generation`, `snapshot_created_at`, and `last_network_activity_at`. It never carries an artifact path, because the Firecracker runtime derives every path from the VM ID. The object is additive, so an old record with no `sleep` key still loads. The reader rejects a partial or corrupt `sleep` object instead of repairing it. A `sleeping` record must carry a published snapshot generation.
 
 ## Reconciliation
 
 ```text
 desired running   -> Start or Resume
 desired paused    -> Start when necessary, then Pause
-desired stopped   -> Stop
+desired stopped   -> Stop, or warm Stop to sleeping
 desired destroyed -> Remove runtime -> Release network -> Release storage
 ```
+
+A VM enters `sleeping` from a live guest by a warm stop. A manual warm stop uses a `stopped` desired state with the `warm` flag. Automatic sleep keeps the desired state running and warm-stops an idle sleepy VM after the idle timeout. An automatic sleep samples network activity before and after the warm stop and aborts, restoring the VM, when a packet arrives during the stop.
+
+A sleeping VM holds asleep while its desired record still wants sleep and its generation is caught up. Any other desired state resumes the VM from the snapshot to running. A later pass then applies a stop or pause. A resume failure keeps the VM sleeping and never cold boots, so the in-memory guest is not lost. A warm stop that terminates the process before it records `sleeping` recovers to `sleeping` from the valid snapshot on the next pass, and reports a failure for an invalid snapshot.
 
 One pass holds the VM lock for its whole duration, and every operation that changes desired state takes the same lock. A mutation therefore never lands halfway through a pass.
 
