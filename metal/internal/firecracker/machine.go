@@ -194,9 +194,10 @@ func (m *machine) Stop(ctx context.Context) error {
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)
 }
 
-// warmStop pauses the guest and publishes a full snapshot, so a later start can
-// resume it. It leaves the Firecracker process paused. Termination of the
-// process is a separate step. The VM must be running or paused.
+// warmStop pauses the guest, publishes a full snapshot, and terminates
+// Firecracker, so a later start can resume it. The snapshot is published before
+// termination, so an interrupted warm stop stays recoverable: a later start
+// restores the published snapshot. The VM must be running or paused.
 func (m *machine) warmStop(ctx context.Context) error {
 	state, err := m.status(ctx)
 	if err != nil {
@@ -218,7 +219,8 @@ func (m *machine) warmStop(ctx context.Context) error {
 	if _, err := m.runtime.createAndPublishSnapshot(ctx, m.input); err != nil {
 		return m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
 	}
-	return nil
+
+	return m.kill(ctx)
 }
 
 // recoverFailedWarmStop cleans up a failed warm stop. It removes the current
