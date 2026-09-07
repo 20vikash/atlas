@@ -46,7 +46,7 @@ The configuration is written to a temporary file with mode `0600` and moved into
 
 ## Archive
 
-Archive removes the node from `proxy.<wildcard-domain>`, deletes its health check, removes its node A record, terminates its VM, and marks the Proxy Server as Archived. Atlas then pushes the smaller membership list to the remaining active nodes.
+Archive removes the node from `proxy.<wildcard-domain>`, deletes its health check, removes its node A record, terminates its VM, and marks the Proxy Server as Archived. Archive also clears the `virtual_machine` link and puts the machine name in a comment. Atlas then pushes the smaller membership list to the remaining active nodes.
 
 ## Constraints
 

@@ -267,3 +267,8 @@ class SSHTask(Document):
 def mark_timed_out_ssh_tasks():
 	"""Mark SSH tasks that outlive their configured timeout."""
 	SSHTask.mark_timed_out_tasks()
+
+
+def delete_tasks_for_target(target_type: str, target: str) -> None:
+	"""Delete the SSH tasks of one target. A target cannot be deleted while they exist."""
+	frappe.db.delete("SSH Task", {"target_type": target_type, "target": target})

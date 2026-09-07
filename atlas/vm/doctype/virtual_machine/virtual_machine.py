@@ -9,6 +9,7 @@ from frappe.model.document import Document
 from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.parsing import strict_bool
+from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import EGRESS_MODES
@@ -64,6 +65,7 @@ class VirtualMachine(Document):
 	def on_trash(self) -> None:
 		"""Delete only after Metal confirms that the VM is absent."""
 		VirtualMachineService(self).validate_deletion()
+		delete_tasks_for_target(self.doctype, self.name)
 
 	@property
 	def current_state(self) -> str:

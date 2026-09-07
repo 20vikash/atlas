@@ -116,7 +116,7 @@ class ProxyServer(Document):
 
 	def on_trash(self) -> None:
 		"""Refuse deletion while the virtual machine exists."""
-		if self.virtual_machine and frappe.db.exists("Virtual Machine", self.virtual_machine):
+		if self.status != "Archived" and self.virtual_machine:
 			frappe.throw(_("Archive Proxy Server {0} before you delete it.").format(self.name))
 
 	@frappe.whitelist(methods=["POST"])
@@ -151,23 +151,29 @@ class ProxyServer(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def archive(self) -> None:
-		"""Terminate the virtual machine, release its address, and remove its name."""
+		"""Terminate the virtual machine, remove its DNS records, and detach it."""
 		_validate_system_manager()
-		proxy_server = frappe.get_doc(self.doctype, self.name, for_update=True)
-		if proxy_server.status == "Archived":
+		if self.status == "Archived":
 			return
 
-		proxy_server.remove_dns_record()
-		if proxy_server.virtual_machine and frappe.db.exists("Virtual Machine", proxy_server.virtual_machine):
-			frappe.get_doc("Virtual Machine", proxy_server.virtual_machine).terminate()
+		self.remove_dns_record()
+		if self.virtual_machine:
+			if frappe.db.exists("Virtual Machine", self.virtual_machine):
+				frappe.get_doc("Virtual Machine", self.virtual_machine).terminate()
+			self.add_comment("Info", _("Archived with Virtual Machine {0}.").format(self.virtual_machine))
 
-		proxy_server.db_set(
-			{"status": "Archived", "is_provisioning_completed": 0, "dns_health_check_id": None}
+		self.db_set(
+			{
+				"status": "Archived",
+				"is_provisioning_completed": 0,
+				"dns_health_check_id": None,
+				"virtual_machine": None,
+			}
 		)
 		from atlas.service.core.proxy.configuration import push_configuration_to_active_proxies
 
 		push_configuration_to_active_proxies()
-		frappe.msgprint(_("Proxy Server {0} is archived.").format(proxy_server.name))
+		frappe.msgprint(_("Proxy Server {0} is archived.").format(self.name))
 
 	def remove_dns_record(self) -> None:
 		"""Remove proxy DNS records before its address is released."""

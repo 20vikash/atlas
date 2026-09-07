@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
+import atlas.service.core.proxy.configuration as configuration_module
 import atlas.service.doctype.proxy_server.proxy_server as proxy_server_module
 
 
@@ -57,19 +58,53 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 
 	def test_deletion_is_refused_while_the_machine_exists(self) -> None:
 		proxy_server = self.build()
-		proxy_server.db_set("virtual_machine", "vm-00001")
-		proxy_server.reload()
 
-		with patch.object(frappe.db, "exists", return_value=True):
-			with self.assertRaises(frappe.ValidationError):
-				proxy_server.delete()
+		with self.assertRaises(frappe.ValidationError):
+			proxy_server.delete()
 
 	def test_deletion_is_allowed_once_the_machine_is_gone(self) -> None:
+		"""Archive detaches the machine. Only then can the record be deleted."""
 		proxy_server = self.build()
+		proxy_server.db_set({"status": "Archived", "virtual_machine": None})
+		proxy_server.reload()
 
 		proxy_server.delete()
 
 		self.assertFalse(frappe.db.exists("Proxy Server", proxy_server.name))
+
+	def test_archive_detaches_the_machine_and_records_its_name(self) -> None:
+		"""An archived proxy keeps no machine link."""
+		proxy_server = self.build()
+
+		with (
+			patch.object(type(proxy_server), "remove_dns_record"),
+			patch.object(configuration_module, "push_configuration_to_active_proxies"),
+		):
+			proxy_server.archive()
+
+		self.assertEqual(proxy_server.status, "Archived")
+		self.assertIsNone(proxy_server.virtual_machine)
+		self.assertTrue(
+			frappe.db.exists(
+				"Comment",
+				{"reference_name": proxy_server.name, "content": ("like", "%vm-00001%")},
+			)
+		)
+
+	def test_archive_terminates_a_machine_that_still_exists(self) -> None:
+		proxy_server = self.build()
+		virtual_machine = MagicMock()
+
+		with (
+			patch.object(type(proxy_server), "remove_dns_record"),
+			patch.object(configuration_module, "push_configuration_to_active_proxies"),
+			patch.object(proxy_server_module.frappe.db, "exists", return_value=True),
+			patch.object(proxy_server_module.frappe, "get_doc", return_value=virtual_machine),
+		):
+			proxy_server.archive()
+
+		virtual_machine.terminate.assert_called_once()
+		self.assertIsNone(proxy_server.virtual_machine)
 
 	def test_an_action_without_a_machine_is_refused(self) -> None:
 		proxy_server = self.build(virtual_machine=None)

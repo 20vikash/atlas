@@ -20,7 +20,7 @@ Atlas creates `*.<wildcard-domain>` as a CNAME to `proxy.<wildcard-domain>` with
 
 Before Atlas publishes a joining node in regional DNS, it sends the new peer list to each active node. The joining node restores route state from the highest-generation peer.
 
-Archive removes the regional DNS value and health check before it removes the node DNS record and releases the VM. Atlas then sends the remaining membership to active nodes.
+Archive removes the regional DNS value and health check before it removes the node DNS record and releases the VM. An archived record keeps no `virtual_machine` link. Atlas then sends the remaining membership to active nodes.
 
 ## Configuration
 
