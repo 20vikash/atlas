@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Create a VM through the Metal API. Then, connect to it with the development SSH key.
-# Run this command as root while `metald serve` runs in another terminal:
+# Create a VM through the Metal API and connect with the development SSH key.
+# Run as root while `metald serve` runs in another terminal:
 #   sudo test/integration/ssh-test.sh
 set -euo pipefail
 
@@ -18,8 +18,7 @@ case $host_architecture in
 	*) echo "unsupported architecture: $host_architecture" >&2; exit 1 ;;
 esac
 
-# The image is built and imported locally, so the digests come from the manifest
-# dev.sh wrote. metald reuses the cached image and never fetches these URLs.
+# The local manifest supplies digests for the cached image.
 manifest=$work_directory/images/ubuntu/manifest.json
 image_url=${METALD_IMAGE_URL:-$image_base_url/ubuntu-22.04.ext4}
 image_sha256=${METALD_IMAGE_SHA256:-$(jq -r .rootfs_sha256 "$manifest")}
