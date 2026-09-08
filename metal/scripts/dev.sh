@@ -110,18 +110,6 @@ cat > "$IMAGE_DIR/ubuntu/manifest.json" <<EOF
 {"rootfs_sha256":"$rootfs_sha256","kernel_sha256":"$kernel_sha256","architecture":"$IMAGE_ARCHITECTURE"}
 EOF
 
-step "console wrapper (survives metald restart)"
-# The VM console is a PTY whose master metald holds. When metald stops, the
-# master closes and the slave hangs up. This wrapper makes the jailer, and the
-# firecracker it execs, ignore SIGHUP, so a metald restart does not kill the VM.
-# The ignored signal disposition survives each exec.
-cat > "$BIN/jailer-nohup" <<EOF
-#!/bin/sh
-trap '' HUP
-exec "$BIN/jailer" "\$@"
-EOF
-chmod +x "$BIN/jailer-nohup"
-
 step "systemd template unit (metal-vm@.service)"
 cat > /etc/systemd/system/metal-vm@.service <<EOF
 [Unit]
@@ -130,7 +118,7 @@ After=network.target
 [Service]
 Type=exec
 EnvironmentFile=$VAR_DIR/%i/jailer.env
-ExecStart=$BIN/jailer-nohup \$JAILER_ARGS
+ExecStart=$BIN/jailer \$JAILER_ARGS
 StandardInput=tty-force
 StandardOutput=tty
 StandardError=journal

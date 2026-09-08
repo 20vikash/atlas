@@ -34,8 +34,6 @@ Everything one VM owns lives under its own directory, so removing that directory
 
 The jailer arguments reach systemd through an `EnvironmentFile`. systemd word splits that value, so no argument may contain a space. Firecracker's API socket lives inside the chroot at a fixed relative path, and a symlink outside gives metald a short path to dial.
 
-The unit runs the jailer through a small wrapper that ignores SIGHUP. metald holds the console PTY master, so its exit hangs up the guest's controlling terminal. The wrapper's ignored disposition survives the exec into Firecracker, so a metald restart leaves running guests alone, which is the promise in Purpose. See [internal/console/SPEC.md](../console/SPEC.md) for the console side.
-
 ## Launch
 
 Cold and warm launch share one preparation step:
