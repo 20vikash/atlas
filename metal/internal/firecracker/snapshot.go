@@ -9,8 +9,7 @@ import (
 	"strconv"
 )
 
-// Snapshot layout below the VM directory. metald publishes one generation
-// per publish and never overwrites a memory file a live process can map.
+// Snapshot layout below the VM directory.
 //
 //	machines/<id>/snapshots/generations/<n>/state
 //	machines/<id>/snapshots/generations/<n>/memory
@@ -37,15 +36,12 @@ func (configuration Config) snapshotGenerationDirectory(id string, generation ui
 	return filepath.Join(configuration.snapshotGenerationsDirectory(id), strconv.FormatUint(generation, 10))
 }
 
-// pendingSnapshotDirectory is where Firecracker writes a new generation inside
-// its jail. metald moves it to a published generation directory when complete.
+// pendingSnapshotDirectory is where Firecracker writes a new generation.
 func (configuration Config) pendingSnapshotDirectory(id string) string {
 	return filepath.Join(configuration.chrootRoot(id), pendingSnapshotDirName)
 }
 
-// latestSnapshotGeneration returns the highest published generation and true, or
-// zero and false when none exist. It ignores a directory name that is not a
-// canonical positive base-10 number.
+// latestSnapshotGeneration returns the highest valid generation.
 func (configuration Config) latestSnapshotGeneration(id string) (uint64, bool, error) {
 	entries, err := os.ReadDir(configuration.snapshotGenerationsDirectory(id))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -83,9 +79,7 @@ func (configuration Config) nextSnapshotGeneration(id string) (uint64, error) {
 	return highest + 1, nil
 }
 
-// errSnapshotNotFound reports that no complete snapshot exists for a
-// generation. It is distinct from an invalid-artifact error, so a caller can
-// tell absence from corruption.
+// errSnapshotNotFound reports that no complete snapshot exists.
 var errSnapshotNotFound = errors.New("snapshot not found")
 
 // snapshotRequirement is what a restore needs a published snapshot to be.
@@ -105,10 +99,7 @@ type validatedSnapshot struct {
 	MemoryPath string
 }
 
-// latestValidSnapshot validates the newest published snapshot against the
-// requirement. It returns errSnapshotNotFound when no generation exists. metald
-// always restores the newest generation, because a new generation is used for
-// every publish.
+// latestValidSnapshot validates the newest published snapshot.
 func (configuration Config) latestValidSnapshot(requirement snapshotRequirement) (validatedSnapshot, error) {
 	generation, found, err := configuration.latestSnapshotGeneration(requirement.VirtualMachineID)
 	if err != nil {
@@ -121,10 +112,7 @@ func (configuration Config) latestValidSnapshot(requirement snapshotRequirement)
 	return configuration.validateSnapshotGeneration(requirement, generation)
 }
 
-// validateSnapshotGeneration validates the published snapshot of one generation. It
-// returns errSnapshotNotFound when the manifest is absent. A manifest that
-// is present but does not match, or an artifact that is missing, wrong sized, or
-// not a regular file, is an invalid-artifact error, not absence.
+// validateSnapshotGeneration validates one published snapshot generation.
 func (configuration Config) validateSnapshotGeneration(requirement snapshotRequirement, generation uint64) (validatedSnapshot, error) {
 	directory := configuration.snapshotGenerationDirectory(requirement.VirtualMachineID, generation)
 	data, err := os.ReadFile(filepath.Join(directory, snapshotManifestFileName))
@@ -176,8 +164,7 @@ func (manifest snapshotManifest) matches(requirement snapshotRequirement) error 
 	return nil
 }
 
-// validateArtifactFile checks one snapshot file. It derives the path from the
-// fixed name, never from the manifest, so a bad manifest cannot redirect it.
+// validateArtifactFile checks one fixed-name snapshot file.
 func validateArtifactFile(directory, fixedName string, expectedSize int64) (string, error) {
 	path := filepath.Join(directory, fixedName)
 	info, err := os.Lstat(path)
@@ -196,8 +183,7 @@ func validateArtifactFile(directory, fixedName string, expectedSize int64) (stri
 	return path, nil
 }
 
-// parseSnapshotGeneration accepts a canonical positive base-10 generation name. It
-// rejects zero and a name with leading zeros, so one generation has one name.
+// parseSnapshotGeneration accepts a canonical positive generation name.
 func parseSnapshotGeneration(name string) (uint64, bool) {
 	generation, err := strconv.ParseUint(name, 10, 64)
 	if err != nil || generation == 0 {
