@@ -175,9 +175,12 @@ type bpfWakeEventReader struct {
 	reader *ringbuf.Reader
 }
 
-// read returns the next wake event or ringbuf.ErrClosed.
+// read returns the next wake event. A closed reader reports errWakeReaderClosed.
 func (handle *bpfWakeEventReader) read() (uint32, uint64, error) {
 	record, err := handle.reader.Read()
+	if errors.Is(err, ringbuf.ErrClosed) {
+		return 0, 0, errWakeReaderClosed
+	}
 	if err != nil {
 		return 0, 0, err
 	}

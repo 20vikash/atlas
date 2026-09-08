@@ -3,7 +3,6 @@ package activity
 import (
 	"context"
 	"errors"
-	"io"
 	"slices"
 	"strings"
 	"sync"
@@ -84,7 +83,10 @@ func (m *fakeWakeStateMap) Close() error {
 // fakeWakeEventMap serves wake events from a test channel.
 type fakeWakeEventMap struct {
 	events chan fakeWakeEvent
-	closed bool
+	// readErrors are returned before any event. alwaysFail never stops.
+	readErrors []error
+	alwaysFail error
+	closed     bool
 }
 
 type fakeWakeEvent struct {
@@ -93,7 +95,12 @@ type fakeWakeEvent struct {
 }
 
 func (m *fakeWakeEventMap) newReader() (wakeEventReader, error) {
-	return &fakeWakeEventReader{events: m.events, done: make(chan struct{})}, nil
+	return &fakeWakeEventReader{
+		events:     m.events,
+		readErrors: m.readErrors,
+		alwaysFail: m.alwaysFail,
+		done:       make(chan struct{}),
+	}, nil
 }
 
 func (m *fakeWakeEventMap) Close() error {
@@ -101,22 +108,33 @@ func (m *fakeWakeEventMap) Close() error {
 	return nil
 }
 
-// fakeWakeEventReader returns queued events and stops on close.
+// fakeWakeEventReader returns queued faults, then events, and stops on close.
 type fakeWakeEventReader struct {
-	events chan fakeWakeEvent
-	done   chan struct{}
-	closed bool
+	events     chan fakeWakeEvent
+	readErrors []error
+	alwaysFail error
+	done       chan struct{}
+	closed     bool
 }
 
 func (r *fakeWakeEventReader) read() (uint32, uint64, error) {
+	if r.alwaysFail != nil {
+		return 0, 0, r.alwaysFail
+	}
+	if len(r.readErrors) > 0 {
+		failure := r.readErrors[0]
+		r.readErrors = r.readErrors[1:]
+		return 0, 0, failure
+	}
+
 	select {
 	case event, ok := <-r.events:
 		if !ok {
-			return 0, 0, io.EOF
+			return 0, 0, errWakeReaderClosed
 		}
 		return event.userID, event.packetTime, nil
 	case <-r.done:
-		return 0, 0, io.EOF
+		return 0, 0, errWakeReaderClosed
 	}
 }
 
@@ -163,6 +181,8 @@ type fakeActivityLoader struct {
 	createdWakeState *fakeWakeStateMap
 	createdWakeEvent *fakeWakeEventMap
 	wakeEvents       chan fakeWakeEvent
+	wakeReadErrors   []error
+	wakeAlwaysFail   error
 	capacities       []uint32
 	loadedUserIDs    []uint32
 	programs         []*fakeActivityProgram
@@ -178,7 +198,11 @@ func (loader *fakeActivityLoader) createSharedMaps(capacity uint32) (sharedMaps,
 	if loader.wakeEvents == nil {
 		loader.wakeEvents = make(chan fakeWakeEvent)
 	}
-	loader.createdWakeEvent = &fakeWakeEventMap{events: loader.wakeEvents}
+	loader.createdWakeEvent = &fakeWakeEventMap{
+		events:     loader.wakeEvents,
+		readErrors: loader.wakeReadErrors,
+		alwaysFail: loader.wakeAlwaysFail,
+	}
 	return sharedMaps{
 		activity:   loader.createdMap,
 		wakeState:  loader.createdWakeState,
@@ -743,4 +767,90 @@ func TestConcurrentActivityReadsAndReplacement(t *testing.T) {
 		}
 	}()
 	group.Wait()
+}
+
+// A single bad ring record must not end wake delivery for every VM on the host.
+func TestWakeReaderContinuesAfterABadRecord(t *testing.T) {
+	loader := &fakeActivityLoader{
+		attachIndex:    5,
+		wakeEvents:     make(chan fakeWakeEvent, 1),
+		wakeReadErrors: []error{errors.New("wake event sample is 8 bytes, want 16")},
+	}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	loader.wakeEvents <- fakeWakeEvent{userID: 100001, packetTime: 42}
+	select {
+	case event := <-monitor.NetworkWakeEvents():
+		if event.VirtualMachineID != "vm-1" || event.PacketTime != 42 {
+			t.Errorf("event = %+v, want vm-1 at 42", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the bad record stopped wake delivery")
+	}
+}
+
+// A reader that never recovers must stop, so the fault does not spin forever.
+func TestWakeReaderStopsAfterRepeatedFailures(t *testing.T) {
+	loader := &fakeActivityLoader{wakeAlwaysFail: errors.New("ring buffer is broken")}
+	monitor := newTestMonitor(t, loader)
+
+	select {
+	case _, open := <-monitor.NetworkWakeEvents():
+		if open {
+			t.Error("a failing reader delivered an event")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the failing reader never stopped")
+	}
+}
+
+// A replaced user ID must not leave its packet time behind for the next VM.
+func TestEnsureAttachmentReleasesTheReplacedUserID(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	base := AttachmentRequest{VirtualMachineID: "vm-1", NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
+
+	first := base
+	first.UserID = 100001
+	if err := monitor.EnsureAttachment(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := monitor.ArmNetworkWake(vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: 100001}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := base
+	second.UserID = 100002
+	if err := monitor.EnsureAttachment(second); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Contains(loader.createdMap.deletedUserIDs, 100001) {
+		t.Errorf("activity deletes = %v, want user 100001", loader.createdMap.deletedUserIDs)
+	}
+	if !slices.Contains(loader.createdWakeState.deletedUserIDs, 100001) {
+		t.Errorf("wake state deletes = %v, want user 100001", loader.createdWakeState.deletedUserIDs)
+	}
+	if slices.Contains(loader.createdMap.deletedUserIDs, 100002) {
+		t.Error("the new user ID was released")
+	}
+}
+
+// A stale user ID must not read another VM's activity.
+func TestLastNetworkActivityRejectsAMismatchedUserID(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := monitor.LastNetworkActivity(t.Context(), vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: 100002})
+	if !errors.Is(err, vm.ErrNotFound) {
+		t.Errorf("error = %v, want vm.ErrNotFound", err)
+	}
 }

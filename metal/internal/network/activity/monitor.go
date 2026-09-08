@@ -50,6 +50,12 @@ type Monitor struct {
 // wakeEventChannelSize limits buffered wake events. A full channel rearms the VM.
 const wakeEventChannelSize = 128
 
+// maxWakeReadFailures bounds a reader that fails without end.
+const maxWakeReadFailures = 64
+
+// errWakeReaderClosed reports a closed reader. Every other read error is a fault.
+var errWakeReaderClosed = errors.New("wake event reader is closed")
+
 // attachment owns the activity resources of one VM.
 type attachment struct {
 	userID         uint32
@@ -192,15 +198,30 @@ func newMonitor(config MonitorConfig, loader activityLoader) (*Monitor, error) {
 	return monitor, nil
 }
 
-// runWakeReader forwards events until the reader closes.
+// runWakeReader forwards events until the reader closes. A bad record must not
+// end wake for every VM on the host, so it logs the fault and reads again.
 func (monitor *Monitor) runWakeReader() {
 	defer close(monitor.workerDone)
 	defer close(monitor.wakeEvents)
+
+	failures := 0
 	for {
 		userID, packetTime, err := monitor.wakeReader.read()
-		if err != nil {
+		if errors.Is(err, errWakeReaderClosed) {
 			return
 		}
+		if err != nil {
+			failures++
+			monitor.logger.Warn("wake event read failed", "error", err, "consecutive_failures", failures)
+			if failures >= maxWakeReadFailures {
+				monitor.logger.Error("wake events stopped; sleeping VMs cannot wake from a packet",
+					"consecutive_failures", failures)
+				return
+			}
+			continue
+		}
+
+		failures = 0
 		monitor.handleWakeEvent(userID, packetTime)
 	}
 }
@@ -275,8 +296,10 @@ func (monitor *Monitor) EnsureAttachment(request AttachmentRequest) error {
 
 	monitor.mu.Lock()
 	replaced := monitor.attachments[request.VirtualMachineID]
+	releasedUserID, hasReleasedUserID := uint32(0), false
 	if replaced != nil && replaced.userID != request.UserID {
 		delete(monitor.byUserID, replaced.userID)
+		releasedUserID, hasReleasedUserID = replaced.userID, true
 	}
 	monitor.attachments[request.VirtualMachineID] = &attachment{
 		userID:         request.UserID,
@@ -288,10 +311,18 @@ func (monitor *Monitor) EnsureAttachment(request AttachmentRequest) error {
 	monitor.byUserID[request.UserID] = request.VirtualMachineID
 	monitor.mu.Unlock()
 
-	if replaced != nil {
-		return replaced.program.Close()
+	if replaced == nil {
+		return nil
 	}
-	return nil
+
+	// A stale value under the old user ID would become another VM's activity.
+	closeErrors := []error{replaced.program.Close()}
+	if hasReleasedUserID {
+		closeErrors = append(closeErrors,
+			monitor.shared.activity.delete(releasedUserID),
+			monitor.shared.wakeState.deleteState(releasedUserID))
+	}
+	return errors.Join(closeErrors...)
 }
 
 // ReleaseAttachment releases the program, link, activity, and wake state for one VM.
@@ -349,7 +380,7 @@ func (monitor *Monitor) LastNetworkActivity(_ context.Context, request vm.Networ
 	monitor.mu.Lock()
 	current := monitor.attachments[request.VirtualMachineID]
 	monitor.mu.Unlock()
-	if current == nil {
+	if current == nil || current.userID != request.UserID {
 		return vm.NetworkActivity{}, fmt.Errorf("activity for VM %s: %w", request.VirtualMachineID, vm.ErrNotFound)
 	}
 
