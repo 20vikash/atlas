@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Prove the full sleepy VM path: run, idle sleep, packet wake, and guest state
-# continuity. Run this as root while metald serves with automatic sleep on and a
-# short idle timeout:
+# Prove run, idle sleep, packet wake, and guest state continuity:
 #   sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
 #   sudo test/integration/sleepy-vm-test.sh
-# The test pins the guest neighbour entry, so the ssh probes keep the VM awake
-# during boot. Without that, a short idle timeout can sleep the VM mid-boot,
-# because early boot has no host-to-guest TCP.
+# Pin the guest neighbour entry to keep the VM awake during boot.
 set -euo pipefail
 
 work_directory=${METALD_WORKDIR:-/tmp/metald}
@@ -46,8 +42,7 @@ call_metal() { curl -sS "http://$listen_address$1" -H "Authorization: Bearer $au
 
 observed_state() { call_metal "/v1/vms/$1" | jq -r '.observed.state // empty'; }
 
-# guest_ssh runs one command in the guest and prints its output. It retries,
-# because the first packet after sleep can be lost and only wakes the VM.
+# guest_ssh runs a guest command and retries after a wake packet.
 guest_ssh() {
 	local id=$1 command=$2
 	ip netns exec "metal-$id" ssh -i "$private_key" \
@@ -95,10 +90,7 @@ machine_directory=$work_directory/machines/$virtual_machine_id
 guest_mac=${METALD_GUEST_MAC:-06:00:ac:10:00:02}
 ssh_boot_seconds=${METALD_SSH_BOOT_SECONDS:-180}
 
-# Wait for the VM namespace, then pin the guest neighbour entry. Every guest uses
-# a fixed MAC, so a TCP SYN can egress on tap0 before the guest network is up.
-# This keeps activity fresh through boot, so the VM does not sleep mid-boot with a
-# short idle timeout, and it lets a wake SYN reach a sleeping VM without ARP.
+# Pin the fixed guest neighbour before boot traffic starts.
 for _ in $(seq 1 60); do
 	if ip netns list | grep -qw "$namespace"; then
 		ip -n "$namespace" neigh replace 172.16.0.2 lladdr "$guest_mac" dev tap0 nud permanent 2>/dev/null && break
@@ -117,8 +109,7 @@ until [[ $(guest_ssh "$virtual_machine_id" 'echo metal-ok') == metal-ok ]]; do
 done
 echo "VM is reachable over ssh"
 
-# Put a unique token and a long-running process in the guest. Record the guest
-# PID, so a wake can prove the same process survived.
+# Start a long-running guest process and record its token and PID.
 token="metal-$(cat /proc/sys/kernel/random/uuid)"
 guest_pid=$(guest_ssh "$virtual_machine_id" \
 	"echo $token > /dev/shm/metal-sleep-token; nohup sleep 100000 >/dev/null 2>&1 </dev/null & echo \$!")
@@ -128,8 +119,7 @@ if [[ -z $guest_pid ]]; then
 fi
 echo "guest token $token, marker PID $guest_pid"
 
-# wait_for_sleeping stops deliberate traffic and waits for the sleeping state and
-# a terminated Firecracker process.
+# wait_for_sleeping waits for sleeping state and process exit.
 wait_for_sleeping() {
 	echo "waiting up to ${sleep_poll_seconds}s for the VM to sleep..."
 	local deadline=$((SECONDS + sleep_poll_seconds))
@@ -147,8 +137,7 @@ wait_for_sleeping() {
 	exit 1
 }
 
-# wake_and_verify wakes the VM with a TCP connection and proves the guest state
-# survived: the same marker PID and the same token.
+# wake_and_verify wakes the VM and checks the marker PID and token.
 wake_and_verify() {
 	echo "waking the VM with a TCP connection..."
 	local result
