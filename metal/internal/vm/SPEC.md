@@ -68,7 +68,15 @@ A VM enters `sleeping` from a live guest by a warm stop. A manual warm stop uses
 
 A sleeping VM holds asleep while its desired record still wants sleep and its generation is caught up. Any other desired state resumes the VM from the snapshot to running. A later pass then applies a stop or pause. A resume failure keeps the VM sleeping and never cold boots, so the in-memory guest is not lost. A warm stop that terminates the process before it records `sleeping` recovers to `sleeping` from the valid snapshot on the next pass, and reports a failure for an invalid snapshot.
 
-One pass holds the VM lock for its whole duration, and every operation that changes desired state takes the same lock. A mutation therefore never lands halfway through a pass.
+## Packet wake
+
+A sleeping VM can wake on a host-to-guest packet. Automatic sleep arms the wake before the final idle check, so a packet that arrives during the warm stop produces a wake event that waits for the VM lock. The event reaches `WakeFromNetwork` through the network monitor and the wake reconciler. This is a warm VMM restart, not a guest reboot: the guest resumes from its memory snapshot.
+
+`WakeFromNetwork` takes the VM lock and validates the event: the user ID must match, the desired state must be running and sleepy, the observed state must be `sleeping`, and a snapshot generation must be recorded. A stale or duplicate event is a safe no-op, so a normal pass still owns every real state change. A valid event restores with the snapshot start mode, requires running, publishes running, and then disarms.
+
+Failures never lose the guest. A restore failure keeps the VM `sleeping` and the snapshot, and a later hold pass rearms it, so a new packet notifies again. A restore that runs but does not record running is completed on the next pass from the running runtime, without loading the snapshot again. The trigger packet can be lost while no process has `tap0` open, so a client must retry, usually over TCP. An established TCP or vsock connection is not guaranteed to survive the restart.
+
+One pass holds the VM lock for its whole duration, and every operation that changes desired state takes the same lock. A mutation therefore never lands halfway through a pass. A wake event uses the same lock, so it waits for a warm stop to finish and then restores.
 
 The phase and operation ID are written before each host call, so an interrupted pass leaves evidence of what was in flight. A failure stores a safe message for the controller and local detail that stays on the host.
 

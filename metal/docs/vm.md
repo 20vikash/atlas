@@ -40,7 +40,7 @@ A VM specification has an `is_sleepy` flag. When it is set, and the host turns o
 
 `sleeping` is an observed state only. The controller cannot request it. When a VM is asleep, the observed response reports `state` as `sleeping`, and reports `last_network_activity_at` and `sleeping_since` when they are known. The response never carries a snapshot path or a timeout.
 
-When automatic sleep is on, Metal warm-stops an idle sleepy VM to `sleeping` after the idle timeout, and the desired state stays running. A later pass holds the VM asleep. A packet during the warm stop aborts the sleep and keeps the VM running. A controller change that needs a running guest resumes it from the snapshot. Wake on an incoming packet is not part of this state yet, so a sleeping VM wakes on a controller change. Automatic sleep is off by default.
+When automatic sleep is on, Metal warm-stops an idle sleepy VM to `sleeping` after the idle timeout, and the desired state stays running. A later pass holds the VM asleep. A packet during the warm stop aborts the sleep and keeps the VM running. A controller change that needs a running guest resumes it from the snapshot. A sleeping VM also wakes on a host-to-guest TCP packet: Metal restores the memory snapshot and reports running. The first packet can be lost, so a client must retry, usually over TCP. Automatic sleep is off by default.
 
 ## Design notes
 
