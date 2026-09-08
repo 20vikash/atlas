@@ -10,9 +10,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// Every VM sees the same private addresses. They are unique because each VM has
-// its own namespace, so nothing has to be allocated per VM. The MAC encodes the
-// guest address (ac:10:00:02 is 172.16.0.2) and sets the locally administered bit.
+// VMs reuse private addresses across isolated namespaces.
 const (
 	tapName             = "tap0"
 	gatewayIPAddress    = "172.16.0.1"
@@ -85,9 +83,7 @@ func ensureNamespace(ctx context.Context, virtualMachineID string) error {
 	return platform.Run(ctx, "ip", "netns", "add", namespaceName(virtualMachineID))
 }
 
-// converge makes every host network resource agree with the request. Resources
-// the request drops are removed before the ones it wants are added, so a change
-// of egress mode never leaves both shapes in place at once.
+// converge removes dropped resources before adding requested ones.
 func (allocator *LinuxAllocator) converge(ctx context.Context, request request) error {
 	if request.PublicIPv4 != "" && !request.Egress.HasInternetPath() {
 		return fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
@@ -130,9 +126,7 @@ func (allocator *LinuxAllocator) removeUnwanted(ctx context.Context, request req
 	return nil
 }
 
-// addWanted builds what this request asks for. The order matters: the veth pair
-// carries everything above it, and the mesh registration announces the VM, so it
-// comes last and the first packet it attracts finds a complete path.
+// addWanted builds requested resources in dependency order.
 func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request) error {
 	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.Egress.HasVirtualEthernet()); err != nil {
 		return err
@@ -167,9 +161,7 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 	}
 }
 
-// Release removes a virtual machine network. It removes the mesh registration
-// first, because deleting the namespace also deletes the veth pair that the
-// registration names.
+// Release removes a VM network and its mesh registration.
 func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
 	virtualMachineID := request.VirtualMachineID
 	// Release TCX links before tap0 is removed.
@@ -190,8 +182,7 @@ func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseReq
 	return errors.Join(activityError, meshError, rulesError, namespaceRulesError, namespaceError)
 }
 
-// addMeshRegistration routes the guest mesh address through the namespace and
-// registers it with Atlas WG Mesh.
+// addMeshRegistration routes and registers the guest mesh address.
 func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, virtualMachineID string, userID uint32, address string) error {
 	if address == "" {
 		return nil
