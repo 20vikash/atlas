@@ -33,8 +33,7 @@ func (manager *fakeNetworkWakeManager) WakeFromNetwork(ctx context.Context, even
 	return manager.returnErr
 }
 
-// runReconciler starts the reconciler and returns a channel that closes when Run
-// returns.
+// runReconciler starts the reconciler and reports when it returns.
 func runReconciler(ctx context.Context, r *NetworkWakeReconciler) chan struct{} {
 	finished := make(chan struct{})
 	go func() {
