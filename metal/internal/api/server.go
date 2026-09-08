@@ -19,8 +19,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// Config contains HTTP server configuration. Only the token hash is stored, so
-// the plain token never reaches this package.
+// Config contains HTTP server configuration. Only the token hash is stored; the
+// plain token never reaches this package.
 type Config struct {
 	AuthTokenHash string
 	Logger        *slog.Logger
@@ -46,12 +46,13 @@ type SerialBroker interface {
 
 // VirtualMachineManager owns virtual machine state and operations.
 type VirtualMachineManager interface {
-	Create(context.Context, string, vm.Specification) (vm.Information, error)
+	Create(context.Context, string, vm.Specification, vm.SleepPolicy) (vm.Information, error)
 	Information(context.Context, string) (vm.Information, error)
 	List(context.Context) ([]vm.Information, error)
 	SetPowerState(context.Context, string, vm.State) error
+	StopWarm(context.Context, string) error
 	RequestRestart(context.Context, string) error
-	SetCompute(context.Context, string, int, int) error
+	SetCompute(context.Context, string, vm.Compute) error
 	SetDisk(context.Context, string, int, vm.Disk) error
 	SetNetwork(context.Context, string, vm.NetworkConfiguration) error
 	ReplaceSSHKeys(context.Context, string, []string) (bool, error)
@@ -113,9 +114,7 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	return router, nil
 }
 
-// logRequest records the outcome of every request. The status of a failed
-// request comes from the public error, because the handler returned before the
-// response was written.
+// logRequest records each request outcome.
 func (s *Server) logRequest(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		c.Set("logger", s.logger)
@@ -136,8 +135,7 @@ func (s *Server) logRequest(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// validateServerConfiguration rejects a server that cannot serve safely. The
-// token hash is required, so an unset token can never mean an open API.
+// validateServerConfiguration rejects unsafe server configuration.
 func validateServerConfiguration(configuration Config, dependencies Dependencies) error {
 	if len(configuration.AuthTokenHash) != sha256.Size*2 {
 		return fmt.Errorf("API authentication token SHA-256 hash is required")
@@ -151,9 +149,8 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	return nil
 }
 
-// authenticate accepts a bearer token whose SHA-256 digest matches the
-// configured hash. The comparison is constant time, so a wrong token reveals
-// nothing through timing.
+// authenticate accepts a bearer token with the configured SHA-256 digest. The
+// comparison is constant time.
 func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if isPublicPath(c.Path()) {
@@ -174,10 +171,8 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// isPublicPath reports whether a route serves without a token. Liveness must
-// answer a probe that holds no token, and the documentation page is opened in a
-// browser that cannot send one. Neither carries VM data, so both stay open and
-// metald is expected to listen on a private control network.
+// isPublicPath reports whether health and documentation serve without
+// authentication. They carry no VM data.
 func isPublicPath(path string) bool {
 	return path == "/health" || path == "/docs" || path == "/docs/swagger.json"
 }

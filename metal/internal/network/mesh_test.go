@@ -10,8 +10,7 @@ import (
 	"testing"
 )
 
-// stubMeshCommand returns an executable path, because NewMesh checks that the
-// CLI is on the host.
+// stubMeshCommand returns an executable path accepted by NewMesh.
 func stubMeshCommand(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "atlas-wg-mesh")
@@ -57,6 +56,7 @@ func TestMeshNamespaceStepsRouteTheGuestAddress(t *testing.T) {
 		"link set vg-100 mtu 1380",
 		"addr replace fe80::1/64 dev tap0 nodad",
 		"route replace fdaa:1:0:7::1/128 dev tap0",
+		"neigh replace fdaa:1:0:7::1 lladdr 06:00:ac:10:00:02 dev tap0 nud permanent",
 		"route replace fdaa::/16 via fe80::1 dev vg-100",
 		"neigh replace proxy fdaa:1:0:7::1 dev vg-100",
 	} {
@@ -154,8 +154,7 @@ exit 0
 	return mesh, callLog
 }
 
-// A partial apply converges on the next sync, so one failure must not stop the
-// other changes, and a revocation must not wait behind an addition.
+// One failure must not stop other changes or delay revocation.
 func TestApplyPrivilegedAddressesAttemptsEveryChange(t *testing.T) {
 	mesh, callLog := scriptedMesh(t, `[{"address":"fdaa:1::2"},{"address":"fdaa:1::3"}]`, "fdaa:1::9")
 

@@ -8,8 +8,7 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
-// ensureNamespaceBase brings up loopback and the tap the guest attaches to. The
-// tap is owned by the VM user, so the jailed Firecracker process can open it.
+// ensureNamespaceBase creates the namespace loopback and guest tap.
 func ensureNamespaceBase(ctx context.Context, request request) error {
 	namespace := namespaceName(request.VirtualMachineID)
 	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", "lo", "up"); err != nil {
@@ -29,7 +28,12 @@ func ensureNamespaceBase(ctx context.Context, request request) error {
 	if err := platform.Run(ctx, "ip", "-n", namespace, "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
 		return err
 	}
-	return platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up")
+	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up"); err != nil {
+		return err
+	}
+	// Keep wake packets routable while the guest cannot answer ARP.
+	return platform.Run(ctx, "ip", "-n", namespace, "neigh", "replace",
+		guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
 }
 
 // namespaceLinkExists reports whether one interface is inside the namespace.
@@ -49,8 +53,8 @@ func namespacePath(virtualMachineID string) string {
 	return "/run/netns/" + namespaceName(virtualMachineID)
 }
 
-// virtualEthernetNames derives both veth ends from the user ID, so the names
-// stay stable across restarts without any stored state.
+// virtualEthernetNames derives stable veth names from the user ID, so names need
+// no stored state and survive daemon restarts.
 func virtualEthernetNames(userID uint32) (host, guest string) {
 	return fmt.Sprintf("vh-%d", userID), fmt.Sprintf("vg-%d", userID)
 }
@@ -67,16 +71,37 @@ func virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, 
 	}
 }
 
-// setVirtualEthernet adds or removes the veth pair.
+// setVirtualEthernet adds or removes the veth pair. The pair belongs to this VM
+// only when its peer sits in this VM's namespace. A released VM can leave a pair
+// behind, and the next VM reuses its user ID and therefore its device names, so
+// a host link alone is not proof that the pair is the right one.
 func setVirtualEthernet(ctx context.Context, virtualMachineID string, userID uint32, present bool) error {
 	namespace := namespaceName(virtualMachineID)
 	hostVirtualEthernet, guestVirtualEthernet := virtualEthernetNames(userID)
-	exists, err := networkLinkExists(ctx, hostVirtualEthernet)
-	if err != nil || exists == present {
+	hostLinkExists, err := networkLinkExists(ctx, hostVirtualEthernet)
+	if err != nil {
 		return err
 	}
+
 	if !present {
+		if !hostLinkExists {
+			return nil
+		}
 		return platform.Run(ctx, "ip", "link", "del", hostVirtualEthernet)
+	}
+
+	attached, err := namespaceLinkExists(ctx, namespace, guestVirtualEthernet)
+	if err != nil {
+		return err
+	}
+	if attached {
+		return nil
+	}
+	// The name is taken by a stale pair. Remove it, which removes both ends.
+	if hostLinkExists {
+		if err := platform.Run(ctx, "ip", "link", "del", hostVirtualEthernet); err != nil {
+			return fmt.Errorf("remove stale veth %s: %w", hostVirtualEthernet, err)
+		}
 	}
 
 	hostIPAddress, namespaceIPAddress := transitAddresses(userID)
@@ -92,8 +117,7 @@ func networkLinkExists(ctx context.Context, name string) (bool, error) {
 	return linkListContains(output, name), nil
 }
 
-// linkListContains finds a device in `ip link show` output. A veth line names
-// the peer after an @, which is trimmed.
+// linkListContains finds a device in ip link output.
 func linkListContains(output, name string) bool {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
@@ -118,9 +142,8 @@ func runSteps(ctx context.Context, steps [][]string) error {
 	return nil
 }
 
-// transitAddresses carves one /30 out of 10.0.0.0/8 per user ID and returns its
-// 2 usable addresses: the host end and the namespace end. The ID is masked to 22
-// bits, which shifted by 2 fills the 24 host bits of the /8.
+// transitAddresses returns the two usable addresses in the /30 derived from a
+// user ID: one for the host and one for the namespace.
 func transitAddresses(userID uint32) (hostIPAddress, namespaceIPAddress string) {
 	networkAddress := uint32(0x0A000000) | ((userID & 0x3FFFFF) << 2)
 	return addressString(networkAddress + 1), addressString(networkAddress + 2)

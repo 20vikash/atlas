@@ -1,11 +1,10 @@
 //go:build integration
 
-// Boots real microVMs and drives them over SSH. Requires root, KVM, firecracker +
-// jailer installed, and a prepared host (see docs/testing.md). Run with:
+// Boots real microVMs over SSH. Requires root, KVM, Firecracker, Jailer, and a prepared host.
 //
 //	sudo -E go test -tags integration -v ./internal/firecracker/
 //
-// The tests share a host, so they run one at a time (each cleans up its VMs).
+// Tests run one at a time and clean up their VMs.
 package firecracker
 
 import (
@@ -13,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/network"
+	"github.com/frappe/atlas/metal/internal/network/activity"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
@@ -33,8 +34,7 @@ func env(k, def string) string {
 	return def
 }
 
-// skipUnlessHost skips unless the test runs as root with the image and ssh key
-// env set. It returns the image ref and the public key contents.
+// skipUnlessHost skips when the host prerequisites are missing.
 func skipUnlessHost(t *testing.T) (image, pub string) {
 	t.Helper()
 	if os.Geteuid() != 0 {
@@ -54,8 +54,7 @@ func skipUnlessHost(t *testing.T) (image, pub string) {
 	return image, strings.TrimSpace(string(b))
 }
 
-// integrationMesh builds the mesh that the host integration test needs. The
-// test already requires a configured host, so a missing CLI skips it.
+// integrationMesh builds the mesh required by the host test.
 func integrationMesh(t *testing.T) *network.Mesh {
 	t.Helper()
 	mesh, err := network.NewMesh(network.MeshConfig{
@@ -79,7 +78,12 @@ func newManager(t *testing.T) *vm.Manager {
 	stores := storage.NewStores(t.Context(), env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"), nil)
 	serialBroker := console.NewSerialBroker(t.TempDir(), platform.NewFileDescriptorStore())
 	t.Cleanup(serialBroker.Shutdown)
-	networkManager := network.NewLinuxAllocator(integrationMesh(t))
+	activityMonitor, err := activity.NewMonitor(activity.MonitorConfig{UserIDRange: vm.DefaultUserIDRange})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = activityMonitor.Close() })
+	networkManager := network.NewLinuxAllocator(integrationMesh(t), activityMonitor)
 	virtualMachineRuntime := NewRuntime(
 		DefaultConfig(),
 		units,
@@ -151,7 +155,7 @@ func waitSSH(t *testing.T, id string) bool {
 func bootVM(t *testing.T, manager *vm.Manager, specification vm.Specification) string {
 	t.Helper()
 	identifier := uuid.NewString()
-	_, err := manager.Create(context.Background(), identifier, specification)
+	_, err := manager.Create(context.Background(), identifier, specification, vm.SleepPolicy{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -171,4 +175,69 @@ func bootVM(t *testing.T, manager *vm.Manager, specification vm.Specification) s
 func TestBootAndSSH(t *testing.T) {
 	image, pub := skipUnlessHost(t)
 	bootVM(t, newManager(t), spec(image, pub))
+}
+
+// mainPID returns the systemd MainPID of a VM unit, or 0 when it is not running.
+func mainPID(t *testing.T, id string) int {
+	t.Helper()
+	out, err := exec.CommandContext(context.Background(),
+		"systemctl", "show", "metal-vm@"+id+".service", "-p", "MainPID", "--value").Output()
+	if err != nil {
+		t.Fatalf("systemctl show %s: %v", id, err)
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return pid
+}
+
+// TestWarmStopAndRestoreTwoCycles checks that a token and process survive two
+// warm-stop cycles, proving memory restore instead of cold boot.
+func TestWarmStopAndRestoreTwoCycles(t *testing.T) {
+	image, pub := skipUnlessHost(t)
+	manager := newManager(t)
+	id := bootVM(t, manager, spec(image, pub))
+
+	token := uuid.NewString()
+	run(t, id, "echo "+token+" > /dev/shm/token")
+	guestPID := run(t, id, "sh -c 'nohup sleep 100000 >/dev/null 2>&1 & echo $!'")
+
+	for cycle := 1; cycle <= 2; cycle++ {
+		before := mainPID(t, id)
+		if before == 0 {
+			t.Fatalf("cycle %d: no Firecracker process before warm stop", cycle)
+		}
+
+		if err := manager.StopWarm(context.Background(), id); err != nil {
+			t.Fatalf("cycle %d: warm stop request: %v", cycle, err)
+		}
+		if err := manager.Reconcile(context.Background(), id); err != nil {
+			t.Fatalf("cycle %d: warm stop reconcile: %v", cycle, err)
+		}
+		if pid := mainPID(t, id); pid != 0 {
+			t.Fatalf("cycle %d: Firecracker still running (pid %d) after warm stop", cycle, pid)
+		}
+
+		if err := manager.SetPowerState(context.Background(), id, vm.StateRunning); err != nil {
+			t.Fatalf("cycle %d: start request: %v", cycle, err)
+		}
+		if err := manager.Reconcile(context.Background(), id); err != nil {
+			t.Fatalf("cycle %d: restore reconcile: %v", cycle, err)
+		}
+		if !waitSSH(t, id) {
+			t.Fatalf("cycle %d: ssh never returned after restore", cycle)
+		}
+
+		after := mainPID(t, id)
+		if after == 0 || after == before {
+			t.Fatalf("cycle %d: want a new Firecracker pid, before %d after %d", cycle, before, after)
+		}
+		if got := run(t, id, "cat /dev/shm/token"); got != token {
+			t.Fatalf("cycle %d: token = %q, want %q, so memory was not restored", cycle, got, token)
+		}
+		if _, err := sshCmd(id, "kill -0 "+guestPID); err != nil {
+			t.Fatalf("cycle %d: long-running process %s is gone: %v", cycle, guestPID, err)
+		}
+		if _, err := os.Stat(DefaultConfig().memorySnapshotRoot(id)); !os.IsNotExist(err) {
+			t.Fatalf("cycle %d: external snapshots were not removed after restore: %v", cycle, err)
+		}
+	}
 }

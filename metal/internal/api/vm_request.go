@@ -12,12 +12,12 @@ import (
 
 // Bounds on caller-supplied values.
 const (
-	// maximumResourceIDLength keeps an identifier usable as a path segment, a ZFS
-	// dataset name, and a systemd unit instance name.
+	// maximumResourceIDLength keeps an ID usable as a path, ZFS dataset, and
+	// systemd unit instance name.
 	maximumResourceIDLength = 64
 
-	// maximumMemoryMiB is the largest request that cannot overflow the unit memory
-	// limit, which is twice the guest size plus overhead.
+	// maximumMemoryMiB prevents unit memory overflow. The unit limit is twice the
+	// guest size plus fixed overhead.
 	maximumMemoryMiB = (math.MaxInt - 128) / 2
 )
 
@@ -31,8 +31,8 @@ var (
 	wireGuardMeshPrefix = netip.MustParsePrefix("fdaa::/16")
 )
 
-// createRequest is the complete desired specification of a new VM. Every group
-// is required, because a create stores state rather than merging into it.
+// createRequest is the complete desired specification of a new VM. Each group
+// is required because creation stores state instead of merging it.
 type createRequest struct {
 	Compute computeRequest `json:"compute"`
 	Disk    diskRequest    `json:"disk"`
@@ -41,10 +41,19 @@ type createRequest struct {
 	Guest   guestRequest   `json:"guest"`
 }
 
-// computeRequest is the complete CPU and memory shape.
+// computeRequest is the complete CPU shape, memory shape, and sleep policy.
 type computeRequest struct {
 	VirtualCPUCount int `json:"virtual_cpu_count" minimum:"1"`
 	MemoryMiB       int `json:"memory_mib" minimum:"1"`
+	// IsSleepy allows automatic sleep for an idle VM.
+	IsSleepy bool `json:"is_sleepy"`
+	// IdleTimeoutSeconds is the idle time before sleep. Zero disables sleep.
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds" minimum:"0"`
+}
+
+// sleepPolicy returns the requested sleep policy.
+func (request computeRequest) sleepPolicy() vm.SleepPolicy {
+	return vm.SleepPolicy{IsSleepy: request.IsSleepy, IdleTimeoutSeconds: request.IdleTimeoutSeconds}
 }
 
 // imageRequest identifies boot content and how the host should keep it.
@@ -111,9 +120,11 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
-// powerRequest is the desired power state.
+// powerRequest is the desired power state and optional warm-stop request. Warm
+// is valid only for stopped and makes the next start resume the saved memory.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
+	Warm  bool   `json:"warm"`
 }
 
 // validate checks every group and the guest values a create carries.
@@ -160,6 +171,9 @@ func (request computeRequest) validate() error {
 	}
 	if request.MemoryMiB > maximumMemoryMiB {
 		return fmt.Errorf("compute.memory_mib is too large")
+	}
+	if request.IdleTimeoutSeconds < 0 {
+		return fmt.Errorf("compute.idle_timeout_seconds must not be negative")
 	}
 	return nil
 }
@@ -270,7 +284,7 @@ func validHTTPURL(value string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-// validImageReference reports whether value is usable as a directory and a
+// validImageReference reports whether value is usable as a directory and ZFS
 // dataset name.
 func validImageReference(value string) bool {
 	return imageReferencePattern.MatchString(value)

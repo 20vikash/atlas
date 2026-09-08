@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/host"
@@ -29,7 +30,7 @@ type fakeVirtualMachineManager struct {
 	deferMetadata   bool
 }
 
-func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification) (vm.Information, error) {
+func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification, sleep vm.SleepPolicy) (vm.Information, error) {
 	if existing, found := manager.virtualMachines[id]; found {
 		return existing.info, nil
 	}
@@ -49,6 +50,8 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
+		IsSleepy:                      sleep.IsSleepy,
+		IdleTimeoutSeconds:            sleep.IdleTimeoutSeconds,
 		DesiredGeneration:             1,
 	}}
 	manager.virtualMachines[id] = virtualMachine
@@ -85,6 +88,17 @@ func (manager *fakeVirtualMachineManager) SetPowerState(_ context.Context, id st
 	}
 
 	virtualMachine.info.DesiredState = state
+	virtualMachine.info.DesiredGeneration++
+	return nil
+}
+
+func (manager *fakeVirtualMachineManager) StopWarm(_ context.Context, id string) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
+
+	virtualMachine.info.DesiredState = vm.StateStopped
 	virtualMachine.info.DesiredGeneration++
 	return nil
 }
@@ -146,18 +160,25 @@ func (manager *fakeVirtualMachineManager) SetDisk(_ context.Context, id string, 
 	return nil
 }
 
-func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id string, virtualCPUCount, memoryMiB int) error {
+func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id string, compute vm.Compute) error {
 	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
-	if virtualMachine.info.State != vm.StateStopped {
-		return vm.ErrConflict
+	// A shape change needs a stopped VM. A sleep policy change does not.
+	shapeChanged := virtualMachine.info.VirtualCPUCount != compute.VirtualCPUCount ||
+		virtualMachine.info.MemoryMiB != compute.MemoryMiB
+	if shapeChanged {
+		if virtualMachine.info.State != vm.StateStopped {
+			return vm.ErrConflict
+		}
+		virtualMachine.info.VirtualCPUCount = compute.VirtualCPUCount
+		virtualMachine.info.MemoryMiB = compute.MemoryMiB
+		virtualMachine.info.DesiredState = vm.StateRunning
 	}
 
-	virtualMachine.info.VirtualCPUCount = virtualCPUCount
-	virtualMachine.info.MemoryMiB = memoryMiB
-	virtualMachine.info.DesiredState = vm.StateRunning
+	virtualMachine.info.IsSleepy = compute.Sleep.IsSleepy
+	virtualMachine.info.IdleTimeoutSeconds = compute.Sleep.IdleTimeoutSeconds
 	virtualMachine.info.DesiredGeneration++
 	return nil
 }
@@ -492,6 +513,16 @@ func TestMutationRequestsRejectUnknownAndTrailingJSON(t *testing.T) {
 	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped"}{}`, http.StatusBadRequest)
 }
 
+func TestWarmStopPowerRequest(t *testing.T) {
+	server := newTestServer(t)
+	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	// A warm stop is accepted.
+	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped","warm":true}`, http.StatusAccepted)
+	// Warm is valid only with a stopped state.
+	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"running","warm":true}`, http.StatusBadRequest)
+}
+
 func TestCreateRejectsLongID(t *testing.T) {
 	id := strings.Repeat("a", maximumResourceIDLength+1)
 	do(t, newTestServer(t), http.MethodPut, "/v1/vms/"+id, validCreateRequest, http.StatusBadRequest)
@@ -555,8 +586,7 @@ func TestCreateReturnsNetworkThroughput(t *testing.T) {
 	}
 }
 
-// A public IPv4 address needs an internet path. The request is rejected instead
-// of silently changing the egress mode that the caller asked for.
+// A public IPv4 address requires internet egress.
 func TestCreateRejectsPublicIPv4WithoutUplink(t *testing.T) {
 	srv := newTestServer(t)
 	for _, egress := range []string{"mesh", "none"} {
@@ -566,8 +596,7 @@ func TestCreateRejectsPublicIPv4WithoutUplink(t *testing.T) {
 	}
 }
 
-// A mode without an internet path keeps a public limit but does not apply it.
-// This lets a caller change the mode without clearing the stored limits first.
+// A mode without internet egress keeps, but does not apply, public limits.
 func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 	srv := newTestServer(t)
 	body := strings.Replace(validCreateRequest, `"egress":"uplink"`,
@@ -581,6 +610,106 @@ func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 	if response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
 		t.Fatalf("public throughput = %+v", response.Desired.Network)
 	}
+}
+
+func TestCreateStoresAndReturnsTheSleepyFlag(t *testing.T) {
+	srv := newTestServer(t)
+	body := strings.Replace(validCreateRequest,
+		`"compute":{"virtual_cpu_count":1,"memory_mib":512}`,
+		`"compute":{"virtual_cpu_count":1,"memory_mib":512,"is_sleepy":true,"idle_timeout_seconds":1800}`, 1)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
+
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Desired.Compute.IsSleepy {
+		t.Fatal("desired.is_sleepy = false, want true")
+	}
+}
+
+func TestCreateDefaultsToNonSleepy(t *testing.T) {
+	srv := newTestServer(t)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Desired.Compute.IsSleepy {
+		t.Fatal("desired.is_sleepy = true, want false for a request without the field")
+	}
+}
+
+func TestObservedResponseReportsSleepTimes(t *testing.T) {
+	activityAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	sleepingSince := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+	response := toVirtualMachine(vm.Information{
+		State:                 vm.StateSleeping,
+		LastNetworkActivityAt: activityAt,
+		SleepingSince:         sleepingSince,
+	})
+
+	if response.Observed.State != "sleeping" {
+		t.Errorf("state = %q, want sleeping", response.Observed.State)
+	}
+	if response.Observed.LastNetworkActivityAt != activityAt.Format(time.RFC3339) {
+		t.Errorf("last_network_activity_at = %q", response.Observed.LastNetworkActivityAt)
+	}
+	if response.Observed.SleepingSince != sleepingSince.Format(time.RFC3339) {
+		t.Errorf("sleeping_since = %q", response.Observed.SleepingSince)
+	}
+}
+
+func TestObservedResponseOmitsZeroSleepTimes(t *testing.T) {
+	response := toVirtualMachine(vm.Information{State: vm.StateRunning})
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "sleeping_since") || strings.Contains(string(data), "last_network_activity_at") {
+		t.Errorf("zero sleep times must be omitted: %s", data)
+	}
+}
+
+func TestPowerRequestRejectsSleeping(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	// sleeping is an observed state only, so a power request cannot ask for it.
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/power", `{"state":"sleeping"}`, http.StatusBadRequest)
+}
+
+func TestSetComputeStoresTheSleepPolicy(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	body := `{"virtual_cpu_count":1,"memory_mib":512,"is_sleepy":true,"idle_timeout_seconds":1800}`
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusAccepted)
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Desired.Compute.IsSleepy {
+		t.Error("compute.is_sleepy = false, want true")
+	}
+	if response.Desired.Compute.IdleTimeoutSeconds != 1800 {
+		t.Errorf("compute.idle_timeout_seconds = %d, want 1800", response.Desired.Compute.IdleTimeoutSeconds)
+	}
+}
+
+func TestSetComputeRejectsANegativeIdleTimeout(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+
+	body := `{"virtual_cpu_count":1,"memory_mib":512,"is_sleepy":true,"idle_timeout_seconds":-1}`
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusBadRequest)
+}
+
+// The sleep policy endpoint was removed. Its path must not answer.
+func TestSleepPolicyRouteIsGone(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusNotFound)
 }
 
 func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {
@@ -619,8 +748,7 @@ func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
 		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1"}`, http.StatusBadRequest)
 
-	// Atlas resends every mutable setting, so a stored public limit must not
-	// block a change to a mode that cannot apply it.
+	// Stored public limits must not block an egress mode change.
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
 		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50}`, http.StatusAccepted)
 }

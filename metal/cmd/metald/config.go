@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -21,8 +22,10 @@ type opts struct {
 	mesh            meshOpts
 }
 
-// meshOpts configures the Atlas WG Mesh integration.
+// meshOpts configures Atlas WG Mesh, which is enabled by default and can be
+// disabled for development or test hosts without mesh connectivity.
 type meshOpts struct {
+	enabled    bool
 	binaryPath string
 	uplinkName string
 }
@@ -37,7 +40,7 @@ func defaultOpts() opts {
 		pool:          "metal",
 		baseDir:       defaultBaseDir,
 		wireGuardName: "wg0",
-		mesh:          meshOpts{binaryPath: "/usr/local/bin/atlas-wg-mesh"},
+		mesh:          meshOpts{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
 		// TCP host:port by default; "unix:/path" for a unix socket instead.
 		listen: "127.0.0.1:8080",
 	}
@@ -45,8 +48,8 @@ func defaultOpts() opts {
 	return o
 }
 
-// deriveDirs places the directories metald owns under baseDir. They are a
-// convention, not separate keys, so one base_dir moves all of them.
+// deriveDirs places all metald directories under baseDir, so one base_dir moves
+// the complete metald state tree.
 func (o *opts) deriveDirs() {
 	o.cfg.MachinesDir = filepath.Join(o.baseDir, "machines")
 	o.imagesDir = filepath.Join(o.baseDir, "images")
@@ -59,6 +62,21 @@ type fileConfig struct {
 	ZFS         zfsFile         `toml:"zfs"`
 	WireGuard   wireGuardFile   `toml:"wireguard"`
 	WGMesh      wgMeshFile      `toml:"wg_mesh"`
+}
+
+// tomlDuration decodes a TOML string with time.ParseDuration.
+type tomlDuration struct {
+	time.Duration
+}
+
+// UnmarshalText parses a duration string such as "30m".
+func (duration *tomlDuration) UnmarshalText(text []byte) error {
+	parsed, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	duration.Duration = parsed
+	return nil
 }
 
 type metaldFile struct {
@@ -85,6 +103,7 @@ type wireGuardFile struct {
 }
 
 type wgMeshFile struct {
+	Enabled    *bool  `toml:"enabled"`
 	BinaryPath string `toml:"binary_path"`
 	Uplink     string `toml:"uplink"`
 }
@@ -98,8 +117,8 @@ func load(path string) (opts, error) {
 	return o, nil
 }
 
-// applyFile overlays the configuration file onto o. A missing default file is
-// not an error; a missing explicit path is.
+// applyFile overlays a configuration file onto o. A missing default file is
+// allowed; a missing explicit file is an error.
 func applyFile(o *opts, path string) error {
 	explicit := path != ""
 	if path == "" {
@@ -122,6 +141,9 @@ func applyFile(o *opts, path string) error {
 	overlay(&o.wireGuardName, fc.WireGuard.Interface)
 	overlay(&o.mesh.binaryPath, fc.WGMesh.BinaryPath)
 	overlay(&o.mesh.uplinkName, fc.WGMesh.Uplink)
+	if fc.WGMesh.Enabled != nil {
+		o.mesh.enabled = *fc.WGMesh.Enabled
+	}
 	return nil
 }
 

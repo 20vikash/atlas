@@ -6,7 +6,33 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/frappe/atlas/metal/internal/network/activity"
 )
+
+// fakeActivityMonitor records the attach and release calls of the allocator.
+type fakeActivityMonitor struct {
+	ensured  []activity.AttachmentRequest
+	released []string
+}
+
+func (attacher *fakeActivityMonitor) EnsureAttachment(request activity.AttachmentRequest) error {
+	attacher.ensured = append(attacher.ensured, request)
+	return nil
+}
+
+func (attacher *fakeActivityMonitor) ReleaseAttachment(virtualMachineID string) error {
+	attacher.released = append(attacher.released, virtualMachineID)
+	return nil
+}
+
+func TestNewLinuxAllocatorStoresTheActivityAttacher(t *testing.T) {
+	attacher := &fakeActivityMonitor{}
+	allocator := NewLinuxAllocator(nil, attacher)
+	if allocator.activityMonitor != attacher {
+		t.Error("the activity monitor was not stored")
+	}
+}
 
 func TestGuestMACAddressIsTheSameForEveryVirtualMachine(t *testing.T) {
 	allocator := &LinuxAllocator{}
