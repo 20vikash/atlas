@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -19,12 +20,22 @@ type opts struct {
 	baseDir         string
 	wireGuardName   string
 	mesh            meshOpts
+	sleep           sleepOpts
 }
 
-// meshOpts configures the Atlas WG Mesh integration.
+// meshOpts configures the Atlas WG Mesh integration. Mesh is on by default. A
+// development or test host can turn it off, and then VMs get no mesh.
 type meshOpts struct {
+	enabled    bool
 	binaryPath string
 	uplinkName string
+}
+
+// sleepOpts is the Metal-wide automatic sleep policy. One idle timeout applies
+// to every sleepy VM on this host.
+type sleepOpts struct {
+	enabled     bool
+	idleTimeout time.Duration
 }
 
 const defaultConfigPath = "/var/lib/metal/metald.toml"
@@ -37,7 +48,7 @@ func defaultOpts() opts {
 		pool:          "metal",
 		baseDir:       defaultBaseDir,
 		wireGuardName: "wg0",
-		mesh:          meshOpts{binaryPath: "/usr/local/bin/atlas-wg-mesh"},
+		mesh:          meshOpts{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
 		// TCP host:port by default; "unix:/path" for a unix socket instead.
 		listen: "127.0.0.1:8080",
 	}
@@ -59,6 +70,28 @@ type fileConfig struct {
 	ZFS         zfsFile         `toml:"zfs"`
 	WireGuard   wireGuardFile   `toml:"wireguard"`
 	WGMesh      wgMeshFile      `toml:"wg_mesh"`
+	Sleep       sleepFile       `toml:"sleep"`
+}
+
+// sleepFile is the [sleep] section. idle_timeout is a Go duration string.
+type sleepFile struct {
+	Enabled     bool         `toml:"enabled"`
+	IdleTimeout tomlDuration `toml:"idle_timeout"`
+}
+
+// tomlDuration decodes a TOML string with time.ParseDuration.
+type tomlDuration struct {
+	time.Duration
+}
+
+// UnmarshalText parses a duration string such as "30m".
+func (duration *tomlDuration) UnmarshalText(text []byte) error {
+	parsed, err := time.ParseDuration(string(text))
+	if err != nil {
+		return err
+	}
+	duration.Duration = parsed
+	return nil
 }
 
 type metaldFile struct {
@@ -85,6 +118,7 @@ type wireGuardFile struct {
 }
 
 type wgMeshFile struct {
+	Enabled    *bool  `toml:"enabled"`
 	BinaryPath string `toml:"binary_path"`
 	Uplink     string `toml:"uplink"`
 }
@@ -122,6 +156,13 @@ func applyFile(o *opts, path string) error {
 	overlay(&o.wireGuardName, fc.WireGuard.Interface)
 	overlay(&o.mesh.binaryPath, fc.WGMesh.BinaryPath)
 	overlay(&o.mesh.uplinkName, fc.WGMesh.Uplink)
+	if fc.WGMesh.Enabled != nil {
+		o.mesh.enabled = *fc.WGMesh.Enabled
+	}
+	o.sleep = sleepOpts{enabled: fc.Sleep.Enabled, idleTimeout: fc.Sleep.IdleTimeout.Duration}
+	if o.sleep.enabled && o.sleep.idleTimeout <= 0 {
+		return fmt.Errorf("config %s: [sleep] idle_timeout must be a positive duration when enabled", path)
+	}
 	return nil
 }
 

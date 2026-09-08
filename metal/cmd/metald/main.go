@@ -128,6 +128,26 @@ func makeDirs(o opts) error {
 	return nil
 }
 
+// meshProvider is the mesh behavior metald wires into the network allocator and
+// the host service. A real Mesh or a DisabledMesh satisfies it.
+type meshProvider interface {
+	Add(ctx context.Context, address, interfaceName string) error
+	Remove(ctx context.Context, address, interfaceName string) error
+	ApplyPrivilegedAddresses(ctx context.Context, desired []string) error
+}
+
+// setUpMesh prepares the Atlas WG Mesh integration, or a disabled no-op mesh when
+// the host turns it off. A disabled mesh gives VMs no mesh connectivity, so it is
+// for development and testing only.
+func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
+	if !o.mesh.enabled {
+		logger.Warn("Atlas WG Mesh is disabled; VMs have no mesh connectivity", "wg_mesh.enabled", false)
+		return network.DisabledMesh{}, nil
+	}
+
+	return connectMesh(o)
+}
+
 // connectMesh prepares the Atlas WG Mesh integration. It configures the host on
 // every start, so a reinstalled or reset host recovers without an operator.
 func connectMesh(o opts) (*network.Mesh, error) {
@@ -197,8 +217,8 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	}
 
 	// Connect required host services.
-	// Atlas WG Mesh is required, so fail before metald builds anything.
-	mesh, err := connectMesh(o)
+	// Set up Atlas WG Mesh before metald builds anything, so a bad mesh fails fast.
+	mesh, err := setUpMesh(o, logger)
 	if err != nil {
 		return err
 	}
@@ -235,7 +255,12 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	networkManager := network.NewLinuxAllocator(mesh)
+	activityMonitor, err := network.NewActivityMonitor(network.ActivityMonitorConfig{UserIDRange: vm.DefaultUserIDRange})
+	if err != nil {
+		return fmt.Errorf("configure activity monitor: %w", err)
+	}
+	daemon.OwnActivityMonitor(activityMonitor)
+	networkManager := network.NewLinuxAllocator(mesh, activityMonitor)
 	virtualMachineRuntime := firecracker.NewRuntime(
 		o.cfg,
 		units,
@@ -245,13 +270,18 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		logger,
 	)
 	virtualMachineManager, err := vm.NewManager(
-		vm.ManagerConfig{MachinesDirectory: o.cfg.MachinesDir},
+		vm.ManagerConfig{
+			MachinesDirectory: o.cfg.MachinesDir,
+			Sleep:             vm.SleepConfig{Enabled: o.sleep.enabled, IdleTimeout: o.sleep.idleTimeout},
+		},
 		vm.ManagerDependencies{
-			Runtime:   virtualMachineRuntime,
-			Network:   networkManager,
-			Storage:   stores.VirtualMachines,
-			Snapshots: stores.Snapshots,
-			Logger:    logger,
+			Runtime:                virtualMachineRuntime,
+			Network:                networkManager,
+			Storage:                stores.VirtualMachines,
+			Snapshots:              stores.Snapshots,
+			NetworkActivityMonitor: networkManager,
+			NetworkWakeMonitor:     activityMonitor,
+			Logger:                 logger,
 		},
 	)
 	if err != nil {
@@ -274,6 +304,14 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		memorySnapshotBuilder,
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
+	)
+	// The wake worker restores a sleeping VM when a host-to-guest packet arms its
+	// wake. The activity monitor produces the events. The VM reconcile pass arms
+	// each sleeping VM, so a metald restart rearms them on its first pass.
+	networkWakeReconciler := reconciler.NewNetworkWakeReconciler(
+		virtualMachineManager,
+		activityMonitor.NetworkWakeEvents(),
+		reconciler.NetworkWakeConfig{Logger: logger},
 	)
 	wakeReconcilers := func() {
 		virtualMachineReconciler.Wake()
@@ -306,5 +344,6 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	server.Listener = listener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
+	daemon.StartWorker(networkWakeReconciler.Run)
 	return daemon.Serve(server)
 }

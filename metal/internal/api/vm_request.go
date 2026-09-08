@@ -34,11 +34,12 @@ var (
 // createRequest is the complete desired specification of a new VM. Every group
 // is required, because a create stores state rather than merging into it.
 type createRequest struct {
-	Compute computeRequest `json:"compute"`
-	Disk    diskRequest    `json:"disk"`
-	Image   imageRequest   `json:"image"`
-	Network networkRequest `json:"network"`
-	Guest   guestRequest   `json:"guest"`
+	Compute  computeRequest `json:"compute"`
+	Disk     diskRequest    `json:"disk"`
+	Image    imageRequest   `json:"image"`
+	Network  networkRequest `json:"network"`
+	Guest    guestRequest   `json:"guest"`
+	IsSleepy bool           `json:"is_sleepy"`
 }
 
 // computeRequest is the complete CPU and memory shape.
@@ -111,9 +112,18 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
-// powerRequest is the desired power state.
+// powerRequest is the desired power state. Warm asks a stop to save a memory
+// snapshot instead of shutting the guest down. It is valid only with a stopped
+// state. A later start resumes the VM from the snapshot.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
+	Warm  bool   `json:"warm"`
+}
+
+// sleepPolicyRequest is the complete sleep policy. It carries only is_sleepy.
+// The idle timeout is one Metal-wide host value and is not part of this request.
+type sleepPolicyRequest struct {
+	IsSleepy bool `json:"is_sleepy"`
 }
 
 // validate checks every group and the guest values a create carries.
@@ -150,6 +160,7 @@ func (request createRequest) specification() vm.Specification {
 		Hostname:        request.Guest.Hostname,
 		UserData:        request.Guest.UserData,
 		Metadata:        request.Guest.Metadata,
+		IsSleepy:        request.IsSleepy,
 	}
 }
 

@@ -2,11 +2,33 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// fakeActivityMonitor records how the daemon closes the activity monitor. It
+// captures whether the worker finished before Close ran.
+type fakeActivityMonitor struct {
+	closeError     error
+	closed         bool
+	workerFinished *atomic.Bool
+	sawWorkerDone  bool
+}
+
+func (monitor *fakeActivityMonitor) Close() error {
+	monitor.closed = true
+	if monitor.workerFinished != nil {
+		monitor.sawWorkerDone = monitor.workerFinished.Load()
+	}
+	return monitor.closeError
+}
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 type fakeSnapshotUploadOwner struct {
 	shutdown bool
@@ -63,6 +85,52 @@ func TestDaemonShutdownOwnsBackgroundLifecycle(t *testing.T) {
 	}
 	if !snapshotUploads.shutdown || !serialBroker.shutdown || !systemd.closed {
 		t.Fatalf("owners were not stopped: uploads=%t consoles=%t systemd=%t", snapshotUploads.shutdown, serialBroker.shutdown, systemd.closed)
+	}
+}
+
+func TestDaemonShutdownClosesTheActivityMonitorAfterWorkers(t *testing.T) {
+	daemonContext, cancelDaemon := context.WithCancel(t.Context())
+	workerFinished := &atomic.Bool{}
+	monitor := &fakeActivityMonitor{workerFinished: workerFinished}
+	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
+		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
+	lifecycle.OwnActivityMonitor(monitor)
+	lifecycle.StartWorker(func(workerContext context.Context) {
+		<-workerContext.Done()
+		workerFinished.Store(true)
+	})
+
+	if err := lifecycle.Shutdown(t.Context()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if !monitor.closed {
+		t.Fatal("the activity monitor was not closed")
+	}
+	if !monitor.sawWorkerDone {
+		t.Fatal("the activity monitor closed before the worker finished")
+	}
+}
+
+func TestDaemonShutdownReportsAnActivityMonitorCloseError(t *testing.T) {
+	daemonContext, cancelDaemon := context.WithCancel(t.Context())
+	monitor := &fakeActivityMonitor{closeError: errors.New("map still busy")}
+	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
+		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
+	lifecycle.OwnActivityMonitor(monitor)
+
+	err := lifecycle.Shutdown(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "activity monitor") {
+		t.Fatalf("error = %v, want the activity monitor context", err)
+	}
+}
+
+func TestDaemonShutdownWithoutAnActivityMonitor(t *testing.T) {
+	daemonContext, cancelDaemon := context.WithCancel(t.Context())
+	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
+		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
+
+	if err := lifecycle.Shutdown(t.Context()); err != nil {
+		t.Fatalf("shutdown without a monitor returned %v", err)
 	}
 }
 

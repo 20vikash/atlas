@@ -80,3 +80,26 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 - Expected evidence: Shutdown cancels upload roots, stops background owners, and waits for their bounded completion. Guest systemd units remain active.
 - Safe recovery: Allow the configured bound. Stop the daemon service again after the worker exits. Use process termination only after you preserve logs.
 - Do not: Do not stop `metal-vm@*.service` units as part of daemon shutdown. Do not remove upload state while a worker is active.
+
+## Sleepy VM does not sleep or wake
+
+- Symptom: An idle sleepy VM does not reach `sleeping`, or a packet does not wake a sleeping VM.
+- Owner: `network.ActivityMonitor` tracks activity and wake events. `vm.Manager` controls sleep and wake.
+- Safe checks:
+  - Read `GET /v1/vms/{id}`. Check `observed.state`, `observed.sleeping_since`, `observed.last_network_activity_at`, and `observed.error`.
+  - Confirm that `sleep.enabled` is true, `sleep.idle_timeout` is positive, and the VM has `is_sleepy`.
+  - Run `systemctl show -p MainPID --value metal-vm@<id>.service`. A sleeping VM has a value of `0`.
+  - Run `ls <base_dir>/machines/<id>/snapshots/generations/*/manifest.json`.
+  - Run `bpftool map show`. Dump `activity_by_user_id` and `wake_state_by_user_id` with `bpftool map dump name <map>`. Use the VM user ID as the key.
+  - Run `ip netns exec metal-<id> bpftool link show`.
+  - Read `journalctl -u metald --since "15 minutes ago"` for sleep and wake failures.
+- Expected evidence:
+
+  ```text
+  host TCP -> update activity
+           -> armed (1) -> notified (2) -> wake
+  ```
+
+  Only host-to-guest TCP traffic updates activity or wakes a VM. The trigger packet can be lost while Firecracker starts.
+- Safe recovery: Retry the TCP connection. A metald restart rearms each sleeping VM during reconciliation. Correct a wrong `idle_timeout` or missing `is_sleepy` value.
+- Do not: Do not delete a sleep manifest or a snapshot generation of a sleeping VM. Do not start Firecracker directly to wake a VM.

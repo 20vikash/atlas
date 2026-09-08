@@ -14,7 +14,7 @@ sudo metal/dist/metald serve --config /tmp/metald/metald.toml
 Run the script again when required. It performs these actions:
 
 - Downloads Firecracker and Jailer.
-- Downloads and imports a test image with its manifest.
+- Builds the Atlas guest image with `build_ubuntu_server_image.sh` and imports it with its manifest. The image bakes the sshd `AuthorizedKeysCommand`, the cloud-init datasource, the network, and the metadata service, so a VM reads its per-VM SSH key from MMDS. Set `METALD_IMAGE_VERSION` to pick 22.04 or 24.04.
 - Creates the ZFS pool and parent datasets.
 - Creates a Secure Shell key.
 - Installs the systemd template unit.
@@ -36,6 +36,35 @@ Use the `METALD_IMAGE_URL`, digest, kernel, and architecture variables to test a
 
 The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2` in the VM namespace. It requests termination when the test ends.
 
+## Network activity tests
+
+These tests need root, `ip`, and Linux 6.6 or newer. Run them when no other test uses the same namespaces:
+
+```sh
+sudo -E go test -tags integration -v ./internal/network/
+```
+
+The tests attach the eBPF program to `tap0` in a temporary namespace. They verify that only host-to-guest TCP traffic updates activity. They also verify wake delivery when no process reads `tap0`.
+
+## Sleepy VM test
+
+This test needs Linux 6.6 or newer. Start metald with a short sleep timeout, then run the test:
+
+```sh
+sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
+sudo metal/test/integration/sleepy-vm-test.sh
+```
+
+```text
+running -> idle -> sleeping (no Firecracker process)
+                      |
+                 TCP packet
+                      v
+                   running
+```
+
+The test runs this cycle twice. It verifies that the same guest token and process survive each wake. It removes the VM when it exits.
+
 ## Configuration
 
 | Key | Default | Meaning |
@@ -47,6 +76,12 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 | `firecracker.sockets_dir` | `/run/metal` | Short VM socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
 | `zfs.pool` | `metal` | ZFS pool name. |
+| `wg_mesh.enabled` | `true` | Atlas WG Mesh integration. Set `false` for a test host with no mesh; VMs then get no mesh connectivity. |
+| `wg_mesh.uplink` | none | Discovery interface. Required when mesh is enabled. |
+| `sleep.enabled` | `false` | Enable automatic sleep for sleepy VMs. |
+| `sleep.idle_timeout` | none | Idle timeout for all sleepy VMs. Must be positive when sleep is enabled. |
+
+A VM request and record contain only `is_sleepy`. The timeout applies to all sleepy VMs on the host.
 
 ## Development environment
 
@@ -59,6 +94,10 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 | `METALD_POOL` | `metal` | ZFS pool name. |
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
 | `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
+| `METALD_WG_MESH_ENABLED` | `false` | Write `wg_mesh.enabled`. The development host boots without the mesh CLI by default. |
+| `METALD_SLEEP_ENABLED` | `false` | Write `sleep.enabled`. Enable it for a sleep test. |
+| `METALD_SLEEP_IDLE_TIMEOUT` | `30m` | Write `sleep.idle_timeout`. Use `1m` to watch a VM sleep. |
+| `METALD_IMAGE_VERSION` | `22.04` | Ubuntu version the guest image builder uses. |
 
 ## Manual access
 

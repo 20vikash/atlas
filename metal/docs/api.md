@@ -10,6 +10,10 @@ A mutation stores desired state and returns. It does not wait for the host. The 
 
 Each VM response nests `desired` and `observed`, so one read shows both what was asked for and what the host reached.
 
+`PUT /v1/vms/{id}/power` sets the power state with `{"state": "running"|"stopped"|"paused"}`. A stopped request can add `"warm": true` to save VM memory. `warm` is valid only for `stopped`. The next start resumes the VM. A plain stop, restart, or specification change removes the snapshot.
+
+`PUT /v1/vms/{id}/sleep-policy` sets `{"is_sleepy": true|false}`. The idle timeout is host configuration, not an API field. The response reports the policy in `desired.is_sleepy`. `observed.state` can be `sleeping`, with `last_network_activity_at` and `sleeping_since` when known. Responses omit snapshot paths and the timeout.
+
 Every `/v1` route needs a bearer token. Only liveness and the documentation are public.
 
 Routes, status codes, and error mapping: [internal/api/SPEC.md](../internal/api/SPEC.md).
