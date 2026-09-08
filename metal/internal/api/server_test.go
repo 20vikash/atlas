@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/host"
@@ -50,7 +49,6 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
-		IsSleepy:                      specification.IsSleepy,
 		DesiredGeneration:             1,
 	}}
 	manager.virtualMachines[id] = virtualMachine
@@ -87,17 +85,6 @@ func (manager *fakeVirtualMachineManager) SetPowerState(_ context.Context, id st
 	}
 
 	virtualMachine.info.DesiredState = state
-	virtualMachine.info.DesiredGeneration++
-	return nil
-}
-
-func (manager *fakeVirtualMachineManager) StopWarm(_ context.Context, id string) error {
-	virtualMachine, found := manager.virtualMachines[id]
-	if !found {
-		return vm.ErrNotFound
-	}
-
-	virtualMachine.info.DesiredState = vm.StateStopped
 	virtualMachine.info.DesiredGeneration++
 	return nil
 }
@@ -140,19 +127,6 @@ func (manager *fakeVirtualMachineManager) SetNetwork(_ context.Context, id strin
 	virtualMachine.info.WireGuardMeshIPv6 = configuration.WireGuardMeshIPv6
 	virtualMachine.info.PrivateNetworkThroughputMiBps = configuration.PrivateNetworkThroughputMiBps
 	virtualMachine.info.PublicNetworkThroughputMiBps = configuration.PublicNetworkThroughputMiBps
-	virtualMachine.info.DesiredGeneration++
-	return nil
-}
-
-func (manager *fakeVirtualMachineManager) SetSleepPolicy(_ context.Context, id string, isSleepy bool) error {
-	virtualMachine, found := manager.virtualMachines[id]
-	if !found {
-		return vm.ErrNotFound
-	}
-	if virtualMachine.info.IsSleepy == isSleepy {
-		return nil
-	}
-	virtualMachine.info.IsSleepy = isSleepy
 	virtualMachine.info.DesiredGeneration++
 	return nil
 }
@@ -518,16 +492,6 @@ func TestMutationRequestsRejectUnknownAndTrailingJSON(t *testing.T) {
 	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped"}{}`, http.StatusBadRequest)
 }
 
-func TestWarmStopPowerRequest(t *testing.T) {
-	server := newTestServer(t)
-	do(t, server, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-
-	// A warm stop is accepted.
-	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"stopped","warm":true}`, http.StatusAccepted)
-	// Warm is valid only with a stopped state.
-	do(t, server, http.MethodPut, "/v1/vms/vm1/power", `{"state":"running","warm":true}`, http.StatusBadRequest)
-}
-
 func TestCreateRejectsLongID(t *testing.T) {
 	id := strings.Repeat("a", maximumResourceIDLength+1)
 	do(t, newTestServer(t), http.MethodPut, "/v1/vms/"+id, validCreateRequest, http.StatusBadRequest)
@@ -617,117 +581,6 @@ func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 	if response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
 		t.Fatalf("public throughput = %+v", response.Desired.Network)
 	}
-}
-
-func TestCreateStoresAndReturnsTheSleepyFlag(t *testing.T) {
-	srv := newTestServer(t)
-	body := strings.Replace(validCreateRequest, `"guest":{`, `"is_sleepy":true,"guest":{`, 1)
-	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
-
-	var response virtualMachineResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if !response.Desired.IsSleepy {
-		t.Fatal("desired.is_sleepy = false, want true")
-	}
-}
-
-func TestCreateDefaultsToNonSleepy(t *testing.T) {
-	srv := newTestServer(t)
-	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-
-	var response virtualMachineResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Desired.IsSleepy {
-		t.Fatal("desired.is_sleepy = true, want false for a request without the field")
-	}
-}
-
-func TestObservedResponseReportsSleepTimes(t *testing.T) {
-	activityAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	sleepingSince := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
-	response := toVirtualMachine(vm.Information{
-		State:                 vm.StateSleeping,
-		LastNetworkActivityAt: activityAt,
-		SleepingSince:         sleepingSince,
-	})
-
-	if response.Observed.State != "sleeping" {
-		t.Errorf("state = %q, want sleeping", response.Observed.State)
-	}
-	if response.Observed.LastNetworkActivityAt != activityAt.Format(time.RFC3339) {
-		t.Errorf("last_network_activity_at = %q", response.Observed.LastNetworkActivityAt)
-	}
-	if response.Observed.SleepingSince != sleepingSince.Format(time.RFC3339) {
-		t.Errorf("sleeping_since = %q", response.Observed.SleepingSince)
-	}
-}
-
-func TestObservedResponseOmitsZeroSleepTimes(t *testing.T) {
-	response := toVirtualMachine(vm.Information{State: vm.StateRunning})
-	data, err := json.Marshal(response)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "sleeping_since") || strings.Contains(string(data), "last_network_activity_at") {
-		t.Errorf("zero sleep times must be omitted: %s", data)
-	}
-}
-
-func TestPowerRequestRejectsSleeping(t *testing.T) {
-	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-	// sleeping is an observed state only, so a power request cannot ask for it.
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/power", `{"state":"sleeping"}`, http.StatusBadRequest)
-}
-
-func TestSetSleepPolicyUpdatesTheFlag(t *testing.T) {
-	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-
-	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
-	var response virtualMachineResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if !response.Desired.IsSleepy {
-		t.Fatal("desired.is_sleepy = false, want true")
-	}
-}
-
-func TestSetSleepPolicyIsIdempotent(t *testing.T) {
-	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-
-	first := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
-	second := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
-
-	var firstResponse, secondResponse virtualMachineResponse
-	if err := json.Unmarshal(first.Body.Bytes(), &firstResponse); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(second.Body.Bytes(), &secondResponse); err != nil {
-		t.Fatal(err)
-	}
-	if firstResponse.Desired.Generation != secondResponse.Desired.Generation {
-		t.Fatalf("generation changed on a repeat: %d then %d", firstResponse.Desired.Generation, secondResponse.Desired.Generation)
-	}
-}
-
-func TestSetSleepPolicyRejectsAnIdleTimeoutField(t *testing.T) {
-	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-
-	// The idle timeout is a host value, so it is an unknown field here.
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true,"idle_timeout":"30m"}`, http.StatusBadRequest)
-}
-
-func TestSetSleepPolicyReturnsNotFoundForAMissingVirtualMachine(t *testing.T) {
-	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/v1/vms/missing/sleep-policy", `{"is_sleepy":true}`, http.StatusNotFound)
 }
 
 func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {

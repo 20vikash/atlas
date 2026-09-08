@@ -20,10 +20,9 @@ This package makes one virtual machine network agree with its desired state, and
 
 | Type | Owns |
 |---|---|
-| `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network` and `vm.NetworkActivityMonitor`. |
+| `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network`. |
 | `Mesh` | Registration of VM addresses through the Atlas WG Mesh CLI. |
 | `WireGuardManager` | The managed peer set of one WireGuard interface. |
-| `ActivityMonitor` | VM packet activity tracking. One shared map and one eBPF program for each VM. |
 
 ## Convergence
 
@@ -68,51 +67,6 @@ The VM is inside the namespace, so `egress` carries traffic away from it and mat
 Private filters take a lower `tc` priority than the public filter, which matches every IPv4 address. A private packet therefore stops at the private policer. One priority holds one protocol, so private IPv4 and IPv6 need separate priorities.
 
 Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, plus the IPv6 unique-local range `fc00::/7`, which contains every mesh prefix. Public traffic is every other IPv4 address.
-
-## Packet activity
-
-`ActivityMonitor` tracks host-to-guest TCP traffic. It attaches one eBPF program to the `tap0` egress hook in each VM namespace. It does not attach to the veth pair, which Atlas WG Mesh owns.
-
-```text
-host TCP -> tap0 egress -> activity_by_user_id[user_id]
-                       |
-                       +-> armed -> wake event
-
-host non-TCP -> ignored
-guest packet  -> tap0 ingress -> not hooked
-```
-
-The program reads only the Ethernet type and IP protocol. It counts IPv4 and IPv6 TCP packets, then returns `TCX_NEXT`. It never drops or changes a packet. Other traffic does not count because ARP and IPv6 housekeeping can keep an idle VM awake.
-
-`activity_by_user_id` is a shared hash map keyed by VM user ID. Its value is the monotonic packet time from `bpf_ktime_get_ns`. `LastNetworkActivity` converts its age to UTC. A wall-clock change cannot make a VM sleep early.
-
-The monitor owns all maps and one program and link per VM. `EnsureAttachment` replaces an attachment only when the `tap0` index changes. `ReleaseAttachment` clears the VM state and closes its program and link. `Close` stops the worker and releases all eBPF resources.
-
-metald does not pin eBPF resources. A restart uses the new attachment time as the activity baseline. This can delay sleep by one idle timeout, but it cannot cause early sleep.
-
-## Packet wake
-
-A sleeping VM has no Firecracker process to receive a packet. The eBPF program must signal Go to restore the VM.
-
-```text
-host TCP -> armed -> notified -> wake_events -> Go worker -> wake channel
-```
-
-`wake_state_by_user_id` stores each VM's wake state. `wake_events` is the shared ring buffer. The manager arms a sleeping VM. The first TCP packet atomically changes `armed` to `notified` and writes one event. Later packets do not write another event until the manager rearms the VM.
-
-One worker reads the ring buffer and maps the user ID to the current VM ID. It drops events without a matching attachment. If the output channel is full, it rearms the VM so a later packet can send another event.
-
-`ReleaseAttachment` clears wake state before a user ID can be reused. The packet that triggers a wake can be lost while Firecracker starts, so clients must retry.
-
-A sleeping guest cannot answer ARP or neighbour discovery. Metal pins both guest addresses to the fixed guest MAC:
-
-```text
-fixed guest IPv4 ---+
-                    +-> guest MAC -> tap0
-per-VM mesh IPv6 ---+
-```
-
-`ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver a TCP wake packet.
 
 ## Atlas WG Mesh
 

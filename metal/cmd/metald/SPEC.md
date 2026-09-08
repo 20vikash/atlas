@@ -19,7 +19,7 @@ The default configuration path is `/var/lib/metal/metald.toml`. A missing defaul
 | Type | Role |
 |---|---|
 | `opts` | Resolved Firecracker, ZFS, WireGuard, Atlas WG Mesh, listener, authentication, and base-directory settings. |
-| `fileConfig` | TOML sections for metald, Firecracker, Jailer, ZFS, WireGuard, Atlas WG Mesh, and sleep. |
+| `fileConfig` | TOML sections for metald, Firecracker, Jailer, ZFS, WireGuard, and Atlas WG Mesh. |
 
 ## Startup wiring
 
@@ -30,18 +30,17 @@ load configuration
    -> create storage stores
    -> create the WireGuard manager
    -> connect Atlas WG Mesh and configure the host
-   -> create the activity monitor
    -> create the Firecracker runtime
    -> validate all VM records and create the VM manager
    -> create the host service
-   -> create the VM, image, and network-wake reconcilers
+   -> start the VM and image reconcilers
    -> create the authenticated API
    -> listen and serve
 ```
 
 The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
 
-The network constructor is `network.NewLinuxAllocator(mesh, activityMonitor)`. The VM manager receives the runtime, network, disk, snapshot, activity, wake, and logger services.
+The network constructor is `network.NewLinuxAllocator(mesh)`. The VM manager receives the runtime, network, disk, snapshot, and logger services.
 
 The host service receives the mesh, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
 
@@ -63,16 +62,14 @@ The host service receives the mesh, WireGuard, image, VM, storage, and reconcile
 | `wireguard.interface` | `wg0` | Underlay interface for managed peers and Atlas WG Mesh. |
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
 | `wg_mesh.uplink` | none | Discovery uplink. Required when the mesh is enabled. |
-| `sleep.enabled` | `false` | Enable automatic sleep for sleepy VMs. |
-| `sleep.idle_timeout` | none | Idle timeout for all sleepy VMs. Positive when sleep is enabled. |
 
 See `config.example.toml` for the complete file format.
 
 ## Runtime loops
 
-The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data. The network-wake reconciler restores a sleeping VM after a host-to-guest TCP packet.
+The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data.
 
-The daemon owns all reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for workers, closes the activity monitor, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
+The daemon owns both reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for uploads, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
 
 The daemon writes structured JSON logs. Log records include request and operation correlation fields when the operation comes from the API.
 

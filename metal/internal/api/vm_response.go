@@ -24,24 +24,21 @@ type desiredVirtualMachineResponse struct {
 	Image             virtualMachineImageResponse `json:"image"`
 	Network           networkResponse             `json:"network"`
 	Guest             guestResponse               `json:"guest"`
-	IsSleepy          bool                        `json:"is_sleepy"`
 }
 
 // observedVirtualMachineResponse is what the host reached, and the operation
 // that is running when it has not.
 type observedVirtualMachineResponse struct {
-	Generation            uint64                  `json:"generation"`
-	RestartGeneration     uint64                  `json:"restart_generation"`
-	State                 string                  `json:"state"`
-	Phase                 string                  `json:"phase,omitempty"`
-	OperationID           string                  `json:"operation_id,omitempty"`
-	OperationStarted      string                  `json:"operation_started_at,omitempty"`
-	UpdatedAt             string                  `json:"updated_at"`
-	LastNetworkActivityAt string                  `json:"last_network_activity_at,omitempty"`
-	SleepingSince         string                  `json:"sleeping_since,omitempty"`
-	Disk                  observedDiskResponse    `json:"disk"`
-	Network               observedNetworkResponse `json:"network"`
-	Error                 *operationErrorResponse `json:"error"`
+	Generation        uint64                  `json:"generation"`
+	RestartGeneration uint64                  `json:"restart_generation"`
+	State             string                  `json:"state"`
+	Phase             string                  `json:"phase,omitempty"`
+	OperationID       string                  `json:"operation_id,omitempty"`
+	OperationStarted  string                  `json:"operation_started_at,omitempty"`
+	UpdatedAt         string                  `json:"updated_at"`
+	Disk              observedDiskResponse    `json:"disk"`
+	Network           observedNetworkResponse `json:"network"`
+	Error             *operationErrorResponse `json:"error"`
 }
 
 // computeResponse is the CPU and memory shape.
@@ -145,21 +142,18 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 				SSHKeys:  append([]string{}, information.SSHKeys...),
 				Metadata: cloneMetadata(information.Metadata),
 			},
-			IsSleepy: information.IsSleepy,
 		},
 		Observed: observedVirtualMachineResponse{
-			Generation:            information.ObservedGeneration,
-			RestartGeneration:     information.ObservedRestartGeneration,
-			State:                 string(information.State),
-			Phase:                 information.Phase,
-			OperationID:           information.OperationID,
-			OperationStarted:      formatRFC3339(information.OperationStartedAt),
-			UpdatedAt:             formatRFC3339(information.UpdatedAt),
-			LastNetworkActivityAt: formatRFC3339(information.LastNetworkActivityAt),
-			SleepingSince:         formatRFC3339(information.SleepingSince),
-			Disk:                  observedDiskResponse{UsedMiB: information.DiskUsedMiB},
-			Network:               observedNetworkResponse{MAC: information.MAC},
-			Error:                 toOperationError(information.Error),
+			Generation:        information.ObservedGeneration,
+			RestartGeneration: information.ObservedRestartGeneration,
+			State:             string(information.State),
+			Phase:             information.Phase,
+			OperationID:       information.OperationID,
+			OperationStarted:  formatRFC3339(information.OperationStartedAt),
+			UpdatedAt:         formatRFC3339(information.UpdatedAt),
+			Disk:              observedDiskResponse{UsedMiB: information.DiskUsedMiB},
+			Network:           observedNetworkResponse{MAC: information.MAC},
+			Error:             toOperationError(information.Error),
 		},
 	}
 }

@@ -60,24 +60,6 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	}, nil
 }
 
-// DisabledMesh disables mesh registration on development and test hosts.
-type DisabledMesh struct{}
-
-// Check the mesh registrar interface at compile time.
-var (
-	_ meshRegistrar = (*Mesh)(nil)
-	_ meshRegistrar = DisabledMesh{}
-)
-
-// Add does nothing.
-func (DisabledMesh) Add(context.Context, string, string) error { return nil }
-
-// Remove does nothing.
-func (DisabledMesh) Remove(context.Context, string, string) error { return nil }
-
-// ApplyPrivilegedAddresses does nothing.
-func (DisabledMesh) ApplyPrivilegedAddresses(context.Context, []string) error { return nil }
-
 // EnsureHost configures Atlas WG Mesh when this host has no configuration, and
 // rejects a configuration that discovers on another interface.
 func (mesh *Mesh) EnsureHost(ctx context.Context) error {
@@ -241,8 +223,9 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 	return false, nil
 }
 
-// meshNamespaceSteps routes mesh traffic through the namespace. Proxy NDP
-// answers on the veth. A permanent tap0 neighbour keeps a sleeping guest reachable.
+// meshNamespaceSteps makes the namespace an IPv6 router for the guest mesh
+// address. The host route from Atlas WG Mesh is on-link on the host veth, so the
+// namespace answers neighbour solicitations for the guest with proxy NDP.
 func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]string {
 	return [][]string{
 		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
@@ -250,7 +233,6 @@ func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]str
 		{"ip", "-n", namespace, "link", "set", guestVirtualEthernet, "mtu", strconv.Itoa(meshMTU)},
 		{"ip", "-n", namespace, "-6", "addr", "replace", meshGatewayAddress + "/64", "dev", tapName, "nodad"},
 		{"ip", "-n", namespace, "-6", "route", "replace", address + "/128", "dev", tapName},
-		{"ip", "-n", namespace, "-6", "neigh", "replace", address, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent"},
 		{"ip", "-n", namespace, "-6", "route", "replace", meshPrefix, "via", meshGatewayAddress, "dev", guestVirtualEthernet},
 		{"ip", "-n", namespace, "-6", "neigh", "replace", "proxy", address, "dev", guestVirtualEthernet},
 	}

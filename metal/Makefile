@@ -11,12 +11,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 # -trimpath drops build paths, -s -w drop the symbol table and DWARF.
 GO_BUILD_FLAGS := -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: build clean openapi version generate-network
-
-# Regenerate the eBPF network files. This needs Clang.
-# Normal builds use the committed files.
-generate-network:
-	go generate ./internal/network/...
+.PHONY: build clean openapi version
 
 build: openapi
 	mkdir -p $(OUTPUT_DIRECTORY)

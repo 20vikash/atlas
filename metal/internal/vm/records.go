@@ -28,23 +28,15 @@ const (
 
 // DesiredRecord stores the complete desired state of one virtual machine.
 type DesiredRecord struct {
-	SchemaVersion     int    `json:"schema_version"`
-	ID                string `json:"id"`
-	UserID            uint32 `json:"user_id"`
-	GroupID           uint32 `json:"group_id"`
-	CreateFingerprint string `json:"create_fingerprint"`
-	Generation        uint64 `json:"generation"`
-	RestartGeneration uint64 `json:"restart_generation"`
-	// SpecificationGeneration bumps only when the compute, disk, or network shape
-	// changes. It stays stable across power and warm-stop changes, so a memory
-	// snapshot keyed on it survives a stop and start.
-	SpecificationGeneration uint64 `json:"specification_generation,omitempty"`
-	State                   State  `json:"state"`
-	// WarmStop asks a stop to save a memory snapshot instead of shutting the
-	// guest down. It is meaningful only when State is stopped. A later start
-	// resumes from the snapshot. It defaults false, so an old record stops cold.
-	WarmStop      bool          `json:"warm_stop,omitempty"`
-	Specification Specification `json:"specification"`
+	SchemaVersion     int           `json:"schema_version"`
+	ID                string        `json:"id"`
+	UserID            uint32        `json:"user_id"`
+	GroupID           uint32        `json:"group_id"`
+	CreateFingerprint string        `json:"create_fingerprint"`
+	Generation        uint64        `json:"generation"`
+	RestartGeneration uint64        `json:"restart_generation"`
+	State             State         `json:"state"`
+	Specification     Specification `json:"specification"`
 }
 
 // ObservedRecord stores reconciliation progress and observed state.
@@ -63,41 +55,6 @@ type ObservedRecord struct {
 	StorageCleanupComplete bool             `json:"storage_cleanup_complete,omitempty"`
 	NetworkInterface       NetworkInterface `json:"network_interface,omitempty"`
 	Disk                   DiskUsage        `json:"disk,omitempty"`
-	Sleep                  *SleepProgress   `json:"sleep,omitempty"`
-}
-
-// SleepProgress records the automatic sleep operation of one VM. It holds only
-// safe times and generation numbers. It never holds artifact paths, which the
-// Firecracker runtime derives from the VM ID.
-type SleepProgress struct {
-	EligibleAt         time.Time `json:"eligible_at,omitempty"`
-	RequestedAt        time.Time `json:"requested_at,omitempty"`
-	SnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
-	SnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
-	// SpecificationGeneration is the desired specification generation the snapshot
-	// was made for. A later shape change makes the snapshot incompatible, so the
-	// VM cold boots instead of resuming.
-	SpecificationGeneration uint64    `json:"specification_generation,omitempty"`
-	LastNetworkActivityAt   time.Time `json:"last_network_activity_at,omitempty"`
-}
-
-// validate rejects a corrupt sleep object. A published snapshot needs both a
-// generation and a creation time, and a sleeping VM needs a published snapshot.
-func (record ObservedRecord) validateSleep() error {
-	if record.State == StateSleeping && record.Sleep == nil {
-		return errors.New("sleeping record has no sleep progress")
-	}
-	sleep := record.Sleep
-	if sleep == nil {
-		return nil
-	}
-	if (sleep.SnapshotGeneration == 0) != sleep.SnapshotCreatedAt.IsZero() {
-		return errors.New("sleep progress has a partial snapshot")
-	}
-	if record.State == StateSleeping && sleep.SnapshotGeneration == 0 {
-		return errors.New("sleeping record has no published snapshot")
-	}
-	return nil
 }
 
 // OperationError stores safe and local reconciliation error details. Message is
@@ -202,9 +159,6 @@ func (store *recordStore) readObserved(identifier string) (ObservedRecord, error
 	}
 	if !isObservedState(record.State) || record.UpdatedAt.IsZero() {
 		return ObservedRecord{}, fmt.Errorf("read %s: invalid observed record", store.observedPath(identifier))
-	}
-	if err := record.validateSleep(); err != nil {
-		return ObservedRecord{}, fmt.Errorf("read %s: %w", store.observedPath(identifier), err)
 	}
 	return record, nil
 }

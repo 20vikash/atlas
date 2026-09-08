@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -43,29 +42,6 @@ func TestLoadFileOverridesDefault(t *testing.T) {
 	}
 }
 
-func TestMeshEnabledByDefaultAndDisabledByConfig(t *testing.T) {
-	if !defaultOpts().mesh.enabled {
-		t.Fatal("mesh must be enabled by default")
-	}
-
-	// An absent enabled key keeps the default; only an explicit false disables it.
-	present, err := load(writeConfig(t, "[wg_mesh]\nuplink = \"eth0\"\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !present.mesh.enabled {
-		t.Error("mesh became disabled without an explicit enabled=false")
-	}
-
-	off, err := load(writeConfig(t, "[wg_mesh]\nenabled = false\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if off.mesh.enabled {
-		t.Error("enabled=false did not disable the mesh")
-	}
-}
-
 func TestLoadBaseDirMovesDerivedDirs(t *testing.T) {
 	path := writeConfig(t, "[metald]\nbase_dir = \"/srv/metal\"\n")
 	o, err := load(path)
@@ -95,45 +71,6 @@ func TestLoadAuthenticationTokenHash(t *testing.T) {
 func TestLoadMissingFile(t *testing.T) {
 	if _, err := load("/no/such/config.toml"); err == nil {
 		t.Error("explicit missing path: want error, got nil")
-	}
-}
-
-func TestLoadSleepConfiguration(t *testing.T) {
-	cases := []struct {
-		name        string
-		body        string
-		wantErr     bool
-		wantEnabled bool
-		wantTimeout time.Duration
-	}{
-		{name: "absent section is disabled", body: "", wantEnabled: false, wantTimeout: 0},
-		{name: "enabled with a positive timeout", body: "[sleep]\nenabled = true\nidle_timeout = \"30m\"\n", wantEnabled: true, wantTimeout: 30 * time.Minute},
-		{name: "disabled keeps a parsed timeout", body: "[sleep]\nenabled = false\nidle_timeout = \"30m\"\n", wantEnabled: false, wantTimeout: 30 * time.Minute},
-		{name: "disabled without a timeout", body: "[sleep]\nenabled = false\n", wantEnabled: false, wantTimeout: 0},
-		{name: "enabled without a timeout is rejected", body: "[sleep]\nenabled = true\n", wantErr: true},
-		{name: "enabled with a zero timeout is rejected", body: "[sleep]\nenabled = true\nidle_timeout = \"0s\"\n", wantErr: true},
-		{name: "enabled with a negative timeout is rejected", body: "[sleep]\nenabled = true\nidle_timeout = \"-5m\"\n", wantErr: true},
-		{name: "an invalid duration is rejected", body: "[sleep]\nenabled = true\nidle_timeout = \"soon\"\n", wantErr: true},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			o, err := load(writeConfig(t, testCase.body))
-			if testCase.wantErr {
-				if err == nil {
-					t.Fatal("want an error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if o.sleep.enabled != testCase.wantEnabled {
-				t.Errorf("enabled = %t, want %t", o.sleep.enabled, testCase.wantEnabled)
-			}
-			if o.sleep.idleTimeout != testCase.wantTimeout {
-				t.Errorf("idleTimeout = %v, want %v", o.sleep.idleTimeout, testCase.wantTimeout)
-			}
-		})
 	}
 }
 

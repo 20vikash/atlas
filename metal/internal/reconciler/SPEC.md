@@ -14,9 +14,8 @@ Every pass is a full sweep, not a queue of events. A missed wake, a failed opera
 |---|---|
 | `VirtualMachineReconciler` | Drives every VM towards its desired record. |
 | `ImageReconciler` | Caches the images the controller selects and prunes the rest. |
-| `NetworkWakeReconciler` | Restores a sleeping VM after a packet wake event. |
-| `passScheduler` | Runs one pass on an interval and on demand. Both sweep reconcilers embed it. |
-| `VirtualMachineManager`, `ImageStore`, `SnapshotStore`, `MemorySnapshotBuilder`, `NetworkWakeManager` | The work each pass calls out to. |
+| `passScheduler` | Runs one pass on an interval and on demand. Both reconcilers embed it. |
+| `VirtualMachineManager`, `ImageStore`, `SnapshotStore`, `MemorySnapshotBuilder` | The work each pass calls out to. |
 
 ## Pass model
 
@@ -37,20 +36,6 @@ Run(ctx)
 A pass runs first, then the loop waits. A new reconciler therefore converges at startup without waiting one interval.
 
 `Wake` never blocks. The wake channel holds one request, so many wakes that arrive during a pass collapse into one pass after it. The API calls `Wake` after a mutation, so a change is applied at once instead of at the next tick.
-
-## Network wake
-
-`NetworkWakeReconciler` handles one event at a time:
-
-```text
-network monitor -> shared wake channel -> Manager.WakeFromNetwork -> restore
-                                          |
-                                          +-> one event at a time
-                                          +-> operation timeout
-                                          +-> failure: log and continue
-```
-
-It does not retry a failed event. A normal VM pass rearms a sleeping VM, so a later packet can send a new event. A canceled context or closed channel stops the reconciler.
 
 ## Bounds
 

@@ -1,60 +1,12 @@
 package vm
 
-import (
-	"context"
-	"time"
-)
-
-// StartMode selects how Runtime.Start brings up a virtual machine.
-type StartMode int
-
-const (
-	// StartNormal keeps the current warm-image and cold-boot behavior.
-	StartNormal StartMode = iota
-	// StartFromSleepSnapshot restores the VM-local sleep snapshot and resumes it.
-	StartFromSleepSnapshot
-	// StartFromSleepSnapshotPaused restores the snapshot without running the vCPUs.
-	StartFromSleepSnapshotPaused
-)
-
-// StopMode selects how Runtime.Stop ends a virtual machine.
-type StopMode int
-
-const (
-	// StopShutdown ends the guest with the current Ctrl+Alt+Del and bounded kill.
-	StopShutdown StopMode = iota
-	// StopWithSleepSnapshot pauses the guest, saves a full snapshot, and
-	// terminates the Firecracker process without a guest shutdown.
-	StopWithSleepSnapshot
-)
-
-// StopOutcome reports what a stop produced. A warm stop fills the published
-// snapshot generation and its creation time. A shutdown leaves both zero.
-type StopOutcome struct {
-	SnapshotGeneration uint64
-	SnapshotCreatedAt  time.Time
-}
-
-// SleepSnapshot describes a validated VM-local sleep snapshot. The manager reads
-// it to recover a sleep that terminated the process but did not record sleeping.
-type SleepSnapshot struct {
-	Generation uint64
-	CreatedAt  time.Time
-}
+import "context"
 
 // Runtime controls virtual machine processes and guest-facing operations.
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
-	Start(context.Context, RuntimeMachine, StartMode) error
-	Stop(context.Context, RuntimeMachine, StopMode) (StopOutcome, error)
-	// InspectSleepSnapshot returns the newest valid sleep snapshot. It returns
-	// ErrNotFound when none exists and an error when a manifest is present but
-	// invalid.
-	InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error)
-	// DiscardSleepSnapshot removes the sleep snapshot of a stopped VM and clears
-	// the runtime unit, so a later start cold boots. It accepts a VM with no
-	// snapshot.
-	DiscardSleepSnapshot(context.Context, RuntimeMachine) error
+	Start(context.Context, RuntimeMachine) error
+	Stop(context.Context, RuntimeMachine) error
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error
@@ -70,11 +22,6 @@ type RuntimeMachine struct {
 	GroupID          uint32
 	Specification    Specification
 	NetworkInterface NetworkInterface
-	// SpecificationGeneration and RestartGeneration identify the desired state a
-	// snapshot belongs to. A restore validates them against the current desired
-	// record before it loads the snapshot.
-	SpecificationGeneration uint64
-	RestartGeneration       uint64
 }
 
 // RuntimeStatus contains the observed runtime state.

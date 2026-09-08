@@ -14,8 +14,8 @@ internal/api/                HTTP API
 internal/console/            VM serial consoles over PTYs
 internal/firecracker/        Firecracker support
 internal/host/               Controller synchronization and host capacity
-internal/network/            Linux VM networking, packet activity, and WireGuard peer management
-internal/reconciler/         VM, image, and network-wake reconciliation
+internal/network/            Linux VM networking and WireGuard peer management
+internal/reconciler/         VM and image reconciliation
 internal/storage/            ZFS images, VM disks, and pool capacity
 internal/platform/           Host file, command, and systemd support
 internal/vm/                 VM domain logic
@@ -63,4 +63,4 @@ Metal manages host VMs. It does not define the proxy or WG Mesh services.
 
 ## Ownership
 
-Keep VM logic in `internal/vm/`. Keep HTTP handlers thin. `internal/network/` owns VM network convergence, packet activity, WireGuard peer reconciliation, and persistent peer state. `internal/storage/` separates the ZFS pool, VM disks, images, and snapshot staging. `internal/reconciler/` owns the asynchronous VM, image, and network-wake loops.
+Keep VM logic in `internal/vm/`. Keep HTTP handlers thin. `internal/network/` owns WireGuard peer reconciliation and persistent peer state. `internal/storage/` separates the ZFS pool, VM disks, images, and snapshot staging. `internal/reconciler/` owns the asynchronous VM and image loops.
