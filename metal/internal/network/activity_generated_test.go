@@ -29,6 +29,20 @@ func TestActivitySpecMatchesSource(t *testing.T) {
 		t.Errorf("map value size = %d, want 8", activityMap.ValueSize)
 	}
 
+	wakeState := spec.Maps["wake_state_by_user_id"]
+	if wakeState == nil {
+		t.Fatal("map wake_state_by_user_id is missing")
+	}
+	if wakeState.Type != ebpf.Hash {
+		t.Errorf("wake state map type = %v, want Hash", wakeState.Type)
+	}
+	if wakeState.KeySize != 4 {
+		t.Errorf("wake state map key size = %d, want 4", wakeState.KeySize)
+	}
+	if wakeState.ValueSize != 4 {
+		t.Errorf("wake state map value size = %d, want 4", wakeState.ValueSize)
+	}
+
 	program := spec.Programs["record_activity"]
 	if program == nil {
 		t.Fatal("program record_activity is missing")

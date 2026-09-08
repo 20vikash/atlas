@@ -61,7 +61,8 @@ type activityProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type activityMapSpecs struct {
-	ActivityByUserId *ebpf.MapSpec `ebpf:"activity_by_user_id"`
+	ActivityByUserId  *ebpf.MapSpec `ebpf:"activity_by_user_id"`
+	WakeStateByUserId *ebpf.MapSpec `ebpf:"wake_state_by_user_id"`
 }
 
 // activityVariableSpecs contains global variables before they are loaded into the kernel.
@@ -91,12 +92,14 @@ func (o *activityObjects) Close() error {
 //
 // It can be passed to loadActivityObjects or ebpf.CollectionSpec.LoadAndAssign.
 type activityMaps struct {
-	ActivityByUserId *ebpf.Map `ebpf:"activity_by_user_id"`
+	ActivityByUserId  *ebpf.Map `ebpf:"activity_by_user_id"`
+	WakeStateByUserId *ebpf.Map `ebpf:"wake_state_by_user_id"`
 }
 
 func (m *activityMaps) Close() error {
 	return _ActivityClose(
 		m.ActivityByUserId,
+		m.WakeStateByUserId,
 	)
 }
 

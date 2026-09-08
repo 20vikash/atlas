@@ -17,6 +17,16 @@ struct {
 	__type(value, __u64);
 } activity_by_user_id SEC(".maps");
 
+/* wake_state_by_user_id holds the wake state of each VM user ID. A missing key
+   means disarmed. Go arms a sleeping VM and disarms a running VM. metald sets the
+   real capacity at load time. */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u32);
+} wake_state_by_user_id SEC(".maps");
+
 /* virtual_machine_user_id is the map key for this program instance. metald
    rewrites it before load, so one instance serves one VM. */
 const volatile __u32 virtual_machine_user_id = 0;
