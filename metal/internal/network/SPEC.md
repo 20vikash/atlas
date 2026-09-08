@@ -20,7 +20,7 @@ This package makes one virtual machine network agree with its desired state, and
 
 | Type | Owns |
 |---|---|
-| `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network` and `vm.NetworkActivityMonitor`. |
+| `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network`. |
 | `Mesh` | Registration of VM addresses through the Atlas WG Mesh CLI. |
 | `WireGuardManager` | The managed peer set of one WireGuard interface. |
 | [`activity.Monitor`](activity/SPEC.md) | Tracking of packet activity for one VM. Three shared maps and one eBPF program for each VM. |
