@@ -104,7 +104,15 @@ One worker reads the ring buffer and maps the user ID to the current VM ID. It d
 
 `ReleaseAttachment` clears wake state before a user ID can be reused. The packet that triggers a wake can be lost while Firecracker starts, so clients must retry.
 
-A static neighbour entry lets a wake packet reach `tap0` while the guest cannot answer ARP or neighbour discovery. `ensureNamespaceBase` pins the fixed IPv4 guest address and MAC. The mesh path pins the per-VM IPv6 mesh address and the same MAC, so a mesh TCP packet also wakes a sleeping VM.
+A sleeping guest cannot answer ARP or neighbour discovery. Metal pins both guest addresses to the fixed guest MAC:
+
+```text
+fixed guest IPv4 ---+
+                    +-> guest MAC -> tap0
+per-VM mesh IPv6 ---+
+```
+
+`ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver a TCP wake packet.
 
 ## Atlas WG Mesh
 
