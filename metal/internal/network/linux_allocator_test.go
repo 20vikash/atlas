@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/network/activity"
-	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // fakeActivityMonitor records the attach and release calls of the allocator.
@@ -25,10 +24,6 @@ func (attacher *fakeActivityMonitor) EnsureAttachment(request activity.Attachmen
 func (attacher *fakeActivityMonitor) ReleaseAttachment(virtualMachineID string) error {
 	attacher.released = append(attacher.released, virtualMachineID)
 	return nil
-}
-
-func (attacher *fakeActivityMonitor) LastNetworkActivity(context.Context, vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
-	return vm.NetworkActivity{}, nil
 }
 
 func TestNewLinuxAllocatorStoresTheActivityAttacher(t *testing.T) {

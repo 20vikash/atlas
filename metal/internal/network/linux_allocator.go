@@ -25,11 +25,11 @@ type meshRegistrar interface {
 	Remove(ctx context.Context, address, interfaceName string) error
 }
 
-// activityMonitor tracks and releases VM packet activity.
+// activityMonitor attaches and releases VM packet activity tracking. The VM
+// manager reads activity from the monitor itself, not through this allocator.
 type activityMonitor interface {
 	EnsureAttachment(request activity.AttachmentRequest) error
 	ReleaseAttachment(virtualMachineID string) error
-	LastNetworkActivity(ctx context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error)
 }
 
 // LinuxAllocator creates Linux network resources for virtual machines.
@@ -211,12 +211,4 @@ func (allocator *LinuxAllocator) removeMeshRegistration(ctx context.Context, use
 	return nil
 }
 
-// LastNetworkActivity returns the last packet time for one VM.
-func (allocator *LinuxAllocator) LastNetworkActivity(ctx context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
-	return allocator.activityMonitor.LastNetworkActivity(ctx, request)
-}
-
-var (
-	_ vm.Network                = (*LinuxAllocator)(nil)
-	_ vm.NetworkActivityMonitor = (*LinuxAllocator)(nil)
-)
+var _ vm.Network = (*LinuxAllocator)(nil)
