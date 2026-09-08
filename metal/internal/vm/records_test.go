@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-// writeStatusFile places a hand-written status.json, so a test can simulate an
-// old or corrupt on-disk record.
+// writeStatusFile writes a hand-crafted status record.
 func writeStatusFile(t *testing.T, directory, identifier, body string) string {
 	t.Helper()
 	machineDirectory := filepath.Join(directory, identifier)
