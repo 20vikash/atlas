@@ -41,7 +41,7 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 These tests need root, `ip`, and Linux 6.6 or newer. Run them when no other test uses the same namespaces:
 
 ```sh
-sudo -E go test -tags integration -v ./internal/network/
+sudo -E go test -tags integration -v ./internal/network/activity/
 ```
 
 The tests attach the eBPF program to `tap0` in a temporary namespace. They verify that only host-to-guest TCP traffic updates activity. They also verify wake delivery when no process reads `tap0`.

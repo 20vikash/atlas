@@ -164,7 +164,7 @@ for cycle in 1 2; do
 	wait_for_sleeping
 
 	# The ZFS disk and the sleep manifest must remain while asleep.
-	if ! compgen -G "$machine_directory/snapshots/generations/*/manifest.json" >/dev/null; then
+	if ! compgen -G "$machine_directory/memory-snapshots/*/manifest.json" >/dev/null; then
 		echo "FAILED: no sleep manifest under $machine_directory" >&2
 		exit 1
 	fi

@@ -76,7 +76,7 @@ func loadWakeProgram(t *testing.T, spec *ebpf.CollectionSpec, userID uint32, act
 
 // TestWakeProgramLoadsWithSharedMaps checks shared-map compatibility.
 //
-//	sudo -E go test -tags integration -run TestWakeProgramLoadsWithSharedMaps ./internal/network/
+//	sudo -E go test -tags integration -run TestWakeProgramLoadsWithSharedMaps ./internal/network/activity/
 func TestWakeProgramLoadsWithSharedMaps(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
@@ -212,7 +212,7 @@ func readWakeUserID(t *testing.T, reader *ringbuf.Reader, wait time.Duration) (u
 
 // TestWakeDeduplicatesConcurrentPackets checks one event per arm.
 //
-//	sudo -E go test -tags integration -run TestWakeDeduplicatesConcurrentPackets ./internal/network/
+//	sudo -E go test -tags integration -run TestWakeDeduplicatesConcurrentPackets ./internal/network/activity/
 func TestWakeDeduplicatesConcurrentPackets(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
@@ -273,7 +273,7 @@ func TestWakeDeduplicatesConcurrentPackets(t *testing.T) {
 
 // TestWakeSurvivesRingPressure checks wake delivery after ring pressure.
 //
-//	sudo -E go test -tags integration -run TestWakeSurvivesRingPressure ./internal/network/
+//	sudo -E go test -tags integration -run TestWakeSurvivesRingPressure ./internal/network/activity/
 func TestWakeSurvivesRingPressure(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
@@ -349,7 +349,7 @@ func setUpWakeNamespace(t *testing.T, namespace string) string {
 
 // TestNetworkWakeDeliversWithoutATapReader checks wake delivery without a reader.
 //
-//	sudo -E go test -tags integration -run TestNetworkWakeDeliversWithoutATapReader ./internal/network/
+//	sudo -E go test -tags integration -run TestNetworkWakeDeliversWithoutATapReader ./internal/network/activity/
 func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")

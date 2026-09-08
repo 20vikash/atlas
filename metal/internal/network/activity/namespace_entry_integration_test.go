@@ -13,7 +13,7 @@ import (
 
 // TestInNamespaceEntersARealNamespace checks real namespace entry and restore.
 //
-//	sudo -E go test -tags integration -run TestInNamespaceEntersARealNamespace ./internal/network/
+//	sudo -E go test -tags integration -run TestInNamespaceEntersARealNamespace ./internal/network/activity/
 func TestInNamespaceEntersARealNamespace(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root to create a network namespace")

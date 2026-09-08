@@ -126,7 +126,7 @@ func assertNoActivity(t *testing.T, monitor *Monitor, request vm.NetworkActivity
 
 // TestActivityCountsHostToGuestTcpOnly checks host-to-guest TCP activity.
 //
-//	sudo -E go test -tags integration -run TestActivityCountsHostToGuestTcpOnly ./internal/network/
+//	sudo -E go test -tags integration -run TestActivityCountsHostToGuestTcpOnly ./internal/network/activity/
 func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")

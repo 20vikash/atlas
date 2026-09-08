@@ -16,7 +16,7 @@ import (
 
 // TestActivityAdvancesWithoutATapReader checks activity without a tap reader.
 //
-//	sudo -E go test -tags integration -run TestActivityAdvancesWithoutATapReader ./internal/network/
+//	sudo -E go test -tags integration -run TestActivityAdvancesWithoutATapReader ./internal/network/activity/
 func TestActivityAdvancesWithoutATapReader(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
