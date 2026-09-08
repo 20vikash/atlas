@@ -7,26 +7,17 @@ import (
 	"time"
 )
 
-// sleepRequest carries why a VM enters sleep. RequestedAt is when the sleep
-// operation started. EligibleAt and LastNetworkActivityAt come from an automatic
-// idle decision. They stay zero for a manual warm stop. AbortOnTraffic makes an
-// automatic sleep restore the VM when a packet arrives during the warm stop. A
-// manual warm stop leaves it false, because the operator asked for the stop.
+// sleepRequest records why a VM enters sleep.
 type sleepRequest struct {
 	EligibleAt            time.Time
 	RequestedAt           time.Time
 	LastNetworkActivityAt time.Time
-	// LastNetworkActivityMonotonic is the raw eBPF time of the last packet at the
-	// idle decision. The abort check compares it, so wall-clock read jitter never
-	// looks like new traffic.
+	// LastNetworkActivityMonotonic is the packet time at the idle decision.
 	LastNetworkActivityMonotonic uint64
 	AbortOnTraffic               bool
 }
 
-// enterSleep warm-stops a live guest and publishes the sleeping observed state.
-// It records the sleep-check operation before host work, so an interrupted sleep
-// keeps its requested time. It publishes sleeping only after the runtime stops
-// with a valid snapshot. It keeps the desired power state.
+// enterSleep warm-stops a live guest and publishes sleeping state.
 func (manager *Manager) enterSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -46,9 +37,7 @@ func (manager *Manager) enterSleep(
 		return err
 	}
 
-	// Arm the wake before the final idle check. A packet after this point produces
-	// a wake event that waits for this VM lock, so no wake is lost during the warm
-	// stop. A manual warm stop does not arm, because it wants the VM stopped.
+	// Arm wake before the final idle check for automatic sleep.
 	if request.AbortOnTraffic {
 		if err := manager.armNetworkWake(desired); err != nil {
 			return err
@@ -77,8 +66,7 @@ func (manager *Manager) enterSleep(
 	observed.Sleep.MemorySnapshotCreatedAt = outcome.MemorySnapshotCreatedAt
 	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration
 
-	// A packet during the warm stop aborts an automatic sleep. The just-created
-	// snapshot is restored, so the VM keeps running with the new traffic.
+	// A packet during the warm stop aborts automatic sleep.
 	after, afterError := manager.sampleActivityForAbort(ctx, desired, request)
 	if request.AbortOnTraffic && beforeError == nil && afterError == nil && after.LastPacketMonotonicNanoseconds > before.LastPacketMonotonicNanoseconds {
 		manager.logger.Info("automatic sleep aborted by traffic",
@@ -94,9 +82,7 @@ func (manager *Manager) enterSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// abortSleepBeforeSnapshot cancels an automatic sleep that a packet interrupted
-// before the warm stop. It disarms the wake and keeps the VM running, so no
-// snapshot is made and the new traffic continues.
+// abortSleepBeforeSnapshot cancels automatic sleep before snapshotting.
 func (manager *Manager) abortSleepBeforeSnapshot(desired DesiredRecord, observed *ObservedRecord) error {
 	manager.disarmNetworkWake(desired)
 	manager.logger.Info("automatic sleep aborted by traffic before snapshot",
@@ -108,8 +94,7 @@ func (manager *Manager) abortSleepBeforeSnapshot(desired DesiredRecord, observed
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// sampleActivityForAbort reads activity only for an automatic sleep. It returns a
-// zero value and no error for a manual warm stop, which never aborts on traffic.
+// sampleActivityForAbort reads activity for automatic sleep.
 func (manager *Manager) sampleActivityForAbort(ctx context.Context, desired DesiredRecord, request sleepRequest) (NetworkActivity, error) {
 	if !request.AbortOnTraffic {
 		return NetworkActivity{}, nil
@@ -117,10 +102,7 @@ func (manager *Manager) sampleActivityForAbort(ctx context.Context, desired Desi
 	return manager.sampleNetworkActivity(ctx, desired)
 }
 
-// recoverInterruptedSleep completes a warm stop that terminated the process but
-// did not record the sleeping state. It publishes sleeping from a valid snapshot
-// without making a new one. It reports a failure for an invalid snapshot and
-// clears the sleep intent when no snapshot published, so the VM boots normally.
+// recoverInterruptedSleep completes a warm stop that missed its sleeping state.
 func (manager *Manager) recoverInterruptedSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -130,8 +112,7 @@ func (manager *Manager) recoverInterruptedSleep(
 ) error {
 	snapshot, err := manager.runtime.InspectSleepSnapshot(ctx, machine)
 	if errors.Is(err, ErrNotFound) {
-		// The warm stop did not publish a snapshot. There is nothing to restore,
-		// so clear the sleep intent and let the normal flow start the VM.
+		// No snapshot means normal startup can continue.
 		observed.Sleep = nil
 		observed.Phase = ""
 		observed.OperationID = ""
@@ -149,8 +130,7 @@ func (manager *Manager) recoverInterruptedSleep(
 	}
 	observed.Sleep.MemorySnapshotGeneration = snapshot.Generation
 	observed.Sleep.MemorySnapshotCreatedAt = snapshot.CreatedAt
-	// InspectSleepSnapshot validated the snapshot against the current desired
-	// generations, so it matches the current specification generation.
+	// The validated snapshot matches the current shape.
 	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration
 	observed.State = StateSleeping
 	observed.Generation = desired.Generation
@@ -160,10 +140,7 @@ func (manager *Manager) recoverInterruptedSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// reconcileSleeping decides what to do with a VM that is already asleep. It holds
-// a VM that still wants sleep, resumes one that wants running or paused, and
-// discards the snapshot for a plain stop. It never rewrites the snapshot and
-// never cold boots on a resume failure.
+// reconcileSleeping applies desired state to a sleeping VM.
 func (manager *Manager) reconcileSleeping(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -172,9 +149,7 @@ func (manager *Manager) reconcileSleeping(
 	operationID string,
 	status RuntimeStatus,
 ) error {
-	// A running runtime while the record says sleeping means a wake restore ran
-	// but did not record the running state. Infer running without loading the
-	// snapshot again.
+	// A running runtime means wake restore completed before its status write.
 	if status.State == StateRunning {
 		return manager.completeWakeWithoutStatus(desired, observed)
 	}
@@ -210,9 +185,7 @@ func (manager *Manager) reconcileSleeping(
 	}
 }
 
-// completeWakeWithoutStatus finishes a network wake whose restore ran but whose
-// running status was not recorded. It infers running from the live runtime,
-// disarms the wake, and publishes running without loading the snapshot again.
+// completeWakeWithoutStatus records a wake restore that already completed.
 func (manager *Manager) completeWakeWithoutStatus(desired DesiredRecord, observed *ObservedRecord) error {
 	manager.disarmNetworkWake(desired)
 
@@ -224,8 +197,7 @@ func (manager *Manager) completeWakeWithoutStatus(desired DesiredRecord, observe
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// restartFromSleep discards the snapshot and cold boots the guest, so an explicit
-// restart of a sleeping VM reboots instead of resuming the saved memory.
+// restartFromSleep discards the snapshot and cold boots the guest.
 func (manager *Manager) restartFromSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -251,14 +223,12 @@ func (manager *Manager) restartFromSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// isSnapshotStale reports whether a specification shape change since the snapshot
-// makes it incompatible. Such a snapshot cannot be resumed and must cold boot.
+// isSnapshotStale reports whether the snapshot shape is incompatible.
 func (manager *Manager) isSnapshotStale(desired DesiredRecord, observed *ObservedRecord) bool {
 	return observed.Sleep != nil && observed.Sleep.SpecificationGeneration != desired.SpecificationGeneration
 }
 
-// coldBootFromSleep discards an incompatible snapshot and cold boots the guest
-// with the current shape. A later pass applies a pause from the running state.
+// coldBootFromSleep discards an incompatible snapshot and cold boots the guest.
 func (manager *Manager) coldBootFromSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -283,10 +253,7 @@ func (manager *Manager) coldBootFromSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// holdSleeping keeps a VM asleep for another pass. It rearms the wake, so a wake
-// that failed to restore is armed again and a later packet notifies again. Arm
-// is idempotent. It does not copy generations, so a pending change applies when
-// the VM later resumes.
+// holdSleeping keeps a VM asleep and rearms packet wake.
 func (manager *Manager) holdSleeping(desired DesiredRecord, observed *ObservedRecord) error {
 	if err := manager.armNetworkWake(desired); err != nil {
 		return err
@@ -297,8 +264,7 @@ func (manager *Manager) holdSleeping(desired DesiredRecord, observed *ObservedRe
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// loadPausedFromSleep restores a sleeping VM without running the vCPUs and reports
-// paused. It keeps the snapshot and the sleeping state on a load failure.
+// loadPausedFromSleep restores a sleeping VM without running its vCPUs.
 func (manager *Manager) loadPausedFromSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -320,8 +286,7 @@ func (manager *Manager) loadPausedFromSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// discardSleepToStopped drops the snapshot and reports stopped, so a plain stop
-// of a sleeping VM does not resume it.
+// discardSleepToStopped drops the snapshot and reports stopped.
 func (manager *Manager) discardSleepToStopped(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -343,10 +308,7 @@ func (manager *Manager) discardSleepToStopped(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// resumeFromSleep restores a sleeping VM from its snapshot and reports running.
-// It keeps the snapshot and the sleeping state on a load failure, so a bad
-// snapshot never cold boots. It does not copy the desired generation, so a
-// pending stop, pause, or specification change applies on the next pass.
+// resumeFromSleep restores a sleeping VM from its snapshot.
 func (manager *Manager) resumeFromSleep(
 	ctx context.Context,
 	desired DesiredRecord,
