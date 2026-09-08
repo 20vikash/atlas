@@ -107,8 +107,7 @@ func (m *machine) coldBoot(ctx context.Context) error {
 	return nil
 }
 
-// memorySnapshotRequirement is what this VM needs a published snapshot to be, for a
-// restore or a completion check.
+// memorySnapshotRequirement describes a snapshot required by this VM.
 func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
 	return memorySnapshotRequirement{
 		VirtualMachineID:         m.input.ID,
@@ -142,8 +141,7 @@ func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool,
 	return true, nil
 }
 
-// latestMemorySnapshot returns the newest valid published snapshot for this VM and
-// true, or a zero value and false when none validates.
+// latestMemorySnapshot returns the newest valid snapshot.
 func (m *machine) latestMemorySnapshot() (validatedMemorySnapshot, bool) {
 	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
 	if err != nil {
