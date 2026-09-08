@@ -7,9 +7,7 @@ import (
 	"time"
 )
 
-// newSleepyManager builds a manager with automatic sleep enabled and a
-// controllable activity monitor. It returns the runtime and monitor so a test
-// can drive warm stops and activity.
+// newSleepyManager builds a manager with automatic sleep and controllable activity.
 func newSleepyManager(t *testing.T, timeout time.Duration) (*Manager, *fakeRuntime, *fakeNetworkActivityMonitor) {
 	t.Helper()
 	runtime := &fakeRuntime{
@@ -50,8 +48,7 @@ func TestIdleSleepyVMReachesSleeping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fresh attachment reports its baseline, so the first pass keeps the VM
-	// running instead of sleeping a VM that has seen no packet.
+	// A fresh attachment keeps the VM running.
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
@@ -126,9 +123,7 @@ func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The idle check and the sample before the warm stop see idle activity. The
-	// sample after the warm stop sees a newer packet, so the sleep aborts. The
-	// monotonic value advances only for the new packet.
+	// A newer packet during warm stop aborts sleep.
 	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 1000}
 	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 2000}
 	monitor.sequence = []NetworkActivity{idle, idle, advanced}
@@ -165,9 +160,7 @@ func TestSleepAbortsBeforeSnapshotWhenTrafficArrives(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The idle decision sees old activity, but the final check after arming sees a
-	// newer packet. The sleep aborts before any warm stop. The monotonic value
-	// advances only for the new packet.
+	// A newer packet after arming aborts sleep before warm stop.
 	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 1000}
 	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 2000}
 	monitor.sequence = []NetworkActivity{idle, advanced}
@@ -196,8 +189,7 @@ func TestReconcileRecoversACompletedWakeWithoutStatus(t *testing.T) {
 	manager.networkWakeMonitor = wake
 	autoSleepToSleeping(t, manager, monitor)
 
-	// The wake restore ran but the running status was lost. The process is running
-	// while the record still says sleeping.
+	// The process is running while the record still says sleeping.
 	runtime.state = StateRunning
 	startsBefore := runtime.starts
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
@@ -245,9 +237,7 @@ func TestSleepDoesNotAbortOnWallClockJitter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The eligibility, before, and after samples share one monotonic packet time,
-	// but the derived wall time jitters forward a little on each read. A jitter
-	// with no new packet must not read as traffic and must not abort the sleep.
+	// Wall-clock jitter without a new packet must not abort sleep.
 	base := time.Now().Add(-time.Hour).UTC()
 	eligibility := NetworkActivity{LastSeenAt: base, HasBeenSeen: true, LastPacketMonotonicNanoseconds: 5000}
 	before := NetworkActivity{LastSeenAt: base.Add(time.Microsecond), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 5000}
@@ -269,8 +259,7 @@ func TestSleepDoesNotAbortOnWallClockJitter(t *testing.T) {
 	}
 }
 
-// autoSleepToSleeping creates a sleepy VM, boots it, and lets it auto-sleep by
-// reporting idle activity.
+// autoSleepToSleeping boots a sleepy VM and lets it auto-sleep.
 func autoSleepToSleeping(t *testing.T, manager *Manager, monitor *fakeNetworkActivityMonitor) {
 	t.Helper()
 	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
@@ -395,8 +384,7 @@ func TestDestroyWhileSleepingRemovesArtifacts(t *testing.T) {
 	}
 }
 
-// warmStopToSleeping creates a VM, boots it, and warm-stops it to the sleeping
-// state through the manual power path.
+// warmStopToSleeping reaches sleeping through the manual power path.
 func warmStopToSleeping(t *testing.T, manager *Manager) {
 	t.Helper()
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
@@ -464,9 +452,7 @@ func TestPlainStopWhileSleepingDiscards(t *testing.T) {
 	}
 }
 
-// seedInterruptedSleep drives a running sleepy VM, then rewrites its observed
-// record to model a crash inside the sleep-snapshot phase: the process is gone
-// but the sleeping status was never written.
+// seedInterruptedSleep models a crash before sleeping status was written.
 func seedInterruptedSleep(t *testing.T, manager *Manager, runtime *fakeRuntime, monitor *fakeNetworkActivityMonitor) {
 	t.Helper()
 	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
