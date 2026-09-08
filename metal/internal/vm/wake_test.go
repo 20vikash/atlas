@@ -30,8 +30,7 @@ func (monitor *fakeNetworkWakeMonitor) NetworkWakeEvents() <-chan NetworkWakeEve
 	return monitor.events
 }
 
-// sleepingWakeManager builds a sleeping VM and attaches a wake monitor. It
-// returns the runtime, the wake monitor, and the sleeping VM user ID.
+// sleepingWakeManager builds a sleeping VM with a wake monitor.
 func sleepingWakeManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetworkWakeMonitor, uint32) {
 	t.Helper()
 	manager, runtime, activity := newSleepyManager(t, 30*time.Minute)
@@ -43,8 +42,7 @@ func sleepingWakeManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetworkWake
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The boot and warm stop already ran. Reset the counters, so a test sees only
-	// the wake-phase runtime calls.
+	// Reset counters so tests see only wake calls.
 	runtime.starts = 0
 	runtime.startMode = StartNormal
 	return manager, runtime, wakeMonitor, desired.UserID
