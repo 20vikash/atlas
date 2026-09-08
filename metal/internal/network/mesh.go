@@ -13,8 +13,7 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
-// meshMTU is the VM interface MTU that Atlas WG Mesh needs. A mesh packet gains
-// a 40-byte outer IPv6 header and must still fit the 1420-byte WireGuard MTU.
+// meshMTU is the VM interface MTU required by Atlas WG Mesh.
 const meshMTU = 1380
 
 // meshGatewayAddress is the link-local address the guest routes the mesh through.
@@ -23,8 +22,7 @@ const meshGatewayAddress = "fe80::1"
 // meshPrefix is the Atlas mesh address block.
 const meshPrefix = "fdaa::/16"
 
-// MeshConfig identifies the Atlas WG Mesh CLI and the host interfaces it uses.
-// UplinkName must name the interface that carries discovery, never its parent.
+// MeshConfig identifies the Atlas WG Mesh CLI and host interfaces.
 type MeshConfig struct {
 	CommandPath   string
 	UplinkName    string
@@ -78,8 +76,7 @@ func (DisabledMesh) Remove(context.Context, string, string) error { return nil }
 // ApplyPrivilegedAddresses does nothing.
 func (DisabledMesh) ApplyPrivilegedAddresses(context.Context, []string) error { return nil }
 
-// EnsureHost configures Atlas WG Mesh when this host has no configuration, and
-// rejects a configuration that discovers on another interface.
+// EnsureHost configures Atlas WG Mesh and verifies its discovery interface.
 func (mesh *Mesh) EnsureHost(ctx context.Context) error {
 	status, statusError := platform.Output(ctx, mesh.commandPath, "status")
 	if statusError == nil {
@@ -94,8 +91,7 @@ func (mesh *Mesh) EnsureHost(ctx context.Context) error {
 	return nil
 }
 
-// verifyDiscoveryInterface rejects a host that discovers on another interface.
-// The uplink hook consumes the discovery traffic of every VLAN under it.
+// verifyDiscoveryInterface verifies the configured discovery interface.
 func (mesh *Mesh) verifyDiscoveryInterface(status string) error {
 	name := discoveryInterface(status)
 	if name == "" {
@@ -142,8 +138,7 @@ func (mesh *Mesh) Remove(ctx context.Context, address, interfaceName string) err
 	return platform.Run(ctx, mesh.commandPath, "vm", "remove", "--interface", interfaceName, "--address", address)
 }
 
-// ApplyPrivilegedAddresses replaces the privileged VM whitelist with the
-// complete desired set. Only these tenant-0 addresses cross tenants.
+// ApplyPrivilegedAddresses replaces the privileged VM whitelist.
 func (mesh *Mesh) ApplyPrivilegedAddresses(ctx context.Context, desired []string) error {
 	wanted, err := parseMeshAddresses(desired)
 	if err != nil {
@@ -201,8 +196,7 @@ func (mesh *Mesh) privilegedAddresses(ctx context.Context) (map[string]struct{},
 	return addresses, nil
 }
 
-// parseMeshAddresses normalises the desired set, so a differently written
-// address does not read as a change.
+// parseMeshAddresses normalises the desired address set.
 func parseMeshAddresses(values []string) (map[string]struct{}, error) {
 	addresses := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -241,8 +235,7 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 	return false, nil
 }
 
-// meshNamespaceSteps routes mesh traffic through the namespace. Proxy NDP
-// answers on the veth. A permanent tap0 neighbour keeps a sleeping guest reachable.
+// meshNamespaceSteps routes mesh traffic through the namespace.
 func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]string {
 	return [][]string{
 		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
