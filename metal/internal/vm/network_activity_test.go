@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// fakeNetworkActivityMonitor is the Phase 2 manager seam for activity reads. It
+// fakeNetworkActivityMonitor is the manager seam for activity reads. It
 // returns each queued sequence value in order, then falls back to activity.
 type fakeNetworkActivityMonitor struct {
 	activity    NetworkActivity
@@ -24,7 +24,7 @@ func (monitor *fakeNetworkActivityMonitor) LastNetworkActivity(_ context.Context
 	return monitor.activity, monitor.err
 }
 
-// The fake and the interface must stay in step for Phase 2.
+// The fake and the interface must stay in step.
 var _ NetworkActivityMonitor = (*fakeNetworkActivityMonitor)(nil)
 
 func TestNetworkActivityZeroValueHasNotBeenSeen(t *testing.T) {

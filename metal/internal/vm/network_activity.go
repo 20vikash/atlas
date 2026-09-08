@@ -27,7 +27,7 @@ type NetworkActivity struct {
 }
 
 // NetworkActivityMonitor reads the last packet time of one VM. The VM manager
-// consumes it to decide idle sleep in Phase 2.
+// consumes it to decide whether the VM is idle.
 type NetworkActivityMonitor interface {
 	LastNetworkActivity(ctx context.Context, request NetworkActivityRequest) (NetworkActivity, error)
 }

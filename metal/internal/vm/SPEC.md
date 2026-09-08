@@ -33,6 +33,8 @@ The controller polls until the observed generations match the desired generation
 | `Information` | The safe view for consumers. Local error detail never reaches it. |
 | `WarmImageBuilder` | Warm artifact creation, through narrow capability interfaces. |
 | `Runtime`, `Network`, `Storage`, `Snapshots` | Host services, defined here and implemented elsewhere. |
+| `NetworkActivityMonitor` | Last host-to-guest packet activity for a VM. |
+| `NetworkWakeMonitor` | Packet-triggered wake state and event delivery. |
 
 An operation binds the manager to one identifier for its duration. That handle keeps no VM state.
 
