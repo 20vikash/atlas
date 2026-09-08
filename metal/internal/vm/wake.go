@@ -6,14 +6,10 @@ import (
 	"fmt"
 )
 
-// phaseWakeRestore names the host operation that restores a sleeping VM after a
-// network wake event.
+// phaseWakeRestore names a network wake restore.
 const phaseWakeRestore = "wake-restore"
 
-// WakeFromNetwork restores a sleeping VM after a host-to-guest packet armed its
-// wake. It takes the VM lock, validates the event against the current records,
-// restores the snapshot, and reports running. A stale or duplicate event is a
-// safe no-op, so a normal reconcile pass still owns every real state change.
+// WakeFromNetwork restores a sleeping VM after a host-to-guest packet.
 func (manager *Manager) WakeFromNetwork(ctx context.Context, event NetworkWakeEvent) error {
 	virtualMachine := manager.newVirtualMachine(event.VirtualMachineID)
 	unlock, err := virtualMachine.lock(ctx)
@@ -51,10 +47,7 @@ func (manager *Manager) WakeFromNetwork(ctx context.Context, event NetworkWakeEv
 	return manager.restoreFromNetworkWake(ctx, desired, machine, &observed, operationID)
 }
 
-// networkWakeIsValid reports whether a wake event still matches the records. It
-// requires the event user ID, a desired running and sleepy VM, an observed
-// sleeping state, and a recorded snapshot. A mismatch means a stale or duplicate
-// event, which is a safe no-op.
+// networkWakeIsValid reports whether a wake event matches current records.
 func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed ObservedRecord) bool {
 	return event.UserID == desired.UserID &&
 		desired.State == StateRunning &&
@@ -64,10 +57,7 @@ func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed 
 		observed.Sleep.MemorySnapshotGeneration != 0
 }
 
-// restoreFromNetworkWake restores the snapshot and publishes the running state.
-// It keeps the VM sleeping and the snapshot on a load failure, so a bad snapshot
-// never cold boots. It persists the completed operation before it disarms the
-// wake, so a lost disarm cannot lose the running state.
+// restoreFromNetworkWake restores the snapshot and publishes running state.
 func (manager *Manager) restoreFromNetworkWake(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -102,9 +92,7 @@ func (manager *Manager) restoreFromNetworkWake(
 	return nil
 }
 
-// armNetworkWake makes the next host-to-guest packet for the VM produce a wake
-// event. It returns an error, because a VM that cannot arm must not sleep: it
-// would never wake on a packet. It is a no-op when no wake monitor is set.
+// armNetworkWake arms the next host-to-guest packet wake event.
 func (manager *Manager) armNetworkWake(desired DesiredRecord) error {
 	if manager.networkWakeMonitor == nil {
 		return nil
@@ -116,9 +104,7 @@ func (manager *Manager) armNetworkWake(desired DesiredRecord) error {
 	return nil
 }
 
-// disarmNetworkWake stops further wake events for a woken VM. A disarm failure is
-// logged, not returned, because the VM is already running and the eBPF program
-// only produces one event until the next arm.
+// disarmNetworkWake stops wake events for a running VM.
 func (manager *Manager) disarmNetworkWake(desired DesiredRecord) {
 	if manager.networkWakeMonitor == nil {
 		return
