@@ -46,6 +46,17 @@ sudo -E go test -tags integration -v ./internal/network/
 
 These tests create a temporary namespace and a `tap0`, attach the eBPF program, and confirm the last-seen time advances for a frame in each direction. One test confirms the egress hook still runs with no tap reader, which network wake depends on. The test logs the host kernel and result.
 
+## Sleepy VM test
+
+This test proves the full path: run, idle sleep, packet wake, and guest state continuity. It needs a host kernel with TCX support, Linux 6.6 or newer. Start metald with automatic sleep on and a short idle timeout, then run the test:
+
+```sh
+sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
+sudo metal/test/integration/sleepy-vm-test.sh
+```
+
+The test creates a sleepy VM, writes a token and a marker process in the guest, waits for the `sleeping` state with no Firecracker process, wakes the VM with a TCP connection, and confirms the token and the same marker PID survive. It repeats the sleep and wake once. It cleans up the VM on exit.
+
 ## Configuration
 
 | Key | Default | Meaning |

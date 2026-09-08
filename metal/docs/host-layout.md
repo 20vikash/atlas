@@ -52,6 +52,8 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 
 The host veth is `vh-<user-id>`. The namespace veth is `vg-<user-id>`. The TAP name is `tap0`.
 
+A sleepy VM moves through `running`, `sleeping`, and back to `running`. When it sleeps, the warm stop terminates Firecracker, so `metal-vm@<id>.service` reports `MainPID` 0, and it publishes a memory snapshot under `machines/<id>/snapshots/generations/<n>/`. The ZFS VM volume `vms/<id>` and the sleep manifest stay on the host while asleep. A packet wake or a controller change restores the snapshot, starts a new Firecracker process, and reports `running`. `status.json` records the sleep progress and the running state through each transition.
+
 The jail is inside the VM directory. Removing `machines/<id>` removes the VM and its chroot. Jailer adds `<exec>/<id>/root` below the VM directory, so the jail stays separate from the VM's other files. The jail base is not configurable: the kernel is hard-linked into the jail, and a hard link cannot cross a filesystem.
 
 A Unix socket address holds 108 bytes. Metal uses a short link because the jail socket path can exceed this limit. The veth names use the VM user ID to meet the Linux interface name limit.

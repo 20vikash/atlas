@@ -55,3 +55,12 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 - Expected evidence: Shutdown cancels upload roots, stops background owners, and waits for their bounded completion. Guest systemd units remain active.
 - Safe recovery: Allow the configured bound. Stop the daemon service again after the worker exits. Use process termination only after you preserve logs.
 - Do not: Do not stop `metal-vm@*.service` units as part of daemon shutdown. Do not remove upload state while a worker is active.
+
+## Sleepy VM does not sleep or wake
+
+- Symptom: An idle sleepy VM does not reach `sleeping`, or a packet does not wake a sleeping VM.
+- Owner: `network.ActivityMonitor` for activity and wake events, and `vm.Manager` for the sleep and wake decisions.
+- Safe checks: Read `GET /v1/vms/{id}` and `observed.state`, `observed.sleeping_since`, `observed.last_network_activity_at`, and `observed.error`. Confirm `sleep.enabled` and a positive `sleep.idle_timeout`, and that the VM has `is_sleepy`. Run `systemctl show -p MainPID --value metal-vm@<id>.service`, which is `0` while asleep. List the sleep manifest with `ls <base_dir>/machines/<id>/snapshots/generations/*/manifest.json`. Inspect the eBPF state with `bpftool map show`, then `bpftool map dump name activity_by_user_id` and `bpftool map dump name wake_state_by_user_id` keyed by the VM user ID, and `bpftool link show` inside the namespace with `ip netns exec metal-<id> bpftool link show`. Read `journalctl -u metald --since "15 minutes ago"` for sleep, abort, wake, and failure logs.
+- Expected evidence: Only a host-to-guest TCP segment updates activity and wakes a VM. A wake state of `1` is armed and `2` is notified. A missing wake event for a real packet is expected once and the client retries, because the first packet can be lost while no process has `tap0` open.
+- Safe recovery: Send another TCP connection to retry the wake. A metald restart rearms every sleeping VM on its first reconcile pass. Correct a wrong `idle_timeout` or a missing `is_sleepy`.
+- Do not: Do not delete a sleep manifest or a snapshot generation of a sleeping VM. Do not start Firecracker directly to wake a VM.
