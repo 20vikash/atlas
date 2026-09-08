@@ -6,7 +6,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.placement import PlacementService
-from atlas.vm.core.vm_service import VirtualMachineService
+from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 
 
 class TestVirtualMachineCreation(UnitTestCase):
@@ -75,6 +75,39 @@ class TestVirtualMachineCreation(UnitTestCase):
 			result = VirtualMachineService.create(self.request())
 
 		self.assertEqual(result, {"name": "VM-00001", "is_draft": True})
+		commit.assert_called_once()
+		virtual_machine.save.assert_not_called()
+
+	def test_confirmed_create_failure_identifies_the_committed_draft(self) -> None:
+		image = SimpleNamespace(
+			name="image-1",
+			platform="amd64",
+			enabled=1,
+			title="Ubuntu",
+			validate_compatibility=Mock(),
+		)
+		server = SimpleNamespace(name="server-1")
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			flags=SimpleNamespace(),
+			is_draft=1,
+			save=Mock(),
+		)
+		metal_client = Mock()
+		metal_client.put_virtual_machine.side_effect = MetalClientError("rejected", status=400)
+
+		with (
+			patch.object(VirtualMachineService, "get_image", return_value=image),
+			patch.object(PlacementService, "select_server", return_value=server),
+			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
+			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
+			patch("atlas.vm.core.vm_service.frappe.db.commit") as commit,
+			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
+			self.assertRaises(VirtualMachineCreateError) as raised,
+		):
+			VirtualMachineService.create(self.request())
+
+		self.assertEqual(raised.exception.virtual_machine_name, "VM-00001")
 		commit.assert_called_once()
 		virtual_machine.save.assert_not_called()
 

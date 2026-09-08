@@ -8,8 +8,8 @@ import frappe
 from frappe import _
 from frappe.utils.password import get_decrypted_password
 
-from atlas.atlas.core.host_binaries import get_binary_download_url
-from atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task import MetalServerSSHTask
+from atlas.atlas.core.artifacts import get_download_url
+from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -28,8 +28,9 @@ class HostInstallation:
 	def configure_wireguard(self) -> None:
 		"""Configure WireGuard and store its public key."""
 		self.set_wireguard_ip_address()
-		result = MetalServerSSHTask.create_for_script_file(
-			server=self.server.name,
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
 			script_path="configure-wireguard.sh",
 			environment={
 				"WIREGUARD_ADDRESS": self.server.wireguard_ip_address,
@@ -67,12 +68,13 @@ class HostInstallation:
 			self.server.metald_api_token = token
 			self.server.save(ignore_permissions=True, ignore_version=True)
 
-		result = MetalServerSSHTask.create_for_script_file(
-			server=self.server.name,
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
 			script_path="install-metald.sh",
 			environment={
-				"METALD_DOWNLOAD_URL": get_binary_download_url(settings.metald_binary_x86_64_file),
-				"WG_MESH_DOWNLOAD_URL": get_binary_download_url(settings.wg_mesh_binary_x86_64_file),
+				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
+				"WG_MESH_DOWNLOAD_URL": get_download_url(settings.wg_mesh_binary_x86_64_file),
 				"METALD_AUTH_TOKEN_HASH": hashlib.sha256(token.encode()).hexdigest(),
 				"LISTEN_ADDRESS": "0.0.0.0:9000",
 				"STORAGE_POOL_DEVICE": settings.server_provider_controller.get_storage_pool_device(
@@ -85,6 +87,25 @@ class HostInstallation:
 		).result
 		if not result or not result.is_success:
 			frappe.throw(_("Could not install metald on server {0}.").format(self.server.name))
+
+	def upgrade_metald(self) -> None:
+		"""Replace the metald binary and restart its daemon."""
+		settings = self.server.settings
+		if not settings.metald_binary_x86_64_file:
+			frappe.throw(_("Atlas Settings needs the metald binary."))
+
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
+			script_path="upgrade-metald.sh",
+			environment={
+				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
+			},
+			timeout_seconds=METALD_INSTALL_TIMEOUT_SECONDS,
+			run_in_background=False,
+		).result
+		if not result or not result.is_success:
+			frappe.throw(_("Could not upgrade metald on server {0}.").format(self.server.name))
 
 	def set_wireguard_ip_address(self) -> None:
 		"""Set the WireGuard IP address if it is empty."""

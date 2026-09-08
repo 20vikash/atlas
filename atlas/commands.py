@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import click
@@ -18,6 +19,7 @@ from atlas.atlas.core.host_binaries import (
 	source_digest,
 )
 from atlas.atlas.object_storage import ObjectStorageError
+from atlas.service.core import http_proxy_package
 from atlas.vm.core.image_builder import build_ubuntu_image, publish_ubuntu_image
 
 
@@ -55,6 +57,32 @@ def build_and_publish(context: CliCtxObj, binary: HostBinary) -> None:
 			file_name = publish_host_binary(binary, ensure_go_toolchain(), digest)
 			frappe.db.commit()  # nosemgrep
 			click.echo(f"Published {binary.label} as File {file_name} on {site}")
+		finally:
+			frappe.destroy()
+
+
+@click.command("build-http-proxy-package")
+@pass_context
+def build_http_proxy_package(context: CliCtxObj) -> None:
+	"""Package the HTTP proxy component and link it in Atlas Settings."""
+	if not context.sites:
+		raise SiteNotSpecifiedError
+
+	for site in context.sites:
+		try:
+			frappe.init(site)
+			frappe.connect()
+
+			archive = http_proxy_package.build_archive()
+			digest = hashlib.sha256(archive).hexdigest()
+			if http_proxy_package.is_published(digest):
+				click.echo(f"{http_proxy_package.PACKAGE_LABEL} is current on {site}")
+				continue
+
+			click.echo(f"Packaging the HTTP proxy for {site}")
+			file_name = http_proxy_package.publish_package(archive, digest)
+			frappe.db.commit()  # nosemgrep
+			click.echo(f"Published {http_proxy_package.PACKAGE_LABEL} as File {file_name} on {site}")
 		finally:
 			frappe.destroy()
 
@@ -106,4 +134,4 @@ def build_ubuntu_base_image(
 			frappe.destroy()
 
 
-commands = [build_metald, build_wg_mesh, build_ubuntu_base_image]
+commands = [build_metald, build_wg_mesh, build_http_proxy_package, build_ubuntu_base_image]

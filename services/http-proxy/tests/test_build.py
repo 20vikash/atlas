@@ -145,11 +145,37 @@ def test_control_daemon_is_installed():
 	res = exec_proxy(
 		"/opt/atlas/proxy-control/bin/python",
 		"-c",
-		"import proxy_control.main, fastapi, httpx, uvicorn",
+		"import proxy_control.apply, proxy_control.config, fastapi, httpx, uvicorn",
 	)
 	assert res.returncode == 0
 	unit = exec_proxy("cat", "/etc/systemd/system/atlas-proxy-control.service")
 	assert "Requires=openresty.service" in unit.stdout
+
+
+def test_the_apply_command_refuses_an_unconfigured_proxy():
+	"""Atlas runs this over SSH after it writes the configuration file.
+
+	The image ships an empty file, so the command must report the missing
+	certificate instead of leaving the placeholder in place.
+	"""
+	res = exec_proxy("/opt/atlas/proxy-control/bin/proxy-control", check=False)
+
+	assert res.returncode == 2
+	assert "[tls]" in res.stderr
+
+
+def test_the_daemon_refuses_to_start_without_a_certificate():
+	res = exec_proxy("/opt/atlas/proxy-control/bin/python", "-m", "proxy_control.main", check=False)
+
+	assert res.returncode != 0
+	assert "[tls]" in res.stderr
+
+
+def test_the_configuration_file_is_private_to_root():
+	"""It carries the wildcard private key and the control credential."""
+	res = exec_proxy("stat", "-c", "%a %U", "/etc/atlas/proxy-control.toml")
+
+	assert res.stdout.strip() == "600 root"
 
 
 def test_stream_block_declares_its_own_lua_package_path():
@@ -322,6 +348,34 @@ ZONE = "test.x.frappe.dev"
 VM_A = "fd00:a71a:5::a"
 HTTPS_PORT = "8443"
 SETUP_SH = os.path.join(HERE, "..", "nginx", "setup.sh")
+OPENRESTY_SYSTEMD_OVERRIDE = os.path.join(
+	HERE,
+	"..",
+	"nginx",
+	"systemd",
+	"openresty.service.d",
+	"atlas.conf",
+)
+
+
+def test_setup_restarts_openresty_after_it_installs_the_systemd_override():
+	"""A restart makes the active service use the Atlas configuration and PID file."""
+	with open(SETUP_SH) as setup_file:
+		setup = setup_file.read()
+
+	override_install = setup.index("openresty.service.d/atlas.conf")
+	service_restart = setup.index("systemctl restart openresty.service")
+
+	assert service_restart > override_install
+
+
+def test_openresty_uses_the_nginx_group_for_runtime_sockets():
+	"""Systemd must keep the bridge socket available after a service reload."""
+	with open(OPENRESTY_SYSTEMD_OVERRIDE) as override_file:
+		override = override_file.read()
+
+	assert "Group=nginx" in override.splitlines()
+	assert "RuntimeDirectory=nginx" in override.splitlines()
 
 
 def _upstream_conns() -> int:

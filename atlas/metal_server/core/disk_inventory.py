@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import frappe
 from frappe import _
 
-from atlas.metal_server.doctype.metal_server_ssh_task.metal_server_ssh_task import MetalServerSSHTask
+from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -21,8 +21,9 @@ class DiskInventory:
 
 	def sync(self) -> None:
 		"""Replace the Server disk rows with the current host inventory."""
-		result = MetalServerSSHTask.create_for_command(
-			server=self.server.name,
+		result = SSHTask.create_for_command(
+			target_type=self.server.doctype,
+			target=self.server.name,
 			command="lsblk --json --bytes --paths --output NAME,UUID,SIZE,MOUNTPOINT",
 			run_in_background=False,
 		).result

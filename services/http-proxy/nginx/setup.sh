@@ -13,6 +13,7 @@ LUA_DIR="/etc/nginx/lua"
 RUN_DIR="/run/nginx"
 LOG_DIR="/var/log/nginx"
 STATE_DIR="/var/lib/nginx"
+CONFIG_FILE="/etc/atlas/proxy-control.toml"
 SBIN_PATH="/usr/local/openresty/nginx/sbin/nginx"
 SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -28,8 +29,12 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/openr
 	> /etc/apt/sources.list.d/openresty.list
 apt-get update
 OPENRESTY_PKG_VERSION="${OPENRESTY_VERSION}-${OPENRESTY_PKG_RELEASE}~$(lsb_release -sc)1"
-apt-mark unhold openresty 2>/dev/null || true
-apt-get install -y --reinstall --no-install-recommends "openresty=${OPENRESTY_PKG_VERSION}"
+if [ -x "$SBIN_PATH" ] && [ "$("$SBIN_PATH" -v 2>&1 | sed 's#.*openresty/##')" = "$OPENRESTY_VERSION" ]; then
+	echo "OpenResty ${OPENRESTY_VERSION} is already installed"
+else
+	apt-mark unhold openresty 2>/dev/null || true
+	apt-get install -y --no-install-recommends "openresty=${OPENRESTY_PKG_VERSION}"
+fi
 apt-get install -y --no-install-recommends sudo
 apt-mark hold openresty
 
@@ -90,20 +95,22 @@ install -d /opt/atlas/proxy-control
 # Ensure that the codebase is compatible with the guest Python version.
 /opt/atlas/proxy-control/bin/python -m compileall -q /opt/atlas/proxy-control/lib/python3*/site-packages/proxy_control
 
-# Create runtime state, bootstrap authentication, and certificate files.
+# Create runtime state, the configuration file, and certificate files.
 install -d -m 0750 /etc/atlas
-if [ ! -e /etc/atlas/proxy-control.htpasswd ]; then
-	install -m 0640 /dev/null /etc/atlas/proxy-control.htpasswd
+if [ ! -e "$CONFIG_FILE" ]; then
+	install -m 0600 /dev/null "$CONFIG_FILE"
 fi
 install -d -o root -g nginx -m 0770 "$RUN_DIR"
 install -d -m 0755 "$LOG_DIR"
 install -d -m 0750 "$STATE_DIR/certs"
 install -d -o root -g nginx -m 0770 "$STATE_DIR"
 install -d -o root -g nginx -m 0750 "$STATE_DIR/acme"
-# The placeholder certificate makes first boot possible before cloud-init pushes
-# the real region and wildcard certificate.
+# Keep placeholder state until Atlas pushes the configuration.
 if [ ! -e "$STATE_DIR/region" ]; then
 	: > "$STATE_DIR/region"
+fi
+if [ ! -e "$STATE_DIR/control-subdomain" ]; then
+	: > "$STATE_DIR/control-subdomain"
 fi
 install -d -m 0750 "$STATE_DIR/certs/_placeholder"
 if [ ! -f "$STATE_DIR/certs/_placeholder/fullchain.pem" ] || [ ! -f "$STATE_DIR/certs/_placeholder/privkey.pem" ]; then
@@ -120,24 +127,42 @@ if [ ! -e "$STATE_DIR/certs/privkey.pem" ]; then
 	ln -sfn _placeholder/privkey.pem "$STATE_DIR/certs/privkey.pem"
 fi
 
-# Install and enable both services. They start on the next boot.
+# Install and enable the units.
 install -d /etc/systemd/system/openresty.service.d
 install -m 0644 "$SERVICE_DIR/nginx/systemd/openresty.service.d/atlas.conf" \
 	/etc/systemd/system/openresty.service.d/atlas.conf
 install -m 0644 "$SERVICE_DIR/nginx/systemd/atlas-proxy-control.service" \
 	/etc/systemd/system/atlas-proxy-control.service
+install -m 0644 "$SERVICE_DIR/nginx/systemd/atlas-proxy-control.socket" \
+	/etc/systemd/system/atlas-proxy-control.socket
 if [ -d /run/systemd/system ]; then
 	systemctl daemon-reload
 	systemctl enable openresty.service
+	systemctl enable --now atlas-proxy-control.socket
 	systemctl enable atlas-proxy-control.service
 else
-	install -d /etc/systemd/system/multi-user.target.wants
+	install -d /etc/systemd/system/multi-user.target.wants /etc/systemd/system/sockets.target.wants
 	ln -sf /usr/lib/systemd/system/openresty.service \
 		/etc/systemd/system/multi-user.target.wants/openresty.service
 	ln -sf /usr/lib/systemd/system/atlas-proxy-control.service \
 		/etc/systemd/system/multi-user.target.wants/atlas-proxy-control.service
+	ln -sf /etc/systemd/system/atlas-proxy-control.socket \
+		/etc/systemd/system/sockets.target.wants/atlas-proxy-control.socket
 fi
 
 "$SBIN_PATH" -t -c "$CONF_DIR/nginx.conf"
+
+# Apply the certificate the configuration file carries. The daemon refuses to
+# start without one, so an empty file waits for Atlas to write the real one.
+if [ -d /run/systemd/system ]; then
+	# The package can start OpenResty before Atlas installs its systemd override.
+	systemctl restart openresty.service
+	if [ -s "$CONFIG_FILE" ]; then
+		/opt/atlas/proxy-control/bin/proxy-control
+		systemctl restart atlas-proxy-control.service
+	else
+		echo "no configuration in $CONFIG_FILE: write it, then run this script again"
+	fi
+fi
 
 echo "proxy stack built: stock OpenResty ${OPENRESTY_VERSION} (nginx + lua + stream-lua + headers-more, no local compile)."

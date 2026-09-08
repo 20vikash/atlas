@@ -69,7 +69,7 @@ Wait for the background jobs to finish. The catalog supplies the provider size a
 
 Open **Metal Server** and create a record. Select `Scaleway/EM-A116X-SSD` and an Ubuntu 24.04 Metal Server Image.
 
-Save the record, then wait for its status to become `Running`. Open its linked **Metal Server SSH Task** records to see each host command and its result.
+Save the record. Wait for its status to become `Running`. Open its linked **SSH Task** records to see each host command and its result.
 
 ## 8. Build a virtual machine image
 
@@ -87,8 +87,19 @@ Open **Virtual Machine** and click **Create Virtual Machine**. Select the new Vi
 
 Atlas places the virtual machine on the running Metal Server and sends the desired state to Metal. Keep the record if the first response is uncertain. Atlas reconciles it after Metal confirms the result.
 
+## 10. Create a proxy server
+
+Open **Atlas Settings**, select **Actions**, and click **Renew TLS certificate**. Wait for the wildcard certificate to appear in the Proxy tab.
+
+Open **Metal Server IP Address** and click **Reserve Public IPv4** for each planned proxy.
+
+Open **Proxy Server** and click **Create Proxy Server**. Select the Ubuntu image, set the proxy VM size, and select an Allocated public IPv4 address. Repeat this action to create up to five regional proxies. Atlas adds ready nodes to the health-checked `proxy.<wildcard-domain>` address.
+
+Wait for the status to become `Active`. Open its linked **SSH Task** records to see the install output. See [Proxy Server](proxy-server.md) for engineering details.
+
 ## Next steps
 
 - [Virtual machine control plane](vm-control-plane.md) explains placement and request recovery.
 - [Metal Server lifecycle](metal-server-lifecycle.md) explains host provisioning.
+- [Wildcard TLS](wildcard-tls.md) explains certificate issuance and renewal.
 - [Atlas operations](operations.md) lists safe checks when setup or provisioning fails.

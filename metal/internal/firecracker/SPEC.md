@@ -42,6 +42,7 @@ Cold and warm launch share one preparation step:
 write the jailer environment and the socket link
 open the console PTY          before the unit starts, so no output is lost
 start the systemd unit
+persist the console master    after the unit holds the PTY slave
 set unit resource limits
 wait for the API socket       the process belongs to systemd, so this is the only signal
     |

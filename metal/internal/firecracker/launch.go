@@ -65,6 +65,14 @@ func (runtime *Runtime) prepareLaunch(ctx context.Context, configuration vm.Runt
 	if err := runtime.units.Start(ctx, configuration.ID); err != nil {
 		return err
 	}
+	// The unit holds the slave now, so systemd can keep the master.
+	if err := runtime.serialBroker.Persist(configuration.ID); err != nil {
+		runtime.logger.Warn(
+			"console master not preserved; a metald exit stops this VM",
+			"virtual_machine_id", configuration.ID,
+			"error", err,
+		)
+	}
 	if err := runtime.units.SetLimits(ctx, configuration.ID, resourceLimits(configuration.Specification)); err != nil {
 		return err
 	}

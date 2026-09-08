@@ -41,8 +41,9 @@ type stubUnits struct {
 
 type stubSerialBroker struct{}
 
-func (*stubSerialBroker) Open(string) error  { return nil }
-func (*stubSerialBroker) Close(string) error { return nil }
+func (*stubSerialBroker) Open(string) error    { return nil }
+func (*stubSerialBroker) Persist(string) error { return nil }
+func (*stubSerialBroker) Close(string) error   { return nil }
 
 func (s *stubUnits) shutdown() {
 	s.mu.Lock()

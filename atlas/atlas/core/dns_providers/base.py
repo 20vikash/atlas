@@ -48,6 +48,37 @@ class DnsProvider(ABC):
 		"""Remove the DNS record for the name and type, if it exists."""
 		...
 
+	@abstractmethod
+	def create_https_health_check(self, ip_address: str, domain: str, path: str) -> str:
+		"""Create an HTTPS health check and return its ID."""
+		...
+
+	@abstractmethod
+	def remove_health_check(self, health_check_id: str) -> None:
+		"""Remove one health check."""
+		...
+
+	@abstractmethod
+	def upsert_multivalue_a_record(
+		self,
+		name: str,
+		identifier: str,
+		ip_address: str,
+		health_check_id: str,
+		ttl: int = 120,
+	) -> None:
+		"""Create or update one health-checked multivalue A record."""
+		...
+
+	@abstractmethod
+	def remove_multivalue_a_record(
+		self,
+		name: str,
+		identifier: str,
+	) -> None:
+		"""Remove one health-checked multivalue A record."""
+		...
+
 	def upsert_a_record(self, name: str, ip_address: str, ttl: int = 300) -> None:
 		"""Create or update an A record that points to the given IP address."""
 		self.upsert_record("A", name, [ip_address], ttl)

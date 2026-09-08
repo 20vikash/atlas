@@ -50,5 +50,22 @@ The existing whitelisted methods remain the public boundary:
 - `archive_server`
 - `sync_disks`
 - `install_metald`
+- `upgrade_metald`
 
 These methods check permissions and local state. Dedicated server objects perform the long operations.
+
+## Metald upgrade
+
+`install_metald` writes the host configuration and systemd units. It installs missing binaries and does not replace a running daemon.
+
+`upgrade_metald` downloads the metald build from Atlas Settings, saves the current binary at `/usr/bin/metald.previous`, installs the new binary, and restarts `metal.service`.
+
+Both methods use one job lock per server. Setup and upgrade cannot run together on the same host.
+
+A restart keeps systemd's console descriptors. The virtual machines stay up.
+
+If the descriptor store is empty, every virtual machine on the host stops during the upgrade. The script reports the descriptor count before the restart.
+
+The script checks the service five times. If the new binary fails, the script restores the earlier binary, restarts the service, and reports the failure.
+
+Run **Re-configure Metald** if the script reports an old unit. This action adds `FileDescriptorStorePreserve=yes`. A restart is safe before this update, but a service stop is not. The host systemd version must support this setting.

@@ -13,11 +13,7 @@ if TYPE_CHECKING:
 
 
 def reconcile_stale_draft(name: str) -> None:
-	"""Finalize a draft that Metal holds, or delete one that Metal never received.
-
-	A create can leave a draft whose outcome Atlas never saw. This runs on a
-	schedule, so a lost response costs one interval.
-	"""
+	"""Finalize a draft that Metal holds, or delete one that Metal does not."""
 	settle(name, "draft reconciliation", on_present=lambda machine: machine.db_set("is_draft", 0))
 
 
@@ -31,27 +27,38 @@ def settle(
 	description: str,
 	on_present: Callable[[VirtualMachine], None] | None,
 ) -> None:
-	"""Ask Metal whether one virtual machine exists and settle the Atlas record.
-
-	Metal is the authority. A confirmed absence deletes the record. Any other
-	failure is logged and left alone, because an unreachable host says nothing
-	about whether the virtual machine exists.
-	"""
+	"""Settle one Atlas record against Metal. Metal is the authority."""
 	virtual_machine = cast("VirtualMachine", frappe.get_doc("Virtual Machine", name))
 
 	try:
 		VirtualMachineService(virtual_machine).metal_client.get_virtual_machine(name)
 	except MetalClientError as error:
 		if not error.is_not_found:
-			frappe.log_error(
-				message=frappe.get_traceback(),
-				title=f"Virtual Machine {name} {description} failed",
-			)
+			log_failure(name, description)
 			return
 
-		virtual_machine.flags.metal_absence_confirmed = True
-		virtual_machine.delete(ignore_permissions=True)
+		delete_virtual_machine(virtual_machine, description)
 		return
 
 	if on_present:
 		on_present(virtual_machine)
+
+
+def delete_virtual_machine(virtual_machine: VirtualMachine, description: str) -> None:
+	"""Delete one absent record. A failure is logged and does not stop the batch."""
+	virtual_machine.flags.metal_absence_confirmed = True
+
+	try:
+		virtual_machine.delete(ignore_permissions=True)
+		frappe.db.commit()
+	except Exception:
+		frappe.db.rollback()
+		log_failure(cast(str, virtual_machine.name), description)
+
+
+def log_failure(name: str, description: str) -> None:
+	"""Record why one virtual machine did not settle."""
+	frappe.log_error(
+		message=frappe.get_traceback(),
+		title=f"Virtual Machine {name} {description} failed",
+	)

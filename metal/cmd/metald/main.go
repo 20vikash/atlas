@@ -2,6 +2,7 @@
 // drives firecracker microVMs.
 //
 //	metald serve [--config path]   run the server (default)
+//	metald version                 print the build version
 //
 // Use scripts/dev.sh to prepare a throwaway dev host before serve.
 package main
@@ -64,12 +65,16 @@ func main() {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
 	}
+	if cmd == "version" {
+		fmt.Println(version)
+		return
+	}
 	configPath, err := parseFlags(cmd, args)
 	if err != nil {
 		os.Exit(2)
 	}
 	if cmd != "serve" {
-		fmt.Fprintf(os.Stderr, "usage: metald [serve] [--config path]\n")
+		fmt.Fprintf(os.Stderr, "usage: metald [serve] [--config path] | metald version\n")
 		os.Exit(2)
 	}
 	o, err := load(configPath)
@@ -162,10 +167,56 @@ func connectMesh(o opts) (*network.Mesh, error) {
 	return mesh, nil
 }
 
+// adoptConsoles restores consoles after a metald restart.
+func adoptConsoles(
+	ctx context.Context,
+	logger *slog.Logger,
+	serialBroker *console.SerialBroker,
+	units *platform.DBus,
+	descriptorStoreAvailable bool,
+) error {
+	runningVirtualMachineIDs, err := units.List(ctx)
+	if err != nil {
+		return fmt.Errorf("list virtual machine units: %w", err)
+	}
+
+	adoptedConsoleCount := serialBroker.Adopt(runningVirtualMachineIDs)
+	logger.Info(
+		"adopted serial consoles",
+		"adopted_console_count", adoptedConsoleCount,
+		"running_unit_count", len(runningVirtualMachineIDs),
+		"descriptor_store_available", descriptorStoreAvailable,
+	)
+
+	// Without the store, metald holds the only PTY master. Its exit stops every VM.
+	if !descriptorStoreAvailable {
+		logger.Warn(
+			"descriptor store unavailable; a metald exit stops every running VM",
+			"running_unit_count", len(runningVirtualMachineIDs),
+			"required_unit_settings", "NotifyAccess=main, FileDescriptorStoreMax",
+		)
+
+		return nil
+	}
+
+	// A VM without an adopted console has no stored master. Its next metald exit stops it.
+	if adoptedConsoleCount < len(runningVirtualMachineIDs) {
+		logger.Warn(
+			"running VMs have no adopted console; a metald exit stops them",
+			"adopted_console_count", adoptedConsoleCount,
+			"running_unit_count", len(runningVirtualMachineIDs),
+		)
+	}
+
+	return nil
+}
+
 func serve(o opts, logger *slog.Logger) (serveError error) {
 	if o.authTokenHash == "" {
 		return fmt.Errorf("metald.auth_token_hash is required")
 	}
+
+	// Connect required host services.
 	// Set up Atlas WG Mesh before metald builds anything, so a bad mesh fails fast.
 	mesh, err := setUpMesh(o, logger)
 	if err != nil {
@@ -179,9 +230,11 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		return fmt.Errorf("connect systemd: %w", err)
 	}
 
+	// Create resources that metald owns.
 	daemonContext, cancelDaemon := context.WithCancel(context.Background())
 	stores := storage.NewStores(daemonContext, o.pool, o.imagesDir, logger)
-	serialBroker := console.NewSerialBroker(filepath.Join(o.cfg.SocketsDir, "consoles"))
+	descriptorStore := platform.NewFileDescriptorStore()
+	serialBroker := console.NewSerialBroker(filepath.Join(o.cfg.SocketsDir, "consoles"), descriptorStore)
 	daemon := newDaemon(daemonContext, cancelDaemon, logger, stores.Snapshots, serialBroker, units)
 	defer func() {
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
@@ -189,6 +242,12 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		serveError = errors.Join(serveError, daemon.Shutdown(shutdownContext))
 	}()
 
+	// Restore consoles for running virtual machines.
+	if err := adoptConsoles(daemonContext, logger, serialBroker, units, descriptorStore.IsAvailable()); err != nil {
+		return err
+	}
+
+	// Create virtual machine and API services.
 	wireGuardManager, err := network.NewWireGuardManager(network.WireGuardConfig{
 		InterfaceName: o.wireGuardName,
 		StatePath:     filepath.Join(o.baseDir, "wireguard-peers.json"),
@@ -276,6 +335,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		return fmt.Errorf("configure API: %w", err)
 	}
 
+	// Start workers and serve the API.
 	listener, err := listen(o.listen)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", o.listen, err)

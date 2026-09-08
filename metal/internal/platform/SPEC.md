@@ -15,6 +15,7 @@ Metal talks to systemd through D-Bus. It does not call the `systemctl` command.
 | `UnitManager` | Defines the systemd operations needed by a VM runtime. |
 | `DBus` | Implements `UnitManager` and owns the system-bus connection. |
 | `Status`, `Result`, and `Limits` | Carry systemd state across the platform boundary. |
+| `FileDescriptorStore` | Keeps open file descriptors in systemd across a restart of this service. |
 
 ## Host commands
 
@@ -43,6 +44,19 @@ Metal --D-Bus--> systemd --> jailer --> Firecracker
 | Set limits | Applies the requested runtime resource limits. |
 
 The context cancels systemd waits and polling. The VM runtime maps the returned unit state to VM state; that mapping belongs in the `firecracker` package.
+
+## File descriptor store
+
+systemd holds file descriptors across a restart or a stop of the service. `FileDescriptorStore` stores one with `FDSTORE=1`, removes one with `FDSTOREREMOVE=1`, and reads the descriptors that systemd returns.
+
+```text
+metald run 1 --FDSTORE=1, FDNAME=<id>--> systemd --holds--> descriptor
+metald run 2 <--LISTEN_FDS, LISTEN_FDNAMES-- systemd
+```
+
+The unit needs `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes`. Without the notification socket, `IsAvailable` is false and store operations do nothing.
+
+Without `FileDescriptorStorePreserve=yes`, systemd releases the descriptors when the service stops.
 
 ## Related
 

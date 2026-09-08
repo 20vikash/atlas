@@ -16,6 +16,8 @@ from pathlib import Path
 import frappe
 from frappe import _
 
+from atlas.atlas.core.artifacts import publish_public_file
+
 # metal/go.mod needs 1.26.2 and services/wg-mesh/cli/go.mod needs 1.26.0.
 GO_VERSION = "1.26.2"
 GO_DOWNLOAD_URL = "https://go.dev/dl/go{version}.linux-{architecture}.tar.gz"
@@ -101,21 +103,10 @@ def publish_host_binaries() -> None:
 def publish_host_binary(binary: HostBinary, go_binary: str, digest: str) -> str:
 	"""Build one binary, attach it as a File, and link it in Atlas Settings."""
 	artifact = build_host_binary(binary, go_binary)
-	file_name = publish_binary_file(binary, artifact.read_bytes())
+	file_name = publish_public_file(binary.file_name, binary.label, artifact.read_bytes())
 	frappe.db.set_single_value("Atlas Settings", binary.settings_field, file_name)
 	frappe.db.set_single_value("Atlas Settings", binary.source_hash_field, digest)
 	return file_name
-
-
-def get_binary_download_url(file_name: str) -> str:
-	"""Return the URL a host uses to download one built binary.
-
-	`atlas_base_url` in the site configuration names an address that a host can
-	reach, which the site's own URL is not during local development.
-	"""
-	file_url = frappe.db.get_value("File", file_name, "file_url")
-	base_url = frappe.conf.atlas_base_url or frappe.utils.get_url()
-	return f"{base_url.rstrip('/')}{file_url}"
 
 
 def find_host_binary(key: str) -> HostBinary:
@@ -275,24 +266,3 @@ def build_host_binary(binary: HostBinary, go_binary: str) -> Path:
 	if not artifact.exists():
 		raise FileNotFoundError(_("The build did not produce {0}.").format(artifact))
 	return artifact
-
-
-def publish_binary_file(binary: HostBinary, content: bytes) -> str:
-	"""Insert a public File for one build and return its document name.
-
-	Every build gets its own File, so the earlier binaries stay downloadable and
-	a server that is still provisioning keeps the URL it started with.
-	"""
-	file_doc = frappe.get_doc(
-		{
-			"doctype": "File",
-			"file_name": binary.file_name,
-			"attached_to_doctype": "Atlas Settings",
-			"attached_to_name": "Atlas Settings",
-			"is_private": 0,
-			"content": content,
-		}
-	).insert(ignore_permissions=True)
-
-	print(f"atlas: {binary.label} sha256 {hashlib.sha256(content).hexdigest()}")
-	return file_doc.name

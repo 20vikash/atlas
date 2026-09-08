@@ -1,0 +1,140 @@
+{
+ "actions": [],
+ "autoname": "proxy-.###",
+ "creation": "2026-09-07 10:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "is_provisioning_completed",
+  "column_break_status",
+  "virtual_machine",
+  "runtime_section",
+  "dns_health_check_id",
+  "tls_expires_on",
+  "column_break_runtime",
+  "installed_package_hash",
+  "pushed_config_hash",
+  "failure_section",
+  "failure_message"
+ ],
+ "fields": [
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nProvisioning\nActive\nFailed\nArchived",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_provisioning_completed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Provisioning Completed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "virtual_machine",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Virtual Machine",
+   "options": "Virtual Machine",
+   "read_only": 1
+  },
+  {
+   "fieldname": "runtime_section",
+   "fieldtype": "Section Break",
+   "label": "Runtime"
+  },
+  {
+   "fieldname": "column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dns_health_check_id",
+   "fieldtype": "Data",
+   "label": "DNS Health Check ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "installed_package_hash",
+   "fieldtype": "Data",
+   "label": "Installed Package SHA-256",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pushed_config_hash",
+   "fieldtype": "Data",
+   "label": "Pushed Configuration Digest",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tls_expires_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Certificate Expires On",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval: doc.failure_message",
+   "fieldname": "failure_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "failure_message",
+   "fieldtype": "Small Text",
+   "label": "Failure",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-08 00:22:19.296277",
+ "modified_by": "test@gmail.com",
+ "module": "Service",
+ "name": "Proxy Server",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [
+  {
+   "color": "Orange",
+   "title": "Pending"
+  },
+  {
+   "color": "Blue",
+   "title": "Provisioning"
+  },
+  {
+   "color": "Green",
+   "title": "Active"
+  },
+  {
+   "color": "Red",
+   "title": "Failed"
+  },
+  {
+   "color": "Gray",
+   "title": "Archived"
+  }
+ ]
+}
