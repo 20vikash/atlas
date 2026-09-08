@@ -10,7 +10,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// VMs reuse private addresses across isolated namespaces.
+// VMs reuse private addresses across isolated namespaces. The fixed guest MAC
+// encodes 172.16.0.2 and keeps a sleeping guest reachable.
 const (
 	tapName             = "tap0"
 	gatewayIPAddress    = "172.16.0.1"
@@ -83,7 +84,8 @@ func ensureNamespace(ctx context.Context, virtualMachineID string) error {
 	return platform.Run(ctx, "ip", "netns", "add", namespaceName(virtualMachineID))
 }
 
-// converge removes dropped resources before adding requested ones.
+// converge removes dropped resources before adding requested ones, so an egress
+// mode change never leaves both network shapes in place.
 func (allocator *LinuxAllocator) converge(ctx context.Context, request request) error {
 	if request.PublicIPv4 != "" && !request.Egress.HasInternetPath() {
 		return fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
@@ -126,7 +128,8 @@ func (allocator *LinuxAllocator) removeUnwanted(ctx context.Context, request req
 	return nil
 }
 
-// addWanted builds requested resources in dependency order.
+// addWanted builds requested resources in dependency order. Mesh registration is
+// last, so its first packet finds a complete path.
 func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request) error {
 	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.Egress.HasVirtualEthernet()); err != nil {
 		return err
@@ -161,7 +164,8 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 	}
 }
 
-// Release removes a VM network and its mesh registration.
+// Release removes a VM network and its mesh registration. It unregisters mesh
+// before deleting the namespace, which also deletes its veth pair.
 func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
 	virtualMachineID := request.VirtualMachineID
 	// Release TCX links before tap0 is removed.
@@ -182,7 +186,8 @@ func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseReq
 	return errors.Join(activityError, meshError, rulesError, namespaceRulesError, namespaceError)
 }
 
-// addMeshRegistration routes and registers the guest mesh address.
+// addMeshRegistration routes the guest mesh address through the namespace and
+// registers it with Atlas WG Mesh.
 func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, virtualMachineID string, userID uint32, address string) error {
 	if address == "" {
 		return nil

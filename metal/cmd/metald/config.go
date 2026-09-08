@@ -22,7 +22,8 @@ type opts struct {
 	mesh            meshOpts
 }
 
-// meshOpts configures the Atlas WG Mesh integration.
+// meshOpts configures Atlas WG Mesh, which is enabled by default and can be
+// disabled for development or test hosts without mesh connectivity.
 type meshOpts struct {
 	enabled    bool
 	binaryPath string
@@ -47,7 +48,8 @@ func defaultOpts() opts {
 	return o
 }
 
-// deriveDirs places all metald directories under baseDir.
+// deriveDirs places all metald directories under baseDir, so one base_dir moves
+// the complete metald state tree.
 func (o *opts) deriveDirs() {
 	o.cfg.MachinesDir = filepath.Join(o.baseDir, "machines")
 	o.imagesDir = filepath.Join(o.baseDir, "images")
@@ -115,7 +117,8 @@ func load(path string) (opts, error) {
 	return o, nil
 }
 
-// applyFile overlays a configuration file onto o.
+// applyFile overlays a configuration file onto o. A missing default file is
+// allowed; a missing explicit file is an error.
 func applyFile(o *opts, path string) error {
 	explicit := path != ""
 	if path == "" {

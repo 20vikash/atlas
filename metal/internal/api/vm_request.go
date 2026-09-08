@@ -12,10 +12,12 @@ import (
 
 // Bounds on caller-supplied values.
 const (
-	// maximumResourceIDLength bounds host resource names.
+	// maximumResourceIDLength keeps an ID usable as a path, ZFS dataset, and
+	// systemd unit instance name.
 	maximumResourceIDLength = 64
 
-	// maximumMemoryMiB prevents unit memory overflow.
+	// maximumMemoryMiB prevents unit memory overflow. The unit limit is twice the
+	// guest size plus fixed overhead.
 	maximumMemoryMiB = (math.MaxInt - 128) / 2
 )
 
@@ -29,7 +31,8 @@ var (
 	wireGuardMeshPrefix = netip.MustParsePrefix("fdaa::/16")
 )
 
-// createRequest is the complete desired specification of a new VM.
+// createRequest is the complete desired specification of a new VM. Each group
+// is required because creation stores state instead of merging it.
 type createRequest struct {
 	Compute computeRequest `json:"compute"`
 	Disk    diskRequest    `json:"disk"`
@@ -117,7 +120,8 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
-// powerRequest is the desired power state and optional warm-stop request.
+// powerRequest is the desired power state and optional warm-stop request. Warm
+// is valid only for stopped and makes the next start resume the saved memory.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
 	Warm  bool   `json:"warm"`
@@ -280,7 +284,8 @@ func validHTTPURL(value string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-// validImageReference reports whether value is a valid image name.
+// validImageReference reports whether value is usable as a directory and ZFS
+// dataset name.
 func validImageReference(value string) bool {
 	return imageReferencePattern.MatchString(value)
 }

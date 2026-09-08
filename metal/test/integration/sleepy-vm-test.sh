@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Prove run, idle sleep, packet wake, and guest state continuity:
+# Prove run, idle sleep, packet wake, and guest state continuity. Run as root
+# with automatic sleep enabled and a short idle timeout:
 #   sudo metald serve --config /tmp/metald/metald.toml
 #   sudo test/integration/sleepy-vm-test.sh
 # The sleep policy is per VM. This test sets it in the create request.
-# Pin the guest neighbour entry to keep the VM awake during boot.
+# Pin the fixed guest neighbour entry so SSH probes keep the VM awake during
+# boot and wake packets reach tap0 without ARP.
 set -euo pipefail
 
 work_directory=${METALD_WORKDIR:-/tmp/metald}
@@ -14,7 +16,7 @@ authentication_token=${METALD_AUTH_TOKEN:-metal-development-token}
 # The poll budget must exceed the Metal-wide idle timeout with slack.
 sleep_poll_seconds=${METALD_SLEEP_POLL_SECONDS:-120}
 # The per-VM idle timeout. The poll budget above must exceed it with slack.
-idle_timeout_seconds=${METALD_SLEEP_IDLE_TIMEOUT_SECONDS:-30}
+idle_timeout_seconds=${METALD_SLEEP_IDLE_TIMEOUT_SECONDS:-1}
 host_architecture=$(uname -m)
 image_base_url=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$host_architecture
 
@@ -45,7 +47,8 @@ call_metal() { curl -sS "http://$listen_address$1" -H "Authorization: Bearer $au
 
 observed_state() { call_metal "/v1/vms/$1" | jq -r '.observed.state // empty'; }
 
-# guest_ssh runs a guest command and retries after a wake packet.
+# guest_ssh runs a guest command and retries because the first wake packet can be
+# lost while Firecracker starts.
 guest_ssh() {
 	local id=$1 command=$2
 	ip netns exec "metal-$id" ssh -i "$private_key" \
@@ -96,7 +99,8 @@ machine_directory=$work_directory/machines/$virtual_machine_id
 guest_mac=${METALD_GUEST_MAC:-06:00:ac:10:00:02}
 ssh_boot_seconds=${METALD_SSH_BOOT_SECONDS:-180}
 
-# Pin the fixed guest neighbour before boot traffic starts.
+# Pin the fixed guest neighbour before boot traffic starts. This lets a TCP SYN
+# reach tap0 before the guest network is ready and while the guest is sleeping.
 for _ in $(seq 1 60); do
 	if ip netns list | grep -qw "$namespace"; then
 		ip -n "$namespace" neigh replace 172.16.0.2 lladdr "$guest_mac" dev tap0 nud permanent 2>/dev/null && break
@@ -143,7 +147,7 @@ wait_for_sleeping() {
 	exit 1
 }
 
-# wake_and_verify wakes the VM and checks the marker PID and token.
+# wake_and_verify wakes the VM and checks that the marker PID and token survived.
 wake_and_verify() {
 	echo "waking the VM with a TCP connection..."
 	local result

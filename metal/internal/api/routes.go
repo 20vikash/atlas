@@ -2,7 +2,8 @@ package api
 
 import "github.com/labstack/echo/v4"
 
-// registerRoutes binds handlers using the API method conventions.
+// registerRoutes binds handlers. PUT mutations are idempotent; POST is for
+// actions and creation of addressable resources.
 func (s *Server) registerRoutes(router *echo.Echo) {
 	router.GET("/health", s.checkHealth)
 	router.GET("/docs", s.showDocumentation)

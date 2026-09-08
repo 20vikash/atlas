@@ -74,7 +74,8 @@ func loadWakeProgram(t *testing.T, spec *ebpf.CollectionSpec, userID uint32, act
 	return programs.RecordActivity
 }
 
-// TestWakeProgramLoadsWithSharedMaps checks shared-map compatibility.
+// TestWakeProgramLoadsWithSharedMaps checks that the kernel accepts the wake
+// program with compatible shared maps.
 //
 //	sudo -E go test -tags integration -run TestWakeProgramLoadsWithSharedMaps ./internal/network/activity/
 func TestWakeProgramLoadsWithSharedMaps(t *testing.T) {
@@ -210,7 +211,8 @@ func readWakeUserID(t *testing.T, reader *ringbuf.Reader, wait time.Duration) (u
 	return binary.LittleEndian.Uint32(record.RawSample[0:4]), true
 }
 
-// TestWakeDeduplicatesConcurrentPackets checks one event per arm.
+// TestWakeDeduplicatesConcurrentPackets checks one event per arm and requires a
+// rearm before the next event.
 //
 //	sudo -E go test -tags integration -run TestWakeDeduplicatesConcurrentPackets ./internal/network/activity/
 func TestWakeDeduplicatesConcurrentPackets(t *testing.T) {
@@ -271,7 +273,8 @@ func TestWakeDeduplicatesConcurrentPackets(t *testing.T) {
 	}
 }
 
-// TestWakeSurvivesRingPressure checks wake delivery after ring pressure.
+// TestWakeSurvivesRingPressure checks that ring pressure does not lose wake
+// intent after the ring drains and the VM rearms.
 //
 //	sudo -E go test -tags integration -run TestWakeSurvivesRingPressure ./internal/network/activity/
 func TestWakeSurvivesRingPressure(t *testing.T) {
@@ -347,7 +350,8 @@ func setUpWakeNamespace(t *testing.T, namespace string) string {
 	return namespacePath
 }
 
-// TestNetworkWakeDeliversWithoutATapReader checks wake delivery without a reader.
+// TestNetworkWakeDeliversWithoutATapReader checks wake delivery with no
+// Firecracker tap reader, including rearm and user-ID reuse safety.
 //
 //	sudo -E go test -tags integration -run TestNetworkWakeDeliversWithoutATapReader ./internal/network/activity/
 func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {

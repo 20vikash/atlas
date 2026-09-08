@@ -136,7 +136,8 @@ type meshProvider interface {
 	ApplyPrivilegedAddresses(ctx context.Context, desired []string) error
 }
 
-// setUpMesh prepares the Atlas WG Mesh integration or its disabled no-op.
+// setUpMesh prepares Atlas WG Mesh or a disabled no-op for hosts without mesh
+// connectivity.
 func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
 	if !o.mesh.enabled {
 		logger.Warn("Atlas WG Mesh is disabled; VMs have no mesh connectivity", "wg_mesh.enabled", false)
@@ -146,7 +147,7 @@ func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
 	return connectMesh(o)
 }
 
-// connectMesh prepares Atlas WG Mesh and configures the host.
+// connectMesh prepares Atlas WG Mesh and configures the host on every start.
 func connectMesh(o opts) (*network.Mesh, error) {
 	mesh, err := network.NewMesh(network.MeshConfig{
 		CommandPath:   o.mesh.binaryPath,
@@ -214,7 +215,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	}
 
 	// Connect required host services.
-	// Set up Atlas WG Mesh before building dependent resources.
+	// Set up Atlas WG Mesh first, so a host configuration error fails early.
 	mesh, err := setUpMesh(o, logger)
 	if err != nil {
 		return err
@@ -301,7 +302,8 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
 	)
-	// Start the wake worker after the activity monitor is ready.
+	// The activity monitor emits wake events, and each reconcile pass rearms
+	// sleeping VMs after a restart. Start the worker after the monitor is ready.
 	networkWakeReconciler := reconciler.NewNetworkWakeReconciler(
 		virtualMachineManager,
 		activityMonitor.NetworkWakeEvents(),

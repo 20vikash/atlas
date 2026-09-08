@@ -9,7 +9,8 @@ import (
 	"time"
 )
 
-// memorySnapshotManifest describes one published memory snapshot.
+// memorySnapshotManifest describes one published memory snapshot. Its manifest
+// is the signal that the generation is complete; paths remain VM-derived.
 type memorySnapshotManifest struct {
 	VirtualMachineID         string    `json:"virtual_machine_id"`
 	UserID                   uint32    `json:"user_id"`
@@ -23,7 +24,8 @@ type memorySnapshotManifest struct {
 	MemoryFileSizeBytes      int64     `json:"memory_file_size_bytes"`
 }
 
-// newMemorySnapshotManifest fills the fixed artifact file names.
+// newMemorySnapshotManifest fills fixed artifact file names so callers cannot
+// choose restore paths.
 func newMemorySnapshotManifest(base memorySnapshotManifest) memorySnapshotManifest {
 	base.StateFileName = memorySnapshotStateFileName
 	base.MemoryFileName = memorySnapshotMemoryFileName
@@ -35,7 +37,8 @@ func encodeMemorySnapshotManifest(manifest memorySnapshotManifest) ([]byte, erro
 	return json.MarshalIndent(manifest, "", "  ")
 }
 
-// decodeMemorySnapshotManifest decodes a manifest and rejects unknown or trailing data.
+// decodeMemorySnapshotManifest decodes a manifest and rejects unknown or
+// trailing data from a newer or broken writer.
 func decodeMemorySnapshotManifest(data []byte) (memorySnapshotManifest, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

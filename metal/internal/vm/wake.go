@@ -9,7 +9,8 @@ import (
 // phaseWakeRestore names a network wake restore.
 const phaseWakeRestore = "wake-restore"
 
-// WakeFromNetwork restores a sleeping VM after a host-to-guest packet.
+// WakeFromNetwork restores a sleeping VM after a host-to-guest packet. A stale
+// or duplicate event is a safe no-op.
 func (manager *Manager) WakeFromNetwork(ctx context.Context, event NetworkWakeEvent) error {
 	virtualMachine := manager.newVirtualMachine(event.VirtualMachineID)
 	unlock, err := virtualMachine.lock(ctx)
@@ -47,7 +48,8 @@ func (manager *Manager) WakeFromNetwork(ctx context.Context, event NetworkWakeEv
 	return manager.restoreFromNetworkWake(ctx, desired, machine, &observed, operationID)
 }
 
-// networkWakeIsValid reports whether a wake event matches current records.
+// networkWakeIsValid reports whether an event matches the current user ID,
+// desired state, observed sleeping state, and snapshot.
 func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed ObservedRecord) bool {
 	return event.UserID == desired.UserID &&
 		desired.State == StateRunning &&
@@ -57,7 +59,8 @@ func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed 
 		observed.Sleep.MemorySnapshotGeneration != 0
 }
 
-// restoreFromNetworkWake restores the snapshot and publishes running state.
+// restoreFromNetworkWake restores the snapshot and publishes running state. A
+// failure keeps the VM sleeping, and the wake is disarmed after persistence.
 func (manager *Manager) restoreFromNetworkWake(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -92,7 +95,8 @@ func (manager *Manager) restoreFromNetworkWake(
 	return nil
 }
 
-// armNetworkWake arms the next host-to-guest packet wake event.
+// armNetworkWake arms the next host-to-guest packet wake event. Failure prevents
+// a VM from entering automatic sleep.
 func (manager *Manager) armNetworkWake(desired DesiredRecord) error {
 	if manager.networkWakeMonitor == nil {
 		return nil
@@ -104,7 +108,8 @@ func (manager *Manager) armNetworkWake(desired DesiredRecord) error {
 	return nil
 }
 
-// disarmNetworkWake stops wake events for a running VM.
+// disarmNetworkWake stops wake events for a running VM. A failure is logged
+// because the VM is already running and the monitor emits one event per arm.
 func (manager *Manager) disarmNetworkWake(desired DesiredRecord) {
 	if manager.networkWakeMonitor == nil {
 		return

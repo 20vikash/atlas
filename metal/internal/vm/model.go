@@ -83,7 +83,8 @@ type NetworkConfiguration struct {
 	Egress                        Egress `json:"egress"`
 }
 
-// SameReservation reports whether two specifications reserve the same VM.
+// SameReservation reports whether two specifications reserve the same VM. It
+// ignores signed image URLs, which can rotate without changing the reservation.
 func (specification Specification) SameReservation(other Specification) bool {
 	return specification.VirtualCPUCount == other.VirtualCPUCount &&
 		specification.MemoryMiB == other.MemoryMiB &&
@@ -100,7 +101,8 @@ func (specification Specification) SameReservation(other Specification) bool {
 		maps.Equal(specification.Metadata, other.Metadata)
 }
 
-// RefreshImageSource replaces image URLs and caching intent.
+// RefreshImageSource replaces image URLs and caching intent so a retry can use
+// fresh signed URLs without changing the reservation.
 func (specification Specification) RefreshImageSource(other Specification) Specification {
 	specification.Image.RootfsURL = other.Image.RootfsURL
 	specification.Image.KernelURL = other.Image.KernelURL
@@ -158,7 +160,8 @@ const (
 	StateStopped State = "stopped"
 	// StateFailed means the runtime stopped the guest unexpectedly.
 	StateFailed State = "failed"
-	// StateSleeping means the guest memory is in a snapshot and no process runs.
+	// StateSleeping is observed only. The guest memory is in a snapshot and no
+	// Firecracker process runs.
 	StateSleeping State = "sleeping"
 	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"

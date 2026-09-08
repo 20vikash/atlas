@@ -99,7 +99,8 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	return manager, nil
 }
 
-// Create reserves a VM or refreshes a matching retry.
+// Create reserves a VM or refreshes a matching retry. The fingerprint excludes
+// rotating signed image URLs, so a retry does not reserve a second VM.
 func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification, sleep SleepPolicy) (Information, error) {
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
@@ -284,7 +285,8 @@ func cloneSpecification(specification Specification) Specification {
 	return specification
 }
 
-// informationFromRecords combines records into the public VM view.
+// informationFromRecords combines records into the public VM view and drops
+// local error detail.
 func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Information {
 	var errorDetail *PublicOperationError
 	if observed.Error != nil {

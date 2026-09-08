@@ -14,7 +14,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// TestActivityAdvancesWithoutATapReader checks activity without a tap reader.
+// TestActivityAdvancesWithoutATapReader proves the egress TCX hook updates
+// activity while a sleeping VM has no Firecracker process reading tap0.
 //
 //	sudo -E go test -tags integration -run TestActivityAdvancesWithoutATapReader ./internal/network/activity/
 func TestActivityAdvancesWithoutATapReader(t *testing.T) {

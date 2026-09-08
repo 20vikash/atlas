@@ -6,7 +6,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// virtualMachineResponse pairs desired and observed VM state.
+// virtualMachineResponse pairs desired and observed VM state. Their generations
+// tell the controller when a change reached the host.
 type virtualMachineResponse struct {
 	ID       string                         `json:"id"`
 	Desired  desiredVirtualMachineResponse  `json:"desired"`
@@ -25,7 +26,8 @@ type desiredVirtualMachineResponse struct {
 	Guest             guestResponse               `json:"guest"`
 }
 
-// observedVirtualMachineResponse is the state reached by the host.
+// observedVirtualMachineResponse is the state reached by the host and any
+// operation currently in progress.
 type observedVirtualMachineResponse struct {
 	Generation            uint64                  `json:"generation"`
 	RestartGeneration     uint64                  `json:"restart_generation"`
@@ -56,7 +58,8 @@ type guestResponse struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// virtualMachineImageResponse identifies boot content without transport URLs.
+// virtualMachineImageResponse identifies boot content without signed,
+// short-lived transport URLs.
 type virtualMachineImageResponse struct {
 	Ref                         string                               `json:"ref"`
 	Architecture                string                               `json:"architecture"`
@@ -105,7 +108,8 @@ type observedNetworkResponse struct {
 	MAC string `json:"mac,omitempty"`
 }
 
-// operationErrorResponse contains the public part of a reconciliation failure.
+// operationErrorResponse contains the public part of a reconciliation failure;
+// local detail stays on the host.
 type operationErrorResponse struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`

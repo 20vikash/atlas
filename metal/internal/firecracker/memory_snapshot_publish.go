@@ -11,7 +11,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// createAndPublishMemorySnapshot creates and publishes a memory snapshot of a paused VM.
+// createAndPublishMemorySnapshot creates and publishes a full snapshot of a
+// paused VM. Warm image creation and warm stop share this path.
 func (runtime *Runtime) createAndPublishMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine) (validatedMemorySnapshot, error) {
 	generation, err := runtime.configuration.nextMemorySnapshotGeneration(machine.ID)
 	if err != nil {
@@ -23,7 +24,8 @@ func (runtime *Runtime) createAndPublishMemorySnapshot(ctx context.Context, mach
 	return runtime.publishPendingMemorySnapshot(machine, generation)
 }
 
-// publishPendingMemorySnapshot publishes a pending generation and writes its manifest.
+// publishPendingMemorySnapshot moves a complete pending directory to a new
+// generation and writes the manifest last.
 func (runtime *Runtime) publishPendingMemorySnapshot(machine vm.RuntimeMachine, generation uint64) (validatedMemorySnapshot, error) {
 	pending := runtime.configuration.pendingMemorySnapshotDirectory(machine.ID)
 	stateSize, err := statMemorySnapshotFile(filepath.Join(pending, memorySnapshotStateFileName))
@@ -57,7 +59,7 @@ func (runtime *Runtime) publishPendingMemorySnapshot(machine vm.RuntimeMachine, 
 	if err != nil {
 		return validatedMemorySnapshot{}, err
 	}
-	// Write the manifest last.
+	// Write the manifest last, so readers never accept a partial generation.
 	if err := platform.WriteFile(filepath.Join(generationDirectory, memorySnapshotManifestFileName), data, 0o640); err != nil {
 		return validatedMemorySnapshot{}, fmt.Errorf("write memory snapshot manifest: %w", err)
 	}
@@ -71,7 +73,8 @@ func (runtime *Runtime) publishPendingMemorySnapshot(machine vm.RuntimeMachine, 
 	}, generation)
 }
 
-// purgeMemorySnapshots removes every published memory snapshot of one VM.
+// purgeMemorySnapshots removes every published memory snapshot of one VM. An
+// absent directory is allowed.
 func (runtime *Runtime) purgeMemorySnapshots(id string) error {
 	if err := os.RemoveAll(runtime.configuration.memorySnapshotRoot(id)); err != nil {
 		return fmt.Errorf("remove VM memory snapshots: %w", err)
@@ -79,7 +82,8 @@ func (runtime *Runtime) purgeMemorySnapshots(id string) error {
 	return nil
 }
 
-// statMemorySnapshotFile validates one memory snapshot file and returns its size.
+// statMemorySnapshotFile validates one regular, non-empty snapshot file and
+// returns its size.
 func statMemorySnapshotFile(path string) (int64, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-// Phase names the host operation in progress.
+// Phase names the host operation in progress. It is stored in the observed
+// record so an operator can find where a pass stopped.
 const (
 	phaseInspect        = "inspect"
 	phaseNetwork        = "network"
@@ -76,7 +77,8 @@ func (manager *Manager) reconcileActive(
 		return err
 	}
 
-	// Desired state decides whether a sleeping VM stays asleep or resumes.
+	// Desired state decides whether a sleeping VM stays asleep, resumes, or
+	// discards its snapshot.
 	if wasSleeping {
 		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID, status)
 	}
@@ -185,7 +187,8 @@ func (manager *Manager) applyRestart(
 	return RuntimeStatus{State: StateRunning}, nil
 }
 
-// applyDesiredState moves the runtime to the requested power state.
+// applyDesiredState moves the runtime to the requested power state. Sleeping
+// VMs use their snapshot path instead of this method.
 func (manager *Manager) applyDesiredState(
 	ctx context.Context,
 	identifier string,
@@ -276,7 +279,8 @@ func (manager *Manager) applyDesiredSpecification(
 	return nil
 }
 
-// reconcileDestroyed releases host resources in order before removing records.
+// reconcileDestroyed releases host resources in order and records each step
+// before removing records, so an interrupted destroy resumes safely.
 func (manager *Manager) reconcileDestroyed(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -318,7 +322,8 @@ func (manager *Manager) reconcileDestroyed(
 	return nil
 }
 
-// runOperation stores the phase and records failures.
+// runOperation stores the phase before a host call and records failures. The
+// caller records successful state after the call completes.
 func (manager *Manager) runOperation(
 	ctx context.Context,
 	identifier string,

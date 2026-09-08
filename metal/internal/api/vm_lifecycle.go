@@ -105,7 +105,8 @@ func (s *Server) deleteVirtualMachine(c echo.Context) error {
 	return s.respondWithCurrentVirtualMachine(c, http.StatusAccepted)
 }
 
-// respondWithCurrentVirtualMachine returns the stored VM after a request.
+// respondWithCurrentVirtualMachine rereads the VM so the response contains the
+// stored intent produced by the request.
 func (s *Server) respondWithCurrentVirtualMachine(c echo.Context, status int) error {
 	virtualMachine, err := s.loadVirtualMachine(c)
 	if err != nil {

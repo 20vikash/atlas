@@ -124,7 +124,8 @@ func assertNoActivity(t *testing.T, monitor *Monitor, request vm.NetworkActivity
 	}
 }
 
-// TestActivityCountsHostToGuestTcpOnly checks host-to-guest TCP activity.
+// TestActivityCountsHostToGuestTcpOnly checks that only host-to-guest TCP
+// activity counts; guest traffic and non-TCP traffic do not.
 //
 //	sudo -E go test -tags integration -run TestActivityCountsHostToGuestTcpOnly ./internal/network/activity/
 func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {

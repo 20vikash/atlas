@@ -64,7 +64,8 @@ if [[ ! -f $rootfs ]]; then
 fi
 
 step "guest kernel (firecracker CI build)"
-# Boot the Firecracker CI kernel, which supports the device model.
+# Boot the Firecracker CI kernel. The Ubuntu kernel does not support the
+# Firecracker device model; this kernel includes virtio and ext4 without an initramfs.
 kernel=$IMAGE_DIR/ubuntu/vmlinux
 if [[ ! -f $kernel ]]; then
 	echo "    downloading vmlinux-5.10.223"

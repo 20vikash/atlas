@@ -28,7 +28,8 @@ type sleepEligibility struct {
 	Activity NetworkActivity
 }
 
-// sampleNetworkActivity reads one VM's last packet time.
+// sampleNetworkActivity reads one VM's last packet time. A missing attachment
+// remains ErrNotFound so the caller keeps the VM awake.
 func (manager *Manager) sampleNetworkActivity(ctx context.Context, desired DesiredRecord) (NetworkActivity, error) {
 	request := NetworkActivityRequest{VirtualMachineID: desired.ID, UserID: desired.UserID}
 	activity, err := manager.networkActivityMonitor.LastNetworkActivity(ctx, request)
@@ -38,7 +39,8 @@ func (manager *Manager) sampleNetworkActivity(ctx context.Context, desired Desir
 	return activity, nil
 }
 
-// evaluateSleepEligibility applies the automatic sleep rules without stopping.
+// evaluateSleepEligibility applies all automatic sleep rules without stopping.
+// Only a network read failure is retryable; a missing attachment is not eligible.
 func (manager *Manager) evaluateSleepEligibility(
 	ctx context.Context,
 	desired DesiredRecord,

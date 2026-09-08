@@ -7,17 +7,20 @@ import (
 	"time"
 )
 
-// sleepRequest records why a VM enters sleep.
+// sleepRequest records why a VM enters sleep. Automatic sleep stores activity
+// samples and aborts on newer traffic; manual warm stop leaves them zero.
 type sleepRequest struct {
 	EligibleAt            time.Time
 	RequestedAt           time.Time
 	LastNetworkActivityAt time.Time
-	// LastNetworkActivityMonotonic is the packet time at the idle decision.
+	// LastNetworkActivityMonotonic is the raw packet time at the idle decision, so
+	// the abort check is not affected by wall-clock jitter.
 	LastNetworkActivityMonotonic uint64
 	AbortOnTraffic               bool
 }
 
-// enterSleep warm-stops a live guest and publishes sleeping state.
+// enterSleep warm-stops a live guest and publishes sleeping state while keeping
+// the desired power state unchanged.
 func (manager *Manager) enterSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -66,7 +69,7 @@ func (manager *Manager) enterSleep(
 	observed.Sleep.MemorySnapshotCreatedAt = outcome.MemorySnapshotCreatedAt
 	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration
 
-	// A packet during the warm stop aborts automatic sleep.
+	// A packet during the warm stop aborts automatic sleep and restores the snapshot.
 	after, afterError := manager.sampleActivityForAbort(ctx, desired, request)
 	if request.AbortOnTraffic && beforeError == nil && afterError == nil && after.LastPacketMonotonicNanoseconds > before.LastPacketMonotonicNanoseconds {
 		manager.logger.Info("automatic sleep aborted by traffic",
@@ -103,6 +106,7 @@ func (manager *Manager) sampleActivityForAbort(ctx context.Context, desired Desi
 }
 
 // recoverInterruptedSleep completes a warm stop that missed its sleeping state.
+// An invalid snapshot remains a failure; no cold boot hides the evidence.
 func (manager *Manager) recoverInterruptedSleep(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -140,7 +144,8 @@ func (manager *Manager) recoverInterruptedSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// reconcileSleeping applies desired state to a sleeping VM.
+// reconcileSleeping applies desired state to a sleeping VM. Restore failures
+// keep the VM sleeping and never cold boot.
 func (manager *Manager) reconcileSleeping(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -253,7 +258,7 @@ func (manager *Manager) coldBootFromSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// holdSleeping keeps a VM asleep and rearms packet wake.
+// holdSleeping keeps a VM asleep and rearms packet wake for a later event.
 func (manager *Manager) holdSleeping(desired DesiredRecord, observed *ObservedRecord) error {
 	if err := manager.armNetworkWake(desired); err != nil {
 		return err
@@ -308,7 +313,8 @@ func (manager *Manager) discardSleepToStopped(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// resumeFromSleep restores a sleeping VM from its snapshot.
+// resumeFromSleep restores a sleeping VM from its snapshot and reports running.
+// A restore failure keeps the snapshot and sleeping state.
 func (manager *Manager) resumeFromSleep(
 	ctx context.Context,
 	desired DesiredRecord,

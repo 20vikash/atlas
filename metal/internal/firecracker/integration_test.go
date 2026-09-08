@@ -189,7 +189,8 @@ func mainPID(t *testing.T, id string) int {
 	return pid
 }
 
-// TestWarmStopAndRestoreTwoCycles checks guest memory across two warm-stop cycles.
+// TestWarmStopAndRestoreTwoCycles checks that a token and process survive two
+// warm-stop cycles, proving memory restore instead of cold boot.
 func TestWarmStopAndRestoreTwoCycles(t *testing.T) {
 	image, pub := skipUnlessHost(t)
 	manager := newManager(t)

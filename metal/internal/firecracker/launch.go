@@ -11,7 +11,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// prepareBoot starts and configures a jailed Firecracker process.
+// prepareBoot starts a jailed Firecracker process and configures its machine,
+// kernel, drives, network, and metadata service for a cold boot.
 func (runtime *Runtime) prepareBoot(ctx context.Context, configuration vm.RuntimeMachine) error {
 	if err := runtime.prepareLaunch(ctx, configuration); err != nil {
 		return err
@@ -40,7 +41,8 @@ func (runtime *Runtime) prepareBoot(ctx context.Context, configuration vm.Runtim
 	)
 }
 
-// prepareLaunch creates the jail and starts the unit.
+// prepareLaunch creates the jail and starts the unit. It opens the console PTY
+// first so guest output is not lost.
 func (runtime *Runtime) prepareLaunch(ctx context.Context, configuration vm.RuntimeMachine) error {
 	if err := runtime.configuration.writeJailerEnv(
 		configuration.ID,
@@ -88,7 +90,8 @@ func (runtime *Runtime) relaunch(ctx context.Context, configuration vm.RuntimeMa
 	return runtime.prepareBoot(ctx, configuration)
 }
 
-// launchMemorySnapshot restores a guest from a memory snapshot and updates its metadata.
+// launchMemorySnapshot restores a guest from a memory snapshot, updates metadata
+// before resume, and leaves the vCPUs paused when resume is false.
 func (runtime *Runtime) launchMemorySnapshot(
 	ctx context.Context,
 	configuration vm.RuntimeMachine,
@@ -161,7 +164,8 @@ func (runtime *Runtime) launchMemorySnapshot(
 	return client.Resume(ctx)
 }
 
-// launchWarmImage restores a matching warm image or returns ErrNotFound.
+// launchWarmImage restores a matching warm image or returns ErrNotFound, which
+// lets the caller use the reliable cold-boot path.
 func (runtime *Runtime) launchWarmImage(ctx context.Context, configuration vm.RuntimeMachine, imageReference string) error {
 	memorySnapshotConfiguration := configuration.Specification.Image.MemorySnapshotConfiguration
 	if memorySnapshotConfiguration == nil || configuration.Specification.Image.Name != imageReference {
@@ -196,6 +200,7 @@ func (runtime *Runtime) launchWarmImage(ctx context.Context, configuration vm.Ru
 }
 
 // firecrackerCompatibility identifies a Firecracker build for snapshot matching.
+// Size and modification time stand in for a version the binary does not report.
 func (runtime *Runtime) firecrackerCompatibility() string {
 	information, err := os.Stat(runtime.configuration.FirecrackerBin)
 	if err != nil {
@@ -209,7 +214,8 @@ func (runtime *Runtime) firecrackerCompatibility() string {
 	)
 }
 
-// hasMatchingMemorySnapshot reports whether the warm image shape matches.
+// hasMatchingMemorySnapshot reports whether CPU, memory, and disk match the warm
+// image shape exactly.
 func (runtime *Runtime) hasMatchingMemorySnapshot(specification vm.Specification) bool {
 	configuration := specification.Image.MemorySnapshotConfiguration
 	return specification.Image.CacheImage &&

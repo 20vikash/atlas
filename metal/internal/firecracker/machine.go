@@ -13,10 +13,11 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// defaultStopTimeout bounds graceful guest shutdown.
+// defaultStopTimeout bounds graceful guest shutdown after Ctrl+Alt+Del.
 const defaultStopTimeout = 30 * time.Second
 
-// machine binds a runtime to one VM for one operation.
+// machine binds a runtime to one VM for one operation. systemd owns process
+// lifetime, while Firecracker owns guest state.
 type machine struct {
 	runtime     *Runtime
 	input       vm.RuntimeMachine
@@ -44,7 +45,8 @@ func (m *machine) status(ctx context.Context) (vm.State, error) {
 	return m.state(ctx, unitStatus)
 }
 
-// state maps a systemd unit state to a VM state.
+// state maps a systemd unit state to a VM state. Only an active unit is asked
+// for Firecracker state.
 func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, error) {
 	switch status.ActiveState {
 	case "failed":
@@ -73,7 +75,8 @@ func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, 
 	}
 }
 
-// Start boots a VM with a warm image when available, then falls back to cold boot.
+// Start uses a matching shared warm image when available, then falls back to a
+// cold boot. It never restores a VM-local sleep snapshot.
 func (m *machine) Start(ctx context.Context) error {
 	if m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
 		err := m.runtime.launchWarmImage(ctx, m.input, m.input.Specification.Image.Name)
@@ -107,7 +110,8 @@ func (m *machine) coldBoot(ctx context.Context) error {
 	return nil
 }
 
-// memorySnapshotRequirement describes a snapshot required by this VM.
+// memorySnapshotRequirement describes the generations and build a snapshot must
+// match before this VM restores it.
 func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
 	return memorySnapshotRequirement{
 		VirtualMachineID:         m.input.ID,
@@ -118,7 +122,8 @@ func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
 	}
 }
 
-// restoreMemorySnapshot restores the newest valid VM-local snapshot.
+// restoreMemorySnapshot restores the newest valid VM-local snapshot. The new jail
+// receives its own copy before the external generation is purged.
 func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool, error) {
 	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
 	if errors.Is(err, errMemorySnapshotNotFound) {
@@ -141,7 +146,8 @@ func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool,
 	return true, nil
 }
 
-// latestMemorySnapshot returns the newest valid snapshot.
+// latestMemorySnapshot returns the newest valid snapshot, or false when none
+// validates.
 func (m *machine) latestMemorySnapshot() (validatedMemorySnapshot, bool) {
 	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
 	if err != nil {
@@ -150,7 +156,8 @@ func (m *machine) latestMemorySnapshot() (validatedMemorySnapshot, bool) {
 	return snapshot, true
 }
 
-// startFromMemorySnapshot restores a required VM-local snapshot without cold booting.
+// startFromMemorySnapshot restores a required VM-local snapshot without cold
+// booting. A missing or invalid snapshot is an error.
 func (m *machine) startFromMemorySnapshot(ctx context.Context, resume bool) error {
 	restored, err := m.restoreMemorySnapshot(ctx, resume)
 	if err != nil {
@@ -164,7 +171,8 @@ func (m *machine) startFromMemorySnapshot(ctx context.Context, resume bool) erro
 	return nil
 }
 
-// Stop shuts down the guest and discards its memory snapshot.
+// Stop shuts down the guest and discards its memory snapshot, so a later start
+// cold boots.
 func (m *machine) Stop(ctx context.Context) error {
 	if err := m.shutdownGuest(ctx); err != nil {
 		return err
@@ -182,7 +190,8 @@ func (m *machine) Stop(ctx context.Context) error {
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)
 }
 
-// warmStop publishes a snapshot before terminating Firecracker.
+// warmStop pauses the guest, publishes a full snapshot, then terminates
+// Firecracker. Publication first makes an interrupted stop recoverable.
 func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
 	state, err := m.status(ctx)
 	if err != nil {
@@ -238,7 +247,8 @@ func stopOutcome(snapshot validatedMemorySnapshot) vm.StopOutcome {
 	}
 }
 
-// recoverFailedWarmStop removes the pending snapshot and restores the prior state.
+// recoverFailedWarmStop removes the pending snapshot and resumes only a guest
+// paused by this call.
 func (m *machine) recoverFailedWarmStop(ctx context.Context, pausedByThisCall bool, cause error) error {
 	recovery := []error{cause}
 	if err := os.RemoveAll(m.runtime.configuration.pendingMemorySnapshotDirectory(m.input.ID)); err != nil {

@@ -53,7 +53,8 @@ func namespacePath(virtualMachineID string) string {
 	return "/run/netns/" + namespaceName(virtualMachineID)
 }
 
-// virtualEthernetNames derives stable veth names from the user ID.
+// virtualEthernetNames derives stable veth names from the user ID, so names need
+// no stored state and survive daemon restarts.
 func virtualEthernetNames(userID uint32) (host, guest string) {
 	return fmt.Sprintf("vh-%d", userID), fmt.Sprintf("vg-%d", userID)
 }
@@ -141,7 +142,8 @@ func runSteps(ctx context.Context, steps [][]string) error {
 	return nil
 }
 
-// transitAddresses returns the host and namespace addresses for a user ID.
+// transitAddresses returns the two usable addresses in the /30 derived from a
+// user ID: one for the host and one for the namespace.
 func transitAddresses(userID uint32) (hostIPAddress, namespaceIPAddress string) {
 	networkAddress := uint32(0x0A000000) | ((userID & 0x3FFFFF) << 2)
 	return addressString(networkAddress + 1), addressString(networkAddress + 2)

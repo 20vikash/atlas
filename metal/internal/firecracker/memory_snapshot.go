@@ -9,7 +9,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// Memory snapshot file names shared by warm images and sleep snapshots.
+// Memory snapshot file names shared by warm images and sleep snapshots. A full
+// snapshot contains one state file and one memory file.
 const (
 	memorySnapshotStateFileName  = "state"
 	memorySnapshotMemoryFileName = "memory"
@@ -21,6 +22,7 @@ func (runtime *Runtime) Compatibility() string {
 }
 
 // CreateMemorySnapshot publishes a VM-local snapshot and returns its file paths.
+// Warm image creation promotes those files into image storage.
 func (runtime *Runtime) CreateMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine) (string, string, error) {
 	published, err := runtime.createAndPublishMemorySnapshot(ctx, machine)
 	if err != nil {
@@ -29,7 +31,8 @@ func (runtime *Runtime) CreateMemorySnapshot(ctx context.Context, machine vm.Run
 	return published.StatePath, published.MemoryPath, nil
 }
 
-// createFullMemorySnapshot writes a paused guest snapshot into a jail-relative directory.
+// createFullMemorySnapshot writes a full snapshot of an already paused guest
+// into a jail-relative directory.
 func (runtime *Runtime) createFullMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine, relativeDirectory string) (string, string, error) {
 	directory := filepath.Join(runtime.configuration.chrootRoot(machine.ID), relativeDirectory)
 	if err := mkdirChown(directory, machine.UserID, machine.GroupID); err != nil {

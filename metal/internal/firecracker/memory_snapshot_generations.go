@@ -9,7 +9,8 @@ import (
 	"strconv"
 )
 
-// Memory snapshot layout below the VM directory.
+// Memory snapshot layout below the VM directory. Each publish uses a new
+// generation, so a live process never maps an overwritten memory file.
 //
 //	machines/<id>/memory-snapshots/<n>/state
 //	machines/<id>/memory-snapshots/<n>/memory
@@ -30,12 +31,14 @@ func (configuration Config) memorySnapshotGenerationDirectory(id string, generat
 	return filepath.Join(configuration.memorySnapshotRoot(id), strconv.FormatUint(generation, 10))
 }
 
-// pendingMemorySnapshotDirectory is where Firecracker writes a new generation.
+// pendingMemorySnapshotDirectory is where Firecracker writes a new generation
+// inside its jail before publication.
 func (configuration Config) pendingMemorySnapshotDirectory(id string) string {
 	return filepath.Join(configuration.chrootRoot(id), pendingMemorySnapshotDirectoryName)
 }
 
-// latestMemorySnapshotGeneration returns the highest valid generation.
+// latestMemorySnapshotGeneration returns the highest canonical positive
+// generation name, or no result when none exists.
 func (configuration Config) latestMemorySnapshotGeneration(id string) (uint64, bool, error) {
 	entries, err := os.ReadDir(configuration.memorySnapshotRoot(id))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -72,7 +75,8 @@ func (configuration Config) nextMemorySnapshotGeneration(id string) (uint64, err
 	return highest + 1, nil
 }
 
-// errMemorySnapshotNotFound reports that no complete memory snapshot exists.
+// errMemorySnapshotNotFound reports that no complete memory snapshot exists. It
+// is distinct from an invalid published artifact.
 var errMemorySnapshotNotFound = errors.New("memory snapshot not found")
 
 // memorySnapshotRequirement describes a required memory snapshot.
@@ -92,7 +96,8 @@ type validatedMemorySnapshot struct {
 	MemoryPath string
 }
 
-// latestValidMemorySnapshot validates the newest published memory snapshot.
+// latestValidMemorySnapshot validates the newest published memory snapshot and
+// returns absence separately from corruption or incompatibility.
 func (configuration Config) latestValidMemorySnapshot(requirement memorySnapshotRequirement) (validatedMemorySnapshot, error) {
 	generation, found, err := configuration.latestMemorySnapshotGeneration(requirement.VirtualMachineID)
 	if err != nil {
@@ -105,7 +110,8 @@ func (configuration Config) latestValidMemorySnapshot(requirement memorySnapshot
 	return configuration.validateMemorySnapshotGeneration(requirement, generation)
 }
 
-// validateMemorySnapshotGeneration validates one published memory snapshot generation.
+// validateMemorySnapshotGeneration validates one published memory snapshot. A
+// missing manifest means absence; other manifest or file faults mean invalid.
 func (configuration Config) validateMemorySnapshotGeneration(requirement memorySnapshotRequirement, generation uint64) (validatedMemorySnapshot, error) {
 	directory := configuration.memorySnapshotGenerationDirectory(requirement.VirtualMachineID, generation)
 	data, err := os.ReadFile(filepath.Join(directory, memorySnapshotManifestFileName))
@@ -136,7 +142,8 @@ func (configuration Config) validateMemorySnapshotGeneration(requirement memoryS
 	return validatedMemorySnapshot{Generation: generation, Manifest: manifest, StatePath: statePath, MemoryPath: memoryPath}, nil
 }
 
-// matches reports whether the manifest describes the required VM and build.
+// matches reports whether the manifest describes the required VM, generations,
+// files, and Firecracker build.
 func (manifest memorySnapshotManifest) matches(requirement memorySnapshotRequirement) error {
 	switch {
 	case manifest.VirtualMachineID != requirement.VirtualMachineID:
@@ -157,7 +164,8 @@ func (manifest memorySnapshotManifest) matches(requirement memorySnapshotRequire
 	return nil
 }
 
-// validateMemorySnapshotFile checks one fixed-name memory snapshot file.
+// validateMemorySnapshotFile checks one fixed-name regular file. Paths never
+// come from the manifest.
 func validateMemorySnapshotFile(directory, fixedName string, expectedSize int64) (string, error) {
 	path := filepath.Join(directory, fixedName)
 	info, err := os.Lstat(path)
@@ -176,7 +184,8 @@ func validateMemorySnapshotFile(directory, fixedName string, expectedSize int64)
 	return path, nil
 }
 
-// parseMemorySnapshotGeneration accepts a canonical positive generation name.
+// parseMemorySnapshotGeneration accepts a canonical positive base-10 generation
+// name, so one generation has one directory name.
 func parseMemorySnapshotGeneration(name string) (uint64, bool) {
 	generation, err := strconv.ParseUint(name, 10, 64)
 	if err != nil || generation == 0 {

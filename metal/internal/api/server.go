@@ -19,7 +19,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// Config contains HTTP server configuration and the token hash.
+// Config contains HTTP server configuration. Only the token hash is stored; the
+// plain token never reaches this package.
 type Config struct {
 	AuthTokenHash string
 	Logger        *slog.Logger
@@ -148,7 +149,8 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	return nil
 }
 
-// authenticate accepts a bearer token with the configured SHA-256 digest.
+// authenticate accepts a bearer token with the configured SHA-256 digest. The
+// comparison is constant time.
 func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if isPublicPath(c.Path()) {
@@ -169,7 +171,8 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// isPublicPath reports whether a route serves without authentication.
+// isPublicPath reports whether health and documentation serve without
+// authentication. They carry no VM data.
 func isPublicPath(path string) bool {
 	return path == "/health" || path == "/docs" || path == "/docs/swagger.json"
 }

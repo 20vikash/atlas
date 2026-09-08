@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	// recordSchemaVersion is the on-disk record format.
+	// recordSchemaVersion is the on-disk format. Other versions are rejected and
+	// never migrated in place.
 	recordSchemaVersion = 1
 
 	desiredFileName  = "config.json"
@@ -34,10 +35,12 @@ type DesiredRecord struct {
 	CreateFingerprint string `json:"create_fingerprint"`
 	Generation        uint64 `json:"generation"`
 	RestartGeneration uint64 `json:"restart_generation"`
-	// SpecificationGeneration identifies the compute, disk, and network shape.
+	// SpecificationGeneration identifies the compute, disk, and network shape. It
+	// stays stable across power and warm-stop changes so snapshots remain valid.
 	SpecificationGeneration uint64 `json:"specification_generation,omitempty"`
 	State                   State  `json:"state"`
-	// WarmStop asks a stopped VM to save a memory snapshot.
+	// WarmStop asks a stopped VM to save a memory snapshot. A later start resumes
+	// it, while false keeps the old cold-stop behavior.
 	WarmStop bool `json:"warm_stop,omitempty"`
 	// Sleep is the automatic sleep policy of this VM.
 	Sleep         SleepPolicy   `json:"sleep,omitempty"`
@@ -69,12 +72,14 @@ type SleepProgress struct {
 	RequestedAt              time.Time `json:"requested_at,omitempty"`
 	MemorySnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
 	MemorySnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
-	// SpecificationGeneration identifies the snapshot's VM shape.
+	// SpecificationGeneration identifies the snapshot's VM shape. A later shape
+	// change makes the snapshot incompatible.
 	SpecificationGeneration uint64    `json:"specification_generation,omitempty"`
 	LastNetworkActivityAt   time.Time `json:"last_network_activity_at,omitempty"`
 }
 
-// validate rejects an incomplete sleep object.
+// validate rejects an incomplete sleep object or a sleeping record without a
+// published snapshot.
 func (record ObservedRecord) validateSleep() error {
 	if record.State == StateSleeping && record.Sleep == nil {
 		return errors.New("sleeping record has no sleep progress")
@@ -92,7 +97,8 @@ func (record ObservedRecord) validateSleep() error {
 	return nil
 }
 
-// OperationError stores public and local reconciliation error details.
+// OperationError stores public and local reconciliation error details. Local
+// detail stays on the host.
 type OperationError struct {
 	Code        string    `json:"code"`
 	Message     string    `json:"message"`

@@ -24,7 +24,8 @@ type NetworkWakeConfig struct {
 	OperationTimeout time.Duration
 }
 
-// NetworkWakeReconciler restores sleeping VMs from packet wake events.
+// NetworkWakeReconciler restores sleeping VMs from packet wake events one at a
+// time. It does not retry because the monitor rearms after a failed restore.
 type NetworkWakeReconciler struct {
 	manager          NetworkWakeManager
 	events           <-chan vm.NetworkWakeEvent
@@ -68,7 +69,7 @@ func (r *NetworkWakeReconciler) Run(ctx context.Context) {
 	}
 }
 
-// wake restores one VM under the operation timeout.
+// wake restores one VM under the operation timeout. The event is not retried.
 func (r *NetworkWakeReconciler) wake(ctx context.Context, event vm.NetworkWakeEvent) {
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
@@ -79,7 +80,8 @@ func (r *NetworkWakeReconciler) wake(ctx context.Context, event vm.NetworkWakeEv
 	}
 }
 
-// logFailure reports errors from active workers.
+// logFailure reports errors from active workers and ignores cancellation errors
+// caused by shutdown.
 func (r *NetworkWakeReconciler) logFailure(ctx context.Context, message string, err error, fields ...any) {
 	if ctx.Err() != nil {
 		return

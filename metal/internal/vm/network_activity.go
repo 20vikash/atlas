@@ -13,15 +13,19 @@ type NetworkActivityRequest struct {
 
 // NetworkActivity reports the last packet time of one VM.
 type NetworkActivity struct {
-	// LastSeenAt is the last packet time or attachment baseline.
+	// LastSeenAt is the wall-clock time of the last packet, or the attachment
+	// baseline when no packet has arrived.
 	LastSeenAt time.Time
-	// HasBeenSeen is true after the first packet.
+	// HasBeenSeen is true after at least one packet. It is false for a new
+	// attachment without packet activity.
 	HasBeenSeen bool
-	// LastPacketMonotonicNanoseconds is the raw eBPF time of the last packet.
+	// LastPacketMonotonicNanoseconds is the raw eBPF time of the last packet. It
+	// changes only on packet arrival and gives sleep an exact traffic check.
 	LastPacketMonotonicNanoseconds uint64
 }
 
-// NetworkActivityMonitor reads the last packet time of one VM.
+// NetworkActivityMonitor reads the last packet time of one VM. The manager uses
+// it to decide whether the VM is idle.
 type NetworkActivityMonitor interface {
 	LastNetworkActivity(ctx context.Context, request NetworkActivityRequest) (NetworkActivity, error)
 }
@@ -34,9 +38,12 @@ type NetworkWakeEvent struct {
 	PacketTime uint64
 }
 
-// NetworkWakeMonitor arms packet wake and delivers wake events.
+// NetworkWakeMonitor arms and disarms packet wake and delivers wake events. The
+// manager arms a sleeping VM, a reconciler consumes the shared event channel,
+// and the channel closes when the monitor shuts down.
 type NetworkWakeMonitor interface {
-	// ArmNetworkWake arms one host-to-guest packet wake event.
+	// ArmNetworkWake arms one host-to-guest packet wake event. The VM must have an
+	// existing activity attachment.
 	ArmNetworkWake(request NetworkActivityRequest) error
 	// DisarmNetworkWake stops wake events for the VM. It is idempotent.
 	DisarmNetworkWake(request NetworkActivityRequest) error
