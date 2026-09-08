@@ -68,8 +68,7 @@ func newDaemon(
 	}
 }
 
-// OwnActivityMonitor makes the daemon the one owner that closes the activity
-// monitor. Shutdown closes it after every worker stops.
+// OwnActivityMonitor transfers activity monitor ownership to the daemon.
 func (daemon *daemon) OwnActivityMonitor(monitor activityMonitorResource) {
 	daemon.activityMonitor = monitor
 }
@@ -117,8 +116,7 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 	if err := waitForGroup(shutdownContext, &daemon.workers); err != nil {
 		shutdownErrors = append(shutdownErrors, fmt.Errorf("wait for reconcilers: %w", err))
 	}
-	// Close eBPF links, programs, and maps only after every worker stops, so no
-	// worker reads a closed map.
+	// Close the monitor after all workers stop.
 	if daemon.activityMonitor != nil {
 		if err := daemon.activityMonitor.Close(); err != nil {
 			shutdownErrors = append(shutdownErrors, fmt.Errorf("close activity monitor: %w", err))

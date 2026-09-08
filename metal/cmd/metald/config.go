@@ -23,16 +23,14 @@ type opts struct {
 	sleep           sleepOpts
 }
 
-// meshOpts configures the Atlas WG Mesh integration. Mesh is on by default. A
-// development or test host can turn it off, and then VMs get no mesh.
+// meshOpts configures the Atlas WG Mesh integration.
 type meshOpts struct {
 	enabled    bool
 	binaryPath string
 	uplinkName string
 }
 
-// sleepOpts is the Metal-wide automatic sleep policy. One idle timeout applies
-// to every sleepy VM on this host.
+// sleepOpts is the host-wide automatic sleep policy.
 type sleepOpts struct {
 	enabled     bool
 	idleTimeout time.Duration
@@ -73,7 +71,7 @@ type fileConfig struct {
 	Sleep       sleepFile       `toml:"sleep"`
 }
 
-// sleepFile is the [sleep] section. idle_timeout is a Go duration string.
+// sleepFile is the [sleep] configuration section.
 type sleepFile struct {
 	Enabled     bool         `toml:"enabled"`
 	IdleTimeout tomlDuration `toml:"idle_timeout"`
