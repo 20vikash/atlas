@@ -23,20 +23,17 @@ type StopMode int
 const (
 	// StopShutdown ends the guest with the current Ctrl+Alt+Del and bounded kill.
 	StopShutdown StopMode = iota
-	// StopWithSleepSnapshot pauses the guest, saves a full snapshot, and
-	// terminates the Firecracker process without a guest shutdown.
+	// StopWithSleepSnapshot saves a snapshot before terminating Firecracker.
 	StopWithSleepSnapshot
 )
 
-// StopOutcome reports what a stop produced. A warm stop fills the published
-// snapshot generation and its creation time. A shutdown leaves both zero.
+// StopOutcome reports the snapshot produced by a stop.
 type StopOutcome struct {
 	MemorySnapshotGeneration uint64
 	MemorySnapshotCreatedAt  time.Time
 }
 
-// SleepSnapshot describes a validated VM-local sleep snapshot. The manager reads
-// it to recover a sleep that terminated the process but did not record sleeping.
+// SleepSnapshot describes a validated VM-local sleep snapshot.
 type SleepSnapshot struct {
 	Generation uint64
 	CreatedAt  time.Time
@@ -47,13 +44,9 @@ type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
 	Start(context.Context, RuntimeMachine, StartMode) error
 	Stop(context.Context, RuntimeMachine, StopMode) (StopOutcome, error)
-	// InspectSleepSnapshot returns the newest valid sleep snapshot. It returns
-	// ErrNotFound when none exists and an error when a manifest is present but
-	// invalid.
+	// InspectSleepSnapshot returns the newest valid sleep snapshot or an error.
 	InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error)
-	// DiscardSleepSnapshot removes the sleep snapshot of a stopped VM and clears
-	// the runtime unit, so a later start cold boots. It accepts a VM with no
-	// snapshot.
+	// DiscardSleepSnapshot removes a VM's sleep snapshot and runtime unit.
 	DiscardSleepSnapshot(context.Context, RuntimeMachine) error
 	Pause(context.Context, RuntimeMachine) error
 	Resume(context.Context, RuntimeMachine) error
@@ -70,9 +63,7 @@ type RuntimeMachine struct {
 	GroupID          uint32
 	Specification    Specification
 	NetworkInterface NetworkInterface
-	// SpecificationGeneration and RestartGeneration identify the desired state a
-	// snapshot belongs to. A restore validates them against the current desired
-	// record before it loads the snapshot.
+	// These generations identify the desired state for a snapshot restore.
 	SpecificationGeneration uint64
 	RestartGeneration       uint64
 }
