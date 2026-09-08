@@ -21,7 +21,7 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, network wake, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
 | [network](network/SPEC.md) | VM namespaces, host rules, and managed WireGuard peers. |
-| network/activity | eBPF packet activity tracking and network wake. |
+| [network/activity](network/activity/SPEC.md) | eBPF packet activity tracking and network wake. |
 | [platform](platform/SPEC.md) | Host files, commands, and systemd control. |
 
 ## Dependency graph
