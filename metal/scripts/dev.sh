@@ -59,20 +59,14 @@ fi
 step "Atlas guest image (ssh key command, cloud-init datasource, metadata service)"
 rootfs=$BULK/downloads/ubuntu.ext4
 IMAGE_VERSION=${METALD_IMAGE_VERSION:-22.04}
-# The builder bakes the guest bits a VM needs: the sshd AuthorizedKeysCommand that
-# reads MMDS, the cloud-init datasource, the network, and the metadata service. It
-# is slow, so it runs only when the image is absent. Its Ubuntu kernel is discarded
-# below.
+# The builder creates the guest image when it is absent.
 if [[ ! -f $rootfs ]]; then
 	"$IMAGE_BUILDER" --output "$rootfs" --kernel-output "$BULK/downloads/ubuntu-vmlinux" \
 		--platform "$IMAGE_ARCHITECTURE" --version "$IMAGE_VERSION"
 fi
 
 step "guest kernel (firecracker CI build)"
-# Boot the firecracker CI kernel, not the Ubuntu one. The Ubuntu generic kernel is
-# not built for the firecracker device model: it hangs probing the CMOS RTC at
-# ports 0x70 and 0x71, which firecracker does not emulate. The CI kernel has virtio
-# and ext4 built in and needs no initramfs.
+# Boot the Firecracker CI kernel, which supports the device model.
 kernel=$IMAGE_DIR/ubuntu/vmlinux
 if [[ ! -f $kernel ]]; then
 	echo "    downloading vmlinux-5.10.223"
