@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// buildSleepManager returns a manager with a sleep policy and a controllable
-// activity monitor. Tests drive the eligibility decision through it.
+// buildSleepManager returns a manager with controllable activity.
 func buildSleepManager(t *testing.T, config SleepConfig, monitor NetworkActivityMonitor) *Manager {
 	t.Helper()
 	manager, err := NewManager(
@@ -284,8 +283,7 @@ func TestSleepEligibilityUsesOneMetalWideTimeout(t *testing.T) {
 	monitor := &fakeNetworkActivityMonitor{}
 	manager := buildSleepManager(t, SleepConfig{Enabled: true, IdleTimeout: timeout}, monitor)
 
-	// One VM has been idle past the timeout. The other saw recent traffic. The
-	// same manager timeout decides both.
+	// One VM is idle and the other has recent traffic.
 	first := sleepDesired()
 	monitor.activity = NetworkActivity{LastSeenAt: now.Add(-2 * timeout), HasBeenSeen: true}
 	firstResult, err := manager.evaluateSleepEligibility(context.Background(), first, sleepObserved(), RuntimeStatus{State: StateRunning}, now)
