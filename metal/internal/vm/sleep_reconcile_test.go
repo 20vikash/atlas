@@ -188,6 +188,35 @@ func TestSleepAbortsBeforeSnapshotWhenTrafficArrives(t *testing.T) {
 	}
 }
 
+func TestReconcileRecoversACompletedWakeWithoutStatus(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	wake := &fakeNetworkWakeMonitor{}
+	manager.networkWakeMonitor = wake
+	autoSleepToSleeping(t, manager, monitor)
+
+	// The wake restore ran but the running status was lost. The process is running
+	// while the record still says sleeping.
+	runtime.state = StateRunning
+	startsBefore := runtime.starts
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.starts != startsBefore {
+		t.Fatalf("starts = %d, recovery must not restore again", runtime.starts)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateRunning || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want running with no sleep", observed)
+	}
+	if len(wake.disarmed) == 0 {
+		t.Fatal("recovery must disarm the wake")
+	}
+}
+
 func TestHeldSleepingVMRearmsWake(t *testing.T) {
 	manager, _, monitor := newSleepyManager(t, 30*time.Minute)
 	wake := &fakeNetworkWakeMonitor{}

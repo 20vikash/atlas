@@ -166,7 +166,15 @@ func (manager *Manager) reconcileSleeping(
 	machine RuntimeMachine,
 	observed *ObservedRecord,
 	operationID string,
+	status RuntimeStatus,
 ) error {
+	// A running runtime while the record says sleeping means a wake restore ran
+	// but did not record the running state. Infer running without loading the
+	// snapshot again.
+	if status.State == StateRunning {
+		return manager.completeWakeWithoutStatus(desired, observed)
+	}
+
 	// A restart wants a fresh guest, so discard the snapshot and cold reboot.
 	if observed.RestartGeneration < desired.RestartGeneration {
 		return manager.restartFromSleep(ctx, desired, machine, observed, operationID)
@@ -196,6 +204,20 @@ func (manager *Manager) reconcileSleeping(
 	default:
 		return &TransitionError{DesiredState: desired.State, ObservedState: StateSleeping}
 	}
+}
+
+// completeWakeWithoutStatus finishes a network wake whose restore ran but whose
+// running status was not recorded. It infers running from the live runtime,
+// disarms the wake, and publishes running without loading the snapshot again.
+func (manager *Manager) completeWakeWithoutStatus(desired DesiredRecord, observed *ObservedRecord) error {
+	manager.disarmNetworkWake(desired)
+
+	observed.Sleep = nil
+	observed.State = StateRunning
+	observed.Generation = desired.Generation
+	observed.RestartGeneration = desired.RestartGeneration
+	observed.completeOperation()
+	return manager.store.writeObserved(desired.ID, *observed)
 }
 
 // restartFromSleep discards the snapshot and cold boots the guest, so an explicit

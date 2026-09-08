@@ -81,7 +81,7 @@ func (manager *Manager) reconcileActive(
 	// A sleeping VM has no live guest. Its desired record decides whether it
 	// stays asleep, resumes, or discards the snapshot.
 	if wasSleeping {
-		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID)
+		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID, status)
 	}
 
 	// A warm stop can terminate the process before the sleeping status is written.
