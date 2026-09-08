@@ -36,7 +36,7 @@ func (runtime *Runtime) publishPendingMemorySnapshot(machine vm.RuntimeMachine, 
 	}
 
 	generationDirectory := runtime.configuration.memorySnapshotGenerationDirectory(machine.ID, generation)
-	if err := os.MkdirAll(runtime.configuration.memorySnapshotGenerationsDirectory(machine.ID), 0o750); err != nil {
+	if err := os.MkdirAll(runtime.configuration.memorySnapshotRoot(machine.ID), 0o750); err != nil {
 		return validatedMemorySnapshot{}, fmt.Errorf("create memory snapshot generations directory: %w", err)
 	}
 	if err := os.Rename(pending, generationDirectory); err != nil {

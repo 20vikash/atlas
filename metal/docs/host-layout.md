@@ -30,16 +30,15 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
         ├── config.json             versioned reservation and desired state
         ├── status.json             versioned observed state, cleanup, and sleep progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
-        ├── snapshots/              published memory snapshots for this VM
-        │   └── generations/
-        │       └── <n>/            state, memory, and manifest.json
+        ├── memory-snapshots/       published memory snapshots for this VM
+        │   └── <n>/                state, memory, and manifest.json
         └── firecracker/            the executable name that jailer appends
             └── <id>/
                 └── root/           the VM sees this as /
                     ├── firecracker jailer copies the exec file in
                     ├── vmlinux     hard link to the kernel
                     ├── rootfs.img  block node for the VM zvol
-                    ├── snapshot-pending/  a snapshot being written, before publish
+                    ├── memory-snapshot-pending/  one being written, before publish
                     └── run/
                         └── firecracker.socket
 
@@ -62,7 +61,7 @@ running -- warm stop --> sleeping -- snapshot restore --> running
                               +-> snapshot and vms/<id>: kept
 ```
 
-The snapshot is under `machines/<id>/snapshots/generations/<n>/`. `status.json` records the sleep progress.
+The snapshot is under `machines/<id>/memory-snapshots/<n>/`. `status.json` records the sleep progress.
 
 The jail is inside the VM directory. Removing `machines/<id>` removes the VM and its chroot. Jailer adds `<exec>/<id>/root` below the VM directory, so the jail stays separate from the VM's other files. The jail base is not configurable: the kernel is hard-linked into the jail, and a hard link cannot cross a filesystem.
 

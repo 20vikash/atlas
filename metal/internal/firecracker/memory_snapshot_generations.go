@@ -11,29 +11,23 @@ import (
 
 // Memory snapshot layout below the VM directory.
 //
-//	machines/<id>/snapshots/generations/<n>/state
-//	machines/<id>/snapshots/generations/<n>/memory
-//	machines/<id>/snapshots/generations/<n>/manifest.json
+//	machines/<id>/memory-snapshots/<n>/state
+//	machines/<id>/memory-snapshots/<n>/memory
+//	machines/<id>/memory-snapshots/<n>/manifest.json
 const (
-	memorySnapshotDirName            = "snapshots"
-	memorySnapshotGenerationsDirName = "generations"
-	pendingMemorySnapshotDirName     = "snapshot-pending"
-	memorySnapshotManifestFileName   = "manifest.json"
+	memorySnapshotDirName          = "memory-snapshots"
+	pendingMemorySnapshotDirName   = "memory-snapshot-pending"
+	memorySnapshotManifestFileName = "manifest.json"
 )
 
-// memorySnapshotRoot is the VM-local root for every memory snapshot file.
+// memorySnapshotRoot holds one directory for each published generation.
 func (configuration Config) memorySnapshotRoot(id string) string {
 	return filepath.Join(configuration.vmDir(id), memorySnapshotDirName)
 }
 
-// memorySnapshotGenerationsDirectory holds one directory for each published generation.
-func (configuration Config) memorySnapshotGenerationsDirectory(id string) string {
-	return filepath.Join(configuration.memorySnapshotRoot(id), memorySnapshotGenerationsDirName)
-}
-
 // memorySnapshotGenerationDirectory is the published directory of one generation.
 func (configuration Config) memorySnapshotGenerationDirectory(id string, generation uint64) string {
-	return filepath.Join(configuration.memorySnapshotGenerationsDirectory(id), strconv.FormatUint(generation, 10))
+	return filepath.Join(configuration.memorySnapshotRoot(id), strconv.FormatUint(generation, 10))
 }
 
 // pendingMemorySnapshotDirectory is where Firecracker writes a new generation.
@@ -43,7 +37,7 @@ func (configuration Config) pendingMemorySnapshotDirectory(id string) string {
 
 // latestMemorySnapshotGeneration returns the highest valid generation.
 func (configuration Config) latestMemorySnapshotGeneration(id string) (uint64, bool, error) {
-	entries, err := os.ReadDir(configuration.memorySnapshotGenerationsDirectory(id))
+	entries, err := os.ReadDir(configuration.memorySnapshotRoot(id))
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, false, nil
 	}
@@ -69,8 +63,7 @@ func (configuration Config) latestMemorySnapshotGeneration(id string) (uint64, b
 	return highest, found, nil
 }
 
-// nextMemorySnapshotGeneration returns one more than the highest published generation.
-// It returns 1 when none exist.
+// nextMemorySnapshotGeneration returns the next generation, starting at 1.
 func (configuration Config) nextMemorySnapshotGeneration(id string) (uint64, error) {
 	highest, _, err := configuration.latestMemorySnapshotGeneration(id)
 	if err != nil {

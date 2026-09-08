@@ -12,8 +12,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// writePendingMemorySnapshot simulates Firecracker having written a pending snapshot
-// into the jail.
+// writePendingMemorySnapshot writes a pending snapshot fixture.
 func writePendingMemorySnapshot(t *testing.T, configuration Config, id string, stateSize, memorySize int) {
 	t.Helper()
 	pending := configuration.pendingMemorySnapshotDirectory(id)
@@ -24,7 +23,7 @@ func writePendingMemorySnapshot(t *testing.T, configuration Config, id string, s
 	writeFile(t, filepath.Join(pending, memorySnapshotMemoryFileName), memorySize)
 }
 
-func TestPublishPendingSnapshotMovesAndValidates(t *testing.T) {
+func TestPublishPendingMemorySnapshotMovesAndValidates(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	runtime := &Runtime{configuration: configuration}
 	machine := vm.RuntimeMachine{ID: "vm-1", UserID: 100001, SpecificationGeneration: 4, RestartGeneration: 1}
@@ -58,7 +57,7 @@ func TestPublishPendingSnapshotMovesAndValidates(t *testing.T) {
 	}
 }
 
-func TestPublishPendingSnapshotRejectsAnIncompletePending(t *testing.T) {
+func TestPublishPendingMemorySnapshotRejectsAnIncompletePending(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	runtime := &Runtime{configuration: configuration}
 	machine := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
@@ -72,9 +71,7 @@ func TestPublishPendingSnapshotRejectsAnIncompletePending(t *testing.T) {
 	}
 }
 
-// TestWarmStopRecognizesACompletedStop confirms that a warm stop with a valid
-// published snapshot and a stopped runtime is treated as already done: it returns
-// without a new snapshot or a kill.
+// TestWarmStopRecognizesACompletedStop checks recovery of a published snapshot.
 func TestWarmStopRecognizesACompletedStop(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	units := &stubUnits{active: false} // inactive reports stopped

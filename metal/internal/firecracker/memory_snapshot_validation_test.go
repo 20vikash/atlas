@@ -44,7 +44,7 @@ func writeFile(t *testing.T, path string, size int) {
 	}
 }
 
-func TestValidateSnapshotGenerationAcceptsAValidSnapshot(t *testing.T) {
+func TestValidateMemorySnapshotGenerationAcceptsAValidSnapshot(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	layDownGeneration(t, configuration, 4)
 
@@ -57,7 +57,7 @@ func TestValidateSnapshotGenerationAcceptsAValidSnapshot(t *testing.T) {
 	}
 }
 
-func TestLatestValidSnapshotValidatesTheNewestGeneration(t *testing.T) {
+func TestLatestValidMemorySnapshotValidatesTheNewestGeneration(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	layDownGeneration(t, configuration, 2)
 	layDownGeneration(t, configuration, 5)
@@ -71,7 +71,7 @@ func TestLatestValidSnapshotValidatesTheNewestGeneration(t *testing.T) {
 	}
 }
 
-func TestLatestValidSnapshotReportsNotFoundWithoutAGeneration(t *testing.T) {
+func TestLatestValidMemorySnapshotReportsNotFoundWithoutAGeneration(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 
 	if _, err := configuration.latestValidMemorySnapshot(validRequirement()); !errors.Is(err, errMemorySnapshotNotFound) {
@@ -79,7 +79,7 @@ func TestLatestValidSnapshotReportsNotFoundWithoutAGeneration(t *testing.T) {
 	}
 }
 
-func TestValidateSnapshotGenerationReportsNotFoundWithoutAManifest(t *testing.T) {
+func TestValidateMemorySnapshotGenerationReportsNotFoundWithoutAManifest(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	// Lay down the artifacts but remove the manifest, so the snapshot is absent.
 	directory := layDownGeneration(t, configuration, 4)
@@ -93,7 +93,7 @@ func TestValidateSnapshotGenerationReportsNotFoundWithoutAManifest(t *testing.T)
 	}
 }
 
-func TestValidateSnapshotGenerationRejectsInvalidSnapshots(t *testing.T) {
+func TestValidateMemorySnapshotGenerationRejectsInvalidSnapshots(t *testing.T) {
 	cases := []struct {
 		name        string
 		requirement memorySnapshotRequirement

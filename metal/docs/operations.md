@@ -89,7 +89,7 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
   - Read `GET /v1/vms/{id}`. Check `observed.state`, `observed.sleeping_since`, `observed.last_network_activity_at`, and `observed.error`.
   - Confirm that `sleep.enabled` is true, `sleep.idle_timeout` is positive, and the VM has `is_sleepy`.
   - Run `systemctl show -p MainPID --value metal-vm@<id>.service`. A sleeping VM has a value of `0`.
-  - Run `ls <base_dir>/machines/<id>/snapshots/generations/*/manifest.json`.
+  - Run `ls <base_dir>/machines/<id>/memory-snapshots/*/manifest.json`.
   - Run `bpftool map show`. Dump `activity_by_user_id` and `wake_state_by_user_id` with `bpftool map dump name <map>`. Use the VM user ID as the key.
   - Run `ip netns exec metal-<id> bpftool link show`.
   - Read `journalctl -u metald --since "15 minutes ago"` for sleep and wake failures.

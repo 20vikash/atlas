@@ -69,10 +69,10 @@ A memory snapshot restores only into the Firecracker build that wrote it. The bi
 A full snapshot contains a `state` file and a `memory` file. Warm image builds and warm stops use the same create path.
 
 ```text
-running -> pause -> jail/snapshot-pending/{state,memory}
+running -> pause -> jail/memory-snapshot-pending/{state,memory}
                     |
                     v
-          machines/<id>/snapshots/generations/<n>/
+          machines/<id>/memory-snapshots/<n>/
                     |
                     +-> write manifest.json last
                     |

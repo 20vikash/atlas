@@ -28,14 +28,14 @@ func incompleteManifest() memorySnapshotManifest {
 	return manifest
 }
 
-func TestSnapshotManifestUsesFixedFileNames(t *testing.T) {
+func TestMemorySnapshotManifestUsesFixedFileNames(t *testing.T) {
 	manifest := newMemorySnapshotManifest(memorySnapshotManifest{StateFileName: "/etc/passwd", MemoryFileName: "../escape"})
 	if manifest.StateFileName != memorySnapshotStateFileName || manifest.MemoryFileName != memorySnapshotMemoryFileName {
 		t.Fatalf("file names = %q, %q; want the fixed names", manifest.StateFileName, manifest.MemoryFileName)
 	}
 }
 
-func TestSnapshotManifestRoundTrips(t *testing.T) {
+func TestMemorySnapshotManifestRoundTrips(t *testing.T) {
 	original := completeManifest()
 	data, err := encodeMemorySnapshotManifest(original)
 	if err != nil {
@@ -55,7 +55,7 @@ func TestSnapshotManifestRoundTrips(t *testing.T) {
 	}
 }
 
-func TestDecodeSnapshotManifestRejectsUnknownFields(t *testing.T) {
+func TestDecodeMemorySnapshotManifestRejectsUnknownFields(t *testing.T) {
 	data, err := encodeMemorySnapshotManifest(completeManifest())
 	if err != nil {
 		t.Fatal(err)
