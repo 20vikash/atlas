@@ -12,13 +12,10 @@ import (
 )
 
 const (
-	// warmImageDelay is how long a warm VM runs before its memory is captured.
-	// The guest must finish booting and settle, or the snapshot restores into
-	// work that is still in progress.
+	// warmImageDelay lets the guest finish booting before capture.
 	warmImageDelay = 5 * time.Minute
 
-	// warmIdentifierKeyLength is how much of the warm key names the temporary VM.
-	// A fixed digest prefix keeps the identifier deterministic and bounded.
+	// warmIdentifierKeyLength bounds the temporary VM identifier.
 	warmIdentifierKeyLength = 32
 )
 
@@ -127,8 +124,7 @@ func WarmImageKey(image Image, configuration MemorySnapshotConfiguration, compat
 	return hex.EncodeToString(digest[:])
 }
 
-// warmupSpecification is the throwaway VM that produces a warm image. It has no
-// network, and it never asks for a warm image of its own.
+// warmupSpecification describes the temporary VM used for capture.
 func warmupSpecification(image Image, configuration MemorySnapshotConfiguration) Specification {
 	image.MemorySnapshot = false
 	image.MemorySnapshotConfiguration = nil
@@ -141,7 +137,7 @@ func warmupSpecification(image Image, configuration MemorySnapshotConfiguration)
 	}
 }
 
-// waitForWarmImage sleeps for delay unless ctx ends first.
+// waitForWarmImage waits for the capture delay unless ctx ends.
 func waitForWarmImage(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -153,9 +149,7 @@ func waitForWarmImage(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// RunTemporary runs an operation on a manager-owned temporary virtual machine.
-// The VM has no records on disk, and cleanup always attempts to release its
-// runtime, network, and storage. Cleanup errors are returned to the caller.
+// RunTemporary runs an operation on a temporary virtual machine.
 func (manager *Manager) RunTemporary(
 	ctx context.Context,
 	identifier string,
@@ -200,9 +194,7 @@ func (manager *Manager) RunTemporary(
 	return operation(machine)
 }
 
-// reserveTemporary claims an identifier and a host user ID for a temporary VM.
-// The claim is held in memory only, so it never collides with a stored record
-// and never survives a restart.
+// reserveTemporary claims an identifier and host user ID in memory.
 func (manager *Manager) reserveTemporary(identifier string) (uint32, error) {
 	manager.allocationMutex.Lock()
 	defer manager.allocationMutex.Unlock()
