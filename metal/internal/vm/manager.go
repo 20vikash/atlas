@@ -18,8 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// defaultFastApplyTimeout bounds an immediate guest update made during an API
-// request. The reconciler retries anything that does not finish in time.
+// defaultFastApplyTimeout bounds an immediate guest update.
 const defaultFastApplyTimeout = 2 * time.Second
 
 // ManagerConfig contains persistent VM manager settings.
@@ -30,8 +29,7 @@ type ManagerConfig struct {
 	Sleep             SleepConfig
 }
 
-// SleepConfig is the Metal-wide automatic sleep policy. One idle timeout applies
-// to every sleepy VM on this host. It is not stored in any VM record.
+// SleepConfig is the host-wide automatic sleep policy.
 type SleepConfig struct {
 	Enabled     bool
 	IdleTimeout time.Duration
@@ -44,8 +42,7 @@ type ManagerDependencies struct {
 	Storage                Storage
 	Snapshots              Snapshots
 	NetworkActivityMonitor NetworkActivityMonitor
-	// NetworkWakeMonitor disarms a VM after a packet-triggered wake. It is optional
-	// and used only when automatic sleep is enabled.
+	// NetworkWakeMonitor handles packet-triggered wake.
 	NetworkWakeMonitor NetworkWakeMonitor
 	Logger             *slog.Logger
 }
@@ -114,9 +111,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	return manager, nil
 }
 
-// Create reserves a VM or accepts a retry of the first request. A retry is
-// recognized by its fingerprint, so a repeated call refreshes image URLs instead
-// of reserving a second VM.
+// Create reserves a VM or refreshes a matching retry.
 func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification) (Information, error) {
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
@@ -214,8 +209,7 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 	return manager.store.listIDs()
 }
 
-// information reads both records without taking the VM lock. Callers that are
-// not already holding the lock use Information instead.
+// information reads both records without taking the VM lock.
 func (manager *Manager) information(identifier string) (Information, error) {
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
@@ -277,8 +271,7 @@ func validIdentifier(identifier string) bool {
 	return identifier != "" && identifier != "." && filepath.Base(identifier) == identifier
 }
 
-// createFingerprint identifies the reservation a create request asks for. Image
-// transport URLs are excluded, because they are signed and rotate on their own.
+// createFingerprint identifies the reservation requested by a create call.
 func createFingerprint(specification Specification) (string, error) {
 	normalized := cloneSpecification(specification)
 	normalized.Image.RootfsURL = ""
@@ -291,8 +284,7 @@ func createFingerprint(specification Specification) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// cloneSpecification deep copies the reference fields, so a stored record and a
-// runtime input cannot share mutable state.
+// cloneSpecification copies reference fields before runtime use.
 func cloneSpecification(specification Specification) Specification {
 	specification.SSHKeys = slices.Clone(specification.SSHKeys)
 	specification.Metadata = maps.Clone(specification.Metadata)
@@ -303,8 +295,7 @@ func cloneSpecification(specification Specification) Specification {
 	return specification
 }
 
-// informationFromRecords combines both records into the view consumers receive.
-// Local error detail is dropped here, so only safe data leaves the package.
+// informationFromRecords combines records into the public VM view.
 func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Information {
 	var errorDetail *PublicOperationError
 	if observed.Error != nil {
