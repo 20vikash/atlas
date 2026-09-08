@@ -7,7 +7,7 @@ import (
 )
 
 // @Summary	Set virtual machine sleep policy
-// @Description	Store the complete sleep policy. The body carries only is_sleepy. The idle timeout is one Metal-wide host value.
+// @Description	Store is_sleepy. idle_timeout is host-wide.
 // @ID			setVirtualMachineSleepPolicy
 // @Tags		Virtual machines
 // @Accept		json
