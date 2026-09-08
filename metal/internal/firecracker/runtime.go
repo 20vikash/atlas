@@ -3,7 +3,6 @@ package firecracker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -94,60 +93,14 @@ func (runtime *Runtime) Inspect(ctx context.Context, input vm.RuntimeMachine) (v
 	return vm.RuntimeStatus{State: state}, nil
 }
 
-// Start launches a Firecracker virtual machine. StartNormal keeps the current
-// warm-image and cold-boot behavior. StartFromSleepSnapshot restores and resumes
-// the VM-local snapshot. StartFromSleepSnapshotPaused restores it but leaves the
-// vCPUs paused.
-func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode vm.StartMode) error {
-	switch mode {
-	case vm.StartNormal:
-		return runtime.newMachine(input).Start(ctx)
-	case vm.StartFromSleepSnapshot:
-		return runtime.newMachine(input).startFromSnapshot(ctx, true)
-	case vm.StartFromSleepSnapshotPaused:
-		return runtime.newMachine(input).startFromSnapshot(ctx, false)
-	default:
-		return fmt.Errorf("unknown start mode %d", mode)
-	}
+// Start launches a stopped Firecracker virtual machine.
+func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).Start(ctx)
 }
 
-// Stop stops a Firecracker virtual machine. StopShutdown keeps the current
-// Ctrl+Alt+Del and bounded kill. StopWithSleepSnapshot pauses the guest,
-// publishes a full snapshot, and terminates the process. A warm stop reports the
-// published snapshot generation and its creation time.
-func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) (vm.StopOutcome, error) {
-	switch mode {
-	case vm.StopShutdown:
-		return vm.StopOutcome{}, runtime.newMachine(input).Stop(ctx)
-	case vm.StopWithSleepSnapshot:
-		return runtime.newMachine(input).warmStop(ctx)
-	default:
-		return vm.StopOutcome{}, fmt.Errorf("unknown stop mode %d", mode)
-	}
-}
-
-// InspectSleepSnapshot returns the newest valid sleep snapshot for a VM. It
-// reports vm.ErrNotFound when none exists and preserves an invalid-manifest error
-// for an operator to inspect.
-func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.RuntimeMachine) (vm.SleepSnapshot, error) {
-	machine := runtime.newMachine(input)
-	snapshot, err := runtime.configuration.latestValidSnapshot(machine.snapshotRequirement())
-	if errors.Is(err, errSnapshotNotFound) {
-		return vm.SleepSnapshot{}, vm.ErrNotFound
-	}
-	if err != nil {
-		return vm.SleepSnapshot{}, err
-	}
-	return vm.SleepSnapshot{Generation: snapshot.Generation, CreatedAt: snapshot.Manifest.CreatedAt}, nil
-}
-
-// DiscardSleepSnapshot clears the runtime unit of a warm-stopped VM and removes
-// its sleep snapshots, so a later start cold boots with the current shape.
-func (runtime *Runtime) DiscardSleepSnapshot(ctx context.Context, input vm.RuntimeMachine) error {
-	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
-		return fmt.Errorf("discard sleep snapshot: %w", err)
-	}
-	return runtime.purgeSnapshots(input.ID)
+// Stop stops a Firecracker virtual machine.
+func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).Stop(ctx)
 }
 
 // Pause pauses a running Firecracker virtual machine.
@@ -175,9 +128,6 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	}
 	if err := os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(input.ID))); err != nil {
 		return fmt.Errorf("remove Firecracker jail: %w", err)
-	}
-	if err := runtime.purgeSnapshots(input.ID); err != nil {
-		return err
 	}
 
 	return nil

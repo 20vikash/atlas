@@ -21,8 +21,6 @@ const (
 	phaseMetadata       = "metadata"
 	phaseDisk           = "disk"
 	phaseSnapshot       = "snapshot"
-	phaseSleepCheck     = "sleep-check"
-	phaseSleepSnapshot  = "sleep-snapshot"
 	phaseDestroyRuntime = "destroy-runtime"
 	phaseDestroyNetwork = "destroy-network"
 	phaseDestroyStorage = "destroy-storage"
@@ -57,10 +55,6 @@ func (manager *Manager) reconcileActive(
 	observed ObservedRecord,
 	operationID string,
 ) error {
-	// Capture the pre-pass state before any operation overwrites the phase.
-	wasSleeping := observed.State == StateSleeping
-	interruptedSleep := observed.Phase == phaseSleepSnapshot
-
 	var networkInterface NetworkInterface
 	err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseNetwork, func() error {
 		var ensureError error
@@ -78,19 +72,6 @@ func (manager *Manager) reconcileActive(
 		return err
 	}
 
-	// A sleeping VM has no live guest. Its desired record decides whether it
-	// stays asleep, resumes, or discards the snapshot.
-	if wasSleeping {
-		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID, status)
-	}
-
-	// A warm stop can terminate the process before the sleeping status is written.
-	// A stopped runtime that stopped inside the sleep-snapshot phase recovers to
-	// sleeping instead of cold booting.
-	if interruptedSleep && status.State == StateStopped {
-		return manager.recoverInterruptedSleep(ctx, desired, machine, &observed, operationID)
-	}
-
 	if observed.RestartGeneration < desired.RestartGeneration {
 		status, err = manager.applyRestart(ctx, desired.ID, machine, status, &observed, operationID)
 		if err != nil {
@@ -98,13 +79,6 @@ func (manager *Manager) reconcileActive(
 		}
 		observed.RestartGeneration = desired.RestartGeneration
 	}
-
-	// A warm stop takes a live guest to the sleeping state instead of a cold stop.
-	if desired.State == StateStopped && desired.WarmStop &&
-		(status.State == StateRunning || status.State == StatePaused) {
-		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{RequestedAt: time.Now().UTC()})
-	}
-
 	status, err = manager.applyDesiredState(ctx, desired.ID, machine, status, desired.State, &observed, operationID)
 	if err != nil {
 		return err
@@ -121,22 +95,6 @@ func (manager *Manager) reconcileActive(
 		return usageError
 	}); err != nil {
 		return err
-	}
-
-	// An idle sleepy VM warm-stops to the sleeping state.
-	now := time.Now().UTC()
-	decision, err := manager.evaluateSleepEligibility(ctx, desired, observed, status, now)
-	if err != nil {
-		return err
-	}
-	if decision.Eligible {
-		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{
-			EligibleAt:                   decision.Activity.LastSeenAt.Add(manager.configuration.Sleep.IdleTimeout),
-			RequestedAt:                  now,
-			LastNetworkActivityAt:        decision.Activity.LastSeenAt,
-			LastNetworkActivityMonotonic: decision.Activity.LastPacketMonotonicNanoseconds,
-			AbortOnTraffic:               true,
-		})
 	}
 
 	observed.State = status.State
@@ -181,10 +139,10 @@ func (manager *Manager) applyRestart(
 		return status, nil
 	}
 	err := manager.runOperation(ctx, identifier, observed, operationID, phaseRestart, func() error {
-		if _, err := manager.runtime.Stop(ctx, machine, StopShutdown); err != nil {
+		if err := manager.runtime.Stop(ctx, machine); err != nil {
 			return err
 		}
-		return manager.runtime.Start(ctx, machine, StartNormal)
+		return manager.runtime.Start(ctx, machine)
 	})
 	if err != nil {
 		return status, err
@@ -193,9 +151,7 @@ func (manager *Manager) applyRestart(
 }
 
 // applyDesiredState moves the runtime to the requested power state. Reaching
-// paused from a stopped VM needs a start first. A cold start uses StartNormal. A
-// warm stop and a snapshot resume are handled by the sleeping state path, not
-// here.
+// paused from a stopped VM needs a start first.
 func (manager *Manager) applyDesiredState(
 	ctx context.Context,
 	identifier string,
@@ -205,20 +161,17 @@ func (manager *Manager) applyDesiredState(
 	observed *ObservedRecord,
 	operationID string,
 ) (RuntimeStatus, error) {
-	start := func(ctx context.Context, machine RuntimeMachine) error {
-		return manager.runtime.Start(ctx, machine, StartNormal)
-	}
 	switch desiredState {
 	case StateRunning:
 		if status.State == StatePaused {
 			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseResume, StateRunning, manager.runtime.Resume)
 		}
 		if status.State != StateRunning {
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start)
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, manager.runtime.Start)
 		}
 	case StatePaused:
 		if status.State != StateRunning && status.State != StatePaused {
-			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start); err != nil {
+			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, manager.runtime.Start); err != nil {
 				return status, err
 			}
 			status.State = StateRunning
@@ -228,11 +181,7 @@ func (manager *Manager) applyDesiredState(
 		}
 	case StateStopped:
 		if status.State != StateStopped {
-			stopShutdown := func(ctx context.Context, machine RuntimeMachine) error {
-				_, err := manager.runtime.Stop(ctx, machine, StopShutdown)
-				return err
-			}
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopShutdown)
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, manager.runtime.Stop)
 		}
 	default:
 		return status, &TransitionError{DesiredState: desiredState, ObservedState: status.State}

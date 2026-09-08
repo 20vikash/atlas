@@ -18,9 +18,9 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [api](api/SPEC.md) | Authenticated HTTP API. |
 | [host](host/SPEC.md) | Host synchronization and capacity. |
 | [console](console/SPEC.md) | VM serial consoles over PTYs. |
-| [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, network wake, and staging cleanup loops. |
+| [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
-| [network](network/SPEC.md) | VM namespaces, packet activity, and managed WireGuard peers. |
+| [network](network/SPEC.md) | VM namespaces and managed WireGuard peers. |
 | [platform](platform/SPEC.md) | Host files, commands, and systemd control. |
 
 ## Dependency graph

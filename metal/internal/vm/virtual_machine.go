@@ -48,12 +48,10 @@ func networkRequest(record DesiredRecord) NetworkRequest {
 // specification is cloned, so a runtime cannot reach back into stored state.
 func runtimeMachine(record DesiredRecord, networkInterface NetworkInterface) RuntimeMachine {
 	return RuntimeMachine{
-		ID:                      record.ID,
-		UserID:                  record.UserID,
-		GroupID:                 record.GroupID,
-		Specification:           cloneSpecification(record.Specification),
-		NetworkInterface:        networkInterface,
-		SpecificationGeneration: record.SpecificationGeneration,
-		RestartGeneration:       record.RestartGeneration,
+		ID:               record.ID,
+		UserID:           record.UserID,
+		GroupID:          record.GroupID,
+		Specification:    cloneSpecification(record.Specification),
+		NetworkInterface: networkInterface,
 	}
 }

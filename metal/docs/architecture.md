@@ -20,12 +20,11 @@ api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> 
  |            |                                      |
  |            |                                      └─ one unit for each VM
  |            ├─ storage stores
- |            └─ network and activity managers
+ |            └─ network manager
  |
  ├─ host.Service ----> network, image policy, capacity
  └─ wake reconcilers
        ├─ VM desired-state reconciliation
-       ├─ network wake reconciliation
        └─ image cache and snapshot staging cleanup
 ```
 
@@ -56,7 +55,7 @@ Startup validates every record and refuses to run on one it cannot read, because
 **Composition root**
 
 - `cmd/metald` creates concrete services in one place.
-- Small consumer interfaces keep image, snapshot, VM disk, network, and wake work separate.
+- Small consumer interfaces keep image, snapshot, VM disk, and network work separate.
 - One `base_dir` keeps persistent host files under one root.
 
 **Desired state**

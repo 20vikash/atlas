@@ -19,9 +19,6 @@ type Specification struct {
 	Hostname        string               `json:"hostname"`
 	UserData        string               `json:"user_data"`
 	Metadata        map[string]string    `json:"metadata"`
-	// IsSleepy lets the host sleep an idle VM. The zero value keeps a VM awake, so
-	// old create requests stay non-sleepy.
-	IsSleepy bool `json:"is_sleepy"`
 }
 
 // Image identifies immutable boot files and their transport URLs.
@@ -74,7 +71,6 @@ func (specification Specification) SameReservation(other Specification) bool {
 		slices.Equal(specification.SSHKeys, other.SSHKeys) &&
 		specification.Hostname == other.Hostname &&
 		specification.UserData == other.UserData &&
-		specification.IsSleepy == other.IsSleepy &&
 		maps.Equal(specification.Metadata, other.Metadata)
 }
 
@@ -140,9 +136,6 @@ const (
 	StateStopped State = "stopped"
 	// StateFailed means the runtime stopped the guest unexpectedly.
 	StateFailed State = "failed"
-	// StateSleeping means the guest is asleep. Its memory is in a saved snapshot
-	// and no Firecracker process runs. It is an observed state only.
-	StateSleeping State = "sleeping"
 	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"
 )
@@ -160,7 +153,7 @@ func IsDesiredState(state State) bool {
 // isObservedState reports whether state is one a runtime can report.
 func isObservedState(state State) bool {
 	switch state {
-	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateSleeping, StateDestroyed:
+	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateDestroyed:
 		return true
 	default:
 		return false
@@ -183,7 +176,6 @@ type Information struct {
 	SSHKeys                       []string
 	Hostname                      string
 	Metadata                      map[string]string
-	IsSleepy                      bool
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
@@ -198,8 +190,6 @@ type Information struct {
 	OperationID                   string
 	OperationStartedAt            time.Time
 	UpdatedAt                     time.Time
-	LastNetworkActivityAt         time.Time
-	SleepingSince                 time.Time
 }
 
 // PublicOperationError contains safe reconciliation error data.

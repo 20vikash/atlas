@@ -6,54 +6,34 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 type fakeRuntime struct {
 	state        State
 	starts       int
-	startMode    StartMode
 	stops        int
-	stopMode     StopMode
 	pauses       int
 	resumes      int
 	removes      int
 	metadata     int
 	diskRefresh  int
 	inspectError error
-	// startFromSnapshotError makes a StartFromSleepSnapshot fail, so a test can
-	// drive the cold-boot fallback.
-	startFromSnapshotError error
-	// stopOutcome is returned by a warm stop, so a test can set the published
-	// snapshot generation.
-	stopOutcome StopOutcome
-	// sleepSnapshot and sleepSnapshotError drive InspectSleepSnapshot, so a test
-	// can model a present, absent, or invalid sleep snapshot.
-	sleepSnapshot      SleepSnapshot
-	sleepSnapshotError error
-	// discards counts DiscardSleepSnapshot calls.
-	discards int
 }
 
 func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error) {
 	return RuntimeStatus{State: runtime.state}, runtime.inspectError
 }
 
-func (runtime *fakeRuntime) Start(_ context.Context, _ RuntimeMachine, mode StartMode) error {
-	runtime.startMode = mode
-	if mode == StartFromSleepSnapshot && runtime.startFromSnapshotError != nil {
-		return runtime.startFromSnapshotError
-	}
+func (runtime *fakeRuntime) Start(context.Context, RuntimeMachine) error {
 	runtime.starts++
 	runtime.state = StateRunning
 	return nil
 }
 
-func (runtime *fakeRuntime) Stop(_ context.Context, _ RuntimeMachine, mode StopMode) (StopOutcome, error) {
+func (runtime *fakeRuntime) Stop(context.Context, RuntimeMachine) error {
 	runtime.stops++
-	runtime.stopMode = mode
 	runtime.state = StateStopped
-	return runtime.stopOutcome, nil
+	return nil
 }
 
 func (runtime *fakeRuntime) Pause(context.Context, RuntimeMachine) error {
@@ -81,16 +61,6 @@ func (runtime *fakeRuntime) RefreshMetadata(context.Context, RuntimeMachine) err
 
 func (runtime *fakeRuntime) RefreshDisk(context.Context, RuntimeMachine) error {
 	runtime.diskRefresh++
-	return nil
-}
-
-func (runtime *fakeRuntime) InspectSleepSnapshot(context.Context, RuntimeMachine) (SleepSnapshot, error) {
-	return runtime.sleepSnapshot, runtime.sleepSnapshotError
-}
-
-func (runtime *fakeRuntime) DiscardSleepSnapshot(context.Context, RuntimeMachine) error {
-	runtime.discards++
-	runtime.state = StateStopped
 	return nil
 }
 
@@ -141,21 +111,12 @@ func (fakeSnapshots) Stage(context.Context, SnapshotRequest) (StagedSnapshot, er
 
 func newTestManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetwork, *fakeStorage) {
 	t.Helper()
-	runtime := &fakeRuntime{
-		state:       StateStopped,
-		stopOutcome: StopOutcome{SnapshotGeneration: 1, SnapshotCreatedAt: time.Unix(1000, 0).UTC()},
-	}
+	runtime := &fakeRuntime{state: StateStopped}
 	network := &fakeNetwork{}
 	storage := &fakeStorage{}
 	manager, err := NewManager(
 		ManagerConfig{MachinesDirectory: t.TempDir(), UserIDRange: UserIDRange{Min: 1000, Max: 1010}},
-		ManagerDependencies{
-			Runtime:                runtime,
-			Network:                network,
-			Storage:                storage,
-			Snapshots:              fakeSnapshots{},
-			NetworkActivityMonitor: &fakeNetworkActivityMonitor{},
-		},
+		ManagerDependencies{Runtime: runtime, Network: network, Storage: storage, Snapshots: fakeSnapshots{}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -203,19 +164,6 @@ func TestCreateFingerprintAcceptsChangedSignedURLs(t *testing.T) {
 	}
 }
 
-func TestCreateFingerprintIncludesTheSleepyFlag(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	specification := testSpecification()
-	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
-		t.Fatal(err)
-	}
-	// A create that only flips is_sleepy is a different reservation.
-	specification.IsSleepy = true
-	if _, err := manager.Create(context.Background(), "machine-1", specification); !errors.Is(err, ErrConflict) {
-		t.Fatalf("create error = %v, want conflict", err)
-	}
-}
-
 func TestCreateFingerprintRejectsDifferentFirstRequest(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	specification := testSpecification()
@@ -248,224 +196,6 @@ func TestMutationGenerationChangesOnlyForNewValues(t *testing.T) {
 	}
 }
 
-func TestSpecificationGenerationTracksShapeNotPower(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	base, err := manager.store.readDesired("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A warm stop and a start move the desired generation but must leave the
-	// specification generation alone, so the snapshot stays valid across them.
-	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
-		t.Fatal(err)
-	}
-	afterPower, err := manager.store.readDesired("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if afterPower.SpecificationGeneration != base.SpecificationGeneration {
-		t.Errorf("power change moved specification generation %d to %d", base.SpecificationGeneration, afterPower.SpecificationGeneration)
-	}
-	if afterPower.Generation == base.Generation {
-		t.Error("power change did not raise the desired generation")
-	}
-
-	// A shape change raises the specification generation.
-	configuration := testSpecification().Network
-	configuration.PublicNetworkThroughputMiBps = 500
-	if err := manager.SetNetwork(context.Background(), "machine-1", configuration); err != nil {
-		t.Fatal(err)
-	}
-	afterShape, err := manager.store.readDesired("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if afterShape.SpecificationGeneration <= afterPower.SpecificationGeneration {
-		t.Error("a network change did not raise the specification generation")
-	}
-}
-
-func TestStopWarmStoresTheWarmStopIntent(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	// A repeat with the same intent must not change the record.
-	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	record, err := manager.store.readDesired("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.State != StateStopped || !record.WarmStop {
-		t.Fatalf("desired record = %+v", record)
-	}
-	if record.Generation != 2 {
-		t.Fatalf("generation = %d, want 2", record.Generation)
-	}
-
-	// A plain stop clears the warm intent and raises the generation.
-	if err := manager.SetPowerState(context.Background(), "machine-1", StateStopped); err != nil {
-		t.Fatal(err)
-	}
-	record, err = manager.store.readDesired("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record.WarmStop {
-		t.Error("a plain stop did not clear the warm intent")
-	}
-	if record.Generation != 3 {
-		t.Fatalf("generation = %d, want 3", record.Generation)
-	}
-}
-
-func TestWarmStopReconcilesToSleepingThenResumes(t *testing.T) {
-	manager, runtime, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	// A warm stop terminates the VM and reaches the sleeping observed state.
-	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if runtime.stopMode != StopWithSleepSnapshot {
-		t.Fatalf("stop mode = %d, want StopWithSleepSnapshot", runtime.stopMode)
-	}
-	observed, err := manager.store.readObserved("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.SnapshotGeneration != 1 {
-		t.Fatalf("observed after warm stop = %+v", observed)
-	}
-
-	// Starting again resumes from the snapshot and clears the sleep progress.
-	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if runtime.startMode != StartFromSleepSnapshot {
-		t.Fatalf("start mode = %d, want StartFromSleepSnapshot", runtime.startMode)
-	}
-	observed, err = manager.store.readObserved("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.State != StateRunning || observed.Sleep != nil {
-		t.Fatalf("observed after resume = %+v", observed)
-	}
-}
-
-func TestStopOutsideTheAPIColdBoots(t *testing.T) {
-	manager, runtime, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	// The guest stops itself, so no warm stop set the resume marker.
-	runtime.state = StateStopped
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if runtime.startMode != StartNormal {
-		t.Fatalf("start mode = %d, want StartNormal", runtime.startMode)
-	}
-}
-
-func TestSnapshotResumeFailureKeepsSleeping(t *testing.T) {
-	manager, runtime, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	// The snapshot cannot be restored. A resume failure must keep the VM sleeping
-	// and never cold boot, so the in-memory guest is not lost.
-	runtime.startFromSnapshotError = errors.New("snapshot incompatible")
-	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err == nil {
-		t.Fatal("expected the resume failure to surface")
-	}
-	if runtime.startMode == StartNormal {
-		t.Fatal("a resume failure must not cold boot")
-	}
-	observed, err := manager.store.readObserved("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.State != StateSleeping || observed.Sleep == nil {
-		t.Fatalf("observed after resume failure = %+v", observed)
-	}
-}
-
-func TestWarmStoppedVMStaysSleeping(t *testing.T) {
-	manager, runtime, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	// A later pass holds the VM asleep. It does not snapshot again or resume.
-	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if runtime.stops != 1 {
-		t.Fatalf("stops = %d, want one warm stop", runtime.stops)
-	}
-	if runtime.startMode == StartFromSleepSnapshot {
-		t.Fatal("a held sleeping VM must not resume")
-	}
-	observed, err := manager.store.readObserved("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.State != StateSleeping {
-		t.Fatalf("observed = %+v, want sleeping", observed)
-	}
-}
-
 func TestSetComputeRequestsRunningState(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
@@ -486,64 +216,6 @@ func TestSetComputeRequestsRunningState(t *testing.T) {
 	}
 	if record.State != StateRunning || record.Generation != 3 {
 		t.Fatalf("desired record = %+v", record)
-	}
-}
-
-func TestSetSleepPolicyRaisesGenerationOnlyOnChange(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.SetSleepPolicy(context.Background(), "machine-1", true); err != nil {
-		t.Fatal(err)
-	}
-	// A repeat with the same value must not change the record.
-	if err := manager.SetSleepPolicy(context.Background(), "machine-1", true); err != nil {
-		t.Fatal(err)
-	}
-
-	record, err := manager.store.readDesired("machine-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !record.Specification.IsSleepy {
-		t.Error("is_sleepy was not stored")
-	}
-	if record.State != StateRunning {
-		t.Errorf("power state changed to %s", record.State)
-	}
-	if record.Generation != 2 {
-		t.Fatalf("generation = %d, want 2", record.Generation)
-	}
-}
-
-func TestSetPowerStateRejectsSleeping(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.SetPowerState(context.Background(), "machine-1", StateSleeping); !errors.Is(err, ErrConflict) {
-		t.Fatalf("error = %v, want ErrConflict", err)
-	}
-}
-
-func TestSetSleepPolicyRejectsAMissingVirtualMachine(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	if err := manager.SetSleepPolicy(context.Background(), "missing", true); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("error = %v, want ErrNotFound", err)
-	}
-}
-
-func TestSetSleepPolicyConflictsWithADestroyedVirtualMachine(t *testing.T) {
-	manager, _, _, _ := newTestManager(t)
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Delete(context.Background(), "machine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.SetSleepPolicy(context.Background(), "machine-1", true); !errors.Is(err, ErrConflict) {
-		t.Fatalf("error = %v, want ErrConflict", err)
 	}
 }
 
@@ -640,10 +312,6 @@ func TestRestartIntentSurvivesManagerRecreation(t *testing.T) {
 	}
 	if runtime.stops != 1 || runtime.starts != 2 {
 		t.Fatalf("restart calls = stops %d, starts %d", runtime.stops, runtime.starts)
-	}
-	// A guest restart is a normal shutdown followed by a normal start.
-	if runtime.stopMode != StopShutdown || runtime.startMode != StartNormal {
-		t.Fatalf("restart used stop mode %d and start mode %d, want shutdown then normal", runtime.stopMode, runtime.startMode)
 	}
 	observed, err := recreated.store.readObserved("machine-1")
 	if err != nil {

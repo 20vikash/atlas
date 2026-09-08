@@ -27,44 +27,30 @@ type ManagerConfig struct {
 	MachinesDirectory string
 	UserIDRange       UserIDRange
 	FastApplyTimeout  time.Duration
-	Sleep             SleepConfig
-}
-
-// SleepConfig is the Metal-wide automatic sleep policy. One idle timeout applies
-// to every sleepy VM on this host. It is not stored in any VM record.
-type SleepConfig struct {
-	Enabled     bool
-	IdleTimeout time.Duration
 }
 
 // ManagerDependencies contains the host services used by Manager.
 type ManagerDependencies struct {
-	Runtime                Runtime
-	Network                Network
-	Storage                Storage
-	Snapshots              Snapshots
-	NetworkActivityMonitor NetworkActivityMonitor
-	// NetworkWakeMonitor disarms a VM after a packet-triggered wake. It is optional
-	// and used only when automatic sleep is enabled.
-	NetworkWakeMonitor NetworkWakeMonitor
-	Logger             *slog.Logger
+	Runtime   Runtime
+	Network   Network
+	Storage   Storage
+	Snapshots Snapshots
+	Logger    *slog.Logger
 }
 
 // Manager owns virtual machine desired state and reconciliation.
 type Manager struct {
-	configuration          ManagerConfig
-	store                  *recordStore
-	runtime                Runtime
-	network                Network
-	storage                Storage
-	snapshots              Snapshots
-	networkActivityMonitor NetworkActivityMonitor
-	networkWakeMonitor     NetworkWakeMonitor
-	logger                 *slog.Logger
-	operationLocks         keyedLocks
-	allocationMutex        sync.Mutex
-	temporaryUserIDs       map[uint32]bool
-	temporaryIdentifiers   map[string]bool
+	configuration        ManagerConfig
+	store                *recordStore
+	runtime              Runtime
+	network              Network
+	storage              Storage
+	snapshots            Snapshots
+	logger               *slog.Logger
+	operationLocks       keyedLocks
+	allocationMutex      sync.Mutex
+	temporaryUserIDs     map[uint32]bool
+	temporaryIdentifiers map[string]bool
 }
 
 // NewManager validates all records and returns one host VM manager.
@@ -81,32 +67,19 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
 	}
-	if configuration.Sleep.Enabled {
-		if configuration.Sleep.IdleTimeout <= 0 {
-			return nil, fmt.Errorf("automatic sleep needs a positive idle timeout")
-		}
-		if dependencies.NetworkActivityMonitor == nil {
-			return nil, fmt.Errorf("automatic sleep needs a network activity monitor")
-		}
-		if dependencies.NetworkWakeMonitor == nil {
-			return nil, fmt.Errorf("automatic sleep needs a network wake monitor")
-		}
-	}
 	if dependencies.Logger == nil {
 		dependencies.Logger = slog.Default()
 	}
 	manager := &Manager{
-		configuration:          configuration,
-		store:                  newRecordStore(configuration.MachinesDirectory),
-		runtime:                dependencies.Runtime,
-		network:                dependencies.Network,
-		storage:                dependencies.Storage,
-		snapshots:              dependencies.Snapshots,
-		networkActivityMonitor: dependencies.NetworkActivityMonitor,
-		networkWakeMonitor:     dependencies.NetworkWakeMonitor,
-		logger:                 dependencies.Logger,
-		temporaryUserIDs:       make(map[uint32]bool),
-		temporaryIdentifiers:   make(map[string]bool),
+		configuration:        configuration,
+		store:                newRecordStore(configuration.MachinesDirectory),
+		runtime:              dependencies.Runtime,
+		network:              dependencies.Network,
+		storage:              dependencies.Storage,
+		snapshots:            dependencies.Snapshots,
+		logger:               dependencies.Logger,
+		temporaryUserIDs:     make(map[uint32]bool),
+		temporaryIdentifiers: make(map[string]bool),
 	}
 	if err := manager.store.validateAll(); err != nil {
 		return nil, fmt.Errorf("validate VM records: %w", err)
@@ -162,14 +135,13 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, err
 	}
 	desired := DesiredRecord{
-		ID:                      identifier,
-		UserID:                  userID,
-		GroupID:                 userID,
-		CreateFingerprint:       fingerprint,
-		Generation:              1,
-		SpecificationGeneration: 1,
-		State:                   StateRunning,
-		Specification:           cloneSpecification(specification),
+		ID:                identifier,
+		UserID:            userID,
+		GroupID:           userID,
+		CreateFingerprint: fingerprint,
+		Generation:        1,
+		State:             StateRunning,
+		Specification:     cloneSpecification(specification),
 	}
 	observed := ObservedRecord{State: StateUnknown, UpdatedAt: time.Now().UTC()}
 	if err := manager.store.writeDesired(desired); err != nil {
@@ -318,11 +290,6 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB
 	}
-	var lastNetworkActivityAt, sleepingSince time.Time
-	if observed.Sleep != nil {
-		lastNetworkActivityAt = observed.Sleep.LastNetworkActivityAt
-		sleepingSince = observed.Sleep.SnapshotCreatedAt
-	}
 	return Information{
 		ID:                            desired.ID,
 		State:                         observed.State,
@@ -338,7 +305,6 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		SSHKeys:                       slices.Clone(desired.Specification.SSHKeys),
 		Hostname:                      desired.Specification.Hostname,
 		Metadata:                      maps.Clone(desired.Specification.Metadata),
-		IsSleepy:                      desired.Specification.IsSleepy,
 		MAC:                           observed.NetworkInterface.MACAddress,
 		PublicIPv4:                    desired.Specification.Network.PublicIPv4,
 		WireGuardMeshIPv6:             desired.Specification.Network.WireGuardMeshIPv6,
@@ -353,8 +319,6 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		OperationID:                   observed.OperationID,
 		OperationStartedAt:            observed.OperationStartedAt,
 		UpdatedAt:                     observed.UpdatedAt,
-		LastNetworkActivityAt:         lastNetworkActivityAt,
-		SleepingSince:                 sleepingSince,
 	}
 }
 

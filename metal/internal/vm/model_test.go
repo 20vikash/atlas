@@ -2,28 +2,6 @@ package vm
 
 import "testing"
 
-func TestSleepingIsAnObservedStateOnly(t *testing.T) {
-	if !isObservedState(StateSleeping) {
-		t.Error("sleeping must be a valid observed state")
-	}
-	if IsDesiredState(StateSleeping) {
-		t.Error("sleeping must not be a valid desired state")
-	}
-}
-
-func TestSameReservationDistinguishesTheSleepyFlag(t *testing.T) {
-	base := Specification{VirtualCPUCount: 1, MemoryMiB: 1}
-	sleepy := base
-	sleepy.IsSleepy = true
-
-	if base.SameReservation(sleepy) {
-		t.Error("specifications that differ in is_sleepy must not be the same reservation")
-	}
-	if !base.SameReservation(base) {
-		t.Error("identical specifications must be the same reservation")
-	}
-}
-
 func TestEgressCapabilities(t *testing.T) {
 	for _, testCase := range []struct {
 		egress          Egress

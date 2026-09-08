@@ -29,12 +29,7 @@ func ensureNamespaceBase(ctx context.Context, request request) error {
 	if err := platform.Run(ctx, "ip", "-n", namespace, "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
 		return err
 	}
-	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up"); err != nil {
-		return err
-	}
-	// Keep wake packets routable while the guest cannot answer ARP.
-	return platform.Run(ctx, "ip", "-n", namespace, "neigh", "replace",
-		guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
+	return platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up")
 }
 
 // namespaceLinkExists reports whether one interface is inside the namespace.

@@ -54,20 +54,6 @@ A VM learns its address from MMDS. `atlas-metadata.service` in the guest reads `
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
-## Packet activity and wake
-
-Metal tracks TCP traffic from the host to the guest. It ignores other packets and all guest-to-host traffic. This prevents ARP and IPv6 housekeeping from keeping a VM awake.
-
-```text
-host TCP packet -> tap0 egress TCX hook -> record activity
-                                      |
-                                      +-> VM is armed -> send wake event -> restore VM
-```
-
-The eBPF program observes packets but does not change them. It stores the last packet time by VM user ID.
-
-The first packet can be lost while Firecracker starts. Clients must retry. A metald restart creates a new activity baseline. This can delay sleep, but it cannot make a VM sleep early. See [internal/network/SPEC.md](../internal/network/SPEC.md).
-
 ## WireGuard peers
 
 `POST /v1/sync` supplies the complete managed peer set. Metal applies it to `wg0` and records what it applied, so it never disturbs peers added by other tools.
