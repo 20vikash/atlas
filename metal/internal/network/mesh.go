@@ -245,7 +245,9 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 
 // meshNamespaceSteps makes the namespace an IPv6 router for the guest mesh
 // address. The host route from Atlas WG Mesh is on-link on the host veth, so the
-// namespace answers neighbour solicitations for the guest with proxy NDP.
+// namespace answers neighbour solicitations for the guest with proxy NDP. It also
+// pins the guest neighbour on tap0, so a mesh wake packet reaches a sleeping VM
+// that cannot answer neighbour discovery.
 func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]string {
 	return [][]string{
 		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
@@ -253,6 +255,7 @@ func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]str
 		{"ip", "-n", namespace, "link", "set", guestVirtualEthernet, "mtu", strconv.Itoa(meshMTU)},
 		{"ip", "-n", namespace, "-6", "addr", "replace", meshGatewayAddress + "/64", "dev", tapName, "nodad"},
 		{"ip", "-n", namespace, "-6", "route", "replace", address + "/128", "dev", tapName},
+		{"ip", "-n", namespace, "-6", "neigh", "replace", address, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent"},
 		{"ip", "-n", namespace, "-6", "route", "replace", meshPrefix, "via", meshGatewayAddress, "dev", guestVirtualEthernet},
 		{"ip", "-n", namespace, "-6", "neigh", "replace", "proxy", address, "dev", guestVirtualEthernet},
 	}
