@@ -81,8 +81,7 @@ func (m *fakeWakeStateMap) Close() error {
 	return nil
 }
 
-// fakeWakeEventMap serves fake wake events from a channel. Tests push events and
-// close the channel to end the reader.
+// fakeWakeEventMap serves wake events from a test channel.
 type fakeWakeEventMap struct {
 	events chan fakeWakeEvent
 	closed bool
@@ -102,8 +101,7 @@ func (m *fakeWakeEventMap) Close() error {
 	return nil
 }
 
-// fakeWakeEventReader returns queued events, and returns io.EOF when its channel
-// closes or Close stops it. A real closed ring reader returns ringbuf.ErrClosed.
+// fakeWakeEventReader returns queued events and stops on close.
 type fakeWakeEventReader struct {
 	events chan fakeWakeEvent
 	done   chan struct{}
@@ -526,8 +524,7 @@ func TestHandleWakeEventRearmsWhenTheChannelIsFull(t *testing.T) {
 		monitor.handleWakeEvent(100001, uint64(i))
 	}
 
-	// The eBPF program set notified. The next event cannot be delivered, so the
-	// worker must rearm the VM.
+	// A blocked event must rearm the VM.
 	loader.createdWakeState.states = map[uint32]uint32{100001: wakeNotified}
 	monitor.handleWakeEvent(100001, 999)
 	if state := loader.createdWakeState.states[100001]; state != wakeArmed {
@@ -639,8 +636,7 @@ func TestLastNetworkActivityLaterPacketIsMoreRecent(t *testing.T) {
 }
 
 func TestLastNetworkActivityUsesMonotonicAgeNotWallClock(t *testing.T) {
-	// The map holds a monotonic time. A wall clock that moved backward must give
-	// the same age, so it can never inflate idle time and cause an early sleep.
+	// A backward wall-clock jump must not make activity older.
 	monitor, sharedMap := readMonitor(t, time.Time{}, 5_000_000_000)
 	sharedMap.lookupFound = true
 	sharedMap.lookupValue = 3_000_000_000 // 2 s of age
