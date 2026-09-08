@@ -13,6 +13,8 @@ import frappe
 from frappe import _
 from frappe.utils import get_datetime, get_system_timezone
 
+from atlas.atlas.core.mesh_address import get_region_mesh_address_prefix
+
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 	from atlas.service.doctype.proxy_server.proxy_server import ProxyServer
@@ -21,11 +23,16 @@ CONFIG_PATH = "/etc/atlas/proxy-control.toml"
 APPLY_COMMAND = "/opt/atlas/proxy-control/bin/proxy-control"
 DAEMON_UNIT = "atlas-proxy-control.service"
 DAEMON_SOCKET_UNIT = "atlas-proxy-control.socket"
+AUTO_PROXY_HOST_PREFIXES = ("site-", "*-vm-")
 
 CONFIG_TEMPLATE = Template(
 	"""[control]
 domain = "$cluster_domain"
 node_domain = "$node_domain"
+
+[auto_proxy]
+address_prefix = "$auto_proxy_prefix"
+host_prefixes = $auto_proxy_host_prefixes
 
 [auth]
 password_hash = "$password_hash"
@@ -89,6 +96,11 @@ class ProxyConfiguration:
 		return f"*.{self.settings.wildcard_domain}"
 
 	@property
+	def auto_proxy_prefix(self) -> str:
+		"""Return the regional prefix that auto proxy routes resolve under."""
+		return get_region_mesh_address_prefix(self.settings.region_id)
+
+	@property
 	def content(self) -> str:
 		"""Return the complete configuration file."""
 		certificate = self.settings.get_password("wildcard_tls_certificate", raise_exception=False)
@@ -99,6 +111,8 @@ class ProxyConfiguration:
 		return CONFIG_TEMPLATE.substitute(
 			cluster_domain=self.cluster_domain,
 			node_domain=self.proxy_server.get_domain(),
+			auto_proxy_prefix=self.auto_proxy_prefix,
+			auto_proxy_host_prefixes=json.dumps(AUTO_PROXY_HOST_PREFIXES),
 			password_hash=self.password_hash,
 			previous_password_hash=self.previous_password_hash,
 			previous_password_valid_until=self.previous_password_valid_until,
@@ -192,6 +206,8 @@ class ProxyConfiguration:
 			self.proxy_server.get_domain(),
 			self.cluster_domain,
 			self.wildcard_domain,
+			self.auto_proxy_prefix,
+			json.dumps(AUTO_PROXY_HOST_PREFIXES),
 			self.cluster_password,
 			self.previous_cluster_password,
 			json.dumps(self.peers, sort_keys=True),

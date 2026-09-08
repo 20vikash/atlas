@@ -7,6 +7,7 @@ OpenResty accepts public HTTP and HTTPS traffic on each proxy node. It keeps the
 | Traffic | Route path | TLS certificate |
 | --- | --- | --- |
 | Site HTTP on port `80` | Send HTTP to the site VM on port `80`. | Not used. |
+| Auto proxy HTTP or HTTPS | Compute the VM address from the host and send HTTP to port `80`. | Regional wildcard certificate for HTTPS. |
 | Site HTTPS on port `443` | Terminate TLS and send HTTP to the site VM on port `80`. | Regional wildcard certificate. |
 | Custom-domain HTTP on port `80` | Send HTTP to the site VM on port `80`. | Not used. |
 | Custom-domain HTTPS on port `443` | Read SNI and send TLS to the site VM on port `443`. | Certificate on the site VM. |
@@ -26,6 +27,12 @@ The control daemon rejects `proxy` and every `proxy-*` site key. This rule keeps
 
 The wildcard certificate covers site HTTPS traffic. An address of `-` returns `503` for that site.
 
+## Auto proxy traffic
+
+A configured host form such as `site-<tenant>-<vm>` or `*-vm-<tenant>-<vm>` below the wildcard zone routes directly to its VM address on port `80`. The tenant and VM fields are lowercase hexadecimal values with a maximum of 8 and 16 digits. For example, `site-7-2a` with address prefix `fdaa:1` routes to `[fdaa:1:0:7:0:0:0:2a]:80`.
+
+`/var/lib/nginx/auto-proxy` holds the address prefix and the configured host prefixes. An empty file disables static routing.
+
 ## Custom-domain traffic
 
 OpenResty does not decrypt custom-domain TLS traffic. It connects to the site VM on port `443` and sends a PROXY protocol v2 header before the TLS data. The site VM must accept PROXY protocol v2 and hold the certificate for the requested domain.
@@ -41,6 +48,7 @@ OpenResty writes its live maps below `/var/lib/nginx` after a short delay:
 | `map.json` | Site map. |
 | `domains-http-map.json` | Custom-domain HTTP map. |
 | `sni-map.json` | Custom-domain TLS map. |
+| `auto-proxy` | Address and host prefixes for static routes. The control daemon writes it. |
 
 The control daemon also stores the complete cluster snapshot in `/var/lib/nginx/cluster-state.json`. This snapshot contains both maps and their generation. At daemon startup, the control daemon installs its durable snapshot into OpenResty. It then replaces it with a newer peer snapshot when one is available.
 

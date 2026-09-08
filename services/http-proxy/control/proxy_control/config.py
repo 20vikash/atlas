@@ -68,6 +68,8 @@ class ControlConfig:
 	domain: str = ""
 	node_domain: str = ""
 	auth: AuthConfig = AuthConfig()
+	auto_proxy_address_prefix: str = ""
+	auto_proxy_host_prefixes: tuple[str, ...] = ()
 	cluster: ClusterConfig = ClusterConfig()
 
 	@property
@@ -91,6 +93,10 @@ def load(path: Path | None = None) -> ControlConfig:
 	document = _read(path or config_path())
 	control = _section(document, "control")
 	auth = _section(document, "auth")
+	auto_proxy = _section(document, "auto_proxy")
+	host_prefixes = auto_proxy.get("host_prefixes", [])
+	if not isinstance(host_prefixes, list) or not all(isinstance(value, str) for value in host_prefixes):
+		raise ConfigError("auto_proxy.host_prefixes must be an array of strings")
 	if "port" in control:
 		raise ConfigError("control.port is fixed at 9000")
 
@@ -107,6 +113,8 @@ def load(path: Path | None = None) -> ControlConfig:
 			jwks_url=_text(auth, "jwks_url"),
 			jwks_audience_id=_text(auth, "jwks_audience_id"),
 		),
+		auto_proxy_address_prefix=_text(auto_proxy, "address_prefix"),
+		auto_proxy_host_prefixes=tuple(host_prefixes),
 		cluster=_cluster(_section(document, "cluster")),
 		tls=tls,
 	)

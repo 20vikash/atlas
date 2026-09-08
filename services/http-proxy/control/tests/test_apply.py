@@ -111,6 +111,36 @@ private_key_pem = '''
 	assert (tmp_path / "control-subdomain").read_text() == "proxy,proxy-001\n"
 
 
+def test_apply_writes_the_auto_proxy_address_prefix(tmp_path: Path, monkeypatch):
+	"""OpenResty joins these hextets with the tenant and the VM of each label."""
+	certificate, private_key = _key_and_certificate()
+	cert_dir = tmp_path / "certs"
+	_write_config(
+		tmp_path,
+		monkeypatch,
+		f"""
+[auto_proxy]
+address_prefix = "fdaa:1"
+host_prefixes = ["site-", "*-vm-"]
+
+[control]
+cert_dir = "{cert_dir}"
+
+[tls]
+wildcard_domain = "{WILDCARD}"
+fullchain_pem = '''
+{certificate.strip()}
+'''
+private_key_pem = '''
+{private_key.strip()}
+'''
+""",
+	)
+
+	assert apply.main() == 0
+	assert (tmp_path / "auto-proxy").read_text() == "fdaa:1\nsite-,*-vm-\n"
+
+
 def test_apply_refuses_a_key_that_does_not_match(tmp_path: Path, monkeypatch):
 	certificate, _ = _key_and_certificate()
 	_, other_key = _key_and_certificate()

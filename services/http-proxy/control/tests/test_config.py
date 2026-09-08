@@ -15,6 +15,10 @@ node_domain = "proxy-001.par-1.example.com"
 admin_socket = "/run/nginx/other.sock"
 cert_dir = "/srv/certs"
 
+[auto_proxy]
+address_prefix = "fdaa:1"
+host_prefixes = ["site-", "*-vm-"]
+
 [auth]
 password_hash = "current-hash"
 previous_password_hash = "previous-hash"
@@ -76,6 +80,8 @@ def test_a_full_file_is_read(tmp_path: Path):
 	assert config.domain == "proxy.par-1.example.com"
 	assert config.node_domain == "proxy-001.par-1.example.com"
 	assert config.reserved_subdomains == ("proxy", "proxy-001")
+	assert config.auto_proxy_address_prefix == "fdaa:1"
+	assert config.auto_proxy_host_prefixes == ("site-", "*-vm-")
 	assert config.cluster.node_id == "proxy-001"
 	assert config.cluster.previous_password == "previous-secret"
 	assert config.cluster.previous_password_valid_until == 1788800000
@@ -96,6 +102,8 @@ def test_a_partial_file_keeps_the_defaults(tmp_path: Path):
 	assert config.auth.jwks_audience_id == ""
 	assert config.auth.password_hash == ""
 	assert config.auth.previous_password_valid_until == 0
+	assert config.auto_proxy_address_prefix == ""
+	assert config.auto_proxy_host_prefixes == ()
 	assert config.tls.wildcard_domain == "*.par-1.example.com"
 
 
