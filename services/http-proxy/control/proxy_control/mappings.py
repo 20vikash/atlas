@@ -13,12 +13,14 @@ class MappingStore:
 		client: ProxyClient,
 		reserved_subdomains: tuple[str, ...] | str = (),
 		wildcard_domain: str = "",
+		auto_proxy_host_prefixes: tuple[str, ...] = (),
 	):
 		self.client = client
 		if isinstance(reserved_subdomains, str):
 			reserved_subdomains = (reserved_subdomains,) if reserved_subdomains else ()
 		self.reserved_subdomains = {value.lower() for value in reserved_subdomains}
 		self.wildcard_zone = wildcard_domain.lower().removeprefix("*.").rstrip(".")
+		self.auto_proxy_host_prefixes = auto_proxy_host_prefixes
 
 	async def get(self, kind: str) -> dict[str, str]:
 		self._validate_kind(kind)
@@ -58,6 +60,9 @@ class MappingStore:
 		if self.is_reserved(kind, key):
 			raise HTTPException(status_code=409, detail=f"{key} is reserved for the proxy control daemon")
 
+		if kind == "sites" and self._has_auto_proxy_prefix(key):
+			raise HTTPException(status_code=409, detail=f"{key} is reserved for auto proxy traffic")
+
 		if kind == "domains" and key.startswith("*"):
 			raise HTTPException(status_code=422, detail="custom-domain wildcard routes are not supported")
 
@@ -74,6 +79,17 @@ class MappingStore:
 			return False
 		name = key.lower().rstrip(".")
 		return name == self.wildcard_zone or name.endswith(f".{self.wildcard_zone}")
+
+	def _has_auto_proxy_prefix(self, key: str) -> bool:
+		name = key.lower()
+		for configured_prefix in self.auto_proxy_host_prefixes:
+			if configured_prefix.startswith("*"):
+				suffix = configured_prefix[1:]
+				if (not suffix and name) or name.find(suffix) > 0:
+					return True
+			elif name.startswith(configured_prefix):
+				return True
+		return False
 
 	async def _forward(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
 		status, response_body = await self.client.request(method, path, body)
