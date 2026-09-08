@@ -415,6 +415,41 @@ func TestArmNetworkWakeRejectsAMissingAttachment(t *testing.T) {
 	}
 }
 
+func TestDisarmNetworkWakeWritesDisarmed(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+	wakeRequest := vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: 100001}
+	if err := monitor.ArmNetworkWake(wakeRequest); err != nil {
+		t.Fatal(err)
+	}
+
+	// A repeat disarm must stay disarmed.
+	for range 2 {
+		if err := monitor.DisarmNetworkWake(wakeRequest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state := loader.createdWakeState.states[100001]; state != wakeDisarmed {
+		t.Errorf("wake state = %d, want disarmed", state)
+	}
+}
+
+func TestDisarmNetworkWakeIsANoOpWithoutAttachment(t *testing.T) {
+	loader := &fakeActivityLoader{}
+	monitor := newTestMonitor(t, loader)
+
+	if err := monitor.DisarmNetworkWake(vm.NetworkActivityRequest{VirtualMachineID: "missing", UserID: 1}); err != nil {
+		t.Fatalf("disarm without an attachment returned %v", err)
+	}
+	if _, written := loader.createdWakeState.states[1]; written {
+		t.Error("disarm without an attachment must not write a wake state")
+	}
+}
+
 func TestReleaseAttachmentDeletesTheWakeState(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)

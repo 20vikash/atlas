@@ -279,6 +279,23 @@ func (monitor *ActivityMonitor) ArmNetworkWake(request vm.NetworkActivityRequest
 	return nil
 }
 
+// DisarmNetworkWake stops wake events for the VM. It is idempotent and it is a
+// no-op for a VM that has no attachment, because release already cleared its
+// wake state.
+func (monitor *ActivityMonitor) DisarmNetworkWake(request vm.NetworkActivityRequest) error {
+	monitor.mu.Lock()
+	current := monitor.attachments[request.VirtualMachineID]
+	monitor.mu.Unlock()
+	if current == nil || current.userID != request.UserID {
+		return nil
+	}
+
+	if err := monitor.shared.wakeState.setState(request.UserID, wakeDisarmed); err != nil {
+		return fmt.Errorf("disarm wake for VM %s user %d: %w", request.VirtualMachineID, request.UserID, err)
+	}
+	return nil
+}
+
 // LastNetworkActivity returns the last packet time for one VM. It returns the
 // attachment baseline with HasBeenSeen false before the first packet, and
 // vm.ErrNotFound when the VM has no attachment. It reads CLOCK_MONOTONIC right
