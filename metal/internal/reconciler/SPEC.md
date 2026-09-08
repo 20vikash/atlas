@@ -40,7 +40,17 @@ A pass runs first, then the loop waits. A new reconciler therefore converges at 
 
 ## Network wake
 
-`NetworkWakeReconciler` is not a sweep. It reads one shared channel of wake events from the network monitor and calls `Manager.WakeFromNetwork` for each. It processes one event at a time, so it never runs two wake operations at once. Each restore runs under the operation timeout, and a failure is logged, not retried, because the eBPF program produces one event until the manager rearms the VM. It stops when the context is canceled or the channel closes.
+`NetworkWakeReconciler` handles one event at a time:
+
+```text
+network monitor -> shared wake channel -> Manager.WakeFromNetwork -> restore
+                                          |
+                                          +-> one event at a time
+                                          +-> operation timeout
+                                          +-> failure: log and continue
+```
+
+It does not retry a failed event. A normal VM pass rearms a sleeping VM, so a later packet can send a new event. A canceled context or closed channel stops the reconciler.
 
 ## Bounds
 
