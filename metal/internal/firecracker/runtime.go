@@ -40,6 +40,7 @@ type imageStore interface {
 // serialBroker manages each VM's serial console PTY.
 type serialBroker interface {
 	Open(id string) error
+	Persist(id string) error
 	Close(id string) error
 }
 

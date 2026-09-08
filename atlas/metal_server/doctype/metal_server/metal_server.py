@@ -237,6 +237,11 @@ class MetalServer(Document):
 
 		DiskInventory(self).sync()
 
+	@property
+	def metald_job_id(self) -> str:
+		"""Return one job ID for each metald operation on this server."""
+		return f"atlas||server||metald||{self.name}"
+
 	@frappe.whitelist(methods=["POST"])
 	def install_metald(self) -> None:
 		"""Queue the metald setup for this server."""
@@ -244,15 +249,38 @@ class MetalServer(Document):
 		if self.status != "Running":
 			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
 
-		job_id = f"atlas||server||install-metald||{self.name}"
+		job_id = self.metald_job_id
 
 		if is_job_enqueued(job_id):
-			frappe.throw(_("Metald setup already runs for {0}.").format(self.name))
+			frappe.throw(_("Another Metald operation already runs for {0}.").format(self.name))
 
 		frappe.enqueue_doc(
 			self.doctype,
 			self.name,
 			"_install_metald",
+			queue="long",
+			timeout=METALD_INSTALL_TIMEOUT_SECONDS,
+			job_id=job_id,
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	@frappe.whitelist(methods=["POST"])
+	def upgrade_metald(self) -> None:
+		"""Queue a metald binary upgrade for this server."""
+		frappe.only_for("System Manager")
+		if self.status != "Running":
+			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
+
+		job_id = self.metald_job_id
+
+		if is_job_enqueued(job_id):
+			frappe.throw(_("Another Metald operation already runs for {0}.").format(self.name))
+
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_upgrade_metald",
 			queue="long",
 			timeout=METALD_INSTALL_TIMEOUT_SECONDS,
 			job_id=job_id,
@@ -301,6 +329,10 @@ class MetalServer(Document):
 	def _install_metald(self) -> None:
 		"""Install metald and its host dependencies."""
 		HostInstallation(self).install_metal()
+
+	def _upgrade_metald(self) -> None:
+		"""Replace the metald binary and restart its daemon."""
+		HostInstallation(self).upgrade_metald()
 
 	def _configure_wireguard(self) -> None:
 		"""Configure WireGuard and store its public key."""

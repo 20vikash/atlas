@@ -29,6 +29,17 @@ fi
 step() { echo "==> $*"; }
 skip() { echo "    $* is already installed"; }
 
+# kept_binaries lists existing tools that this script leaves in place.
+kept_binaries=""
+
+# reported_version returns a tool version or "unknown".
+reported_version() {
+	local tool_version
+	tool_version=$("$1" version 2>/dev/null | head -1) || tool_version=""
+	[ -n "$tool_version" ] || tool_version=unknown
+	echo "$tool_version"
+}
+
 
 step "install required packages"
 if ! command -v zpool >/dev/null || ! command -v curl >/dev/null || ! command -v iptables >/dev/null; then
@@ -74,10 +85,16 @@ fi
 # install_binary downloads one tool. An existing tool is left alone, because
 # replacing a running daemon is an upgrade and needs its own steps.
 install_binary() {
-	destination=$1
-	source_url=$2
+	local destination=$1
+	local source_url=$2
+	local binary_name binary_version download
+
 	if [ -x "$destination" ]; then
-		skip "$(basename "$destination")"
+		binary_name=$(basename "$destination")
+		binary_version=$(reported_version "$destination")
+		echo "    $binary_name is already installed; it reports: $binary_version"
+		kept_binaries="$kept_binaries$binary_name reports: $binary_version
+"
 		return
 	fi
 	download=$(mktemp)
@@ -194,9 +211,10 @@ ExecStartPre=/usr/local/lib/metal/network-setup
 ExecStart=/usr/bin/metald serve --config $config_file
 Restart=on-failure
 RestartSec=1
-# Keep PTY masters across a metald restart.
+# Keep PTY masters across a metald restart or stop.
 NotifyAccess=main
 FileDescriptorStoreMax=1024
+FileDescriptorStorePreserve=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -232,3 +250,13 @@ systemctl daemon-reload
 systemctl enable metal.service
 systemctl restart metal.service
 systemctl is-active metal.service
+
+
+if [ -n "$kept_binaries" ]; then
+	step "binaries that this script did not upgrade"
+	printf '%s' "$kept_binaries" | while IFS= read -r kept_binary; do
+		echo "    $kept_binary"
+	done
+	echo "    This script installs a missing binary only. It does not upgrade an installed binary."
+	echo "    A tool that reports unknown has no version command. It can be an old build."
+fi
