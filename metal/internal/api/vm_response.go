@@ -6,8 +6,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// virtualMachineResponse pairs what was asked for with what the host reached.
-// The controller compares the 2 generations to know when a change is applied.
+// virtualMachineResponse pairs desired and observed VM state.
 type virtualMachineResponse struct {
 	ID       string                         `json:"id"`
 	Desired  desiredVirtualMachineResponse  `json:"desired"`
@@ -27,8 +26,7 @@ type desiredVirtualMachineResponse struct {
 	IsSleepy          bool                        `json:"is_sleepy"`
 }
 
-// observedVirtualMachineResponse is what the host reached, and the operation
-// that is running when it has not.
+// observedVirtualMachineResponse is the state reached by the host.
 type observedVirtualMachineResponse struct {
 	Generation            uint64                  `json:"generation"`
 	RestartGeneration     uint64                  `json:"restart_generation"`
@@ -57,8 +55,7 @@ type guestResponse struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// virtualMachineImageResponse identifies boot content. Transport URLs are not
-// returned, because they are signed and short lived.
+// virtualMachineImageResponse identifies boot content without transport URLs.
 type virtualMachineImageResponse struct {
 	Ref                         string                               `json:"ref"`
 	Architecture                string                               `json:"architecture"`
@@ -107,8 +104,7 @@ type observedNetworkResponse struct {
 	MAC string `json:"mac,omitempty"`
 }
 
-// operationErrorResponse is the safe part of a reconciliation failure. Local
-// detail stays on the host.
+// operationErrorResponse contains the public part of a reconciliation failure.
 type operationErrorResponse struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
@@ -197,7 +193,7 @@ func toVirtualMachineImage(image vm.Image) virtualMachineImageResponse {
 	}
 }
 
-// toMemorySnapshotConfiguration converts a warm image shape into the response form.
+// toMemorySnapshotConfiguration converts a warm image shape to its response form.
 func toMemorySnapshotConfiguration(configuration *vm.MemorySnapshotConfiguration) *memorySnapshotConfigurationResponse {
 	if configuration == nil {
 		return nil
