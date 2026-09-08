@@ -591,8 +591,7 @@ func TestCreateReturnsNetworkThroughput(t *testing.T) {
 	}
 }
 
-// A public IPv4 address needs an internet path. The request is rejected instead
-// of silently changing the egress mode that the caller asked for.
+// A public IPv4 address requires internet egress.
 func TestCreateRejectsPublicIPv4WithoutUplink(t *testing.T) {
 	srv := newTestServer(t)
 	for _, egress := range []string{"mesh", "none"} {
@@ -602,8 +601,7 @@ func TestCreateRejectsPublicIPv4WithoutUplink(t *testing.T) {
 	}
 }
 
-// A mode without an internet path keeps a public limit but does not apply it.
-// This lets a caller change the mode without clearing the stored limits first.
+// A mode without internet egress keeps, but does not apply, public limits.
 func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 	srv := newTestServer(t)
 	body := strings.Replace(validCreateRequest, `"egress":"uplink"`,
@@ -766,8 +764,7 @@ func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
 		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1"}`, http.StatusBadRequest)
 
-	// Atlas resends every mutable setting, so a stored public limit must not
-	// block a change to a mode that cannot apply it.
+// Stored public limits must not block an egress mode change.
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
 		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50}`, http.StatusAccepted)
 }
