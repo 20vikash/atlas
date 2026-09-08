@@ -55,6 +55,8 @@ The create fingerprint identifies the reservation a create request asked for. It
 
 The daemon validates every record at startup and refuses to run on one it cannot read. It never repairs or removes a record: losing desired state is worse than failing to start.
 
+The desired record holds the sleep policy of one VM: `is_sleepy` and `idle_timeout_seconds`. The policy is intent, not machine shape, so a change to it does not raise the specification generation and leaves a published memory snapshot valid. The API carries it with the compute settings.
+
 `sleeping` is an observed state only. It means that Firecracker is stopped and a valid VM memory snapshot exists. The `sleep` object stores activity, request, snapshot, and generation values. It stores no paths. Old records without this object remain valid. A partial object or a sleeping record without a published snapshot is invalid.
 
 ## Reconciliation
