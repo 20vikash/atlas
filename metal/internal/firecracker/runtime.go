@@ -45,9 +45,7 @@ type serialBroker interface {
 	Close(id string) error
 }
 
-// Runtime manages Firecracker virtual machines on one host. Each VM runs as a
-// systemd unit, so the process lifetime belongs to systemd and this package
-// controls only what happens inside it.
+// Runtime manages Firecracker virtual machines on one host.
 type Runtime struct {
 	configuration         Config
 	units                 platform.UnitManager
@@ -94,10 +92,7 @@ func (runtime *Runtime) Inspect(ctx context.Context, input vm.RuntimeMachine) (v
 	return vm.RuntimeStatus{State: state}, nil
 }
 
-// Start launches a Firecracker virtual machine. StartNormal keeps the current
-// warm-image and cold-boot behavior. StartFromSleepSnapshot restores and resumes
-// the VM-local snapshot. StartFromSleepSnapshotPaused restores it but leaves the
-// vCPUs paused.
+// Start launches a VM using the selected start mode.
 func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode vm.StartMode) error {
 	switch mode {
 	case vm.StartNormal:
@@ -111,10 +106,7 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode
 	}
 }
 
-// Stop stops a Firecracker virtual machine. StopShutdown keeps the current
-// Ctrl+Alt+Del and bounded kill. StopWithSleepSnapshot pauses the guest,
-// publishes a full snapshot, and terminates the process. A warm stop reports the
-// published snapshot generation and its creation time.
+// Stop stops a VM using the selected stop mode.
 func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) (vm.StopOutcome, error) {
 	switch mode {
 	case vm.StopShutdown:
@@ -126,9 +118,7 @@ func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode 
 	}
 }
 
-// InspectSleepSnapshot returns the newest valid sleep snapshot for a VM. It
-// reports vm.ErrNotFound when none exists and preserves an invalid-manifest error
-// for an operator to inspect.
+// InspectSleepSnapshot returns the newest valid sleep snapshot or an error.
 func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.RuntimeMachine) (vm.SleepSnapshot, error) {
 	machine := runtime.newMachine(input)
 	snapshot, err := runtime.configuration.latestValidSnapshot(machine.snapshotRequirement())
@@ -141,8 +131,7 @@ func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.Runtime
 	return vm.SleepSnapshot{Generation: snapshot.Generation, CreatedAt: snapshot.Manifest.CreatedAt}, nil
 }
 
-// DiscardSleepSnapshot clears the runtime unit of a warm-stopped VM and removes
-// its sleep snapshots, so a later start cold boots with the current shape.
+// DiscardSleepSnapshot removes a VM's sleep snapshots and runtime unit.
 func (runtime *Runtime) DiscardSleepSnapshot(ctx context.Context, input vm.RuntimeMachine) error {
 	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
 		return fmt.Errorf("discard sleep snapshot: %w", err)
@@ -160,8 +149,7 @@ func (runtime *Runtime) Resume(ctx context.Context, input vm.RuntimeMachine) err
 	return runtime.newMachine(input).Resume(ctx)
 }
 
-// Remove stops the process and removes every runtime-owned file, so the VM ID
-// can be used again.
+// Remove stops the process and removes runtime-owned files.
 func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) error {
 	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
 		return err
@@ -183,8 +171,7 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	return nil
 }
 
-// RefreshDisk applies current disk limits and refreshes the guest block device.
-// A VM that is not live has nothing to refresh: its next boot reads the limits.
+// RefreshDisk applies current disk limits to a live guest.
 func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine) error {
 	status, err := runtime.Inspect(ctx, input)
 	if err != nil {
