@@ -20,8 +20,7 @@ type namespaceSyscalls interface {
 	unlockThread()
 }
 
-// inNamespace runs callback in a network namespace. If restore fails, the
-// thread stays locked so Go cannot reuse it in the wrong namespace.
+// inNamespace runs callback in a network namespace safely.
 func inNamespace(syscalls namespaceSyscalls, path string, callback func() error) error {
 	syscalls.lockThread()
 	safeToReuseThread := true
