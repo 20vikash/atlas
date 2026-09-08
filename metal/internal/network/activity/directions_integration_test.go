@@ -24,9 +24,7 @@ type ifreq struct {
 	_     [22]byte
 }
 
-// openTapQueue attaches to an existing tap0 inside the namespace and returns a
-// queue file descriptor. It runs the ioctl inside the target namespace, because
-// the tap belongs to that namespace.
+// openTapQueue opens a tap queue inside the target namespace.
 func openTapQueue(t *testing.T, namespacePath, name string) int {
 	t.Helper()
 	var fileDescriptor int
@@ -61,9 +59,7 @@ func ethernetFrame(ethertype uint16, payload []byte) []byte {
 	return append(frame, payload...)
 }
 
-// ipv4Frame builds one Ethernet frame that carries a minimal IPv4 header with
-// the given protocol. The activity hook reads only the ethertype and the IP
-// protocol, so the header does not need valid addresses or a checksum.
+// ipv4Frame builds a minimal IPv4 Ethernet frame.
 func ipv4Frame(protocol byte) []byte {
 	header := make([]byte, 20)
 	header[0] = 0x45 // version 4, header length 5 words
@@ -71,9 +67,7 @@ func ipv4Frame(protocol byte) []byte {
 	return ethernetFrame(0x0800, header) // 0x0800 is the IPv4 ethertype
 }
 
-// sendHostToGuest sends one packet toward the guest from inside the namespace.
-// The kernel routes it out on tap0 egress, which is the host-to-guest direction.
-// A TCP dial sends one SYN even with no listener. A UDP dial sends one datagram.
+// sendHostToGuest sends one packet through tap0 egress.
 func sendHostToGuest(t *testing.T, namespacePath, transport string) {
 	t.Helper()
 	address := net.JoinHostPort(guestIPAddress, "9")
@@ -130,12 +124,7 @@ func assertNoActivity(t *testing.T, monitor *Monitor, request vm.NetworkActivity
 	}
 }
 
-// TestActivityCountsHostToGuestTcpOnly proves the activity hook counts only a
-// host-to-guest TCP segment. A guest-to-host frame does not count, because the
-// guest's own traffic must not keep a sleepy VM awake. A host-to-guest UDP
-// datagram does not count either, so link-local housekeeping such as IPv6 MLD
-// and ARP does not keep the VM awake. It needs root, the ip command, and TCX
-// support. Run it with:
+// TestActivityCountsHostToGuestTcpOnly checks host-to-guest TCP activity.
 //
 //	sudo -E go test -tags integration -run TestActivityCountsHostToGuestTcpOnly ./internal/network/
 func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
@@ -154,8 +143,7 @@ func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
 	runOrSkip(t, "ip", "-n", namespace, "addr", "add", "172.16.0.1/24", "dev", tapName)
 	runOrSkip(t, "ip", "-n", namespace, "link", "set", tapName, "up")
 	runOrSkip(t, "ip", "-n", namespace, "link", "set", "lo", "up")
-	// Quiet the tap IPv6 stack, so no kernel-generated egress frame advances
-	// activity and hides the guest-to-host result.
+	// Prevent kernel-generated frames from hiding the direction check.
 	runOrSkip(t, "ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf."+tapName+".disable_ipv6=1")
 	runOrSkip(t, "ip", "-n", namespace, "neigh", "replace", guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
 
@@ -183,16 +171,13 @@ func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
 	tapQueue := openTapQueue(t, namespacePath, tapName)
 	t.Cleanup(func() { _ = unix.Close(tapQueue) })
 
-	// A guest-to-host TCP frame written into the tap enters the kernel on tap0
-	// ingress. It must not count, because the guest's own traffic must not keep it
-	// awake, even when it is TCP.
+	// Guest-to-host TCP must not count.
 	if _, err := unix.Write(tapQueue, ipv4Frame(6)); err != nil {
 		t.Fatalf("write guest frame: %v", err)
 	}
 	assertNoActivity(t, monitor, request)
 
-	// A host-to-guest UDP datagram leaves on tap0 egress but is not TCP. It must
-	// not count, so housekeeping traffic does not keep the VM awake.
+	// Host-to-guest UDP must not count.
 	sendHostToGuest(t, namespacePath, "udp")
 	assertNoActivity(t, monitor, request)
 
