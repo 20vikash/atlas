@@ -29,7 +29,25 @@ The wildcard certificate covers site HTTPS traffic. An address of `-` returns `5
 
 ## Auto proxy traffic
 
-A configured host form such as `site-<tenant>-<vm>` or `*-vm-<tenant>-<vm>` below the wildcard zone routes directly to its VM address on port `80`. The tenant and VM fields are lowercase hexadecimal values with a maximum of 8 and 16 digits. For example, `site-7-2a` with address prefix `fdaa:1` routes to `[fdaa:1:0:7:0:0:0:2a]:80`.
+A configured host form such as `site-<label>` or `*-vm-<label>` below the wildcard zone routes directly to its VM address on port `80`. The label is a canonical, 96-bit base-36 value: `(vm << 32) | tenant`. It uses lowercase `0` to `9` and `a` to `z`, has at most 19 digits, and has no leading zero. For example, `site-lpc8lqa` with address prefix `fdaa:1` routes to `[fdaa:1:0:2:0:0:0:b]:80`.
+
+```text
+site-lpc8lqa
+     |
+     +-- label: lpc8lqa
+             |
+             | base-36 decode
+             v
+     +--------------------+----------------+
+     | 64-bit VM: 0x000b  | tenant: 0x0002 |
+     +--------------------+----------------+
+             |                    |
+             +--------+-----------+
+                      v
+fdaa:1 + tenant + VM = fdaa:1:0:2:0:0:0:b
+```
+
+OpenResty computes the address. The control daemon reserves every site key that matches an auto-proxy prefix.
 
 `/var/lib/nginx/auto-proxy` holds the address prefix and the configured host prefixes. An empty file disables static routing.
 

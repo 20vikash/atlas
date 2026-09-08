@@ -36,7 +36,7 @@ ZONE = "test.x.frappe.dev"
 VM_A = "fd00:a71a:5::a"
 VM_B = "fd00:a71a:5::b"
 # The image seeds the prefixes that route these hosts to vm-auto.
-AUTO_PROXY_SUBDOMAINS = ("site-50000-2a", "bench-vm-50000-2a")
+AUTO_PROXY_SUBDOMAINS = ("site-2avaxbsw", "bench-vm-2avaxbsw")
 
 
 def admin(method: str, path: str, body: str | None = None) -> tuple[int, str]:
@@ -190,9 +190,16 @@ def test_a_map_entry_never_overrides_an_auto_proxy_host():
 @pytest.mark.parametrize(
 	"subdomain",
 	[
-		"site-50000",
-		"site-zz-2a",
-		"site-7-12345678901234567",
+		# A padded token is not the label of the VM it decodes to.
+		"site-02avaxbsw",
+		# 20 digits cannot hold a 96-bit value.
+		"site-zzzzzzzzzzzzzzzzzzzz",
+		# One above the widest tenant and VM number pair.
+		"site-7oiylpimjg5u2ca1yps",
+		# The prefix is not configured.
+		"shop-2avaxbsw",
+		# A bare label carries no prefix.
+		"2avaxbsw",
 	],
 )
 def test_a_name_outside_the_auto_proxy_form_reads_the_site_map(subdomain: str):
