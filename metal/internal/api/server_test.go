@@ -764,7 +764,7 @@ func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
 		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1"}`, http.StatusBadRequest)
 
-// Stored public limits must not block an egress mode change.
+	// Stored public limits must not block an egress mode change.
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
 		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50}`, http.StatusAccepted)
 }
