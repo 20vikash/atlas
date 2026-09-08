@@ -44,6 +44,39 @@ class TestProxyClusterPassword(UnitTestCase):
 		settings.save.assert_called_once_with(ignore_permissions=True)
 
 
+class TestRegionID(UnitTestCase):
+	def setUp(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		self.atlas_settings = AtlasSettings
+		self.settings = MagicMock()
+		self.settings.is_new.return_value = False
+		self.settings.has_value_changed.return_value = True
+		self.settings.is_setup_completed = False
+		self.settings.wildcard_domain = "example.com"
+		self.settings.region_name = "test"
+
+	def test_a_virtual_machine_prevents_a_region_id_change(self) -> None:
+		with (
+			patch("frappe.db.exists", return_value=True),
+			self.assertRaises(frappe.ValidationError),
+		):
+			self.atlas_settings.validate(self.settings)
+
+	def test_a_non_archived_proxy_prevents_a_region_id_change(self) -> None:
+		with (
+			patch("frappe.db.exists", side_effect=(False, True)),
+			self.assertRaises(frappe.ValidationError),
+		):
+			self.atlas_settings.validate(self.settings)
+
+	def test_archived_proxies_do_not_prevent_a_region_id_change(self) -> None:
+		with patch("frappe.db.exists", side_effect=(False, False)):
+			self.atlas_settings.validate(self.settings)
+
+		self.settings.server_provider_controller.validate_settings.assert_called_once()
+
+
 class IntegrationTestAtlasSettings(IntegrationTestCase):
 	"""
 	Integration tests for AtlasSettings.
