@@ -11,10 +11,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// createAndPublishSnapshot creates a Full snapshot of a paused VM and publishes
-// it as a new generation. The guest must already be paused. The create step
-// runs inside the jail, so it needs the daemon privileges. Warm image building
-// and warm stop share this path.
+// createAndPublishSnapshot creates and publishes a paused VM snapshot.
 func (runtime *Runtime) createAndPublishSnapshot(ctx context.Context, machine vm.RuntimeMachine) (validatedSnapshot, error) {
 	generation, err := runtime.configuration.nextSnapshotGeneration(machine.ID)
 	if err != nil {
@@ -26,9 +23,7 @@ func (runtime *Runtime) createAndPublishSnapshot(ctx context.Context, machine vm
 	return runtime.publishPendingSnapshot(machine, generation)
 }
 
-// publishPendingSnapshot moves a complete pending directory to a new published
-// generation and writes the manifest last, so a generation is complete only
-// when its manifest validates. It reads the published result back to confirm it.
+// publishPendingSnapshot publishes a pending generation and writes its manifest.
 func (runtime *Runtime) publishPendingSnapshot(machine vm.RuntimeMachine, generation uint64) (validatedSnapshot, error) {
 	pending := runtime.configuration.pendingSnapshotDirectory(machine.ID)
 	stateSize, err := statArtifact(filepath.Join(pending, snapshotStateFileName))
@@ -62,7 +57,7 @@ func (runtime *Runtime) publishPendingSnapshot(machine vm.RuntimeMachine, genera
 	if err != nil {
 		return validatedSnapshot{}, err
 	}
-	// The manifest is written last, so a reader never sees a partial generation.
+	// Write the manifest last.
 	if err := platform.WriteFile(filepath.Join(generationDirectory, snapshotManifestFileName), data, 0o640); err != nil {
 		return validatedSnapshot{}, fmt.Errorf("write snapshot manifest: %w", err)
 	}
@@ -76,8 +71,7 @@ func (runtime *Runtime) publishPendingSnapshot(machine vm.RuntimeMachine, genera
 	}, generation)
 }
 
-// purgeSnapshots removes every published snapshot of one VM. It accepts an
-// absent directory, so a VM that never published a snapshot is fine.
+// purgeSnapshots removes every published snapshot of one VM.
 func (runtime *Runtime) purgeSnapshots(id string) error {
 	if err := os.RemoveAll(runtime.configuration.snapshotRoot(id)); err != nil {
 		return fmt.Errorf("remove VM snapshots: %w", err)
@@ -85,8 +79,7 @@ func (runtime *Runtime) purgeSnapshots(id string) error {
 	return nil
 }
 
-// statArtifact confirms a snapshot file is a regular, non-empty file and returns
-// its size.
+// statArtifact validates a snapshot file and returns its size.
 func statArtifact(path string) (int64, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
