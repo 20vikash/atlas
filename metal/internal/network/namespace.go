@@ -70,16 +70,37 @@ func virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, 
 	}
 }
 
-// setVirtualEthernet adds or removes the veth pair.
+// setVirtualEthernet adds or removes the veth pair. The pair belongs to this VM
+// only when its peer sits in this VM's namespace. A released VM can leave a pair
+// behind, and the next VM reuses its user ID and therefore its device names, so
+// a host link alone is not proof that the pair is the right one.
 func setVirtualEthernet(ctx context.Context, virtualMachineID string, userID uint32, present bool) error {
 	namespace := namespaceName(virtualMachineID)
 	hostVirtualEthernet, guestVirtualEthernet := virtualEthernetNames(userID)
-	exists, err := networkLinkExists(ctx, hostVirtualEthernet)
-	if err != nil || exists == present {
+	hostLinkExists, err := networkLinkExists(ctx, hostVirtualEthernet)
+	if err != nil {
 		return err
 	}
+
 	if !present {
+		if !hostLinkExists {
+			return nil
+		}
 		return platform.Run(ctx, "ip", "link", "del", hostVirtualEthernet)
+	}
+
+	attached, err := namespaceLinkExists(ctx, namespace, guestVirtualEthernet)
+	if err != nil {
+		return err
+	}
+	if attached {
+		return nil
+	}
+	// The name is taken by a stale pair. Remove it, which removes both ends.
+	if hostLinkExists {
+		if err := platform.Run(ctx, "ip", "link", "del", hostVirtualEthernet); err != nil {
+			return fmt.Errorf("remove stale veth %s: %w", hostVirtualEthernet, err)
+		}
 	}
 
 	hostIPAddress, namespaceIPAddress := transitAddresses(userID)
