@@ -1,11 +1,10 @@
 //go:build integration
 
-// Boots real microVMs and drives them over SSH. Requires root, KVM, firecracker +
-// jailer installed, and a prepared host (see docs/testing.md). Run with:
+// Boots real microVMs over SSH. Requires root, KVM, Firecracker, Jailer, and a prepared host.
 //
 //	sudo -E go test -tags integration -v ./internal/firecracker/
 //
-// The tests share a host, so they run one at a time (each cleans up its VMs).
+// Tests run one at a time and clean up their VMs.
 package firecracker
 
 import (
@@ -35,8 +34,7 @@ func env(k, def string) string {
 	return def
 }
 
-// skipUnlessHost skips unless the test runs as root with the image and ssh key
-// env set. It returns the image ref and the public key contents.
+// skipUnlessHost skips when the host prerequisites are missing.
 func skipUnlessHost(t *testing.T) (image, pub string) {
 	t.Helper()
 	if os.Geteuid() != 0 {
@@ -56,8 +54,7 @@ func skipUnlessHost(t *testing.T) (image, pub string) {
 	return image, strings.TrimSpace(string(b))
 }
 
-// integrationMesh builds the mesh that the host integration test needs. The
-// test already requires a configured host, so a missing CLI skips it.
+// integrationMesh builds the mesh required by the host test.
 func integrationMesh(t *testing.T) *network.Mesh {
 	t.Helper()
 	mesh, err := network.NewMesh(network.MeshConfig{
@@ -192,10 +189,7 @@ func mainPID(t *testing.T, id string) int {
 	return pid
 }
 
-// TestWarmStopAndRestoreTwoCycles proves that a warm stop terminates the process
-// and a start restores the same guest memory, across two cycles. A token in
-// /dev/shm and a long-running process live only in memory, so their survival
-// proves a memory restore and not a cold boot.
+// TestWarmStopAndRestoreTwoCycles checks guest memory across two warm-stop cycles.
 func TestWarmStopAndRestoreTwoCycles(t *testing.T) {
 	image, pub := skipUnlessHost(t)
 	manager := newManager(t)
