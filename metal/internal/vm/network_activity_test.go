@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// fakeNetworkActivityMonitor is the manager seam for activity reads. It
-// returns each queued sequence value in order, then falls back to activity.
+// fakeNetworkActivityMonitor supplies activity samples to manager tests.
 type fakeNetworkActivityMonitor struct {
 	activity    NetworkActivity
 	err         error
