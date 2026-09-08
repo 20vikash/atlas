@@ -30,7 +30,7 @@ type fakeVirtualMachineManager struct {
 	deferMetadata   bool
 }
 
-func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification) (vm.Information, error) {
+func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification, sleep vm.SleepPolicy) (vm.Information, error) {
 	if existing, found := manager.virtualMachines[id]; found {
 		return existing.info, nil
 	}
@@ -50,7 +50,8 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
-		IsSleepy:                      specification.IsSleepy,
+		IsSleepy:                      sleep.IsSleepy,
+		IdleTimeoutSeconds:            sleep.IdleTimeoutSeconds,
 		DesiredGeneration:             1,
 	}}
 	manager.virtualMachines[id] = virtualMachine
@@ -144,19 +145,6 @@ func (manager *fakeVirtualMachineManager) SetNetwork(_ context.Context, id strin
 	return nil
 }
 
-func (manager *fakeVirtualMachineManager) SetSleepPolicy(_ context.Context, id string, isSleepy bool) error {
-	virtualMachine, found := manager.virtualMachines[id]
-	if !found {
-		return vm.ErrNotFound
-	}
-	if virtualMachine.info.IsSleepy == isSleepy {
-		return nil
-	}
-	virtualMachine.info.IsSleepy = isSleepy
-	virtualMachine.info.DesiredGeneration++
-	return nil
-}
-
 func (manager *fakeVirtualMachineManager) SetDisk(_ context.Context, id string, diskMiB int, limits vm.Disk) error {
 	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
@@ -172,18 +160,25 @@ func (manager *fakeVirtualMachineManager) SetDisk(_ context.Context, id string, 
 	return nil
 }
 
-func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id string, virtualCPUCount, memoryMiB int) error {
+func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id string, compute vm.Compute) error {
 	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
 		return vm.ErrNotFound
 	}
-	if virtualMachine.info.State != vm.StateStopped {
-		return vm.ErrConflict
+	// A shape change needs a stopped VM. A sleep policy change does not.
+	shapeChanged := virtualMachine.info.VirtualCPUCount != compute.VirtualCPUCount ||
+		virtualMachine.info.MemoryMiB != compute.MemoryMiB
+	if shapeChanged {
+		if virtualMachine.info.State != vm.StateStopped {
+			return vm.ErrConflict
+		}
+		virtualMachine.info.VirtualCPUCount = compute.VirtualCPUCount
+		virtualMachine.info.MemoryMiB = compute.MemoryMiB
+		virtualMachine.info.DesiredState = vm.StateRunning
 	}
 
-	virtualMachine.info.VirtualCPUCount = virtualCPUCount
-	virtualMachine.info.MemoryMiB = memoryMiB
-	virtualMachine.info.DesiredState = vm.StateRunning
+	virtualMachine.info.IsSleepy = compute.Sleep.IsSleepy
+	virtualMachine.info.IdleTimeoutSeconds = compute.Sleep.IdleTimeoutSeconds
 	virtualMachine.info.DesiredGeneration++
 	return nil
 }
@@ -619,14 +614,16 @@ func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 
 func TestCreateStoresAndReturnsTheSleepyFlag(t *testing.T) {
 	srv := newTestServer(t)
-	body := strings.Replace(validCreateRequest, `"guest":{`, `"is_sleepy":true,"guest":{`, 1)
+	body := strings.Replace(validCreateRequest,
+		`"compute":{"virtual_cpu_count":1,"memory_mib":512}`,
+		`"compute":{"virtual_cpu_count":1,"memory_mib":512,"is_sleepy":true,"idle_timeout_seconds":1800}`, 1)
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if !response.Desired.IsSleepy {
+	if !response.Desired.Compute.IsSleepy {
 		t.Fatal("desired.is_sleepy = false, want true")
 	}
 }
@@ -639,7 +636,7 @@ func TestCreateDefaultsToNonSleepy(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Desired.IsSleepy {
+	if response.Desired.Compute.IsSleepy {
 		t.Fatal("desired.is_sleepy = true, want false for a request without the field")
 	}
 }
@@ -682,50 +679,37 @@ func TestPowerRequestRejectsSleeping(t *testing.T) {
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/power", `{"state":"sleeping"}`, http.StatusBadRequest)
 }
 
-func TestSetSleepPolicyUpdatesTheFlag(t *testing.T) {
+func TestSetComputeStoresTheSleepPolicy(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
+	body := `{"virtual_cpu_count":1,"memory_mib":512,"is_sleepy":true,"idle_timeout_seconds":1800}`
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if !response.Desired.IsSleepy {
-		t.Fatal("desired.is_sleepy = false, want true")
+	if !response.Desired.Compute.IsSleepy {
+		t.Error("compute.is_sleepy = false, want true")
+	}
+	if response.Desired.Compute.IdleTimeoutSeconds != 1800 {
+		t.Errorf("compute.idle_timeout_seconds = %d, want 1800", response.Desired.Compute.IdleTimeoutSeconds)
 	}
 }
 
-func TestSetSleepPolicyIsIdempotent(t *testing.T) {
+func TestSetComputeRejectsANegativeIdleTimeout(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	first := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
-	second := do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusAccepted)
-
-	var firstResponse, secondResponse virtualMachineResponse
-	if err := json.Unmarshal(first.Body.Bytes(), &firstResponse); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(second.Body.Bytes(), &secondResponse); err != nil {
-		t.Fatal(err)
-	}
-	if firstResponse.Desired.Generation != secondResponse.Desired.Generation {
-		t.Fatalf("generation changed on a repeat: %d then %d", firstResponse.Desired.Generation, secondResponse.Desired.Generation)
-	}
+	body := `{"virtual_cpu_count":1,"memory_mib":512,"is_sleepy":true,"idle_timeout_seconds":-1}`
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusBadRequest)
 }
 
-func TestSetSleepPolicyRejectsAnIdleTimeoutField(t *testing.T) {
+// The sleep policy endpoint was removed. Its path must not answer.
+func TestSleepPolicyRouteIsGone(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-
-	// The idle timeout is a host value, so it is an unknown field here.
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true,"idle_timeout":"30m"}`, http.StatusBadRequest)
-}
-
-func TestSetSleepPolicyReturnsNotFoundForAMissingVirtualMachine(t *testing.T) {
-	srv := newTestServer(t)
-	do(t, srv, http.MethodPut, "/v1/vms/missing/sleep-policy", `{"is_sleepy":true}`, http.StatusNotFound)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/sleep-policy", `{"is_sleepy":true}`, http.StatusNotFound)
 }
 
 func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {

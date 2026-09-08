@@ -51,7 +51,7 @@ func (manager *Manager) WakeFromNetwork(ctx context.Context, event NetworkWakeEv
 func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed ObservedRecord) bool {
 	return event.UserID == desired.UserID &&
 		desired.State == StateRunning &&
-		desired.Specification.IsSleepy &&
+		desired.Sleep.IsSleepy &&
 		observed.State == StateSleeping &&
 		observed.Sleep != nil &&
 		observed.Sleep.MemorySnapshotGeneration != 0

@@ -9,8 +9,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// The dispatch for an unknown mode returns before touching the machine, so a zero
-// Runtime is enough to test it.
+// Unknown modes return before touching the machine.
 func TestRuntimeStartRejectsAnUnknownMode(t *testing.T) {
 	runtime := &Runtime{}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
@@ -21,8 +20,7 @@ func TestRuntimeStartRejectsAnUnknownMode(t *testing.T) {
 	}
 }
 
-// The snapshot restore modes require a snapshot. With none published they report
-// the not-found result rather than a cold boot.
+// Snapshot restore modes report not found when no snapshot exists.
 func TestRuntimeStartFromSleepSnapshotWithoutASnapshot(t *testing.T) {
 	runtime := &Runtime{configuration: Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}

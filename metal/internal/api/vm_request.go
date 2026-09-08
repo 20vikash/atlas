@@ -31,18 +31,26 @@ var (
 
 // createRequest is the complete desired specification of a new VM.
 type createRequest struct {
-	Compute  computeRequest `json:"compute"`
-	Disk     diskRequest    `json:"disk"`
-	Image    imageRequest   `json:"image"`
-	Network  networkRequest `json:"network"`
-	Guest    guestRequest   `json:"guest"`
-	IsSleepy bool           `json:"is_sleepy"`
+	Compute computeRequest `json:"compute"`
+	Disk    diskRequest    `json:"disk"`
+	Image   imageRequest   `json:"image"`
+	Network networkRequest `json:"network"`
+	Guest   guestRequest   `json:"guest"`
 }
 
-// computeRequest is the complete CPU and memory shape.
+// computeRequest is the complete CPU shape, memory shape, and sleep policy.
 type computeRequest struct {
 	VirtualCPUCount int `json:"virtual_cpu_count" minimum:"1"`
 	MemoryMiB       int `json:"memory_mib" minimum:"1"`
+	// IsSleepy allows automatic sleep for an idle VM.
+	IsSleepy bool `json:"is_sleepy"`
+	// IdleTimeoutSeconds is the idle time before sleep. Zero disables sleep.
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds" minimum:"0"`
+}
+
+// sleepPolicy returns the requested sleep policy.
+func (request computeRequest) sleepPolicy() vm.SleepPolicy {
+	return vm.SleepPolicy{IsSleepy: request.IsSleepy, IdleTimeoutSeconds: request.IdleTimeoutSeconds}
 }
 
 // imageRequest identifies boot content and how the host should keep it.
@@ -115,11 +123,6 @@ type powerRequest struct {
 	Warm  bool   `json:"warm"`
 }
 
-// sleepPolicyRequest carries the per-VM sleep flag.
-type sleepPolicyRequest struct {
-	IsSleepy bool `json:"is_sleepy"`
-}
-
 // validate checks every group and the guest values a create carries.
 func (request createRequest) validate() error {
 	if err := request.Compute.validate(); err != nil {
@@ -154,7 +157,6 @@ func (request createRequest) specification() vm.Specification {
 		Hostname:        request.Guest.Hostname,
 		UserData:        request.Guest.UserData,
 		Metadata:        request.Guest.Metadata,
-		IsSleepy:        request.IsSleepy,
 	}
 }
 
@@ -165,6 +167,9 @@ func (request computeRequest) validate() error {
 	}
 	if request.MemoryMiB > maximumMemoryMiB {
 		return fmt.Errorf("compute.memory_mib is too large")
+	}
+	if request.IdleTimeoutSeconds < 0 {
+		return fmt.Errorf("compute.idle_timeout_seconds must not be negative")
 	}
 	return nil
 }

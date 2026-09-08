@@ -8,7 +8,7 @@ import (
 )
 
 // newSleepyManager builds a manager with automatic sleep and controllable activity.
-func newSleepyManager(t *testing.T, timeout time.Duration) (*Manager, *fakeRuntime, *fakeNetworkActivityMonitor) {
+func newSleepyManager(t *testing.T, _ time.Duration) (*Manager, *fakeRuntime, *fakeNetworkActivityMonitor) {
 	t.Helper()
 	runtime := &fakeRuntime{
 		state:       StateStopped,
@@ -19,7 +19,6 @@ func newSleepyManager(t *testing.T, timeout time.Duration) (*Manager, *fakeRunti
 		ManagerConfig{
 			MachinesDirectory: t.TempDir(),
 			UserIDRange:       UserIDRange{Min: 1000, Max: 1010},
-			Sleep:             SleepConfig{Enabled: true, IdleTimeout: timeout},
 		},
 		ManagerDependencies{
 			Runtime:                runtime,
@@ -36,15 +35,16 @@ func newSleepyManager(t *testing.T, timeout time.Duration) (*Manager, *fakeRunti
 	return manager, runtime, monitor
 }
 
-func sleepySpecification() Specification {
-	specification := testSpecification()
-	specification.IsSleepy = true
-	return specification
+func sleepySpecification() Specification { return testSpecification() }
+
+// sleepyPolicy is the per-VM policy the sleep tests create a VM with.
+func sleepyPolicy() SleepPolicy {
+	return SleepPolicy{IsSleepy: true, IdleTimeoutSeconds: int((30 * time.Minute).Seconds())}
 }
 
 func TestIdleSleepyVMReachesSleeping(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,7 +90,7 @@ func TestIdleSleepyVMReachesSleeping(t *testing.T) {
 
 func TestAutomaticSleepStaysAsleep(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
@@ -115,7 +115,7 @@ func TestAutomaticSleepStaysAsleep(t *testing.T) {
 
 func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
@@ -150,7 +150,7 @@ func TestSleepAbortsBeforeSnapshotWhenTrafficArrives(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
 	wake := &fakeNetworkWakeMonitor{}
 	manager.networkWakeMonitor = wake
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,7 +229,7 @@ func TestHeldSleepingVMRearmsWake(t *testing.T) {
 
 func TestSleepDoesNotAbortOnWallClockJitter(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
@@ -262,7 +262,7 @@ func TestSleepDoesNotAbortOnWallClockJitter(t *testing.T) {
 // autoSleepToSleeping boots a sleepy VM and lets it auto-sleep.
 func autoSleepToSleeping(t *testing.T, manager *Manager, monitor *fakeNetworkActivityMonitor) {
 	t.Helper()
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
@@ -335,7 +335,11 @@ func TestDisableSleepyWhileSleepingResumes(t *testing.T) {
 	autoSleepToSleeping(t, manager, monitor)
 
 	// Disabling sleep keeps the snapshot compatible.
-	if err := manager.SetSleepPolicy(context.Background(), "machine-1", false); err != nil {
+	stopSleeping := Compute{
+		VirtualCPUCount: testSpecification().VirtualCPUCount,
+		MemoryMiB:       testSpecification().MemoryMiB,
+	}
+	if err := manager.SetCompute(context.Background(), "machine-1", stopSleeping); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
@@ -358,7 +362,7 @@ func TestSetComputeRejectedWhileSleeping(t *testing.T) {
 	autoSleepToSleeping(t, manager, monitor)
 
 	// A compute change needs a stopped VM, so it is rejected while sleeping.
-	if err := manager.SetCompute(context.Background(), "machine-1", 4, 4096); !errors.Is(err, ErrConflict) {
+	if err := manager.SetCompute(context.Background(), "machine-1", Compute{VirtualCPUCount: 4, MemoryMiB: 4096}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("SetCompute error = %v, want conflict", err)
 	}
 }
@@ -385,7 +389,7 @@ func TestDestroyWhileSleepingRemovesArtifacts(t *testing.T) {
 // warmStopToSleeping reaches sleeping through the manual power path.
 func warmStopToSleeping(t *testing.T, manager *Manager) {
 	t.Helper()
-	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification(), SleepPolicy{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
@@ -453,7 +457,7 @@ func TestPlainStopWhileSleepingDiscards(t *testing.T) {
 // seedInterruptedSleep models a crash before sleeping status was written.
 func seedInterruptedSleep(t *testing.T, manager *Manager, runtime *fakeRuntime, monitor *fakeNetworkActivityMonitor) {
 	t.Helper()
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
@@ -545,7 +549,7 @@ func TestRecoverInterruptedSleepWithoutSnapshotClears(t *testing.T) {
 
 func TestActiveSleepyVMStaysRunning(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
-	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification(), sleepyPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true}

@@ -20,7 +20,6 @@ type opts struct {
 	baseDir         string
 	wireGuardName   string
 	mesh            meshOpts
-	sleep           sleepOpts
 }
 
 // meshOpts configures the Atlas WG Mesh integration.
@@ -28,12 +27,6 @@ type meshOpts struct {
 	enabled    bool
 	binaryPath string
 	uplinkName string
-}
-
-// sleepOpts is the host-wide automatic sleep policy.
-type sleepOpts struct {
-	enabled     bool
-	idleTimeout time.Duration
 }
 
 const defaultConfigPath = "/var/lib/metal/metald.toml"
@@ -67,13 +60,6 @@ type fileConfig struct {
 	ZFS         zfsFile         `toml:"zfs"`
 	WireGuard   wireGuardFile   `toml:"wireguard"`
 	WGMesh      wgMeshFile      `toml:"wg_mesh"`
-	Sleep       sleepFile       `toml:"sleep"`
-}
-
-// sleepFile is the [sleep] configuration section.
-type sleepFile struct {
-	Enabled     bool         `toml:"enabled"`
-	IdleTimeout tomlDuration `toml:"idle_timeout"`
 }
 
 // tomlDuration decodes a TOML string with time.ParseDuration.
@@ -154,10 +140,6 @@ func applyFile(o *opts, path string) error {
 	overlay(&o.mesh.uplinkName, fc.WGMesh.Uplink)
 	if fc.WGMesh.Enabled != nil {
 		o.mesh.enabled = *fc.WGMesh.Enabled
-	}
-	o.sleep = sleepOpts{enabled: fc.Sleep.Enabled, idleTimeout: fc.Sleep.IdleTimeout.Duration}
-	if o.sleep.enabled && o.sleep.idleTimeout <= 0 {
-		return fmt.Errorf("config %s: [sleep] idle_timeout must be a positive duration when enabled", path)
 	}
 	return nil
 }

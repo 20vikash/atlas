@@ -155,7 +155,7 @@ func waitSSH(t *testing.T, id string) bool {
 func bootVM(t *testing.T, manager *vm.Manager, specification vm.Specification) string {
 	t.Helper()
 	identifier := uuid.NewString()
-	_, err := manager.Create(context.Background(), identifier, specification)
+	_, err := manager.Create(context.Background(), identifier, specification, vm.SleepPolicy{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

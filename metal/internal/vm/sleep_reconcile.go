@@ -163,7 +163,7 @@ func (manager *Manager) reconcileSleeping(
 
 	switch desired.State {
 	case StateRunning:
-		if desired.Specification.IsSleepy && caughtUp {
+		if desired.Sleep.IsSleepy && caughtUp {
 			return manager.holdSleeping(desired, observed)
 		}
 		if manager.isMemorySnapshotStale(desired, observed) {

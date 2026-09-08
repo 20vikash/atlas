@@ -19,8 +19,33 @@ type Specification struct {
 	Hostname        string               `json:"hostname"`
 	UserData        string               `json:"user_data"`
 	Metadata        map[string]string    `json:"metadata"`
+}
+
+// SleepPolicy is the automatic sleep policy of one virtual machine. It is intent,
+// not machine shape, so a change to it does not raise the specification
+// generation and does not make a published memory snapshot stale.
+type SleepPolicy struct {
 	// IsSleepy allows automatic sleep for an idle VM.
-	IsSleepy bool `json:"is_sleepy"`
+	IsSleepy bool `json:"is_sleepy,omitempty"`
+	// IdleTimeoutSeconds is the idle time before sleep. Zero disables sleep.
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds,omitempty"`
+}
+
+// IsEnabled reports whether this policy can sleep a VM.
+func (policy SleepPolicy) IsEnabled() bool {
+	return policy.IsSleepy && policy.IdleTimeoutSeconds > 0
+}
+
+// IdleTimeout returns the idle time before sleep.
+func (policy SleepPolicy) IdleTimeout() time.Duration {
+	return time.Duration(policy.IdleTimeoutSeconds) * time.Second
+}
+
+// Compute is the requested CPU shape, memory shape, and sleep policy of one VM.
+type Compute struct {
+	VirtualCPUCount int
+	MemoryMiB       int
+	Sleep           SleepPolicy
 }
 
 // Image identifies immutable boot files and their transport URLs.
@@ -72,7 +97,6 @@ func (specification Specification) SameReservation(other Specification) bool {
 		slices.Equal(specification.SSHKeys, other.SSHKeys) &&
 		specification.Hostname == other.Hostname &&
 		specification.UserData == other.UserData &&
-		specification.IsSleepy == other.IsSleepy &&
 		maps.Equal(specification.Metadata, other.Metadata)
 }
 
@@ -177,6 +201,7 @@ type Information struct {
 	Hostname                      string
 	Metadata                      map[string]string
 	IsSleepy                      bool
+	IdleTimeoutSeconds            int
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string

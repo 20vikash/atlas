@@ -11,13 +11,12 @@ import (
 )
 
 // buildSleepManager returns a manager with controllable activity.
-func buildSleepManager(t *testing.T, config SleepConfig, monitor NetworkActivityMonitor) *Manager {
+func buildSleepManager(t *testing.T, monitor NetworkActivityMonitor) *Manager {
 	t.Helper()
 	manager, err := NewManager(
 		ManagerConfig{
 			MachinesDirectory: t.TempDir(),
 			UserIDRange:       UserIDRange{Min: 1000, Max: 1010},
-			Sleep:             config,
 		},
 		ManagerDependencies{
 			Runtime:                &fakeRuntime{},
@@ -41,7 +40,7 @@ func sleepDesired() DesiredRecord {
 		Generation:        3,
 		RestartGeneration: 1,
 		State:             StateRunning,
-		Specification:     Specification{IsSleepy: true},
+		Sleep:             SleepPolicy{IsSleepy: true, IdleTimeoutSeconds: 1800},
 	}
 }
 
@@ -49,27 +48,23 @@ func sleepObserved() ObservedRecord {
 	return ObservedRecord{Generation: 3, RestartGeneration: 1}
 }
 
-func TestNewManagerValidatesSleepConfiguration(t *testing.T) {
+func TestNewManagerRequiresTheNetworkMonitors(t *testing.T) {
 	monitor := &fakeNetworkActivityMonitor{}
 	wake := &fakeNetworkWakeMonitor{}
 	cases := []struct {
 		name    string
-		config  SleepConfig
 		monitor NetworkActivityMonitor
 		wake    NetworkWakeMonitor
 		wantErr bool
 	}{
-		{name: "disabled needs nothing", config: SleepConfig{}, wantErr: false},
-		{name: "enabled needs a timeout", config: SleepConfig{Enabled: true}, monitor: monitor, wake: wake, wantErr: true},
-		{name: "enabled needs a positive timeout", config: SleepConfig{Enabled: true, IdleTimeout: -time.Minute}, monitor: monitor, wake: wake, wantErr: true},
-		{name: "enabled needs an activity monitor", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: nil, wake: wake, wantErr: true},
-		{name: "enabled needs a wake monitor", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: monitor, wake: nil, wantErr: true},
-		{name: "enabled with all is accepted", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: monitor, wake: wake, wantErr: false},
+		{name: "an activity monitor is required", monitor: nil, wake: wake, wantErr: true},
+		{name: "a wake monitor is required", monitor: monitor, wake: nil, wantErr: true},
+		{name: "both are accepted", monitor: monitor, wake: wake, wantErr: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			_, err := NewManager(
-				ManagerConfig{MachinesDirectory: t.TempDir(), Sleep: testCase.config},
+				ManagerConfig{MachinesDirectory: t.TempDir()},
 				ManagerDependencies{
 					Runtime:                &fakeRuntime{},
 					Network:                &fakeNetwork{},
@@ -88,7 +83,7 @@ func TestNewManagerValidatesSleepConfiguration(t *testing.T) {
 
 func TestSampleNetworkActivityBuildsRequestFromRecord(t *testing.T) {
 	monitor := &fakeNetworkActivityMonitor{activity: NetworkActivity{HasBeenSeen: true}}
-	manager := buildSleepManager(t, SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor)
+	manager := buildSleepManager(t, monitor)
 	desired := sleepDesired()
 
 	if _, err := manager.sampleNetworkActivity(context.Background(), desired); err != nil {
@@ -102,13 +97,13 @@ func TestSampleNetworkActivityBuildsRequestFromRecord(t *testing.T) {
 func TestSampleNetworkActivityWrapsErrors(t *testing.T) {
 	// A missing attachment keeps ErrNotFound. A read failure is wrapped and named.
 	notFound := &fakeNetworkActivityMonitor{err: fmt.Errorf("activity for VM machine-1: %w", ErrNotFound)}
-	manager := buildSleepManager(t, SleepConfig{Enabled: true, IdleTimeout: time.Minute}, notFound)
+	manager := buildSleepManager(t, notFound)
 	if _, err := manager.sampleNetworkActivity(context.Background(), sleepDesired()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 
 	readFailure := &fakeNetworkActivityMonitor{err: errors.New("map read failed")}
-	manager = buildSleepManager(t, SleepConfig{Enabled: true, IdleTimeout: time.Minute}, readFailure)
+	manager = buildSleepManager(t, readFailure)
 	_, err := manager.sampleNetworkActivity(context.Background(), sleepDesired())
 	if err == nil || !strings.Contains(err.Error(), "machine-1") {
 		t.Fatalf("error = %v, want a wrapped VM read failure", err)
@@ -123,7 +118,6 @@ func TestSleepEligibilityRules(t *testing.T) {
 
 	cases := []struct {
 		name         string
-		config       SleepConfig
 		desired      func(DesiredRecord) DesiredRecord
 		observed     func(ObservedRecord) ObservedRecord
 		status       RuntimeStatus
@@ -135,22 +129,20 @@ func TestSleepEligibilityRules(t *testing.T) {
 	}{
 		{
 			name:         "idle sleepy VM is eligible",
-			config:       SleepConfig{Enabled: true, IdleTimeout: timeout},
 			status:       RuntimeStatus{State: StateRunning},
 			activity:     idle,
 			wantEligible: true,
 			wantReason:   sleepReasonEligible,
 		},
 		{
-			name:       "disabled policy",
-			config:     SleepConfig{},
+			name:       "no idle timeout disables sleep",
+			desired:    func(d DesiredRecord) DesiredRecord { d.Sleep.IdleTimeoutSeconds = 0; return d },
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   idle,
 			wantReason: sleepReasonDisabled,
 		},
 		{
 			name:       "not running desired state",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
 			desired:    func(d DesiredRecord) DesiredRecord { d.State = StateStopped; return d },
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   idle,
@@ -158,15 +150,13 @@ func TestSleepEligibilityRules(t *testing.T) {
 		},
 		{
 			name:       "not sleepy",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
-			desired:    func(d DesiredRecord) DesiredRecord { d.Specification.IsSleepy = false; return d },
+			desired:    func(d DesiredRecord) DesiredRecord { d.Sleep.IsSleepy = false; return d },
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   idle,
 			wantReason: sleepReasonNotSleepy,
 		},
 		{
 			name:       "specification generation pending",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
 			observed:   func(o ObservedRecord) ObservedRecord { o.Generation = 2; return o },
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   idle,
@@ -174,7 +164,6 @@ func TestSleepEligibilityRules(t *testing.T) {
 		},
 		{
 			name:       "restart generation pending",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
 			observed:   func(o ObservedRecord) ObservedRecord { o.RestartGeneration = 0; return o },
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   idle,
@@ -182,14 +171,12 @@ func TestSleepEligibilityRules(t *testing.T) {
 		},
 		{
 			name:       "runtime not running",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
 			status:     RuntimeStatus{State: StatePaused},
 			activity:   idle,
 			wantReason: sleepReasonRuntimeNotRunning,
 		},
 		{
 			name:       "incomplete operation",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
 			observed:   func(o ObservedRecord) ObservedRecord { o.Error = &OperationError{Code: "operation_failed"}; return o },
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   idle,
@@ -197,21 +184,18 @@ func TestSleepEligibilityRules(t *testing.T) {
 		},
 		{
 			name:        "no activity baseline",
-			config:      SleepConfig{Enabled: true, IdleTimeout: timeout},
 			status:      RuntimeStatus{State: StateRunning},
 			activityErr: fmt.Errorf("no attachment: %w", ErrNotFound),
 			wantReason:  sleepReasonNoBaseline,
 		},
 		{
 			name:       "recent activity is not idle",
-			config:     SleepConfig{Enabled: true, IdleTimeout: timeout},
 			status:     RuntimeStatus{State: StateRunning},
 			activity:   recent,
 			wantReason: sleepReasonNotIdle,
 		},
 		{
 			name:        "read failure is retryable",
-			config:      SleepConfig{Enabled: true, IdleTimeout: timeout},
 			status:      RuntimeStatus{State: StateRunning},
 			activityErr: errors.New("map read failed"),
 			wantErr:     true,
@@ -221,7 +205,7 @@ func TestSleepEligibilityRules(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			monitor := &fakeNetworkActivityMonitor{activity: testCase.activity, err: testCase.activityErr}
-			manager := buildSleepManager(t, testCase.config, monitor)
+			manager := buildSleepManager(t, monitor)
 			desired := sleepDesired()
 			if testCase.desired != nil {
 				desired = testCase.desired(desired)
@@ -265,7 +249,7 @@ func TestSleepEligibilityTimeoutBoundary(t *testing.T) {
 			monitor := &fakeNetworkActivityMonitor{
 				activity: NetworkActivity{LastSeenAt: now.Add(-testCase.age), HasBeenSeen: true},
 			}
-			manager := buildSleepManager(t, SleepConfig{Enabled: true, IdleTimeout: timeout}, monitor)
+			manager := buildSleepManager(t, monitor)
 			result, err := manager.evaluateSleepEligibility(context.Background(), sleepDesired(), sleepObserved(), RuntimeStatus{State: StateRunning}, now)
 			if err != nil {
 				t.Fatal(err)
@@ -281,7 +265,7 @@ func TestSleepEligibilityUsesOneMetalWideTimeout(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	timeout := 30 * time.Minute
 	monitor := &fakeNetworkActivityMonitor{}
-	manager := buildSleepManager(t, SleepConfig{Enabled: true, IdleTimeout: timeout}, monitor)
+	manager := buildSleepManager(t, monitor)
 
 	// One VM is idle and the other has recent traffic.
 	first := sleepDesired()
@@ -301,9 +285,9 @@ func TestSleepEligibilityUsesOneMetalWideTimeout(t *testing.T) {
 	}
 }
 
-func TestSleepTimeoutIsNotStoredInVMRecords(t *testing.T) {
-	// The idle timeout is one Metal-wide value. It must never reach a VM record.
-	desired, err := json.Marshal(DesiredRecord{Specification: Specification{IsSleepy: true}})
+func TestSleepPolicyRoundTripsInTheDesiredRecord(t *testing.T) {
+	// The policy is per VM, so both fields must survive a record round trip.
+	desired, err := json.Marshal(DesiredRecord{Sleep: SleepPolicy{IsSleepy: true, IdleTimeoutSeconds: 1800}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,9 +295,11 @@ func TestSleepTimeoutIsNotStoredInVMRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, encoded := range [][]byte{desired, observed} {
-		if strings.Contains(string(encoded), "timeout") {
-			t.Fatalf("record stores a timeout: %s", encoded)
-		}
+	if !strings.Contains(string(desired), `"idle_timeout_seconds":1800`) {
+		t.Fatalf("desired record lost the idle timeout: %s", desired)
+	}
+	// The observed record tracks progress only. It must carry no policy.
+	if strings.Contains(string(observed), "idle_timeout_seconds") {
+		t.Fatalf("observed record stores a policy: %s", observed)
 	}
 }

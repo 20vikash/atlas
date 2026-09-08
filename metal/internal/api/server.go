@@ -45,16 +45,15 @@ type SerialBroker interface {
 
 // VirtualMachineManager owns virtual machine state and operations.
 type VirtualMachineManager interface {
-	Create(context.Context, string, vm.Specification) (vm.Information, error)
+	Create(context.Context, string, vm.Specification, vm.SleepPolicy) (vm.Information, error)
 	Information(context.Context, string) (vm.Information, error)
 	List(context.Context) ([]vm.Information, error)
 	SetPowerState(context.Context, string, vm.State) error
 	StopWarm(context.Context, string) error
 	RequestRestart(context.Context, string) error
-	SetCompute(context.Context, string, int, int) error
+	SetCompute(context.Context, string, vm.Compute) error
 	SetDisk(context.Context, string, int, vm.Disk) error
 	SetNetwork(context.Context, string, vm.NetworkConfiguration) error
-	SetSleepPolicy(context.Context, string, bool) error
 	ReplaceSSHKeys(context.Context, string, []string) (bool, error)
 	ReplaceMetadata(context.Context, string, map[string]string) (bool, error)
 	Delete(context.Context, string) error

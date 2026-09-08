@@ -38,7 +38,9 @@ type DesiredRecord struct {
 	SpecificationGeneration uint64 `json:"specification_generation,omitempty"`
 	State                   State  `json:"state"`
 	// WarmStop asks a stopped VM to save a memory snapshot.
-	WarmStop      bool          `json:"warm_stop,omitempty"`
+	WarmStop bool `json:"warm_stop,omitempty"`
+	// Sleep is the automatic sleep policy of this VM.
+	Sleep         SleepPolicy   `json:"sleep,omitempty"`
 	Specification Specification `json:"specification"`
 }
 

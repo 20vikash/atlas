@@ -7,20 +7,6 @@ import (
 	"slices"
 )
 
-// SetSleepPolicy stores whether the host can sleep an idle VM.
-func (manager *Manager) SetSleepPolicy(ctx context.Context, identifier string, isSleepy bool) error {
-	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		if record.State == StateDestroyed {
-			return false, ErrConflict
-		}
-		if record.Specification.IsSleepy == isSleepy {
-			return false, nil
-		}
-		record.Specification.IsSleepy = isSleepy
-		return true, nil
-	})
-}
-
 // RequestRestart stores durable restart intent.
 func (manager *Manager) RequestRestart(ctx context.Context, identifier string) error {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
@@ -39,25 +25,38 @@ func (manager *Manager) RequestRestart(ctx context.Context, identifier string) e
 	return manager.store.writeDesired(record)
 }
 
-// SetCompute stores the complete requested CPU and memory shape.
-func (manager *Manager) SetCompute(ctx context.Context, identifier string, virtualCPUCount, memoryMiB int) error {
+// SetCompute stores the complete requested CPU shape, memory shape, and sleep
+// policy. A shape change needs a stopped VM and starts it again. A sleep policy
+// change is accepted in any state and leaves the power state alone, because the
+// policy is not part of the machine shape.
+func (manager *Manager) SetCompute(ctx context.Context, identifier string, compute Compute) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		observed, err := manager.store.readObserved(identifier)
-		if err != nil {
-			return false, err
-		}
-		if observed.State != StateStopped {
+		if record.State == StateDestroyed {
 			return false, ErrConflict
 		}
-		if record.Specification.VirtualCPUCount == virtualCPUCount &&
-			record.Specification.MemoryMiB == memoryMiB &&
-			record.State == StateRunning {
+
+		shapeChanged := record.Specification.VirtualCPUCount != compute.VirtualCPUCount ||
+			record.Specification.MemoryMiB != compute.MemoryMiB
+		sleepChanged := record.Sleep != compute.Sleep
+		if !shapeChanged && !sleepChanged && record.State == StateRunning {
 			return false, nil
 		}
-		record.Specification.VirtualCPUCount = virtualCPUCount
-		record.Specification.MemoryMiB = memoryMiB
-		record.SpecificationGeneration++
-		record.State = StateRunning
+
+		if shapeChanged {
+			observed, err := manager.store.readObserved(identifier)
+			if err != nil {
+				return false, err
+			}
+			if observed.State != StateStopped {
+				return false, ErrConflict
+			}
+			record.Specification.VirtualCPUCount = compute.VirtualCPUCount
+			record.Specification.MemoryMiB = compute.MemoryMiB
+			record.SpecificationGeneration++
+			record.State = StateRunning
+		}
+
+		record.Sleep = compute.Sleep
 		return true, nil
 	})
 }

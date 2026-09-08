@@ -269,7 +269,6 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	virtualMachineManager, err := vm.NewManager(
 		vm.ManagerConfig{
 			MachinesDirectory: o.cfg.MachinesDir,
-			Sleep:             vm.SleepConfig{Enabled: o.sleep.enabled, IdleTimeout: o.sleep.idleTimeout},
 		},
 		vm.ManagerDependencies{
 			Runtime:                virtualMachineRuntime,

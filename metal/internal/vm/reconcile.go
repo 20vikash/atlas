@@ -126,7 +126,7 @@ func (manager *Manager) reconcileActive(
 	}
 	if decision.Eligible {
 		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{
-			EligibleAt:                   decision.Activity.LastSeenAt.Add(manager.configuration.Sleep.IdleTimeout),
+			EligibleAt:                   decision.Activity.LastSeenAt.Add(desired.Sleep.IdleTimeout()),
 			RequestedAt:                  now,
 			LastNetworkActivityAt:        decision.Activity.LastSeenAt,
 			LastNetworkActivityMonotonic: decision.Activity.LastPacketMonotonicNanoseconds,

@@ -46,15 +46,15 @@ func (manager *Manager) evaluateSleepEligibility(
 	status RuntimeStatus,
 	now time.Time,
 ) (sleepEligibility, error) {
-	sleep := manager.configuration.Sleep
-	if !sleep.Enabled || sleep.IdleTimeout <= 0 {
+	policy := desired.Sleep
+	if !policy.IsSleepy {
+		return sleepEligibility{Reason: sleepReasonNotSleepy}, nil
+	}
+	if policy.IdleTimeoutSeconds <= 0 {
 		return sleepEligibility{Reason: sleepReasonDisabled}, nil
 	}
 	if desired.State != StateRunning {
 		return sleepEligibility{Reason: sleepReasonNotDesiredRunning}, nil
-	}
-	if !desired.Specification.IsSleepy {
-		return sleepEligibility{Reason: sleepReasonNotSleepy}, nil
 	}
 	if observed.Generation != desired.Generation {
 		return sleepEligibility{Reason: sleepReasonGenerationPending}, nil
@@ -77,7 +77,7 @@ func (manager *Manager) evaluateSleepEligibility(
 		return sleepEligibility{}, err
 	}
 	// LastSeenAt is also the baseline before the first packet.
-	if now.Sub(activity.LastSeenAt) < sleep.IdleTimeout {
+	if now.Sub(activity.LastSeenAt) < policy.IdleTimeout() {
 		return sleepEligibility{Reason: sleepReasonNotIdle, Activity: activity}, nil
 	}
 	return sleepEligibility{Eligible: true, Reason: sleepReasonEligible, Activity: activity}, nil

@@ -38,7 +38,8 @@ func (s *Server) createVirtualMachine(c echo.Context) error {
 	}
 
 	specification := request.specification()
-	information, err := s.virtualMachineManager.Create(c.Request().Context(), identifier, specification)
+	information, err := s.virtualMachineManager.Create(
+		c.Request().Context(), identifier, specification, request.Compute.sleepPolicy())
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,6 @@ type desiredVirtualMachineResponse struct {
 	Image             virtualMachineImageResponse `json:"image"`
 	Network           networkResponse             `json:"network"`
 	Guest             guestResponse               `json:"guest"`
-	IsSleepy          bool                        `json:"is_sleepy"`
 }
 
 // observedVirtualMachineResponse is the state reached by the host.
@@ -42,10 +41,12 @@ type observedVirtualMachineResponse struct {
 	Error                 *operationErrorResponse `json:"error"`
 }
 
-// computeResponse is the CPU and memory shape.
+// computeResponse is the CPU shape, memory shape, and sleep policy.
 type computeResponse struct {
-	VirtualCPUCount int `json:"virtual_cpu_count"`
-	MemoryMiB       int `json:"memory_mib"`
+	VirtualCPUCount    int  `json:"virtual_cpu_count"`
+	MemoryMiB          int  `json:"memory_mib"`
+	IsSleepy           bool `json:"is_sleepy"`
+	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"`
 }
 
 // guestResponse is the guest-facing configuration. User data is not returned.
@@ -120,8 +121,10 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			RestartGeneration: information.DesiredRestartGeneration,
 			State:             string(information.DesiredState),
 			Compute: computeResponse{
-				VirtualCPUCount: information.VirtualCPUCount,
-				MemoryMiB:       information.MemoryMiB,
+				VirtualCPUCount:    information.VirtualCPUCount,
+				MemoryMiB:          information.MemoryMiB,
+				IsSleepy:           information.IsSleepy,
+				IdleTimeoutSeconds: information.IdleTimeoutSeconds,
 			},
 			Disk: diskResponse{
 				ThroughputMiBps: information.DiskThroughputMiBps,
@@ -141,7 +144,6 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 				SSHKeys:  append([]string{}, information.SSHKeys...),
 				Metadata: cloneMetadata(information.Metadata),
 			},
-			IsSleepy: information.IsSleepy,
 		},
 		Observed: observedVirtualMachineResponse{
 			Generation:            information.ObservedGeneration,

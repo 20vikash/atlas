@@ -26,13 +26,6 @@ type ManagerConfig struct {
 	MachinesDirectory string
 	UserIDRange       UserIDRange
 	FastApplyTimeout  time.Duration
-	Sleep             SleepConfig
-}
-
-// SleepConfig is the host-wide automatic sleep policy.
-type SleepConfig struct {
-	Enabled     bool
-	IdleTimeout time.Duration
 }
 
 // ManagerDependencies contains the host services used by Manager.
@@ -78,16 +71,11 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
 	}
-	if configuration.Sleep.Enabled {
-		if configuration.Sleep.IdleTimeout <= 0 {
-			return nil, fmt.Errorf("automatic sleep needs a positive idle timeout")
-		}
-		if dependencies.NetworkActivityMonitor == nil {
-			return nil, fmt.Errorf("automatic sleep needs a network activity monitor")
-		}
-		if dependencies.NetworkWakeMonitor == nil {
-			return nil, fmt.Errorf("automatic sleep needs a network wake monitor")
-		}
+	if dependencies.NetworkActivityMonitor == nil {
+		return nil, fmt.Errorf("a network activity monitor is required")
+	}
+	if dependencies.NetworkWakeMonitor == nil {
+		return nil, fmt.Errorf("a network wake monitor is required")
 	}
 	if dependencies.Logger == nil {
 		dependencies.Logger = slog.Default()
@@ -112,7 +100,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 }
 
 // Create reserves a VM or refreshes a matching retry.
-func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification) (Information, error) {
+func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification, sleep SleepPolicy) (Information, error) {
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
 	}
@@ -164,6 +152,7 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		Generation:              1,
 		SpecificationGeneration: 1,
 		State:                   StateRunning,
+		Sleep:                   sleep,
 		Specification:           cloneSpecification(specification),
 	}
 	observed := ObservedRecord{State: StateUnknown, UpdatedAt: time.Now().UTC()}
@@ -329,7 +318,8 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		SSHKeys:                       slices.Clone(desired.Specification.SSHKeys),
 		Hostname:                      desired.Specification.Hostname,
 		Metadata:                      maps.Clone(desired.Specification.Metadata),
-		IsSleepy:                      desired.Specification.IsSleepy,
+		IsSleepy:                      desired.Sleep.IsSleepy,
+		IdleTimeoutSeconds:            desired.Sleep.IdleTimeoutSeconds,
 		MAC:                           observed.NetworkInterface.MACAddress,
 		PublicIPv4:                    desired.Specification.Network.PublicIPv4,
 		WireGuardMeshIPv6:             desired.Specification.Network.WireGuardMeshIPv6,
