@@ -17,13 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Wake states must match the eBPF program.
-const (
-	wakeDisarmed uint32 = 0
-	wakeArmed    uint32 = 1
-	wakeNotified uint32 = 2
-)
-
 // sharedHashMap creates one shared hash map from the spec with the given
 // capacity. The test owns it and closes it.
 func sharedHashMap(t *testing.T, spec *ebpf.CollectionSpec, name string, capacity uint32) *ebpf.Map {

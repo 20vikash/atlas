@@ -17,13 +17,21 @@ import (
 // range from asking the kernel for an unreasonable map.
 const maxActivityMapEntries = 1 << 20
 
+// Wake states stored in the shared wake state map. They match the eBPF program.
+// A missing key means disarmed.
+const (
+	wakeDisarmed uint32 = 0
+	wakeArmed    uint32 = 1
+	wakeNotified uint32 = 2
+)
+
 // ActivityMonitor loads and owns the eBPF programs that record VM packet
 // activity. It keeps one shared map keyed by VM user ID and one program
 // instance for each VM. The metald process owns the monitor and closes it.
 type ActivityMonitor struct {
 	loader   activityLoader
 	capacity uint32
-	shared   activityMap
+	shared   sharedMaps
 	logger   *slog.Logger
 
 	// wallClock and monotonicClock are seams. Tests replace them.
@@ -72,6 +80,14 @@ func (config ActivityMonitorConfig) capacity() uint32 {
 	return config.UserIDRange.Max - config.UserIDRange.Min + 1
 }
 
+// sharedMaps holds the three kernel maps that every VM program shares. The
+// monitor owns them and closes them.
+type sharedMaps struct {
+	activity   activityMap
+	wakeState  wakeStateMap
+	wakeEvents wakeEventMap
+}
+
 // activityMap is the shared BPF map keyed by VM user ID. The monitor owns the
 // handle and closes it.
 type activityMap interface {
@@ -80,6 +96,32 @@ type activityMap interface {
 	lookup(userID uint32) (nanoseconds uint64, found bool, err error)
 	// delete removes the activity value for one released VM user ID.
 	delete(userID uint32) error
+	Close() error
+}
+
+// wakeStateMap is the shared BPF hash that holds the wake state of each VM user
+// ID. The monitor owns the handle and closes it.
+type wakeStateMap interface {
+	// setState writes one wake state for a VM user ID.
+	setState(userID, state uint32) error
+	// deleteState removes the wake state for one released VM user ID.
+	deleteState(userID uint32) error
+	Close() error
+}
+
+// wakeEventMap is the shared BPF ring buffer that carries wake events. The
+// monitor owns the handle and closes it.
+type wakeEventMap interface {
+	// newReader opens one ring reader on the shared map.
+	newReader() (wakeEventReader, error)
+	Close() error
+}
+
+// wakeEventReader reads decoded wake events from the shared ring buffer. Close
+// unblocks a pending read.
+type wakeEventReader interface {
+	// read returns the next event user ID and monotonic packet time.
+	read() (userID uint32, packetTimeNanoseconds uint64, err error)
 	Close() error
 }
 
@@ -95,8 +137,8 @@ type activityProgram interface {
 // activityLoader creates the kernel objects the monitor needs. A fake replaces
 // it in unit tests, so the tests do not need root.
 type activityLoader interface {
-	createMap(capacity uint32) (activityMap, error)
-	loadProgram(userID uint32, shared activityMap) (activityProgram, error)
+	createSharedMaps(capacity uint32) (sharedMaps, error)
+	loadProgram(userID uint32, shared sharedMaps) (activityProgram, error)
 	// resolveInterfaceIndex reads the current tap0 index inside the namespace.
 	resolveInterfaceIndex(namespacePath string) (interfaceIndex int, err error)
 }
@@ -116,9 +158,9 @@ func newActivityMonitor(config ActivityMonitorConfig, loader activityLoader) (*A
 		return nil, fmt.Errorf("activity map capacity %d is over the limit %d", capacity, maxActivityMapEntries)
 	}
 
-	shared, err := loader.createMap(capacity)
+	shared, err := loader.createSharedMaps(capacity)
 	if err != nil {
-		return nil, fmt.Errorf("create shared activity map: %w", err)
+		return nil, fmt.Errorf("create shared maps: %w", err)
 	}
 
 	logger := config.Logger
@@ -202,7 +244,9 @@ func (monitor *ActivityMonitor) EnsureAttachment(request AttachmentRequest) erro
 }
 
 // ReleaseAttachment closes the links and program of one VM, then removes its
-// activity value. It accepts a VM that has no attachment.
+// activity value and wake state. It clears the wake state before the user ID can
+// be reused, so a stale event cannot wake a new VM. It accepts a VM that has no
+// attachment.
 func (monitor *ActivityMonitor) ReleaseAttachment(virtualMachineID string) error {
 	monitor.mu.Lock()
 	released := monitor.attachments[virtualMachineID]
@@ -214,8 +258,25 @@ func (monitor *ActivityMonitor) ReleaseAttachment(virtualMachineID string) error
 	}
 
 	closeError := released.program.Close()
-	deleteError := monitor.shared.delete(released.userID)
-	return errors.Join(closeError, deleteError)
+	deleteActivityError := monitor.shared.activity.delete(released.userID)
+	deleteWakeError := monitor.shared.wakeState.deleteState(released.userID)
+	return errors.Join(closeError, deleteActivityError, deleteWakeError)
+}
+
+// ArmNetworkWake makes the next host-to-guest packet for the VM produce one wake
+// event. It needs an existing activity attachment with the matching user ID.
+func (monitor *ActivityMonitor) ArmNetworkWake(request vm.NetworkActivityRequest) error {
+	monitor.mu.Lock()
+	current := monitor.attachments[request.VirtualMachineID]
+	monitor.mu.Unlock()
+	if current == nil || current.userID != request.UserID {
+		return fmt.Errorf("arm wake for VM %s: %w", request.VirtualMachineID, vm.ErrNotFound)
+	}
+
+	if err := monitor.shared.wakeState.setState(request.UserID, wakeArmed); err != nil {
+		return fmt.Errorf("arm wake for VM %s user %d: %w", request.VirtualMachineID, request.UserID, err)
+	}
+	return nil
 }
 
 // LastNetworkActivity returns the last packet time for one VM. It returns the
@@ -230,7 +291,7 @@ func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request v
 		return vm.NetworkActivity{}, fmt.Errorf("activity for VM %s: %w", request.VirtualMachineID, vm.ErrNotFound)
 	}
 
-	value, found, err := monitor.shared.lookup(request.UserID)
+	value, found, err := monitor.shared.activity.lookup(request.UserID)
 	if err != nil {
 		return vm.NetworkActivity{}, fmt.Errorf("read activity for VM %s user %d: %w", request.VirtualMachineID, request.UserID, err)
 	}
@@ -257,7 +318,7 @@ func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request v
 	return vm.NetworkActivity{LastSeenAt: lastSeenAt, HasBeenSeen: true}, nil
 }
 
-// Close releases every attachment and the shared activity map. It is the one
+// Close releases every attachment and the three shared maps. It is the one
 // owner of the monitor shutdown.
 func (monitor *ActivityMonitor) Close() error {
 	monitor.mu.Lock()
@@ -269,6 +330,9 @@ func (monitor *ActivityMonitor) Close() error {
 	for _, current := range attachments {
 		closeErrors = append(closeErrors, current.program.Close())
 	}
-	closeErrors = append(closeErrors, monitor.shared.Close())
+	closeErrors = append(closeErrors,
+		monitor.shared.activity.Close(),
+		monitor.shared.wakeState.Close(),
+		monitor.shared.wakeEvents.Close())
 	return errors.Join(closeErrors...)
 }

@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"sync"
@@ -49,6 +50,77 @@ func (m *fakeActivityMap) Close() error {
 	return nil
 }
 
+// fakeWakeStateMap records the wake states the monitor writes and clears.
+type fakeWakeStateMap struct {
+	states         map[uint32]uint32
+	deletedUserIDs []uint32
+	setErr         error
+	closed         bool
+}
+
+func (m *fakeWakeStateMap) setState(userID, state uint32) error {
+	if m.setErr != nil {
+		return m.setErr
+	}
+	if m.states == nil {
+		m.states = map[uint32]uint32{}
+	}
+	m.states[userID] = state
+	return nil
+}
+
+func (m *fakeWakeStateMap) deleteState(userID uint32) error {
+	m.deletedUserIDs = append(m.deletedUserIDs, userID)
+	delete(m.states, userID)
+	return nil
+}
+
+func (m *fakeWakeStateMap) Close() error {
+	m.closed = true
+	return nil
+}
+
+// fakeWakeEventMap serves fake wake events from a channel. Tests push events and
+// close the channel to end the reader.
+type fakeWakeEventMap struct {
+	events chan fakeWakeEvent
+	closed bool
+}
+
+type fakeWakeEvent struct {
+	userID     uint32
+	packetTime uint64
+}
+
+func (m *fakeWakeEventMap) newReader() (wakeEventReader, error) {
+	return &fakeWakeEventReader{events: m.events}, nil
+}
+
+func (m *fakeWakeEventMap) Close() error {
+	m.closed = true
+	return nil
+}
+
+// fakeWakeEventReader returns events until its channel closes. A closed reader
+// returns io.EOF, like a real closed ring reader returns ringbuf.ErrClosed.
+type fakeWakeEventReader struct {
+	events chan fakeWakeEvent
+	closed bool
+}
+
+func (r *fakeWakeEventReader) read() (uint32, uint64, error) {
+	event, ok := <-r.events
+	if !ok {
+		return 0, 0, io.EOF
+	}
+	return event.userID, event.packetTime, nil
+}
+
+func (r *fakeWakeEventReader) Close() error {
+	r.closed = true
+	return nil
+}
+
 // fakeActivityProgram records how the monitor attaches and closes the program.
 type fakeActivityProgram struct {
 	attachErr      error
@@ -72,28 +144,40 @@ func (p *fakeActivityProgram) Close() error {
 
 // fakeActivityLoader stands in for the kernel so tests need no root.
 type fakeActivityLoader struct {
-	createErr     error
-	loadErr       error
-	attachErr     error
-	resolveErr    error
-	resolveIndex  int
-	attachIndex   int
-	createdMap    *fakeActivityMap
-	capacities    []uint32
-	loadedUserIDs []uint32
-	programs      []*fakeActivityProgram
+	createErr        error
+	loadErr          error
+	attachErr        error
+	resolveErr       error
+	resolveIndex     int
+	attachIndex      int
+	createdMap       *fakeActivityMap
+	createdWakeState *fakeWakeStateMap
+	createdWakeEvent *fakeWakeEventMap
+	wakeEvents       chan fakeWakeEvent
+	capacities       []uint32
+	loadedUserIDs    []uint32
+	programs         []*fakeActivityProgram
 }
 
-func (loader *fakeActivityLoader) createMap(capacity uint32) (activityMap, error) {
+func (loader *fakeActivityLoader) createSharedMaps(capacity uint32) (sharedMaps, error) {
 	if loader.createErr != nil {
-		return nil, loader.createErr
+		return sharedMaps{}, loader.createErr
 	}
 	loader.capacities = append(loader.capacities, capacity)
 	loader.createdMap = &fakeActivityMap{}
-	return loader.createdMap, nil
+	loader.createdWakeState = &fakeWakeStateMap{}
+	if loader.wakeEvents == nil {
+		loader.wakeEvents = make(chan fakeWakeEvent)
+	}
+	loader.createdWakeEvent = &fakeWakeEventMap{events: loader.wakeEvents}
+	return sharedMaps{
+		activity:   loader.createdMap,
+		wakeState:  loader.createdWakeState,
+		wakeEvents: loader.createdWakeEvent,
+	}, nil
 }
 
-func (loader *fakeActivityLoader) loadProgram(userID uint32, _ activityMap) (activityProgram, error) {
+func (loader *fakeActivityLoader) loadProgram(userID uint32, _ sharedMaps) (activityProgram, error) {
 	if loader.loadErr != nil {
 		return nil, loader.loadErr
 	}
@@ -148,7 +232,7 @@ func TestNewActivityMonitorRejectsACapacityOverTheLimit(t *testing.T) {
 func TestNewActivityMonitorWrapsTheCreateError(t *testing.T) {
 	loader := &fakeActivityLoader{createErr: errors.New("kernel rejected map")}
 	_, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
-	if err == nil || !strings.Contains(err.Error(), "shared activity map") {
+	if err == nil || !strings.Contains(err.Error(), "shared maps") {
 		t.Fatalf("error = %v, want the shared map context", err)
 	}
 }
@@ -302,6 +386,48 @@ func TestReleaseAttachmentClosesAndDeletesTheMapValue(t *testing.T) {
 	}
 	if monitor.attachments["vm-1"] != nil {
 		t.Error("the attachment was not removed")
+	}
+}
+
+func TestArmNetworkWakeWritesArmed(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := monitor.ArmNetworkWake(vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: 100001}); err != nil {
+		t.Fatal(err)
+	}
+	if state := loader.createdWakeState.states[100001]; state != wakeArmed {
+		t.Errorf("wake state = %d, want armed", state)
+	}
+}
+
+func TestArmNetworkWakeRejectsAMissingAttachment(t *testing.T) {
+	loader := &fakeActivityLoader{}
+	monitor := newTestMonitor(t, loader)
+
+	err := monitor.ArmNetworkWake(vm.NetworkActivityRequest{VirtualMachineID: "missing", UserID: 1})
+	if !errors.Is(err, vm.ErrNotFound) {
+		t.Fatalf("error = %v, want vm.ErrNotFound", err)
+	}
+}
+
+func TestReleaseAttachmentDeletesTheWakeState(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := monitor.ReleaseAttachment("vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []uint32{100001}; !slices.Equal(loader.createdWakeState.deletedUserIDs, want) {
+		t.Errorf("deleted wake user IDs = %v, want %v", loader.createdWakeState.deletedUserIDs, want)
 	}
 }
 
