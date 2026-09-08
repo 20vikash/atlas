@@ -412,7 +412,7 @@ func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request v
 	}
 
 	lastSeenAt := monitor.wallClock().UTC().Add(-time.Duration(ageNanoseconds))
-	return vm.NetworkActivity{LastSeenAt: lastSeenAt, HasBeenSeen: true}, nil
+	return vm.NetworkActivity{LastSeenAt: lastSeenAt, HasBeenSeen: true, LastPacketMonotonicNanoseconds: value}, nil
 }
 
 // Close stops the wake reader, waits for the worker, then releases every

@@ -127,9 +127,10 @@ func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 	}
 
 	// The idle check and the sample before the warm stop see idle activity. The
-	// sample after the warm stop sees a newer packet, so the sleep aborts.
-	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
-	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true}
+	// sample after the warm stop sees a newer packet, so the sleep aborts. The
+	// monotonic value advances only for the new packet.
+	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 1000}
+	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 2000}
 	monitor.sequence = []NetworkActivity{idle, idle, advanced}
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
@@ -165,9 +166,10 @@ func TestSleepAbortsBeforeSnapshotWhenTrafficArrives(t *testing.T) {
 	}
 
 	// The idle decision sees old activity, but the final check after arming sees a
-	// newer packet. The sleep aborts before any warm stop.
-	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
-	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true}
+	// newer packet. The sleep aborts before any warm stop. The monotonic value
+	// advances only for the new packet.
+	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 1000}
+	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 2000}
 	monitor.sequence = []NetworkActivity{idle, advanced}
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
@@ -230,6 +232,40 @@ func TestHeldSleepingVMRearmsWake(t *testing.T) {
 	}
 	if len(wake.armed) <= armsAfterSleep {
 		t.Fatalf("armed = %d, want a rearm above %d", len(wake.armed), armsAfterSleep)
+	}
+}
+
+func TestSleepDoesNotAbortOnWallClockJitter(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+		t.Fatal(err)
+	}
+	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The eligibility, before, and after samples share one monotonic packet time,
+	// but the derived wall time jitters forward a little on each read. A jitter
+	// with no new packet must not read as traffic and must not abort the sleep.
+	base := time.Now().Add(-time.Hour).UTC()
+	eligibility := NetworkActivity{LastSeenAt: base, HasBeenSeen: true, LastPacketMonotonicNanoseconds: 5000}
+	before := NetworkActivity{LastSeenAt: base.Add(time.Microsecond), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 5000}
+	after := NetworkActivity{LastSeenAt: base.Add(2 * time.Microsecond), HasBeenSeen: true, LastPacketMonotonicNanoseconds: 5000}
+	monitor.sequence = []NetworkActivity{eligibility, before, after}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.stopMode != StopWithSleepSnapshot {
+		t.Fatalf("stop mode = %d, want a warm stop despite wall jitter", runtime.stopMode)
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateSleeping {
+		t.Fatalf("wall clock jitter aborted the sleep: %+v", observed)
 	}
 }
 

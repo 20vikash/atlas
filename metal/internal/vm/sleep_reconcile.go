@@ -16,7 +16,11 @@ type sleepRequest struct {
 	EligibleAt            time.Time
 	RequestedAt           time.Time
 	LastNetworkActivityAt time.Time
-	AbortOnTraffic        bool
+	// LastNetworkActivityMonotonic is the raw eBPF time of the last packet at the
+	// idle decision. The abort check compares it, so wall-clock read jitter never
+	// looks like new traffic.
+	LastNetworkActivityMonotonic uint64
+	AbortOnTraffic               bool
 }
 
 // enterSleep warm-stops a live guest and publishes the sleeping observed state.
@@ -54,7 +58,7 @@ func (manager *Manager) enterSleep(
 	before, beforeError := manager.sampleActivityForAbort(ctx, desired, request)
 
 	// A packet since the idle decision aborts the sleep before any snapshot.
-	if request.AbortOnTraffic && beforeError == nil && before.LastSeenAt.After(request.LastNetworkActivityAt) {
+	if request.AbortOnTraffic && beforeError == nil && before.LastPacketMonotonicNanoseconds > request.LastNetworkActivityMonotonic {
 		return manager.abortSleepBeforeSnapshot(desired, observed)
 	}
 
@@ -76,7 +80,7 @@ func (manager *Manager) enterSleep(
 	// A packet during the warm stop aborts an automatic sleep. The just-created
 	// snapshot is restored, so the VM keeps running with the new traffic.
 	after, afterError := manager.sampleActivityForAbort(ctx, desired, request)
-	if request.AbortOnTraffic && beforeError == nil && afterError == nil && after.LastSeenAt.After(before.LastSeenAt) {
+	if request.AbortOnTraffic && beforeError == nil && afterError == nil && after.LastPacketMonotonicNanoseconds > before.LastPacketMonotonicNanoseconds {
 		manager.logger.Info("automatic sleep aborted by traffic",
 			"component", "vm", "vm_id", desired.ID)
 		return manager.resumeFromSleep(ctx, desired, machine, observed, operationID)

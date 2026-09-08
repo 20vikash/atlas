@@ -19,6 +19,11 @@ type NetworkActivity struct {
 	// HasBeenSeen is true after at least one packet. It is false for a new
 	// attachment that has not seen a packet yet.
 	HasBeenSeen bool
+	// LastPacketMonotonicNanoseconds is the raw eBPF monotonic time of the last
+	// packet, or 0 when HasBeenSeen is false. It only changes when a packet
+	// arrives, so it gives an exact traffic check for the sleep abort, free of the
+	// wall-clock read jitter in LastSeenAt.
+	LastPacketMonotonicNanoseconds uint64
 }
 
 // NetworkActivityMonitor reads the last packet time of one VM. The VM manager
