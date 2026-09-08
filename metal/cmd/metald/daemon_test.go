@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// fakeActivityMonitor records how the daemon closes the activity monitor. It
-// captures whether the worker finished before Close ran.
+// fakeActivityMonitor records monitor closure after worker completion.
 type fakeActivityMonitor struct {
 	closeError     error
 	closed         bool
