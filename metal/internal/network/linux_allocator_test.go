@@ -7,16 +7,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/frappe/atlas/metal/internal/network/activity"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // fakeActivityAttacher records the attach and release calls of the allocator.
 type fakeActivityAttacher struct {
-	ensured  []AttachmentRequest
+	ensured  []activity.AttachmentRequest
 	released []string
 }
 
-func (attacher *fakeActivityAttacher) EnsureAttachment(request AttachmentRequest) error {
+func (attacher *fakeActivityAttacher) EnsureAttachment(request activity.AttachmentRequest) error {
 	attacher.ensured = append(attacher.ensured, request)
 	return nil
 }

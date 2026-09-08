@@ -1,4 +1,4 @@
-package network
+package activity
 
 import (
 	"encoding/binary"
@@ -48,8 +48,8 @@ func createHashMap(spec *ebpf.CollectionSpec, name string, capacity uint32) (*eb
 	return ebpf.NewMap(mapSpec)
 }
 
-// resolveInterfaceIndex reads the tap0 index in the VM namespace.
-func (bpfActivityLoader) resolveInterfaceIndex(namespacePath string) (int, error) {
+// resolveInterfaceIndex reads the tap device index in the VM namespace.
+func (bpfActivityLoader) resolveInterfaceIndex(namespacePath, tapName string) (int, error) {
 	var interfaceIndex int
 	err := inNamespace(osNamespaceSyscalls{}, namespacePath, func() error {
 		device, err := net.InterfaceByName(tapName)
@@ -81,7 +81,7 @@ func (bpfActivityLoader) loadProgram(userID uint32, shared sharedMaps) (activity
 	if err != nil {
 		return nil, err
 	}
-	// Match the generated map specs to the shared map capacity.
+	// Match generated map specs to the shared capacity.
 	spec.Maps["activity_by_user_id"].MaxEntries = activityMap.kernelMap.MaxEntries()
 	spec.Maps["wake_state_by_user_id"].MaxEntries = wakeStateMap.kernelMap.MaxEntries()
 	if err := spec.Variables["virtual_machine_user_id"].Set(userID); err != nil {
@@ -175,7 +175,7 @@ type bpfWakeEventReader struct {
 	reader *ringbuf.Reader
 }
 
-// read returns the next wake event. A closed reader returns ringbuf.ErrClosed.
+// read returns the next wake event or ringbuf.ErrClosed.
 func (handle *bpfWakeEventReader) read() (uint32, uint64, error) {
 	record, err := handle.reader.Read()
 	if err != nil {
@@ -199,8 +199,8 @@ type bpfActivityProgram struct {
 	egress   link.Link
 }
 
-// attach hooks tap0 egress, which carries host-to-guest traffic.
-func (handle *bpfActivityProgram) attach(namespacePath string) (int, error) {
+// attach hooks tap egress for host-to-guest traffic.
+func (handle *bpfActivityProgram) attach(namespacePath, tapName string) (int, error) {
 	var interfaceIndex int
 	err := inNamespace(handle.syscalls, namespacePath, func() error {
 		device, err := net.InterfaceByName(tapName)

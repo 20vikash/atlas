@@ -1,6 +1,6 @@
 //go:build integration
 
-package network
+package activity
 
 import (
 	"context"

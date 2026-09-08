@@ -1,6 +1,6 @@
 //go:build linux && integration
 
-package network
+package activity
 
 import (
 	"encoding/binary"
@@ -377,7 +377,7 @@ func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
 	namespacePath := setUpWakeNamespace(t, "metal-test-wake-deliver")
 	const userID = 100005
 
-	monitor, err := NewActivityMonitor(ActivityMonitorConfig{
+	monitor, err := NewMonitor(MonitorConfig{
 		UserIDRange: vm.DefaultUserIDRange,
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -386,7 +386,7 @@ func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = monitor.Close() })
 
-	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-1", UserID: userID, NamespacePath: namespacePath}); err != nil {
+	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-1", UserID: userID, NamespacePath: namespacePath, TapName: tapName}); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	wakeRequest := vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: userID}
@@ -432,7 +432,7 @@ func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
 	if err := monitor.ReleaseAttachment("vm-1"); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-2", UserID: userID, NamespacePath: namespacePath}); err != nil {
+	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-2", UserID: userID, NamespacePath: namespacePath, TapName: tapName}); err != nil {
 		t.Fatalf("reattach: %v", err)
 	}
 	if err := trySendTcpSyn(namespacePath); err != nil {

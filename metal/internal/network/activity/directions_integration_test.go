@@ -1,6 +1,6 @@
 //go:build linux && integration
 
-package network
+package activity
 
 import (
 	"context"
@@ -100,7 +100,7 @@ func sendHostToGuest(t *testing.T, namespacePath, transport string) {
 }
 
 // waitForFreshActivity polls until the last-seen time moves past mark.
-func waitForFreshActivity(t *testing.T, monitor *ActivityMonitor, request vm.NetworkActivityRequest, mark time.Time) vm.NetworkActivity {
+func waitForFreshActivity(t *testing.T, monitor *Monitor, request vm.NetworkActivityRequest, mark time.Time) vm.NetworkActivity {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -118,7 +118,7 @@ func waitForFreshActivity(t *testing.T, monitor *ActivityMonitor, request vm.Net
 }
 
 // assertNoActivity fails if any packet registers within a short window.
-func assertNoActivity(t *testing.T, monitor *ActivityMonitor, request vm.NetworkActivityRequest) {
+func assertNoActivity(t *testing.T, monitor *Monitor, request vm.NetworkActivityRequest) {
 	t.Helper()
 	time.Sleep(300 * time.Millisecond)
 	activity, err := monitor.LastNetworkActivity(context.Background(), request)
@@ -159,7 +159,7 @@ func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
 	runOrSkip(t, "ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf."+tapName+".disable_ipv6=1")
 	runOrSkip(t, "ip", "-n", namespace, "neigh", "replace", guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
 
-	monitor, err := NewActivityMonitor(ActivityMonitorConfig{
+	monitor, err := NewMonitor(MonitorConfig{
 		UserIDRange: vm.DefaultUserIDRange,
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -168,7 +168,7 @@ func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = monitor.Close() })
 
-	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-dir", UserID: userID, NamespacePath: namespacePath}); err != nil {
+	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-dir", UserID: userID, NamespacePath: namespacePath, TapName: tapName}); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 

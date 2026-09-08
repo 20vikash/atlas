@@ -1,4 +1,4 @@
-package network
+package activity
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 var activityRequest = vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: 100001}
 
 // readMonitor builds a monitor with a fixed wall clock and one attached VM.
-func readMonitor(t *testing.T, wallNow time.Time, monotonicNow uint64) (*ActivityMonitor, *fakeActivityMap) {
+func readMonitor(t *testing.T, wallNow time.Time, monotonicNow uint64) (*Monitor, *fakeActivityMap) {
 	t.Helper()
 	loader := &fakeActivityLoader{}
 	monitor := newTestMonitor(t, loader)
@@ -134,15 +134,17 @@ func (r *fakeWakeEventReader) Close() error {
 type fakeActivityProgram struct {
 	attachErr      error
 	attachedPaths  []string
+	attachedTaps   []string
 	interfaceIndex int
 	closed         bool
 }
 
-func (p *fakeActivityProgram) attach(namespacePath string) (int, error) {
+func (p *fakeActivityProgram) attach(namespacePath, tapName string) (int, error) {
 	if p.attachErr != nil {
 		return 0, p.attachErr
 	}
 	p.attachedPaths = append(p.attachedPaths, namespacePath)
+	p.attachedTaps = append(p.attachedTaps, tapName)
 	return p.interfaceIndex, nil
 }
 
@@ -196,7 +198,7 @@ func (loader *fakeActivityLoader) loadProgram(userID uint32, _ sharedMaps) (acti
 	return program, nil
 }
 
-func (loader *fakeActivityLoader) resolveInterfaceIndex(_ string) (int, error) {
+func (loader *fakeActivityLoader) resolveInterfaceIndex(_, _ string) (int, error) {
 	return loader.resolveIndex, loader.resolveErr
 }
 
@@ -204,7 +206,7 @@ func testUserIDRange() vm.UserIDRange { return vm.UserIDRange{Min: 100000, Max: 
 
 func TestNewActivityMonitorCreatesTheSharedMapFromTheRange(t *testing.T) {
 	loader := &fakeActivityLoader{}
-	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +222,7 @@ func TestNewActivityMonitorCreatesTheSharedMapFromTheRange(t *testing.T) {
 func TestNewActivityMonitorRejectsAZeroCapacityRange(t *testing.T) {
 	loader := &fakeActivityLoader{}
 	// Max below Min gives a zero capacity.
-	_, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: vm.UserIDRange{Min: 10, Max: 9}}, loader)
+	_, err := newMonitor(MonitorConfig{UserIDRange: vm.UserIDRange{Min: 10, Max: 9}}, loader)
 	if err == nil {
 		t.Fatal("want an error for a zero capacity")
 	}
@@ -232,7 +234,7 @@ func TestNewActivityMonitorRejectsAZeroCapacityRange(t *testing.T) {
 func TestNewActivityMonitorRejectsACapacityOverTheLimit(t *testing.T) {
 	loader := &fakeActivityLoader{}
 	tooLarge := vm.UserIDRange{Min: 0, Max: maxActivityMapEntries}
-	_, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: tooLarge}, loader)
+	_, err := newMonitor(MonitorConfig{UserIDRange: tooLarge}, loader)
 	if err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("error = %v, want a limit error", err)
 	}
@@ -240,7 +242,7 @@ func TestNewActivityMonitorRejectsACapacityOverTheLimit(t *testing.T) {
 
 func TestNewActivityMonitorWrapsTheCreateError(t *testing.T) {
 	loader := &fakeActivityLoader{createErr: errors.New("kernel rejected map")}
-	_, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	_, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err == nil || !strings.Contains(err.Error(), "shared maps") {
 		t.Fatalf("error = %v, want the shared map context", err)
 	}
@@ -248,7 +250,7 @@ func TestNewActivityMonitorWrapsTheCreateError(t *testing.T) {
 
 func TestLoadProgramWrapsTheLoadErrorWithTheUserID(t *testing.T) {
 	loader := &fakeActivityLoader{loadErr: errors.New("verifier rejected program")}
-	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +263,7 @@ func TestLoadProgramWrapsTheLoadErrorWithTheUserID(t *testing.T) {
 
 func TestLoadProgramRecordsTheUserID(t *testing.T) {
 	loader := &fakeActivityLoader{}
-	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +278,7 @@ func TestLoadProgramRecordsTheUserID(t *testing.T) {
 
 func TestCloseClosesTheSharedMap(t *testing.T) {
 	loader := &fakeActivityLoader{}
-	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,9 +291,9 @@ func TestCloseClosesTheSharedMap(t *testing.T) {
 	}
 }
 
-func newTestMonitor(t *testing.T, loader *fakeActivityLoader) *ActivityMonitor {
+func newTestMonitor(t *testing.T, loader *fakeActivityLoader) *Monitor {
 	t.Helper()
-	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +305,7 @@ func TestEnsureAttachmentAttachesAndStores(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
 
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -313,14 +315,17 @@ func TestEnsureAttachmentAttachesAndStores(t *testing.T) {
 		t.Fatalf("stored attachment = %+v", stored)
 	}
 	if len(loader.programs) != 1 || len(loader.programs[0].attachedPaths) != 1 {
-		t.Errorf("program was not attached once: %+v", loader.programs)
+		t.Fatalf("program was not attached once: %+v", loader.programs)
+	}
+	if got := loader.programs[0].attachedTaps[0]; got != "tap0" {
+		t.Errorf("attached tap device = %q, want tap0", got)
 	}
 }
 
 func TestEnsureAttachmentIsIdempotent(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +343,7 @@ func TestEnsureAttachmentIsIdempotent(t *testing.T) {
 func TestEnsureAttachmentReplacesWhenInterfaceIndexChanges(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +370,7 @@ func TestEnsureAttachmentClosesTheProgramWhenAttachFails(t *testing.T) {
 	loader := &fakeActivityLoader{attachErr: errors.New("egress attach failed")}
 	monitor := newTestMonitor(t, loader)
 
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err == nil {
 		t.Fatal("want an attach error")
 	}
@@ -380,7 +385,7 @@ func TestEnsureAttachmentClosesTheProgramWhenAttachFails(t *testing.T) {
 func TestReleaseAttachmentClosesAndDeletesTheMapValue(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +407,7 @@ func TestReleaseAttachmentClosesAndDeletesTheMapValue(t *testing.T) {
 func TestArmNetworkWakeWritesArmed(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +433,7 @@ func TestArmNetworkWakeRejectsAMissingAttachment(t *testing.T) {
 func TestDisarmNetworkWakeWritesDisarmed(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +468,7 @@ func TestDisarmNetworkWakeIsANoOpWithoutAttachment(t *testing.T) {
 func TestReleaseAttachmentDeletesTheWakeState(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +484,7 @@ func TestReleaseAttachmentDeletesTheWakeState(t *testing.T) {
 func TestHandleWakeEventDeliversAResolvedEvent(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +516,7 @@ func TestHandleWakeEventDropsAnUnresolvedEvent(t *testing.T) {
 func TestHandleWakeEventRearmsWhenTheChannelIsFull(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +537,7 @@ func TestHandleWakeEventRearmsWhenTheChannelIsFull(t *testing.T) {
 
 func TestNetworkWakeEventsClosesOnShutdown(t *testing.T) {
 	loader := &fakeActivityLoader{}
-	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +564,7 @@ func TestCloseReleasesEveryAttachment(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
 	for _, id := range []string{"vm-1", "vm-2"} {
-		request := AttachmentRequest{VirtualMachineID: id, UserID: 100001, NamespacePath: "/run/netns/metal-" + id}
+		request := AttachmentRequest{VirtualMachineID: id, UserID: 100001, NamespacePath: "/run/netns/metal-" + id, TapName: "tap0"}
 		if err := monitor.EnsureAttachment(request); err != nil {
 			t.Fatal(err)
 		}
@@ -687,7 +692,7 @@ func TestLastNetworkActivityReturnsNotFoundWithoutAnAttachment(t *testing.T) {
 func TestLastNetworkActivityReturnsNotFoundAfterRelease(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}
@@ -714,7 +719,7 @@ func TestLastNetworkActivityWrapsTheLookupErrorWithContext(t *testing.T) {
 func TestConcurrentActivityReadsAndReplacement(t *testing.T) {
 	loader := &fakeActivityLoader{attachIndex: 5}
 	monitor := newTestMonitor(t, loader)
-	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1", TapName: "tap0"}
 	if err := monitor.EnsureAttachment(request); err != nil {
 		t.Fatal(err)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/frappe/atlas/metal/internal/network/activity"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -28,7 +29,7 @@ type meshRegistrar interface {
 
 // activityAttacher manages VM packet activity tracking.
 type activityAttacher interface {
-	EnsureAttachment(request AttachmentRequest) error
+	EnsureAttachment(request activity.AttachmentRequest) error
 	ReleaseAttachment(virtualMachineID string) error
 	LastNetworkActivity(ctx context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error)
 }
@@ -62,10 +63,11 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 	if err := allocator.converge(ctx, request); err != nil {
 		return vm.NetworkInterface{}, err
 	}
-	if err := allocator.activity.EnsureAttachment(AttachmentRequest{
+	if err := allocator.activity.EnsureAttachment(activity.AttachmentRequest{
 		VirtualMachineID: request.VirtualMachineID,
 		UserID:           request.UserID,
 		NamespacePath:    namespacePath(request.VirtualMachineID),
+		TapName:          tapName,
 	}); err != nil {
 		return vm.NetworkInterface{}, fmt.Errorf("attach activity tracking: %w", err)
 	}

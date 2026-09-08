@@ -1,4 +1,4 @@
-package network
+package activity
 
 // Run `make generate-network` to update the eBPF objects and Go bindings.
 // The atomic wake check needs BPF CPU v3 and Linux 6.6 or newer.
