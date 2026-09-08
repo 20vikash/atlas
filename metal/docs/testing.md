@@ -38,24 +38,32 @@ The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2`
 
 ## Network activity tests
 
-The packet activity tests need root, the `ip` command, and a host kernel with TCX support, Linux 6.6 or newer. Run them while no other test holds the same namespaces:
+These tests need root, `ip`, and Linux 6.6 or newer. Run them when no other test uses the same namespaces:
 
 ```sh
 sudo -E go test -tags integration -v ./internal/network/
 ```
 
-These tests create a temporary namespace and a `tap0`, attach the eBPF program, and confirm the last-seen time advances for a frame in each direction. One test confirms the egress hook still runs with no tap reader, which network wake depends on. The test logs the host kernel and result.
+The tests attach the eBPF program to `tap0` in a temporary namespace. They verify that only host-to-guest TCP traffic updates activity. They also verify wake delivery when no process reads `tap0`.
 
 ## Sleepy VM test
 
-This test proves the full path: run, idle sleep, packet wake, and guest state continuity. It needs a host kernel with TCX support, Linux 6.6 or newer. Start metald with automatic sleep on and a short idle timeout, then run the test:
+This test needs Linux 6.6 or newer. Start metald with a short sleep timeout, then run the test:
 
 ```sh
 sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
 sudo metal/test/integration/sleepy-vm-test.sh
 ```
 
-The test creates a sleepy VM, writes a token and a marker process in the guest, waits for the `sleeping` state with no Firecracker process, wakes the VM with a TCP connection, and confirms the token and the same marker PID survive. It repeats the sleep and wake once. It cleans up the VM on exit.
+```text
+running -> idle -> sleeping (no Firecracker process)
+                      |
+                 TCP packet
+                      v
+                   running
+```
+
+The test runs this cycle twice. It verifies that the same guest token and process survive each wake. It removes the VM when it exits.
 
 ## Configuration
 
@@ -70,10 +78,10 @@ The test creates a sleepy VM, writes a token and a marker process in the guest, 
 | `zfs.pool` | `metal` | ZFS pool name. |
 | `wg_mesh.enabled` | `true` | Atlas WG Mesh integration. Set `false` for a test host with no mesh; VMs then get no mesh connectivity. |
 | `wg_mesh.uplink` | none | Discovery interface. Required when mesh is enabled. |
-| `sleep.enabled` | `false` | Turn on automatic sleep for sleepy VMs. |
-| `sleep.idle_timeout` | none | One Metal-wide idle timeout. Required and positive when enabled. |
+| `sleep.enabled` | `false` | Enable automatic sleep for sleepy VMs. |
+| `sleep.idle_timeout` | none | Idle timeout for all sleepy VMs. Must be positive when sleep is enabled. |
 
-`idle_timeout` is one host value for every sleepy VM. A VM request or record carries only `is_sleepy` and never a timeout.
+A VM request and record contain only `is_sleepy`. The timeout applies to all sleepy VMs on the host.
 
 ## Development environment
 
@@ -87,8 +95,8 @@ The test creates a sleepy VM, writes a token and a marker process in the guest, 
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
 | `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
 | `METALD_WG_MESH_ENABLED` | `false` | Write `wg_mesh.enabled`. The development host boots without the mesh CLI by default. |
-| `METALD_SLEEP_ENABLED` | `false` | Write `sleep.enabled`. Turn on automatic sleep for a development test. |
-| `METALD_SLEEP_IDLE_TIMEOUT` | `30m` | Write `sleep.idle_timeout`. Use a short value such as `1m` to watch a VM sleep. |
+| `METALD_SLEEP_ENABLED` | `false` | Write `sleep.enabled`. Enable it for a sleep test. |
+| `METALD_SLEEP_IDLE_TIMEOUT` | `30m` | Write `sleep.idle_timeout`. Use `1m` to watch a VM sleep. |
 | `METALD_IMAGE_VERSION` | `22.04` | Ubuntu version the guest image builder uses. |
 
 ## Manual access
