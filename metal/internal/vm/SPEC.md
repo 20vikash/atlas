@@ -53,7 +53,7 @@ The create fingerprint identifies the reservation a create request asked for. It
 
 The daemon validates every record at startup and refuses to run on one it cannot read. It never repairs or removes a record: losing desired state is worse than failing to start.
 
-`sleeping` is an observed state only. A controller cannot request it. A warm stop and automatic sleep both reach it: the state means no Firecracker process, a valid memory snapshot, and a start that resumes. The observed record carries a `sleep` object with safe times and generation numbers: `eligible_at`, `requested_at`, `snapshot_generation`, `snapshot_created_at`, and `last_network_activity_at`. It never carries an artifact path, because the Firecracker runtime derives every path from the VM ID. The object is additive, so an old record with no `sleep` key still loads. The reader rejects a partial or corrupt `sleep` object instead of repairing it. A `sleeping` record must carry a published snapshot generation.
+`sleeping` is an observed state only. It means that Firecracker is stopped and a valid VM memory snapshot exists. The `sleep` object stores activity, request, snapshot, and generation values. It stores no paths. Old records without this object remain valid. A partial object or a sleeping record without a published snapshot is invalid.
 
 ## Reconciliation
 
@@ -64,19 +64,40 @@ desired stopped   -> Stop, or warm Stop to sleeping
 desired destroyed -> Remove runtime -> Release network -> Release storage
 ```
 
-A VM enters `sleeping` from a live guest by a warm stop. A manual warm stop uses a `stopped` desired state with the `warm` flag. Automatic sleep keeps the desired state running and warm-stops an idle sleepy VM after the idle timeout. An automatic sleep samples network activity before and after the warm stop and aborts, restoring the VM, when a packet arrives during the stop.
+A warm stop changes a live guest to `sleeping`. A manual warm stop has desired state `stopped` with the `warm` flag. Automatic sleep keeps desired state `running`. It checks packet activity before and after the warm stop. New traffic cancels the sleep.
 
-A sleeping VM holds asleep while its desired record still wants sleep and its generation is caught up. Any other desired state resumes the VM from the snapshot to running. A later pass then applies a stop or pause. A resume failure keeps the VM sleeping and never cold boots, so the in-memory guest is not lost. A warm stop that terminates the process before it records `sleeping` recovers to `sleeping` from the valid snapshot on the next pass, and reports a failure for an invalid snapshot.
+A sleeping VM follows these rules:
+
+| Desired change | Action |
+|---|---|
+| Running, sleepy, and current | Stay sleeping and arm wake. |
+| Running | Restore the snapshot. |
+| Paused | Load the snapshot with paused vCPUs. |
+| Plain stopped | Discard the snapshot. |
+| Warm stopped | Stay sleeping. |
+| Restart | Discard the snapshot and cold boot. |
+| Incompatible specification | Discard the snapshot and cold boot. |
+
+A restore failure keeps the VM sleeping. An interrupted warm stop recovers from a valid snapshot. An invalid snapshot is an operation failure.
 
 ## Packet wake
 
-A sleeping VM can wake on a host-to-guest packet. Automatic sleep arms the wake before the final idle check, so a packet that arrives during the warm stop produces a wake event that waits for the VM lock. The event reaches `WakeFromNetwork` through the network monitor and the wake reconciler. This is a warm VMM restart, not a guest reboot: the guest resumes from its memory snapshot.
+A sleeping VM wakes on a host-to-guest TCP packet. Automatic sleep arms wake before its final activity check.
 
-`WakeFromNetwork` takes the VM lock and validates the event: the user ID must match, the desired state must be running and sleepy, the observed state must be `sleeping`, and a snapshot generation must be recorded. A stale or duplicate event is a safe no-op, so a normal pass still owns every real state change. A valid event restores with the snapshot start mode, requires running, publishes running, and then disarms.
+```text
+TCP packet -> eBPF event -> wake reconciler -> VM lock -> validate
+                                                     |
+                                                     v
+                             restore -> record running -> disarm
+```
 
-Failures never lose the guest. A restore failure keeps the VM `sleeping` and the snapshot, and a later hold pass rearms it, so a new packet notifies again. A restore that runs but does not record running is completed on the next pass from the running runtime, without loading the snapshot again. The trigger packet can be lost while no process has `tap0` open, so a client must retry, usually over TCP. An established TCP or vsock connection is not guaranteed to survive the restart.
+`WakeFromNetwork` requires the current user ID, desired `running`, `is_sleepy`, observed `sleeping`, and a snapshot generation. A stale or duplicate event has no effect.
 
-One pass holds the VM lock for its whole duration, and every operation that changes desired state takes the same lock. A mutation therefore never lands halfway through a pass. A wake event uses the same lock, so it waits for a warm stop to finish and then restores.
+A restore failure keeps the VM sleeping and keeps its snapshot. A later pass rearms wake. If restore succeeds but the status write fails, the next pass reads the running runtime and completes the record.
+
+The trigger packet can be lost. Clients must retry. Existing TCP and vsock connections might not survive the restore.
+
+Each pass and desired-state change holds the same VM lock. A wake event waits for an active warm stop before it restores the VM.
 
 The phase and operation ID are written before each host call, so an interrupted pass leaves evidence of what was in flight. A failure stores a safe message for the controller and local detail that stays on the host.
 
