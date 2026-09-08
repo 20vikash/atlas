@@ -103,6 +103,8 @@ One worker reads the ring buffer, resolves the user ID to the current VM ID unde
 
 `ReleaseAttachment` clears the wake state before the user ID can be reused. `Close` stops the reader, waits for the worker, then closes the three maps. The trigger packet can be lost while no process has `tap0` open, so a client must retry, usually over TCP.
 
+`ensureNamespaceBase` pins a static neighbour entry for the guest IP and MAC. A sleeping VM has no process to answer ARP, and an ARP frame cannot wake it, so without a static entry a wake packet cannot resolve the guest MAC and never reaches `tap0`. The guest MAC is fixed, so the static entry is always correct.
+
 ## Atlas WG Mesh
 
 Atlas WG Mesh assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.
