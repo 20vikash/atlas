@@ -4,6 +4,9 @@
 # short idle timeout:
 #   sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
 #   sudo test/integration/sleepy-vm-test.sh
+# The test pins the guest neighbour entry, so the ssh probes keep the VM awake
+# during boot. Without that, a short idle timeout can sleep the VM mid-boot,
+# because early boot has no host-to-guest TCP.
 set -euo pipefail
 
 work_directory=${METALD_WORKDIR:-/tmp/metald}
@@ -86,20 +89,33 @@ fi
 echo "created sleepy VM $virtual_machine_id"
 trap 'call_metal "/v1/vms/$virtual_machine_id" -X DELETE >/dev/null 2>&1 || true' EXIT
 
+namespace=metal-$virtual_machine_id
 unit=metal-vm@$virtual_machine_id.service
 machine_directory=$work_directory/machines/$virtual_machine_id
+guest_mac=${METALD_GUEST_MAC:-06:00:ac:10:00:02}
+ssh_boot_seconds=${METALD_SSH_BOOT_SECONDS:-180}
 
-echo "waiting for ssh..."
-for _ in $(seq 1 30); do
-	if [[ $(guest_ssh "$virtual_machine_id" 'echo metal-ok') == metal-ok ]]; then
-		break
+# Wait for the VM namespace, then pin the guest neighbour entry. Every guest uses
+# a fixed MAC, so a TCP SYN can egress on tap0 before the guest network is up.
+# This keeps activity fresh through boot, so the VM does not sleep mid-boot with a
+# short idle timeout, and it lets a wake SYN reach a sleeping VM without ARP.
+for _ in $(seq 1 60); do
+	if ip netns list | grep -qw "$namespace"; then
+		ip -n "$namespace" neigh replace 172.16.0.2 lladdr "$guest_mac" dev tap0 nud permanent 2>/dev/null && break
+	fi
+	sleep 1
+done
+
+echo "waiting up to ${ssh_boot_seconds}s for ssh..."
+ssh_deadline=$((SECONDS + ssh_boot_seconds))
+until [[ $(guest_ssh "$virtual_machine_id" 'echo metal-ok') == metal-ok ]]; do
+	if (( SECONDS >= ssh_deadline )); then
+		echo "FAILED: VM never became reachable (state=$(observed_state "$virtual_machine_id"))" >&2
+		exit 1
 	fi
 	sleep 2
 done
-if [[ $(guest_ssh "$virtual_machine_id" 'echo metal-ok') != metal-ok ]]; then
-	echo "FAILED: VM never became reachable" >&2
-	exit 1
-fi
+echo "VM is reachable over ssh"
 
 # Put a unique token and a long-running process in the guest. Record the guest
 # PID, so a wake can prove the same process survived.
