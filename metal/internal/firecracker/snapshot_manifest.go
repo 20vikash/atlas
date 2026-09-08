@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-// snapshotManifest describes one published snapshot. It is the only signal
-// that a snapshot is complete. Every directory is derived from the VM ID, so a
-// restore never takes a host path from the manifest. The file names are fixed
-// and are recorded only so a validator can confirm them.
+// snapshotManifest describes one published snapshot.
 type snapshotManifest struct {
 	VirtualMachineID         string    `json:"virtual_machine_id"`
 	UserID                   uint32    `json:"user_id"`
@@ -26,8 +23,7 @@ type snapshotManifest struct {
 	MemoryFileSizeBytes      int64     `json:"memory_file_size_bytes"`
 }
 
-// newSnapshotManifest fills the fixed artifact file names, so a caller supplies
-// only the variable fields and can never set a path.
+// newSnapshotManifest fills the fixed artifact file names.
 func newSnapshotManifest(base snapshotManifest) snapshotManifest {
 	base.StateFileName = snapshotStateFileName
 	base.MemoryFileName = snapshotMemoryFileName
@@ -39,8 +35,7 @@ func encodeSnapshotManifest(manifest snapshotManifest) ([]byte, error) {
 	return json.MarshalIndent(manifest, "", "  ")
 }
 
-// decodeSnapshotManifest decodes a manifest and rejects unknown or trailing data,
-// so a manifest from a newer or broken writer never loads silently.
+// decodeSnapshotManifest decodes a manifest and rejects unknown or trailing data.
 func decodeSnapshotManifest(data []byte) (snapshotManifest, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
