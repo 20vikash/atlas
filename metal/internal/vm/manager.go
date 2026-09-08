@@ -44,7 +44,10 @@ type ManagerDependencies struct {
 	Storage                Storage
 	Snapshots              Snapshots
 	NetworkActivityMonitor NetworkActivityMonitor
-	Logger                 *slog.Logger
+	// NetworkWakeMonitor disarms a VM after a packet-triggered wake. It is optional
+	// and used only when automatic sleep is enabled.
+	NetworkWakeMonitor NetworkWakeMonitor
+	Logger             *slog.Logger
 }
 
 // Manager owns virtual machine desired state and reconciliation.
@@ -56,6 +59,7 @@ type Manager struct {
 	storage                Storage
 	snapshots              Snapshots
 	networkActivityMonitor NetworkActivityMonitor
+	networkWakeMonitor     NetworkWakeMonitor
 	logger                 *slog.Logger
 	operationLocks         keyedLocks
 	allocationMutex        sync.Mutex
@@ -96,6 +100,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 		storage:                dependencies.Storage,
 		snapshots:              dependencies.Snapshots,
 		networkActivityMonitor: dependencies.NetworkActivityMonitor,
+		networkWakeMonitor:     dependencies.NetworkWakeMonitor,
 		logger:                 dependencies.Logger,
 		temporaryUserIDs:       make(map[uint32]bool),
 		temporaryIdentifiers:   make(map[string]bool),
