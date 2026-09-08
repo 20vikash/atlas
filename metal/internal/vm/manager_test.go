@@ -143,7 +143,7 @@ func newTestManager(t *testing.T) (*Manager, *fakeRuntime, *fakeNetwork, *fakeSt
 	t.Helper()
 	runtime := &fakeRuntime{
 		state:       StateStopped,
-		stopOutcome: StopOutcome{SnapshotGeneration: 1, SnapshotCreatedAt: time.Unix(1000, 0).UTC()},
+		stopOutcome: StopOutcome{MemorySnapshotGeneration: 1, MemorySnapshotCreatedAt: time.Unix(1000, 0).UTC()},
 	}
 	network := &fakeNetwork{}
 	storage := &fakeStorage{}
@@ -354,7 +354,7 @@ func TestWarmStopReconcilesToSleepingThenResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.SnapshotGeneration != 1 {
+	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.MemorySnapshotGeneration != 1 {
 		t.Fatalf("observed after warm stop = %+v", observed)
 	}
 

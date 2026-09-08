@@ -14,7 +14,7 @@ func newSleepyManager(t *testing.T, timeout time.Duration) (*Manager, *fakeRunti
 	t.Helper()
 	runtime := &fakeRuntime{
 		state:       StateStopped,
-		stopOutcome: StopOutcome{SnapshotGeneration: 1, SnapshotCreatedAt: time.Unix(1000, 0).UTC()},
+		stopOutcome: StopOutcome{MemorySnapshotGeneration: 1, MemorySnapshotCreatedAt: time.Unix(1000, 0).UTC()},
 	}
 	monitor := &fakeNetworkActivityMonitor{}
 	manager, err := NewManager(
@@ -79,7 +79,7 @@ func TestIdleSleepyVMReachesSleeping(t *testing.T) {
 	if observed.State != StateSleeping || observed.Sleep == nil {
 		t.Fatalf("observed = %+v, want sleeping with progress", observed)
 	}
-	if observed.Sleep.SnapshotGeneration != 1 || observed.Sleep.LastNetworkActivityAt.IsZero() {
+	if observed.Sleep.MemorySnapshotGeneration != 1 || observed.Sleep.LastNetworkActivityAt.IsZero() {
 		t.Fatalf("sleep progress = %+v", observed.Sleep)
 	}
 	desired, err := manager.store.readDesired("machine-1")
@@ -515,7 +515,7 @@ func TestRecoverInterruptedSleepPublishesSleeping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.SnapshotGeneration != 4 {
+	if observed.State != StateSleeping || observed.Sleep == nil || observed.Sleep.MemorySnapshotGeneration != 4 {
 		t.Fatalf("observed = %+v, want sleeping from generation 4", observed)
 	}
 }

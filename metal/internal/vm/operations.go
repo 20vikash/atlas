@@ -7,9 +7,7 @@ import (
 	"slices"
 )
 
-// SetPowerState stores a requested power state. A plain power request clears any
-// warm-stop intent, so the next stop shuts the guest down and the next start
-// discards the snapshot.
+// SetPowerState stores a power state and clears warm-stop intent.
 func (manager *Manager) SetPowerState(ctx context.Context, identifier string, state State) error {
 	if state != StateRunning && state != StateStopped && state != StatePaused {
 		return ErrConflict
@@ -24,9 +22,7 @@ func (manager *Manager) SetPowerState(ctx context.Context, identifier string, st
 	})
 }
 
-// StopWarm stores a stop that saves a memory snapshot. The VM state becomes
-// stopped and a later start resumes from the snapshot. It raises the generation
-// only when the intent changes.
+// StopWarm stores a stop that saves a memory snapshot.
 func (manager *Manager) StopWarm(ctx context.Context, identifier string) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
 		if record.State == StateDestroyed {
@@ -41,8 +37,7 @@ func (manager *Manager) StopWarm(ctx context.Context, identifier string) error {
 	})
 }
 
-// SetSleepPolicy stores whether the host can sleep an idle VM. It raises the
-// generation only when the value changes and keeps the desired power state.
+// SetSleepPolicy stores whether the host can sleep an idle VM.
 func (manager *Manager) SetSleepPolicy(ctx context.Context, identifier string, isSleepy bool) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
 		if record.State == StateDestroyed {
@@ -259,10 +254,7 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 	return snapshot, nil
 }
 
-// applyMetadata pushes new guest metadata immediately and reports whether the
-// guest took it. A failure is not an error: the desired record is already
-// stored, so the next reconcile pass applies it. The short timeout keeps an
-// unreachable guest from holding up the API response.
+// applyMetadata pushes guest metadata without blocking the API for long.
 func (manager *Manager) applyMetadata(ctx context.Context, identifier string) (bool, error) {
 	operationContext, cancel := context.WithTimeout(ctx, manager.configuration.FastApplyTimeout)
 	defer cancel()
@@ -304,9 +296,7 @@ func (manager *Manager) mutate(ctx context.Context, identifier string, change fu
 	return err
 }
 
-// mutateAndReport applies one change under the VM lock and reports whether the
-// record changed. The generation increases only on a real change, so a repeated
-// request does not make the reconciler redo work.
+// mutateAndReport applies one change and reports whether the record changed.
 func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) (bool, error) {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
 	if err != nil {

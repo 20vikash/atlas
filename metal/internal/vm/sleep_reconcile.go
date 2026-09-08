@@ -70,11 +70,11 @@ func (manager *Manager) enterSleep(
 	}); err != nil {
 		return err
 	}
-	if outcome.SnapshotGeneration == 0 {
+	if outcome.MemorySnapshotGeneration == 0 {
 		return fmt.Errorf("warm stop for VM %s published no snapshot generation", desired.ID)
 	}
-	observed.Sleep.SnapshotGeneration = outcome.SnapshotGeneration
-	observed.Sleep.SnapshotCreatedAt = outcome.SnapshotCreatedAt
+	observed.Sleep.MemorySnapshotGeneration = outcome.MemorySnapshotGeneration
+	observed.Sleep.MemorySnapshotCreatedAt = outcome.MemorySnapshotCreatedAt
 	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration
 
 	// A packet during the warm stop aborts an automatic sleep. The just-created
@@ -147,8 +147,8 @@ func (manager *Manager) recoverInterruptedSleep(
 	if observed.Sleep == nil {
 		observed.Sleep = &SleepProgress{}
 	}
-	observed.Sleep.SnapshotGeneration = snapshot.Generation
-	observed.Sleep.SnapshotCreatedAt = snapshot.CreatedAt
+	observed.Sleep.MemorySnapshotGeneration = snapshot.Generation
+	observed.Sleep.MemorySnapshotCreatedAt = snapshot.CreatedAt
 	// InspectSleepSnapshot validated the snapshot against the current desired
 	// generations, so it matches the current specification generation.
 	observed.Sleep.SpecificationGeneration = desired.SpecificationGeneration

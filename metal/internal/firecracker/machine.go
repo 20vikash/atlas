@@ -107,10 +107,10 @@ func (m *machine) coldBoot(ctx context.Context) error {
 	return nil
 }
 
-// snapshotRequirement is what this VM needs a published snapshot to be, for a
+// memorySnapshotRequirement is what this VM needs a published snapshot to be, for a
 // restore or a completion check.
-func (m *machine) snapshotRequirement() snapshotRequirement {
-	return snapshotRequirement{
+func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
+	return memorySnapshotRequirement{
 		VirtualMachineID:         m.input.ID,
 		UserID:                   m.input.UserID,
 		SpecificationGeneration:  m.input.SpecificationGeneration,
@@ -119,10 +119,10 @@ func (m *machine) snapshotRequirement() snapshotRequirement {
 	}
 }
 
-// restoreSnapshot restores the newest valid VM-local snapshot.
-func (m *machine) restoreSnapshot(ctx context.Context, resume bool) (bool, error) {
-	snapshot, err := m.runtime.configuration.latestValidSnapshot(m.snapshotRequirement())
-	if errors.Is(err, errSnapshotNotFound) {
+// restoreMemorySnapshot restores the newest valid VM-local snapshot.
+func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool, error) {
+	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
+	if errors.Is(err, errMemorySnapshotNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -132,34 +132,34 @@ func (m *machine) restoreSnapshot(ctx context.Context, resume bool) (bool, error
 	metadata := metadataServiceData(
 		m.input.ID, m.input.NetworkInterface.GuestIPAddress, m.input.NetworkInterface.MACAddress, m.input.Specification,
 	)
-	if err := m.runtime.launchSnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata, resume); err != nil {
+	if err := m.runtime.launchMemorySnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata, resume); err != nil {
 		return false, err
 	}
-	if err := m.runtime.purgeSnapshots(m.input.ID); err != nil {
+	if err := m.runtime.purgeMemorySnapshots(m.input.ID); err != nil {
 		m.runtime.logger.Warn("remove restored snapshots failed", "virtual_machine_id", m.input.ID, "error", err)
 	}
 
 	return true, nil
 }
 
-// latestSnapshot returns the newest valid published snapshot for this VM and
+// latestMemorySnapshot returns the newest valid published snapshot for this VM and
 // true, or a zero value and false when none validates.
-func (m *machine) latestSnapshot() (validatedSnapshot, bool) {
-	snapshot, err := m.runtime.configuration.latestValidSnapshot(m.snapshotRequirement())
+func (m *machine) latestMemorySnapshot() (validatedMemorySnapshot, bool) {
+	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
 	if err != nil {
-		return validatedSnapshot{}, false
+		return validatedMemorySnapshot{}, false
 	}
 	return snapshot, true
 }
 
-// startFromSnapshot restores a required VM-local snapshot without cold booting.
-func (m *machine) startFromSnapshot(ctx context.Context, resume bool) error {
-	restored, err := m.restoreSnapshot(ctx, resume)
+// startFromMemorySnapshot restores a required VM-local snapshot without cold booting.
+func (m *machine) startFromMemorySnapshot(ctx context.Context, resume bool) error {
+	restored, err := m.restoreMemorySnapshot(ctx, resume)
 	if err != nil {
 		return err
 	}
 	if !restored {
-		return fmt.Errorf("start from sleep snapshot: %w", errSnapshotNotFound)
+		return fmt.Errorf("start from sleep snapshot: %w", errMemorySnapshotNotFound)
 	}
 	m.recordImageUse()
 
@@ -176,7 +176,7 @@ func (m *machine) Stop(ctx context.Context) error {
 	}
 	_ = m.runtime.serialBroker.Close(m.input.ID)
 
-	if err := m.runtime.purgeSnapshots(m.input.ID); err != nil {
+	if err := m.runtime.purgeMemorySnapshots(m.input.ID); err != nil {
 		return err
 	}
 
@@ -192,7 +192,7 @@ func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
 	}
 
 	// Recover a snapshot published before a daemon crash.
-	if snapshot, ok := m.latestSnapshot(); ok {
+	if snapshot, ok := m.latestMemorySnapshot(); ok {
 		switch state {
 		case vm.StateStopped:
 			return stopOutcome(snapshot), nil
@@ -220,7 +220,7 @@ func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
 		return vm.StopOutcome{}, vm.ErrConflict
 	}
 
-	published, err := m.runtime.createAndPublishSnapshot(ctx, m.input)
+	published, err := m.runtime.createAndPublishMemorySnapshot(ctx, m.input)
 	if err != nil {
 		return vm.StopOutcome{}, m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
 	}
@@ -233,17 +233,17 @@ func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
 }
 
 // stopOutcome reports the published generation and creation time of a snapshot.
-func stopOutcome(snapshot validatedSnapshot) vm.StopOutcome {
+func stopOutcome(snapshot validatedMemorySnapshot) vm.StopOutcome {
 	return vm.StopOutcome{
-		SnapshotGeneration: snapshot.Generation,
-		SnapshotCreatedAt:  snapshot.Manifest.CreatedAt,
+		MemorySnapshotGeneration: snapshot.Generation,
+		MemorySnapshotCreatedAt:  snapshot.Manifest.CreatedAt,
 	}
 }
 
 // recoverFailedWarmStop removes the pending snapshot and restores the prior state.
 func (m *machine) recoverFailedWarmStop(ctx context.Context, pausedByThisCall bool, cause error) error {
 	recovery := []error{cause}
-	if err := os.RemoveAll(m.runtime.configuration.pendingSnapshotDirectory(m.input.ID)); err != nil {
+	if err := os.RemoveAll(m.runtime.configuration.pendingMemorySnapshotDirectory(m.input.ID)); err != nil {
 		recovery = append(recovery, fmt.Errorf("remove pending snapshot: %w", err))
 	}
 	if pausedByThisCall {

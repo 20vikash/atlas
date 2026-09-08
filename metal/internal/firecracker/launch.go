@@ -88,8 +88,8 @@ func (runtime *Runtime) relaunch(ctx context.Context, configuration vm.RuntimeMa
 	return runtime.prepareBoot(ctx, configuration)
 }
 
-// launchSnapshot restores a guest from a memory snapshot and updates its metadata.
-func (runtime *Runtime) launchSnapshot(
+// launchMemorySnapshot restores a guest from a memory snapshot and updates its metadata.
+func (runtime *Runtime) launchMemorySnapshot(
 	ctx context.Context,
 	configuration vm.RuntimeMachine,
 	rootSnapshot string,
@@ -184,7 +184,7 @@ func (runtime *Runtime) launchWarmImage(ctx context.Context, configuration vm.Ru
 	metadata := metadataServiceData(
 		configuration.ID, configuration.NetworkInterface.GuestIPAddress, configuration.NetworkInterface.MACAddress, configuration.Specification,
 	)
-	return runtime.launchSnapshot(
+	return runtime.launchMemorySnapshot(
 		ctx,
 		configuration,
 		artifacts.RootSnapshot,

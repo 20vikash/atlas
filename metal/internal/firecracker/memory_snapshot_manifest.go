@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// snapshotManifest describes one published snapshot.
-type snapshotManifest struct {
+// memorySnapshotManifest describes one published memory snapshot.
+type memorySnapshotManifest struct {
 	VirtualMachineID         string    `json:"virtual_machine_id"`
 	UserID                   uint32    `json:"user_id"`
 	SpecificationGeneration  uint64    `json:"specification_generation"`
@@ -23,30 +23,30 @@ type snapshotManifest struct {
 	MemoryFileSizeBytes      int64     `json:"memory_file_size_bytes"`
 }
 
-// newSnapshotManifest fills the fixed artifact file names.
-func newSnapshotManifest(base snapshotManifest) snapshotManifest {
-	base.StateFileName = snapshotStateFileName
-	base.MemoryFileName = snapshotMemoryFileName
+// newMemorySnapshotManifest fills the fixed artifact file names.
+func newMemorySnapshotManifest(base memorySnapshotManifest) memorySnapshotManifest {
+	base.StateFileName = memorySnapshotStateFileName
+	base.MemoryFileName = memorySnapshotMemoryFileName
 	return base
 }
 
 // encode renders the manifest.
-func encodeSnapshotManifest(manifest snapshotManifest) ([]byte, error) {
+func encodeMemorySnapshotManifest(manifest memorySnapshotManifest) ([]byte, error) {
 	return json.MarshalIndent(manifest, "", "  ")
 }
 
-// decodeSnapshotManifest decodes a manifest and rejects unknown or trailing data.
-func decodeSnapshotManifest(data []byte) (snapshotManifest, error) {
+// decodeMemorySnapshotManifest decodes a manifest and rejects unknown or trailing data.
+func decodeMemorySnapshotManifest(data []byte) (memorySnapshotManifest, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 
-	var manifest snapshotManifest
+	var manifest memorySnapshotManifest
 	if err := decoder.Decode(&manifest); err != nil {
-		return snapshotManifest{}, fmt.Errorf("decode snapshot manifest: %w", err)
+		return memorySnapshotManifest{}, fmt.Errorf("decode snapshot manifest: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return snapshotManifest{}, fmt.Errorf("decode snapshot manifest: unexpected trailing data")
+		return memorySnapshotManifest{}, fmt.Errorf("decode snapshot manifest: unexpected trailing data")
 	}
 	return manifest, nil
 }

@@ -321,7 +321,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	var lastNetworkActivityAt, sleepingSince time.Time
 	if observed.Sleep != nil {
 		lastNetworkActivityAt = observed.Sleep.LastNetworkActivityAt
-		sleepingSince = observed.Sleep.SnapshotCreatedAt
+		sleepingSince = observed.Sleep.MemorySnapshotCreatedAt
 	}
 	return Information{
 		ID:                            desired.ID,

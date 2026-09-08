@@ -12,25 +12,25 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// writePendingSnapshot simulates Firecracker having written a pending snapshot
+// writePendingMemorySnapshot simulates Firecracker having written a pending snapshot
 // into the jail.
-func writePendingSnapshot(t *testing.T, configuration Config, id string, stateSize, memorySize int) {
+func writePendingMemorySnapshot(t *testing.T, configuration Config, id string, stateSize, memorySize int) {
 	t.Helper()
-	pending := configuration.pendingSnapshotDirectory(id)
+	pending := configuration.pendingMemorySnapshotDirectory(id)
 	if err := os.MkdirAll(pending, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(pending, snapshotStateFileName), stateSize)
-	writeFile(t, filepath.Join(pending, snapshotMemoryFileName), memorySize)
+	writeFile(t, filepath.Join(pending, memorySnapshotStateFileName), stateSize)
+	writeFile(t, filepath.Join(pending, memorySnapshotMemoryFileName), memorySize)
 }
 
 func TestPublishPendingSnapshotMovesAndValidates(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	runtime := &Runtime{configuration: configuration}
 	machine := vm.RuntimeMachine{ID: "vm-1", UserID: 100001, SpecificationGeneration: 4, RestartGeneration: 1}
-	writePendingSnapshot(t, configuration, "vm-1", 2048, 4096)
+	writePendingMemorySnapshot(t, configuration, "vm-1", 2048, 4096)
 
-	published, err := runtime.publishPendingSnapshot(machine, 1)
+	published, err := runtime.publishPendingMemorySnapshot(machine, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,12 +46,12 @@ func TestPublishPendingSnapshotMovesAndValidates(t *testing.T) {
 	}
 
 	// The pending directory is consumed by the move.
-	if _, err := os.Stat(configuration.pendingSnapshotDirectory("vm-1")); !os.IsNotExist(err) {
+	if _, err := os.Stat(configuration.pendingMemorySnapshotDirectory("vm-1")); !os.IsNotExist(err) {
 		t.Error("pending directory was not moved")
 	}
 	// The published generation holds all three files.
-	generationDirectory := configuration.snapshotGenerationDirectory("vm-1", 1)
-	for _, name := range []string{snapshotStateFileName, snapshotMemoryFileName, snapshotManifestFileName} {
+	generationDirectory := configuration.memorySnapshotGenerationDirectory("vm-1", 1)
+	for _, name := range []string{memorySnapshotStateFileName, memorySnapshotMemoryFileName, memorySnapshotManifestFileName} {
 		if _, err := os.Stat(filepath.Join(generationDirectory, name)); err != nil {
 			t.Errorf("published generation is missing %s: %v", name, err)
 		}
@@ -63,11 +63,11 @@ func TestPublishPendingSnapshotRejectsAnIncompletePending(t *testing.T) {
 	runtime := &Runtime{configuration: configuration}
 	machine := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
 	// Create the pending directory with no artifact files.
-	if err := os.MkdirAll(configuration.pendingSnapshotDirectory("vm-1"), 0o750); err != nil {
+	if err := os.MkdirAll(configuration.pendingMemorySnapshotDirectory("vm-1"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := runtime.publishPendingSnapshot(machine, 1); err == nil {
+	if _, err := runtime.publishPendingMemorySnapshot(machine, 1); err == nil {
 		t.Fatal("want an error for a missing artifact")
 	}
 }
@@ -81,8 +81,8 @@ func TestWarmStopRecognizesACompletedStop(t *testing.T) {
 	runtime := &Runtime{configuration: configuration, units: units, serialBroker: &stubSerialBroker{}}
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
 
-	writePendingSnapshot(t, configuration, "vm-1", 2048, 4096)
-	if _, err := runtime.publishPendingSnapshot(input, 1); err != nil {
+	writePendingMemorySnapshot(t, configuration, "vm-1", 2048, 4096)
+	if _, err := runtime.publishPendingMemorySnapshot(input, 1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,7 +93,7 @@ func TestWarmStopRecognizesACompletedStop(t *testing.T) {
 	if _, kills, _ := units.counts(); kills != 0 {
 		t.Errorf("kills = %d, want 0 for an already completed warm stop", kills)
 	}
-	next, err := configuration.nextSnapshotGeneration("vm-1")
+	next, err := configuration.nextMemorySnapshotGeneration("vm-1")
 	if err != nil || next != 2 {
 		t.Errorf("next generation = %d (err %v), want 2, so no second snapshot was made", next, err)
 	}
@@ -110,22 +110,22 @@ func warmStopMachine(t *testing.T, configuration Config, onRequest func()) *mach
 	}
 }
 
-func TestRemovePurgesSnapshots(t *testing.T) {
+func TestRemovePurgesMemorySnapshots(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), SocketsDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	runtime := &Runtime{configuration: configuration, units: &stubUnits{}, serialBroker: &stubSerialBroker{}}
-	if err := os.MkdirAll(configuration.snapshotGenerationDirectory("vm-1", 1), 0o750); err != nil {
+	if err := os.MkdirAll(configuration.memorySnapshotGenerationDirectory("vm-1", 1), 0o750); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := runtime.Remove(context.Background(), vm.RuntimeMachine{ID: "vm-1", UserID: 100001}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(configuration.snapshotRoot("vm-1")); !os.IsNotExist(err) {
+	if _, err := os.Stat(configuration.memorySnapshotRoot("vm-1")); !os.IsNotExist(err) {
 		t.Error("Remove did not purge the snapshots")
 	}
 }
 
-func TestStopPurgesSnapshots(t *testing.T) {
+func TestStopPurgesMemorySnapshots(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir(), SocketsDir: t.TempDir(), FirecrackerBin: "/usr/bin/firecracker"}
 	units := &stubUnits{active: true}
 	m := &machine{
@@ -134,14 +134,14 @@ func TestStopPurgesSnapshots(t *testing.T) {
 		api:         api.New(fcSocket(t, units.shutdown)),
 		stopTimeout: time.Minute,
 	}
-	if err := os.MkdirAll(configuration.snapshotGenerationDirectory("vm-1", 1), 0o750); err != nil {
+	if err := os.MkdirAll(configuration.memorySnapshotGenerationDirectory("vm-1", 1), 0o750); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := m.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(configuration.snapshotRoot("vm-1")); !os.IsNotExist(err) {
+	if _, err := os.Stat(configuration.memorySnapshotRoot("vm-1")); !os.IsNotExist(err) {
 		t.Error("Stop did not purge the snapshots")
 	}
 }
@@ -151,7 +151,7 @@ func TestWarmStopRecoveryResumesAndRemovesPending(t *testing.T) {
 	resumeRequested := false
 	m := warmStopMachine(t, configuration, func() { resumeRequested = true })
 
-	pending := configuration.pendingSnapshotDirectory("vm-1")
+	pending := configuration.pendingMemorySnapshotDirectory("vm-1")
 	if err := os.MkdirAll(pending, 0o750); err != nil {
 		t.Fatal(err)
 	}

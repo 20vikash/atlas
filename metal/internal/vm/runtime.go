@@ -31,8 +31,8 @@ const (
 // StopOutcome reports what a stop produced. A warm stop fills the published
 // snapshot generation and its creation time. A shutdown leaves both zero.
 type StopOutcome struct {
-	SnapshotGeneration uint64
-	SnapshotCreatedAt  time.Time
+	MemorySnapshotGeneration uint64
+	MemorySnapshotCreatedAt  time.Time
 }
 
 // SleepSnapshot describes a validated VM-local sleep snapshot. The manager reads

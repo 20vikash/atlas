@@ -28,8 +28,8 @@ func TestRuntimeStartFromSleepSnapshotWithoutASnapshot(t *testing.T) {
 	input := vm.RuntimeMachine{ID: "vm-1", UserID: 100001}
 
 	for _, mode := range []vm.StartMode{vm.StartFromSleepSnapshot, vm.StartFromSleepSnapshotPaused} {
-		if err := runtime.Start(context.Background(), input, mode); !errors.Is(err, errSnapshotNotFound) {
-			t.Fatalf("Start(mode %d) error = %v, want errSnapshotNotFound", mode, err)
+		if err := runtime.Start(context.Background(), input, mode); !errors.Is(err, errMemorySnapshotNotFound) {
+			t.Fatalf("Start(mode %d) error = %v, want errMemorySnapshotNotFound", mode, err)
 		}
 	}
 }

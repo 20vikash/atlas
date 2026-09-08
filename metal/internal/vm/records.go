@@ -70,10 +70,10 @@ type ObservedRecord struct {
 // safe times and generation numbers. It never holds artifact paths, which the
 // Firecracker runtime derives from the VM ID.
 type SleepProgress struct {
-	EligibleAt         time.Time `json:"eligible_at,omitempty"`
-	RequestedAt        time.Time `json:"requested_at,omitempty"`
-	SnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
-	SnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
+	EligibleAt               time.Time `json:"eligible_at,omitempty"`
+	RequestedAt              time.Time `json:"requested_at,omitempty"`
+	MemorySnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
+	MemorySnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
 	// SpecificationGeneration is the desired specification generation the snapshot
 	// was made for. A later shape change makes the snapshot incompatible, so the
 	// VM cold boots instead of resuming.
@@ -91,10 +91,10 @@ func (record ObservedRecord) validateSleep() error {
 	if sleep == nil {
 		return nil
 	}
-	if (sleep.SnapshotGeneration == 0) != sleep.SnapshotCreatedAt.IsZero() {
+	if (sleep.MemorySnapshotGeneration == 0) != sleep.MemorySnapshotCreatedAt.IsZero() {
 		return errors.New("sleep progress has a partial snapshot")
 	}
-	if record.State == StateSleeping && sleep.SnapshotGeneration == 0 {
+	if record.State == StateSleeping && sleep.MemorySnapshotGeneration == 0 {
 		return errors.New("sleeping record has no published snapshot")
 	}
 	return nil

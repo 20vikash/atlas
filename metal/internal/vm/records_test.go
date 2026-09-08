@@ -67,11 +67,11 @@ func TestObservedSleepProgressRoundTrips(t *testing.T) {
 	store := newRecordStore(t.TempDir())
 	record := newTestObserved(StateSleeping)
 	record.Sleep = &SleepProgress{
-		EligibleAt:            time.Unix(100, 0).UTC(),
-		RequestedAt:           time.Unix(200, 0).UTC(),
-		SnapshotGeneration:    3,
-		SnapshotCreatedAt:     time.Unix(300, 0).UTC(),
-		LastNetworkActivityAt: time.Unix(150, 0).UTC(),
+		EligibleAt:               time.Unix(100, 0).UTC(),
+		RequestedAt:              time.Unix(200, 0).UTC(),
+		MemorySnapshotGeneration: 3,
+		MemorySnapshotCreatedAt:  time.Unix(300, 0).UTC(),
+		LastNetworkActivityAt:    time.Unix(150, 0).UTC(),
 	}
 
 	if err := store.writeObserved("vm-1", record); err != nil {
@@ -85,10 +85,10 @@ func TestObservedSleepProgressRoundTrips(t *testing.T) {
 	if got.Sleep == nil {
 		t.Fatal("sleep progress was not read back")
 	}
-	if got.Sleep.SnapshotGeneration != 3 {
-		t.Errorf("snapshot generation = %d, want 3", got.Sleep.SnapshotGeneration)
+	if got.Sleep.MemorySnapshotGeneration != 3 {
+		t.Errorf("snapshot generation = %d, want 3", got.Sleep.MemorySnapshotGeneration)
 	}
-	if !got.Sleep.SnapshotCreatedAt.Equal(record.Sleep.SnapshotCreatedAt) ||
+	if !got.Sleep.MemorySnapshotCreatedAt.Equal(record.Sleep.MemorySnapshotCreatedAt) ||
 		!got.Sleep.LastNetworkActivityAt.Equal(record.Sleep.LastNetworkActivityAt) ||
 		!got.Sleep.RequestedAt.Equal(record.Sleep.RequestedAt) ||
 		!got.Sleep.EligibleAt.Equal(record.Sleep.EligibleAt) {
@@ -103,10 +103,10 @@ func TestReadObservedRejectsCorruptSleepProgress(t *testing.T) {
 			record.Sleep = nil
 		},
 		"generation without a creation time": func(record *ObservedRecord) {
-			record.Sleep = &SleepProgress{SnapshotGeneration: 1}
+			record.Sleep = &SleepProgress{MemorySnapshotGeneration: 1}
 		},
 		"creation time without a generation": func(record *ObservedRecord) {
-			record.Sleep = &SleepProgress{SnapshotCreatedAt: time.Unix(1, 0).UTC()}
+			record.Sleep = &SleepProgress{MemorySnapshotCreatedAt: time.Unix(1, 0).UTC()}
 		},
 		"sleeping without a published snapshot": func(record *ObservedRecord) {
 			record.State = StateSleeping

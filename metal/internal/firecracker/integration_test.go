@@ -22,6 +22,7 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/network"
+	"github.com/frappe/atlas/metal/internal/network/activity"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
@@ -80,7 +81,7 @@ func newManager(t *testing.T) *vm.Manager {
 	stores := storage.NewStores(t.Context(), env("METAL_POOL", "metal"), env("METAL_IMAGES_DIR", "/var/lib/metal/images"), nil)
 	serialBroker := console.NewSerialBroker(t.TempDir(), platform.NewFileDescriptorStore())
 	t.Cleanup(serialBroker.Shutdown)
-	activityMonitor, err := network.NewActivityMonitor(network.ActivityMonitorConfig{UserIDRange: vm.DefaultUserIDRange})
+	activityMonitor, err := activity.NewMonitor(activity.MonitorConfig{UserIDRange: vm.DefaultUserIDRange})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestWarmStopAndRestoreTwoCycles(t *testing.T) {
 		if _, err := sshCmd(id, "kill -0 "+guestPID); err != nil {
 			t.Fatalf("cycle %d: long-running process %s is gone: %v", cycle, guestPID, err)
 		}
-		if _, err := os.Stat(DefaultConfig().snapshotRoot(id)); !os.IsNotExist(err) {
+		if _, err := os.Stat(DefaultConfig().memorySnapshotRoot(id)); !os.IsNotExist(err) {
 			t.Fatalf("cycle %d: external snapshots were not removed after restore: %v", cycle, err)
 		}
 	}

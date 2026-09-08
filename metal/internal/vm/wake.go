@@ -61,7 +61,7 @@ func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed 
 		desired.Specification.IsSleepy &&
 		observed.State == StateSleeping &&
 		observed.Sleep != nil &&
-		observed.Sleep.SnapshotGeneration != 0
+		observed.Sleep.MemorySnapshotGeneration != 0
 }
 
 // restoreFromNetworkWake restores the snapshot and publishes the running state.

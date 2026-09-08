@@ -309,7 +309,7 @@ func TestSleepTimeoutIsNotStoredInVMRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, err := json.Marshal(ObservedRecord{Sleep: &SleepProgress{SnapshotGeneration: 1, SnapshotCreatedAt: time.Unix(1, 0)}})
+	observed, err := json.Marshal(ObservedRecord{Sleep: &SleepProgress{MemorySnapshotGeneration: 1, MemorySnapshotCreatedAt: time.Unix(1, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}

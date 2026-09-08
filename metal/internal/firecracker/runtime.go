@@ -98,9 +98,9 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode
 	case vm.StartNormal:
 		return runtime.newMachine(input).Start(ctx)
 	case vm.StartFromSleepSnapshot:
-		return runtime.newMachine(input).startFromSnapshot(ctx, true)
+		return runtime.newMachine(input).startFromMemorySnapshot(ctx, true)
 	case vm.StartFromSleepSnapshotPaused:
-		return runtime.newMachine(input).startFromSnapshot(ctx, false)
+		return runtime.newMachine(input).startFromMemorySnapshot(ctx, false)
 	default:
 		return fmt.Errorf("unknown start mode %d", mode)
 	}
@@ -121,8 +121,8 @@ func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode 
 // InspectSleepSnapshot returns the newest valid sleep snapshot or an error.
 func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.RuntimeMachine) (vm.SleepSnapshot, error) {
 	machine := runtime.newMachine(input)
-	snapshot, err := runtime.configuration.latestValidSnapshot(machine.snapshotRequirement())
-	if errors.Is(err, errSnapshotNotFound) {
+	snapshot, err := runtime.configuration.latestValidMemorySnapshot(machine.memorySnapshotRequirement())
+	if errors.Is(err, errMemorySnapshotNotFound) {
 		return vm.SleepSnapshot{}, vm.ErrNotFound
 	}
 	if err != nil {
@@ -136,7 +136,7 @@ func (runtime *Runtime) DiscardSleepSnapshot(ctx context.Context, input vm.Runti
 	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
 		return fmt.Errorf("discard sleep snapshot: %w", err)
 	}
-	return runtime.purgeSnapshots(input.ID)
+	return runtime.purgeMemorySnapshots(input.ID)
 }
 
 // Pause pauses a running Firecracker virtual machine.
@@ -164,7 +164,7 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	if err := os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(input.ID))); err != nil {
 		return fmt.Errorf("remove Firecracker jail: %w", err)
 	}
-	if err := runtime.purgeSnapshots(input.ID); err != nil {
+	if err := runtime.purgeMemorySnapshots(input.ID); err != nil {
 		return err
 	}
 

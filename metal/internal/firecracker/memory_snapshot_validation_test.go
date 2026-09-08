@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func validRequirement() snapshotRequirement {
-	return snapshotRequirement{
+func validRequirement() memorySnapshotRequirement {
+	return memorySnapshotRequirement{
 		VirtualMachineID:         "vm-1",
 		UserID:                   100001,
 		SpecificationGeneration:  4,
@@ -20,18 +20,18 @@ func validRequirement() snapshotRequirement {
 // layDownGeneration writes a valid published generation matching completeManifest.
 func layDownGeneration(t *testing.T, configuration Config, generation uint64) string {
 	t.Helper()
-	directory := configuration.snapshotGenerationDirectory("vm-1", generation)
+	directory := configuration.memorySnapshotGenerationDirectory("vm-1", generation)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	manifest := completeManifest()
-	writeFile(t, filepath.Join(directory, snapshotStateFileName), int(manifest.StateFileSizeBytes))
-	writeFile(t, filepath.Join(directory, snapshotMemoryFileName), int(manifest.MemoryFileSizeBytes))
-	data, err := encodeSnapshotManifest(manifest)
+	writeFile(t, filepath.Join(directory, memorySnapshotStateFileName), int(manifest.StateFileSizeBytes))
+	writeFile(t, filepath.Join(directory, memorySnapshotMemoryFileName), int(manifest.MemoryFileSizeBytes))
+	data, err := encodeMemorySnapshotManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, snapshotManifestFileName), data, 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, memorySnapshotManifestFileName), data, 0o640); err != nil {
 		t.Fatal(err)
 	}
 	return directory
@@ -48,7 +48,7 @@ func TestValidateSnapshotGenerationAcceptsAValidSnapshot(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 	layDownGeneration(t, configuration, 4)
 
-	got, err := configuration.validateSnapshotGeneration(validRequirement(), 4)
+	got, err := configuration.validateMemorySnapshotGeneration(validRequirement(), 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestLatestValidSnapshotValidatesTheNewestGeneration(t *testing.T) {
 	layDownGeneration(t, configuration, 2)
 	layDownGeneration(t, configuration, 5)
 
-	got, err := configuration.latestValidSnapshot(validRequirement())
+	got, err := configuration.latestValidMemorySnapshot(validRequirement())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +74,8 @@ func TestLatestValidSnapshotValidatesTheNewestGeneration(t *testing.T) {
 func TestLatestValidSnapshotReportsNotFoundWithoutAGeneration(t *testing.T) {
 	configuration := Config{MachinesDir: t.TempDir()}
 
-	if _, err := configuration.latestValidSnapshot(validRequirement()); !errors.Is(err, errSnapshotNotFound) {
-		t.Fatalf("error = %v, want errSnapshotNotFound", err)
+	if _, err := configuration.latestValidMemorySnapshot(validRequirement()); !errors.Is(err, errMemorySnapshotNotFound) {
+		t.Fatalf("error = %v, want errMemorySnapshotNotFound", err)
 	}
 }
 
@@ -83,51 +83,51 @@ func TestValidateSnapshotGenerationReportsNotFoundWithoutAManifest(t *testing.T)
 	configuration := Config{MachinesDir: t.TempDir()}
 	// Lay down the artifacts but remove the manifest, so the snapshot is absent.
 	directory := layDownGeneration(t, configuration, 4)
-	if err := os.Remove(filepath.Join(directory, snapshotManifestFileName)); err != nil {
+	if err := os.Remove(filepath.Join(directory, memorySnapshotManifestFileName)); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := configuration.validateSnapshotGeneration(validRequirement(), 4)
-	if !errors.Is(err, errSnapshotNotFound) {
-		t.Fatalf("error = %v, want errSnapshotNotFound", err)
+	_, err := configuration.validateMemorySnapshotGeneration(validRequirement(), 4)
+	if !errors.Is(err, errMemorySnapshotNotFound) {
+		t.Fatalf("error = %v, want errMemorySnapshotNotFound", err)
 	}
 }
 
 func TestValidateSnapshotGenerationRejectsInvalidSnapshots(t *testing.T) {
 	cases := []struct {
 		name        string
-		requirement snapshotRequirement
+		requirement memorySnapshotRequirement
 		mutate      func(t *testing.T, directory string)
 	}{
-		{name: "wrong compatibility", requirement: func() snapshotRequirement {
+		{name: "wrong compatibility", requirement: func() memorySnapshotRequirement {
 			requirement := validRequirement()
 			requirement.FirecrackerCompatibility = "firecracker-9.9.9"
 			return requirement
 		}()},
-		{name: "wrong user id", requirement: func() snapshotRequirement {
+		{name: "wrong user id", requirement: func() memorySnapshotRequirement {
 			requirement := validRequirement()
 			requirement.UserID = 200000
 			return requirement
 		}()},
-		{name: "wrong specification generation", requirement: func() snapshotRequirement {
+		{name: "wrong specification generation", requirement: func() memorySnapshotRequirement {
 			requirement := validRequirement()
 			requirement.SpecificationGeneration = 99
 			return requirement
 		}()},
 		{name: "state file missing", requirement: validRequirement(), mutate: func(t *testing.T, directory string) {
-			if err := os.Remove(filepath.Join(directory, snapshotStateFileName)); err != nil {
+			if err := os.Remove(filepath.Join(directory, memorySnapshotStateFileName)); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{name: "memory size mismatch", requirement: validRequirement(), mutate: func(t *testing.T, directory string) {
-			writeFile(t, filepath.Join(directory, snapshotMemoryFileName), 1234)
+			writeFile(t, filepath.Join(directory, memorySnapshotMemoryFileName), 1234)
 		}},
 		{name: "state file is a symlink", requirement: validRequirement(), mutate: func(t *testing.T, directory string) {
-			statePath := filepath.Join(directory, snapshotStateFileName)
+			statePath := filepath.Join(directory, memorySnapshotStateFileName)
 			if err := os.Remove(statePath); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(filepath.Join(directory, snapshotMemoryFileName), statePath); err != nil {
+			if err := os.Symlink(filepath.Join(directory, memorySnapshotMemoryFileName), statePath); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -141,11 +141,11 @@ func TestValidateSnapshotGenerationRejectsInvalidSnapshots(t *testing.T) {
 				testCase.mutate(t, directory)
 			}
 
-			_, err := configuration.validateSnapshotGeneration(testCase.requirement, 4)
+			_, err := configuration.validateMemorySnapshotGeneration(testCase.requirement, 4)
 			if err == nil {
 				t.Fatal("want an invalid-artifact error")
 			}
-			if errors.Is(err, errSnapshotNotFound) {
+			if errors.Is(err, errMemorySnapshotNotFound) {
 				t.Fatalf("error = %v, want an invalid-artifact error, not absence", err)
 			}
 		})
