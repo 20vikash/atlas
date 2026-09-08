@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// TestInNamespaceEntersARealNamespace confirms real namespace entry and restore
-// on the host. It needs root and the ip command. Run it with:
+// TestInNamespaceEntersARealNamespace checks real namespace entry and restore.
 //
 //	sudo -E go test -tags integration -run TestInNamespaceEntersARealNamespace ./internal/network/
 func TestInNamespaceEntersARealNamespace(t *testing.T) {
@@ -67,8 +66,7 @@ func runOrSkip(t *testing.T, name string, args ...string) {
 	}
 }
 
-// runQuietly runs a command and ignores its result. It is used for cleanup and
-// for a packet send that is expected to get no reply.
+// runQuietly runs a command and ignores its result.
 func runQuietly(name string, args ...string) error {
 	context, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
