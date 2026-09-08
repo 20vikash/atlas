@@ -71,39 +71,40 @@ Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `
 
 ## Packet activity
 
-`ActivityMonitor` records the last packet time of each VM. A sleepy VM sleeps after an idle timeout, so Metal must know when a VM last received a packet from the host side.
-
-One eBPF program attaches to the `tap0` egress path, which carries host-to-guest traffic, inside the VM namespace. The guest's own frames arrive on the ingress path and are not hooked, so the guest's housekeeping does not count as activity. The program does not attach to the veth pair, because Atlas WG Mesh owns the host end.
+`ActivityMonitor` tracks host-to-guest TCP traffic. It attaches one eBPF program to the `tap0` egress hook in each VM namespace. It does not attach to the veth pair, which Atlas WG Mesh owns.
 
 ```text
-host-to-guest TCP     -> tap0 egress hook -> activity_by_user_id[user_id]
-host-to-guest non-TCP -> tap0 egress hook -> not counted
-guest-to-host packet  -> tap0 ingress     -> not hooked, not counted
+host TCP -> tap0 egress -> activity_by_user_id[user_id]
+                       |
+                       +-> armed -> wake event
+
+host non-TCP -> ignored
+guest packet  -> tap0 ingress -> not hooked
 ```
 
-The program only observes. It reads the ethertype and the IP protocol field, then updates the map and returns `TCX_NEXT`, so it never drops or changes a packet. It counts a host-to-guest TCP segment over IPv4 or IPv6 only. Host measurement on the development host showed that link-local IPv6 MLD and ARP housekeeping on the host end of the tap kept a VM awake. So the program counts TCP only. This overrides the first plan that counted every Ethernet frame. A non-TCP frame, such as ARP or neighbour discovery, no longer wakes a VM. A client must retry over TCP.
+The program reads only the Ethernet type and IP protocol. It counts IPv4 and IPv6 TCP packets, then returns `TCX_NEXT`. It never drops or changes a packet. Other traffic does not count because ARP and IPv6 housekeeping can keep an idle VM awake.
 
-`activity_by_user_id` is one shared hash map. The key is the VM user ID. The value is a monotonic nanosecond time from `bpf_ktime_get_ns`. `LastNetworkActivity` reads the value, reads `CLOCK_MONOTONIC` right after, and converts the age to a UTC wall-clock time. A wall-clock change never makes a VM sleep early, because the age comes from the monotonic clock.
+`activity_by_user_id` is a shared hash map keyed by VM user ID. Its value is the monotonic packet time from `bpf_ktime_get_ns`. `LastNetworkActivity` converts its age to UTC. A wall-clock change cannot make a VM sleep early.
 
-The monitor owns the shared map, one program instance for each VM, and the egress link. `EnsureAttachment` is idempotent and replaces the attachment only when `tap0` gets a new index. `ReleaseAttachment` closes the link and clears the map value. `Close` releases everything, and the daemon calls it after every worker stops.
+The monitor owns all maps and one program and link per VM. `EnsureAttachment` replaces an attachment only when the `tap0` index changes. `ReleaseAttachment` clears the VM state and closes its program and link. `Close` stops the worker and releases all eBPF resources.
 
-metald does not pin the programs or maps. A metald restart attaches new links and starts a new activity baseline. The baseline is the attachment time, so a restart can delay sleep by one idle timeout, which is safe. It never causes an early sleep.
+metald does not pin eBPF resources. A restart uses the new attachment time as the activity baseline. This can delay sleep by one idle timeout, but it cannot cause early sleep.
 
 ## Packet wake
 
-A sleeping VM has no Firecracker process to notice a packet, so the same eBPF program signals a wake. The monitor owns two more shared maps: `wake_state_by_user_id`, a hash of the wake state of each VM, and `wake_events`, a ring buffer.
+A sleeping VM has no Firecracker process to receive a packet. The eBPF program must signal Go to restore the VM.
 
 ```text
-armed VM: host-to-guest TCP -> tap0 egress hook -> ring event -> Go worker -> wake channel
+host TCP -> armed -> notified -> wake_events -> Go worker -> wake channel
 ```
 
-The manager arms a VM when it sleeps and disarms it when it wakes. `ArmNetworkWake` writes `armed` for a VM that has an attachment. On the next host-to-guest TCP segment, the program submits one wake event and sets the state to `notified`, so one armed VM produces one event until the manager rearms it. An atomic compare and swap makes concurrent packets on many CPUs submit only one event.
+`wake_state_by_user_id` stores each VM's wake state. `wake_events` is the shared ring buffer. The manager arms a sleeping VM. The first TCP packet atomically changes `armed` to `notified` and writes one event. Later packets do not write another event until the manager rearms the VM.
 
-One worker reads the ring buffer, resolves the user ID to the current VM ID under a short lock, and publishes a `NetworkWakeEvent` on a bounded channel. It drops an event for a user ID that has no attachment, so a released and reused user ID cannot deliver a stale VM ID. When the consumer is behind, the worker rearms the VM instead of blocking, so a later packet notifies again.
+One worker reads the ring buffer and maps the user ID to the current VM ID. It drops events without a matching attachment. If the output channel is full, it rearms the VM so a later packet can send another event.
 
-`ReleaseAttachment` clears the wake state before the user ID can be reused. `Close` stops the reader, waits for the worker, then closes the three maps. The trigger packet can be lost while no process has `tap0` open, so a client must retry, usually over TCP.
+`ReleaseAttachment` clears wake state before a user ID can be reused. The packet that triggers a wake can be lost while Firecracker starts, so clients must retry.
 
-`ensureNamespaceBase` pins a static neighbour entry for the guest IP and MAC. A sleeping VM has no process to answer ARP, and an ARP frame cannot wake it, so without a static entry a wake packet cannot resolve the guest MAC and never reaches `tap0`. The guest MAC is fixed, so the static entry is always correct.
+`ensureNamespaceBase` adds a static neighbour entry for the fixed guest IP and MAC. This lets a TCP packet reach `tap0` while the guest cannot answer ARP.
 
 ## Atlas WG Mesh
 

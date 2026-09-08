@@ -54,11 +54,19 @@ A VM learns its address from MMDS. `atlas-metadata.service` in the guest reads `
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
-## Packet activity
+## Packet activity and wake
 
-Metal records the last packet time of each VM, so a sleepy VM can sleep after an idle timeout. One eBPF program hooks the `tap0` egress path, which carries host-to-guest traffic, inside the namespace and stores the time in a map keyed by VM user ID. The program only observes and never changes a packet.
+Metal tracks TCP traffic from the host to the guest. It ignores other packets and all guest-to-host traffic. This prevents ARP and IPv6 housekeeping from keeping a VM awake.
 
-Only a host-to-guest TCP segment counts. Host measurement showed that link-local IPv6 MLD and ARP housekeeping on the host end of the tap kept a VM awake, so the program counts TCP over IPv4 or IPv6 only and ignores ARP, neighbour discovery, and other non-TCP frames. A client wakes a sleeping VM with TCP and must retry, because the first packet can be lost. The guest's own frames arrive on the ingress path and are not hooked, so the guest's housekeeping does not keep a sleepy VM awake. A daemon restart starts a new safe baseline, which can delay sleep by one idle timeout but never causes an early sleep. Detail: [internal/network/SPEC.md](../internal/network/SPEC.md).
+```text
+host TCP packet -> tap0 egress TCX hook -> record activity
+                                      |
+                                      +-> VM is armed -> send wake event -> restore VM
+```
+
+The eBPF program observes packets but does not change them. It stores the last packet time by VM user ID.
+
+The first packet can be lost while Firecracker starts. Clients must retry. A metald restart creates a new activity baseline. This can delay sleep, but it cannot make a VM sleep early. See [internal/network/SPEC.md](../internal/network/SPEC.md).
 
 ## WireGuard peers
 
