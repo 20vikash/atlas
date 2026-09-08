@@ -8,8 +8,7 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
-// ensureNamespaceBase brings up loopback and the tap the guest attaches to. The
-// tap is owned by the VM user, so the jailed Firecracker process can open it.
+// ensureNamespaceBase creates the namespace loopback and guest tap.
 func ensureNamespaceBase(ctx context.Context, request request) error {
 	namespace := namespaceName(request.VirtualMachineID)
 	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", "lo", "up"); err != nil {
@@ -54,8 +53,7 @@ func namespacePath(virtualMachineID string) string {
 	return "/run/netns/" + namespaceName(virtualMachineID)
 }
 
-// virtualEthernetNames derives both veth ends from the user ID, so the names
-// stay stable across restarts without any stored state.
+// virtualEthernetNames derives stable veth names from the user ID.
 func virtualEthernetNames(userID uint32) (host, guest string) {
 	return fmt.Sprintf("vh-%d", userID), fmt.Sprintf("vg-%d", userID)
 }
@@ -97,8 +95,7 @@ func networkLinkExists(ctx context.Context, name string) (bool, error) {
 	return linkListContains(output, name), nil
 }
 
-// linkListContains finds a device in `ip link show` output. A veth line names
-// the peer after an @, which is trimmed.
+// linkListContains finds a device in ip link output.
 func linkListContains(output, name string) bool {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
@@ -123,9 +120,7 @@ func runSteps(ctx context.Context, steps [][]string) error {
 	return nil
 }
 
-// transitAddresses carves one /30 out of 10.0.0.0/8 per user ID and returns its
-// 2 usable addresses: the host end and the namespace end. The ID is masked to 22
-// bits, which shifted by 2 fills the 24 host bits of the /8.
+// transitAddresses returns the host and namespace addresses for a user ID.
 func transitAddresses(userID uint32) (hostIPAddress, namespaceIPAddress string) {
 	networkAddress := uint32(0x0A000000) | ((userID & 0x3FFFFF) << 2)
 	return addressString(networkAddress + 1), addressString(networkAddress + 2)
