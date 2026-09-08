@@ -36,6 +36,14 @@ frappe.ui.form.on("Metal Server", {
 				false,
 			],
 			[
+				__("Upgrade Metald"),
+				"upgrade_metald",
+				is_running,
+				__("Upgrading Metald..."),
+				__("Upgrade Metald on {0}?", [frm.doc.name.bold()]),
+				true,
+			],
+			[
 				__("Reboot"),
 				"reboot_server",
 				!is_deleted && !is_stopped,

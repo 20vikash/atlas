@@ -88,6 +88,25 @@ class HostInstallation:
 		if not result or not result.is_success:
 			frappe.throw(_("Could not install metald on server {0}.").format(self.server.name))
 
+	def upgrade_metald(self) -> None:
+		"""Replace the metald binary and restart its daemon."""
+		settings = self.server.settings
+		if not settings.metald_binary_x86_64_file:
+			frappe.throw(_("Atlas Settings needs the metald binary."))
+
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
+			script_path="upgrade-metald.sh",
+			environment={
+				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
+			},
+			timeout_seconds=METALD_INSTALL_TIMEOUT_SECONDS,
+			run_in_background=False,
+		).result
+		if not result or not result.is_success:
+			frappe.throw(_("Could not upgrade metald on server {0}.").format(self.server.name))
+
 	def set_wireguard_ip_address(self) -> None:
 		"""Set the WireGuard IP address if it is empty."""
 		if not self.server.wireguard_ip_address:

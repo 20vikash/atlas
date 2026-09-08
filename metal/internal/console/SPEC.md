@@ -34,9 +34,19 @@ Firecracker --writes--> PTY slave <--symlink-- <sockets>/consoles/<id>
                   ringBuffer   viewers --> API WebSocket
 ```
 
-`Open` stores the master and starts the drain. `Close` releases it. `Attach` adds a viewer. `Shutdown` releases the masters that this process holds. `Adopt` restores stored masters after metald restarts.
+`Open` allocates the master and starts the drain. `Persist` stores it. `Close` releases it. `Attach` adds a viewer. `Shutdown` releases local masters. `Adopt` restores stored masters.
 
-Linux destroys a PTY when its master closes. The systemd descriptor store keeps the masters until the next metald process adopts them. A master is non-blocking, so a release stops the drain read at once and one drain at a time reads a PTY. `NotifyAccess` and `FileDescriptorStoreMax` enable the store.
+Linux destroys a PTY when its master closes. The slave is the controlling terminal of Firecracker. A closed master therefore sends SIGHUP to the guest process and stops the VM.
+
+The systemd descriptor store holds the masters until the VM stops. systemd keeps its copy when it passes a master to the next metald process, so one console survives many restarts.
+
+A master is non-blocking. A release stops the drain read at once. One drain at a time reads a PTY.
+
+The unit needs `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes`. The first two enable the store. The third keeps it when metald stops.
+
+systemd watches each stored descriptor. It closes a descriptor that reports `EPOLLHUP`. A PTY master reports `EPOLLHUP` while no slave is open.
+
+`Open` keeps the master out of the store. `Persist` adds it after the unit holds the slave.
 
 ## Backpressure
 
@@ -49,6 +59,7 @@ A viewer that attaches receives the scrollback first, then live output. Scrollba
 ```text
 metald start               -> Adopt(running VM IDs)
 firecracker prepareLaunch  -> Open(id)
+firecracker prepareLaunch  -> Persist(id)   after the unit start
 api  GET /v1/vms/{id}/console?mode=tty -> Attach(id)   many, concurrent, capped
 firecracker stop or remove -> Close(id)
 metald shutdown            -> Shutdown()

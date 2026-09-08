@@ -3,7 +3,6 @@ package platform
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"syscall"
@@ -17,7 +16,7 @@ const notificationSocketEnvironmentVariable = "NOTIFY_SOCKET"
 // ErrInvalidStoreName reports a descriptor name that systemd cannot accept.
 var ErrInvalidStoreName = errors.New("platform: invalid file descriptor store name")
 
-// FileDescriptorStore keeps file descriptors in systemd across a service restart.
+// FileDescriptorStore keeps service file descriptors in systemd.
 type FileDescriptorStore struct {
 	notificationSocketAddress string
 }
@@ -61,20 +60,18 @@ func (s *FileDescriptorStore) sendDescriptorStoreNotification(notificationMessag
 		return nil
 	}
 
-	// systemd uses "@" for an abstract socket address.
-	notificationSocketAddress := s.notificationSocketAddress
-	if strings.HasPrefix(notificationSocketAddress, "@") {
-		notificationSocketAddress = "\x00" + notificationSocketAddress[1:]
-	}
-
-	notificationConnection, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: notificationSocketAddress, Net: "unixgram"})
+	notificationSocket, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_DGRAM|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
-		return fmt.Errorf("dial notification socket: %w", err)
+		return fmt.Errorf("open notification socket: %w", err)
 	}
-	defer notificationConnection.Close()
+	defer syscall.Close(notificationSocket)
+
+	notificationAddress := &syscall.SockaddrUnix{
+		Name: notificationSocketName(s.notificationSocketAddress),
+	}
 
 	if descriptorFile == nil {
-		if _, _, err := notificationConnection.WriteMsgUnix([]byte(notificationMessage), nil, nil); err != nil {
+		if _, err := syscall.SendmsgN(notificationSocket, []byte(notificationMessage), nil, notificationAddress, 0); err != nil {
 			return fmt.Errorf("send notification message: %w", err)
 		}
 
@@ -90,7 +87,13 @@ func (s *FileDescriptorStore) sendDescriptorStoreNotification(notificationMessag
 	var notificationError error
 	sendDescriptor := func(fileDescriptor uintptr) {
 		rights := syscall.UnixRights(int(fileDescriptor))
-		_, _, notificationError = notificationConnection.WriteMsgUnix([]byte(notificationMessage), rights, nil)
+		_, notificationError = syscall.SendmsgN(
+			notificationSocket,
+			[]byte(notificationMessage),
+			rights,
+			notificationAddress,
+			0,
+		)
 	}
 	if err := rawFileDescriptor.Control(sendDescriptor); err != nil {
 		return fmt.Errorf("access file descriptor: %w", err)
@@ -100,6 +103,15 @@ func (s *FileDescriptorStore) sendDescriptorStoreNotification(notificationMessag
 	}
 
 	return nil
+}
+
+// notificationSocketName converts the systemd abstract socket notation.
+func notificationSocketName(notificationSocketAddress string) string {
+	if strings.HasPrefix(notificationSocketAddress, "@") {
+		return "\x00" + notificationSocketAddress[1:]
+	}
+
+	return notificationSocketAddress
 }
 
 // validateDescriptorName rejects an invalid systemd descriptor name.

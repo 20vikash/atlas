@@ -47,14 +47,16 @@ The context cancels systemd waits and polling. The VM runtime maps the returned 
 
 ## File descriptor store
 
-systemd holds file descriptors across a service restart. `FileDescriptorStore` stores one with `FDSTORE=1`, removes one with `FDSTOREREMOVE=1`, and reads the descriptors systemd returns.
+systemd holds file descriptors across a restart or a stop of the service. `FileDescriptorStore` stores one with `FDSTORE=1`, removes one with `FDSTOREREMOVE=1`, and reads the descriptors that systemd returns.
 
 ```text
 metald run 1 --FDSTORE=1, FDNAME=<id>--> systemd --holds--> descriptor
 metald run 2 <--LISTEN_FDS, LISTEN_FDNAMES-- systemd
 ```
 
-The unit needs `NotifyAccess` and `FileDescriptorStoreMax`. Without the notification socket, `IsAvailable` is false and store operations do nothing.
+The unit needs `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes`. Without the notification socket, `IsAvailable` is false and store operations do nothing.
+
+Without `FileDescriptorStorePreserve=yes`, systemd releases the descriptors when the service stops.
 
 ## Related
 

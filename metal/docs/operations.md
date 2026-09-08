@@ -23,9 +23,27 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 ## Serial console is blank or unavailable
 
 - Symptom: The console closes, or it has no output.
-- Check: Confirm `/run/metal/consoles/<id>` exists. Check `TTYPath`, `StandardInput`, and `StandardOutput` for `metal-vm@<id>.service`. Check `NotifyAccess` and `FileDescriptorStoreMax` for `metal.service`.
-- Recovery: Correct the unit settings, run `systemctl daemon-reload`, then restart the VM through the API.
+- Check: Confirm `/run/metal/consoles/<id>` and the `TTYPath`, `StandardInput`, and `StandardOutput` settings.
+- Check: Read `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve` for `metal.service`.
+- Check: Run `metald version`. The build must support the descriptor store.
+- Recovery: Correct the unit settings, run `systemctl daemon-reload`, and restart the VM through the API.
 - Do not: Do not restart `metal-vm@<id>.service` or remove a running guest's console link.
+
+## Virtual machines stop when metald stops
+
+- Symptom: Every VM on the host fails with exit code 156 when `metal.service` stops or restarts.
+- Cause: Firecracker holds the PTY slave as its controlling terminal. A closed PTY master sends SIGHUP to Firecracker.
+- Cause: systemd keeps the master in the descriptor store, so the PTY survives a metald exit.
+- Check: Run `systemctl show metal.service -p NFileDescriptorStore`. The count must be one for each running VM.
+- Check: A count of 0 means that systemd holds no console master. Read the metald start log. `descriptor_store_available` must be true, and `adopted_console_count` must equal `running_unit_count`.
+- Check: Confirm `NotifyAccess=main`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes` for `metal.service`.
+- Check: Run `systemd-analyze log-level debug` to see why systemd drops a descriptor.
+- Check: Start the VM through the API and read the journal for `Added fd` and `Received EPOLLHUP on stored fd`.
+- Check: Run `systemd-analyze log-level info` to restore the log level.
+- Recovery: Correct the unit settings and run `systemctl daemon-reload`.
+- Recovery: Start each VM again through the API.
+- Recovery: A running VM keeps its unprotected console until it starts again.
+- Do not: Do not start or restart `metal-vm@<id>.service` by hand.
 
 ## Disk usage or ZFS inspection fails
 

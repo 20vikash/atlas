@@ -2,6 +2,7 @@
 // drives firecracker microVMs.
 //
 //	metald serve [--config path]   run the server (default)
+//	metald version                 print the build version
 //
 // Use scripts/dev.sh to prepare a throwaway dev host before serve.
 package main
@@ -64,12 +65,16 @@ func main() {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
 	}
+	if cmd == "version" {
+		fmt.Println(version)
+		return
+	}
 	configPath, err := parseFlags(cmd, args)
 	if err != nil {
 		os.Exit(2)
 	}
 	if cmd != "serve" {
-		fmt.Fprintf(os.Stderr, "usage: metald [serve] [--config path]\n")
+		fmt.Fprintf(os.Stderr, "usage: metald [serve] [--config path] | metald version\n")
 		os.Exit(2)
 	}
 	o, err := load(configPath)
@@ -155,12 +160,33 @@ func adoptConsoles(
 		return fmt.Errorf("list virtual machine units: %w", err)
 	}
 
+	adoptedConsoleCount := serialBroker.Adopt(runningVirtualMachineIDs)
 	logger.Info(
 		"adopted serial consoles",
-		"adopted_console_count", serialBroker.Adopt(runningVirtualMachineIDs),
+		"adopted_console_count", adoptedConsoleCount,
 		"running_unit_count", len(runningVirtualMachineIDs),
 		"descriptor_store_available", descriptorStoreAvailable,
 	)
+
+	// Without the store, metald holds the only PTY master. Its exit stops every VM.
+	if !descriptorStoreAvailable {
+		logger.Warn(
+			"descriptor store unavailable; a metald exit stops every running VM",
+			"running_unit_count", len(runningVirtualMachineIDs),
+			"required_unit_settings", "NotifyAccess=main, FileDescriptorStoreMax",
+		)
+
+		return nil
+	}
+
+	// A VM without an adopted console has no stored master. Its next metald exit stops it.
+	if adoptedConsoleCount < len(runningVirtualMachineIDs) {
+		logger.Warn(
+			"running VMs have no adopted console; a metald exit stops them",
+			"adopted_console_count", adoptedConsoleCount,
+			"running_unit_count", len(runningVirtualMachineIDs),
+		)
+	}
 
 	return nil
 }

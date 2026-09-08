@@ -86,20 +86,38 @@ func (b *SerialBroker) Open(id string) error {
 		return err
 	}
 
-	// Keep one stored descriptor for each VM.
-	if err := b.descriptorStore.Remove(id); err != nil {
-		return b.closeFailedConsole(master, link, fmt.Errorf("clear stored console descriptor: %w", err))
-	}
-	if err := b.descriptorStore.Store(id, master); err != nil {
-		return b.closeFailedConsole(master, link, fmt.Errorf("store console descriptor: %w", err))
-	}
-
 	b.consoles[id] = newConsole(master, link, b.scrollbackBytes)
 
 	return nil
 }
 
-// Adopt restores consoles for running virtual machines.
+// Persist stores a VM's console master after the unit opens the PTY slave.
+// systemd drops a stored descriptor that reports EPOLLHUP.
+func (b *SerialBroker) Persist(id string) error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	openConsole := b.consoles[id]
+	if openConsole == nil {
+		return ErrConsoleNotFound
+	}
+
+	return b.storeMaster(id, openConsole.master)
+}
+
+// storeMaster keeps one stored descriptor for each VM.
+func (b *SerialBroker) storeMaster(id string, master *os.File) error {
+	if err := b.descriptorStore.Remove(id); err != nil {
+		return fmt.Errorf("clear stored console descriptor: %w", err)
+	}
+	if err := b.descriptorStore.Store(id, master); err != nil {
+		return fmt.Errorf("store console descriptor: %w", err)
+	}
+
+	return nil
+}
+
+// Adopt restores consoles for running virtual machines without storing them again.
 func (b *SerialBroker) Adopt(runningVirtualMachineIDs []string) int {
 	runningVirtualMachines := make(map[string]struct{}, len(runningVirtualMachineIDs))
 	for _, virtualMachineID := range runningVirtualMachineIDs {
@@ -178,14 +196,6 @@ func newNonBlockingMaster(master *os.File) (*os.File, error) {
 	}
 
 	return os.NewFile(duplicate, master.Name()), nil
-}
-
-// closeFailedConsole removes a failed console setup.
-func (b *SerialBroker) closeFailedConsole(master *os.File, link string, cause error) error {
-	master.Close()
-	_ = os.Remove(link)
-
-	return cause
 }
 
 // removeStaleConsole releases a stale console and its master files.
