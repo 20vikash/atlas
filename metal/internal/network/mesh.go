@@ -60,12 +60,10 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	}, nil
 }
 
-// DisabledMesh is a mesh registrar that does nothing. It lets a development or
-// test host run without Atlas WG Mesh. A VM gets no mesh connectivity, so use it
-// only where mesh routing is not needed, such as an uplink-egress boot test.
+// DisabledMesh disables mesh registration on development and test hosts.
 type DisabledMesh struct{}
 
-// A real Mesh and a DisabledMesh both satisfy the allocator's registrar.
+// Check the mesh registrar interface at compile time.
 var (
 	_ meshRegistrar = (*Mesh)(nil)
 	_ meshRegistrar = DisabledMesh{}
@@ -243,11 +241,8 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 	return false, nil
 }
 
-// meshNamespaceSteps makes the namespace an IPv6 router for the guest mesh
-// address. The host route from Atlas WG Mesh is on-link on the host veth, so the
-// namespace answers neighbour solicitations for the guest with proxy NDP. It also
-// pins the guest neighbour on tap0, so a mesh wake packet reaches a sleeping VM
-// that cannot answer neighbour discovery.
+// meshNamespaceSteps routes mesh traffic through the namespace. Proxy NDP
+// answers on the veth. A permanent tap0 neighbour keeps a sleeping guest reachable.
 func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]string {
 	return [][]string{
 		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},

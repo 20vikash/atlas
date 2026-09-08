@@ -13,11 +13,10 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// maxActivityMapEntries caps the shared activity map. It stops a wrong user ID
-// range from asking the kernel for an unreasonable map.
+// maxActivityMapEntries limits memory use from an invalid user ID range.
 const maxActivityMapEntries = 1 << 20
 
-// Wake states stored in the shared wake state map. They match the eBPF program.
+// These wake states match the eBPF program.
 // A missing key means disarmed.
 const (
 	wakeDisarmed uint32 = 0
@@ -25,9 +24,7 @@ const (
 	wakeNotified uint32 = 2
 )
 
-// ActivityMonitor loads and owns the eBPF programs that record VM packet
-// activity. It keeps one shared map keyed by VM user ID and one program
-// instance for each VM. The metald process owns the monitor and closes it.
+// ActivityMonitor owns the eBPF activity and wake resources for all VMs.
 type ActivityMonitor struct {
 	loader   activityLoader
 	capacity uint32
@@ -38,9 +35,7 @@ type ActivityMonitor struct {
 	wallClock      func() time.Time
 	monotonicClock func() (uint64, error)
 
-	// wakeReader reads the shared ring buffer. The worker owns the read loop and
-	// closes wakeEvents once when it stops. Close stops the reader and waits for
-	// the worker.
+	// Close stops the wake reader before it closes the maps.
 	wakeReader wakeEventReader
 	wakeEvents chan vm.NetworkWakeEvent
 	workerDone chan struct{}
@@ -48,14 +43,11 @@ type ActivityMonitor struct {
 
 	mu          sync.Mutex
 	attachments map[string]*attachment
-	// byUserID maps a VM user ID to the current VM ID, so the worker can resolve a
-	// wake event. A released user ID is removed, so a reused ID cannot resolve to a
-	// stale VM.
+	// Released user IDs are removed before reuse.
 	byUserID map[uint32]string
 }
 
-// wakeEventChannelSize bounds the wake event channel. A behind consumer causes a
-// rearm, not a block, so this is a soft buffer, not a correctness limit.
+// wakeEventChannelSize limits buffered wake events. A full channel rearms the VM.
 const wakeEventChannelSize = 128
 
 // attachment owns the activity resources of one VM.
@@ -64,12 +56,11 @@ type attachment struct {
 	namespacePath  string
 	interfaceIndex int
 	program        activityProgram
-	// baseline is the wall-clock attachment time. It is the safe last-seen value
-	// before the first packet.
+	// baseline is the last-seen value before the first packet.
 	baseline time.Time
 }
 
-// Compile-time proof that the monitor satisfies the manager seams.
+// Check the manager interfaces at compile time.
 var (
 	_ vm.NetworkActivityMonitor = (*ActivityMonitor)(nil)
 	_ vm.NetworkWakeMonitor     = (*ActivityMonitor)(nil)
@@ -84,10 +75,9 @@ type AttachmentRequest struct {
 
 // ActivityMonitorConfig configures the shared activity map.
 type ActivityMonitorConfig struct {
-	// UserIDRange sets the shared map capacity. Every VM user ID must fit.
+	// UserIDRange sets the capacity of each shared hash map.
 	UserIDRange vm.UserIDRange
-	// Logger receives local warnings, such as a map time in the future. It
-	// defaults to slog.Default when nil.
+	// Logger defaults to slog.Default.
 	Logger *slog.Logger
 }
 
@@ -99,27 +89,23 @@ func (config ActivityMonitorConfig) capacity() uint32 {
 	return config.UserIDRange.Max - config.UserIDRange.Min + 1
 }
 
-// sharedMaps holds the three kernel maps that every VM program shares. The
-// monitor owns them and closes them.
+// sharedMaps holds the kernel maps shared by all VM programs.
 type sharedMaps struct {
 	activity   activityMap
 	wakeState  wakeStateMap
 	wakeEvents wakeEventMap
 }
 
-// activityMap is the shared BPF map keyed by VM user ID. The monitor owns the
-// handle and closes it.
+// activityMap stores packet times by VM user ID.
 type activityMap interface {
-	// lookup returns the last monotonic packet time for one VM user ID. found is
-	// false when the VM has no packet entry yet.
+	// lookup returns found=false before the first packet.
 	lookup(userID uint32) (nanoseconds uint64, found bool, err error)
 	// delete removes the activity value for one released VM user ID.
 	delete(userID uint32) error
 	Close() error
 }
 
-// wakeStateMap is the shared BPF hash that holds the wake state of each VM user
-// ID. The monitor owns the handle and closes it.
+// wakeStateMap stores wake states by VM user ID.
 type wakeStateMap interface {
 	// setState writes one wake state for a VM user ID.
 	setState(userID, state uint32) error
@@ -128,33 +114,28 @@ type wakeStateMap interface {
 	Close() error
 }
 
-// wakeEventMap is the shared BPF ring buffer that carries wake events. The
-// monitor owns the handle and closes it.
+// wakeEventMap carries wake events from eBPF.
 type wakeEventMap interface {
 	// newReader opens one ring reader on the shared map.
 	newReader() (wakeEventReader, error)
 	Close() error
 }
 
-// wakeEventReader reads decoded wake events from the shared ring buffer. Close
-// unblocks a pending read.
+// wakeEventReader reads wake events. Close unblocks a pending read.
 type wakeEventReader interface {
 	// read returns the next event user ID and monotonic packet time.
 	read() (userID uint32, packetTimeNanoseconds uint64, err error)
 	Close() error
 }
 
-// activityProgram is one loaded program instance for one VM. The monitor owns
-// the handle and closes it, which also closes its TCX links.
+// activityProgram owns one VM program and its TCX link.
 type activityProgram interface {
-	// attach hooks the tap0 egress path inside the VM network namespace and
-	// returns the resolved tap0 interface index.
+	// attach hooks tap0 egress and returns its interface index.
 	attach(namespacePath string) (interfaceIndex int, err error)
 	Close() error
 }
 
-// activityLoader creates the kernel objects the monitor needs. A fake replaces
-// it in unit tests, so the tests do not need root.
+// activityLoader creates the required kernel objects.
 type activityLoader interface {
 	createSharedMaps(capacity uint32) (sharedMaps, error)
 	loadProgram(userID uint32, shared sharedMaps) (activityProgram, error)
@@ -210,8 +191,7 @@ func newActivityMonitor(config ActivityMonitorConfig, loader activityLoader) (*A
 	return monitor, nil
 }
 
-// runWakeReader reads wake events until the reader closes. It closes the event
-// channel once when it stops.
+// runWakeReader forwards events until the reader closes.
 func (monitor *ActivityMonitor) runWakeReader() {
 	defer close(monitor.workerDone)
 	defer close(monitor.wakeEvents)
@@ -224,9 +204,7 @@ func (monitor *ActivityMonitor) runWakeReader() {
 	}
 }
 
-// handleWakeEvent resolves the VM ID for a wake event and publishes it. It drops
-// an event for a released user ID. When the consumer is behind, it rearms the VM
-// instead of blocking, so a later packet notifies again.
+// handleWakeEvent drops stale events and rearms when the channel is full.
 func (monitor *ActivityMonitor) handleWakeEvent(userID uint32, packetTime uint64) {
 	monitor.mu.Lock()
 	virtualMachineID, resolved := monitor.byUserID[userID]
@@ -246,14 +224,12 @@ func (monitor *ActivityMonitor) handleWakeEvent(userID uint32, packetTime uint64
 	}
 }
 
-// NetworkWakeEvents returns the shared read-only channel of wake events. The
-// channel is closed once, when the monitor shuts down.
+// NetworkWakeEvents returns the wake event channel.
 func (monitor *ActivityMonitor) NetworkWakeEvents() <-chan vm.NetworkWakeEvent {
 	return monitor.wakeEvents
 }
 
-// readMonotonicNanoseconds reads CLOCK_MONOTONIC, the same clock as the eBPF
-// bpf_ktime_get_ns helper.
+// readMonotonicNanoseconds reads the clock used by bpf_ktime_get_ns.
 func readMonotonicNanoseconds() (uint64, error) {
 	var now unix.Timespec
 	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
@@ -271,10 +247,8 @@ func (monitor *ActivityMonitor) loadProgram(userID uint32) (activityProgram, err
 	return program, nil
 }
 
-// EnsureAttachment makes one VM have an activity attachment for its tap0. It is
-// idempotent for the same VM, user ID, namespace, and interface index. It
-// replaces the attachment when tap0 was recreated with a new index. Blocking
-// kernel calls run outside the lock.
+// EnsureAttachment attaches activity tracking to a VM tap0. It replaces a stale
+// attachment when tap0 has a new interface index.
 func (monitor *ActivityMonitor) EnsureAttachment(request AttachmentRequest) error {
 	monitor.mu.Lock()
 	existing := monitor.attachments[request.VirtualMachineID]
@@ -320,10 +294,7 @@ func (monitor *ActivityMonitor) EnsureAttachment(request AttachmentRequest) erro
 	return nil
 }
 
-// ReleaseAttachment closes the links and program of one VM, then removes its
-// activity value and wake state. It clears the wake state before the user ID can
-// be reused, so a stale event cannot wake a new VM. It accepts a VM that has no
-// attachment.
+// ReleaseAttachment releases the program, link, activity, and wake state for one VM.
 func (monitor *ActivityMonitor) ReleaseAttachment(virtualMachineID string) error {
 	monitor.mu.Lock()
 	released := monitor.attachments[virtualMachineID]
@@ -343,8 +314,7 @@ func (monitor *ActivityMonitor) ReleaseAttachment(virtualMachineID string) error
 	return errors.Join(closeError, deleteActivityError, deleteWakeError)
 }
 
-// ArmNetworkWake makes the next host-to-guest packet for the VM produce one wake
-// event. It needs an existing activity attachment with the matching user ID.
+// ArmNetworkWake makes the next host-to-guest packet send one wake event.
 func (monitor *ActivityMonitor) ArmNetworkWake(request vm.NetworkActivityRequest) error {
 	monitor.mu.Lock()
 	current := monitor.attachments[request.VirtualMachineID]
@@ -359,9 +329,7 @@ func (monitor *ActivityMonitor) ArmNetworkWake(request vm.NetworkActivityRequest
 	return nil
 }
 
-// DisarmNetworkWake stops wake events for the VM. It is idempotent and it is a
-// no-op for a VM that has no attachment, because release already cleared its
-// wake state.
+// DisarmNetworkWake stops wake events for the VM.
 func (monitor *ActivityMonitor) DisarmNetworkWake(request vm.NetworkActivityRequest) error {
 	monitor.mu.Lock()
 	current := monitor.attachments[request.VirtualMachineID]
@@ -376,10 +344,8 @@ func (monitor *ActivityMonitor) DisarmNetworkWake(request vm.NetworkActivityRequ
 	return nil
 }
 
-// LastNetworkActivity returns the last packet time for one VM. It returns the
-// attachment baseline with HasBeenSeen false before the first packet, and
-// vm.ErrNotFound when the VM has no attachment. It reads CLOCK_MONOTONIC right
-// after the map lookup and converts the age to a wall-clock time.
+// LastNetworkActivity returns the last packet time for one VM. Before the first
+// packet, it returns the attachment time with HasBeenSeen set to false.
 func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
 	monitor.mu.Lock()
 	current := monitor.attachments[request.VirtualMachineID]
@@ -405,8 +371,7 @@ func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request v
 	if nowMonotonic >= value {
 		ageNanoseconds = nowMonotonic - value
 	} else {
-		// A map time ahead of the clock must never read as fresh activity that
-		// could delay sleep. Clamp it to zero age and warn.
+		// Treat a future map time as current activity.
 		monitor.logger.Warn("activity time is in the future",
 			"virtual_machine_id", request.VirtualMachineID, "user_id", request.UserID)
 	}
@@ -415,9 +380,7 @@ func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request v
 	return vm.NetworkActivity{LastSeenAt: lastSeenAt, HasBeenSeen: true, LastPacketMonotonicNanoseconds: value}, nil
 }
 
-// Close stops the wake reader, waits for the worker, then releases every
-// attachment and the three shared maps. It is the one owner of the monitor
-// shutdown and is safe to call more than once.
+// Close stops event delivery and releases all monitor resources.
 func (monitor *ActivityMonitor) Close() error {
 	var closeErrors []error
 	monitor.closeOnce.Do(func() {

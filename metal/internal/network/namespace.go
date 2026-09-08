@@ -32,10 +32,7 @@ func ensureNamespaceBase(ctx context.Context, request request) error {
 	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up"); err != nil {
 		return err
 	}
-	// Pin the guest neighbour entry. The guest MAC is fixed, so this never changes.
-	// A sleeping VM has no process to answer ARP, and the ARP itself cannot wake
-	// it, so without a static entry a wake packet cannot resolve the guest MAC and
-	// never reaches tap0. The static entry keeps a sleeping VM reachable.
+	// Keep wake packets routable while the guest cannot answer ARP.
 	return platform.Run(ctx, "ip", "-n", namespace, "neigh", "replace",
 		guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
 }

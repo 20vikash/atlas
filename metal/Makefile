@@ -13,8 +13,8 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$(VE
 
 .PHONY: build clean openapi version generate-network
 
-# generate-network regenerates only the eBPF network activity artifacts. It
-# needs Clang. A normal build does not run it, because the results are committed.
+# Regenerate the eBPF network files. This needs Clang.
+# Normal builds use the committed files.
 generate-network:
 	go generate ./internal/network/...
 

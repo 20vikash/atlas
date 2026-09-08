@@ -8,13 +8,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// currentNamespacePath is the network namespace of the running thread.
-// /proc/thread-self points to the calling thread, not the main thread, so it is
-// correct after runtime.LockOSThread and after a Setns on this thread.
+// currentNamespacePath follows the calling thread after Setns.
 const currentNamespacePath = "/proc/thread-self/ns/net"
 
-// namespaceSyscalls are the operations that enter and leave a network
-// namespace. A fake replaces them in unit tests, so the tests need no root.
+// namespaceSyscalls enters and leaves a network namespace.
 type namespaceSyscalls interface {
 	open(path string) (int, error)
 	setNamespace(fileDescriptor int) error
@@ -23,13 +20,8 @@ type namespaceSyscalls interface {
 	unlockThread()
 }
 
-// inNamespace runs callback inside the network namespace at path. It locks the
-// OS thread first, so no other goroutine runs in the wrong namespace. It
-// restores the original namespace on every path where it entered the target.
-//
-// If restore fails, the thread stays locked and is never unlocked. The Go
-// runtime then discards the thread instead of reusing it in the wrong
-// namespace.
+// inNamespace runs callback in a network namespace. If restore fails, the
+// thread stays locked so Go cannot reuse it in the wrong namespace.
 func inNamespace(syscalls namespaceSyscalls, path string, callback func() error) error {
 	syscalls.lockThread()
 	safeToReuseThread := true
@@ -65,7 +57,7 @@ func inNamespace(syscalls namespaceSyscalls, path string, callback func() error)
 	return callbackError
 }
 
-// osNamespaceSyscalls enters real network namespaces.
+// osNamespaceSyscalls changes real network namespaces.
 type osNamespaceSyscalls struct{}
 
 func (osNamespaceSyscalls) open(path string) (int, error) {

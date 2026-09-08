@@ -7,9 +7,7 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-// TestActivitySpecMatchesSource confirms the embedded object still matches the C
-// source. It fails when bpf2go output is stale for the map, program, or the
-// rewritable user ID constant.
+// TestActivitySpecMatchesSource checks the generated object interface used by Go.
 func TestActivitySpecMatchesSource(t *testing.T) {
 	spec, err := loadActivity()
 	if err != nil {
@@ -65,8 +63,7 @@ func TestActivitySpecMatchesSource(t *testing.T) {
 	}
 }
 
-// TestWakeEventLayout confirms the generated wake event matches the C struct, so
-// the ring reader decodes the user ID and packet time at the right offsets.
+// TestWakeEventLayout checks the C and Go wake event layouts.
 func TestWakeEventLayout(t *testing.T) {
 	if size := unsafe.Sizeof(activityWakeEvent{}); size != 16 {
 		t.Errorf("wake event size = %d, want 16", size)

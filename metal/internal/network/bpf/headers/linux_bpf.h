@@ -20,8 +20,7 @@ typedef unsigned long long __u64;
 #define TCX_PASS 0
 #define TCX_DROP 2
 
-/* The TCX program context. The activity program does not read packet bytes, so
-   the type stays opaque. */
+/* The TCX program context. The activity program passes it to packet helpers. */
 struct __sk_buff;
 
 #endif /* ATLAS_LINUX_BPF_H */

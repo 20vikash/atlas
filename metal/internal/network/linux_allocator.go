@@ -26,8 +26,7 @@ type meshRegistrar interface {
 	Remove(ctx context.Context, address, interfaceName string) error
 }
 
-// activityAttacher attaches and releases VM packet activity tracking on tap0,
-// and reports the last packet time.
+// activityAttacher manages VM packet activity tracking.
 type activityAttacher interface {
 	EnsureAttachment(request AttachmentRequest) error
 	ReleaseAttachment(virtualMachineID string) error
@@ -40,9 +39,7 @@ type LinuxAllocator struct {
 	activity activityAttacher
 }
 
-// NewLinuxAllocator returns a Linux network allocator. It attaches activity
-// tracking on every VM tap0, so a sleepy host never runs without it. The mesh
-// registrar can be a real Mesh or DisabledMesh for a host without Atlas WG Mesh.
+// NewLinuxAllocator returns a Linux network allocator.
 func NewLinuxAllocator(mesh meshRegistrar, activity activityAttacher) *LinuxAllocator {
 	return &LinuxAllocator{mesh: mesh, activity: activity}
 }
@@ -173,7 +170,7 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 // registration names.
 func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
 	virtualMachineID := request.VirtualMachineID
-	// Release the TCX links before the namespace delete removes tap0.
+	// Release TCX links before tap0 is removed.
 	activityError := allocator.activity.ReleaseAttachment(virtualMachineID)
 	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
 	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
@@ -221,8 +218,7 @@ func (allocator *LinuxAllocator) removeMeshRegistration(ctx context.Context, use
 	return nil
 }
 
-// LastNetworkActivity returns the last packet time for one VM. It is the
-// activity source that the VM manager reads.
+// LastNetworkActivity returns the last packet time for one VM.
 func (allocator *LinuxAllocator) LastNetworkActivity(ctx context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
 	return allocator.activity.LastNetworkActivity(ctx, request)
 }

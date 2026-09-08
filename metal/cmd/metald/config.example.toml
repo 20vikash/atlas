@@ -35,8 +35,7 @@ binary_path = "/usr/local/bin/atlas-wg-mesh"
 uplink = "eno1.1878"
 
 [sleep]
-# Automatic sleep is off by default. It applies only to VMs with is_sleepy set.
+# Enable automatic sleep for VMs with is_sleepy set.
 enabled = false
-# One Metal-wide idle timeout for every sleepy VM on this host. When enabled, it
-# must be a positive Go duration. A VM request or record never carries a timeout.
+# Idle timeout for all sleepy VMs. Use a positive Go duration when enabled.
 idle_timeout = "30m"
