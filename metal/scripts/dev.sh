@@ -14,8 +14,6 @@ FC_VER=${METALD_FC_VERSION:-v1.16.1}
 LISTEN=${METALD_LISTEN:-127.0.0.1:8080}
 AUTH_TOKEN=${METALD_AUTH_TOKEN:-metal-development-token}
 WG_MESH_ENABLED=${METALD_WG_MESH_ENABLED:-false}
-SLEEP_ENABLED=${METALD_SLEEP_ENABLED:-false}
-SLEEP_IDLE_TIMEOUT=${METALD_SLEEP_IDLE_TIMEOUT:-30m}
 IMAGE_DIR=$WORKDIR/images
 VAR_DIR=$WORKDIR/machines
 BIN=$WORKDIR/bin
@@ -152,9 +150,6 @@ pool = "$POOL"
 enabled = $WG_MESH_ENABLED
 uplink  = "$uplink"
 
-[sleep]
-enabled = $SLEEP_ENABLED
-idle_timeout = "$SLEEP_IDLE_TIMEOUT"
 EOF
 
 step "ready: run metald serve --config $CONFIG"

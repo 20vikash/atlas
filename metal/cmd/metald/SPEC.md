@@ -63,8 +63,6 @@ The host service receives the mesh, WireGuard, image, VM, storage, and reconcile
 | `wireguard.interface` | `wg0` | Underlay interface for managed peers and Atlas WG Mesh. |
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
 | `wg_mesh.uplink` | none | Discovery uplink. Required when the mesh is enabled. |
-| `sleep.enabled` | `false` | Enable automatic sleep for sleepy VMs. |
-| `sleep.idle_timeout` | none | Idle timeout for all sleepy VMs. Positive when sleep is enabled. |
 
 See `config.example.toml` for the complete file format.
 

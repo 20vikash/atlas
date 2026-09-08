@@ -46,7 +46,7 @@ Records, generations, reconciliation, and cleanup: [internal/vm/SPEC.md](../inte
 
 ## Sleepy VMs
 
-A VM can sleep after the host idle timeout when `is_sleepy` and `[sleep].enabled` are true. The timeout is one host value. It is not part of a VM request or record. See [testing.md](testing.md) for the configuration.
+A VM can sleep after its own idle timeout when `is_sleepy` is true and `idle_timeout_seconds` is positive. Both belong to the compute settings of that VM.
 
 ```text
 running -> idle -> arm wake -> warm stop -> sleeping

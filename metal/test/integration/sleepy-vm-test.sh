@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prove run, idle sleep, packet wake, and guest state continuity:
-#   sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
+#   sudo metald serve --config /tmp/metald/metald.toml
 #   sudo test/integration/sleepy-vm-test.sh
+# The sleep policy is per VM. This test sets it in the create request.
 # Pin the guest neighbour entry to keep the VM awake during boot.
 set -euo pipefail
 
@@ -12,6 +13,8 @@ ssh_user=${METALD_SSH_USER:-root}
 authentication_token=${METALD_AUTH_TOKEN:-metal-development-token}
 # The poll budget must exceed the Metal-wide idle timeout with slack.
 sleep_poll_seconds=${METALD_SLEEP_POLL_SECONDS:-120}
+# The per-VM idle timeout. The poll budget above must exceed it with slack.
+idle_timeout_seconds=${METALD_SLEEP_IDLE_TIMEOUT_SECONDS:-30}
 host_architecture=$(uname -m)
 image_base_url=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$host_architecture
 
@@ -57,9 +60,12 @@ request_body=$(jq -n \
 	--arg kernel_url "$kernel_url" --arg kernel_sha256 "$kernel_sha256" \
 	--arg architecture "$architecture" --arg ssh_key "$public_key" \
 	--arg hostname "$requested_virtual_machine_id" \
+	--argjson idle_timeout_seconds "$idle_timeout_seconds" \
 	'{
-		is_sleepy: true,
-		compute: {virtual_cpu_count: 1, memory_mib: 256},
+		compute: {
+			virtual_cpu_count: 1, memory_mib: 256,
+			is_sleepy: true, idle_timeout_seconds: $idle_timeout_seconds
+		},
 		disk: {size_mib: 1024, throughput_mibps: 0, iops: 0},
 		image: {
 			ref: "ubuntu", architecture: $architecture,

@@ -87,7 +87,7 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 - Owner: `activity.Monitor` tracks activity and wake events. `vm.Manager` controls sleep and wake.
 - Safe checks:
   - Read `GET /v1/vms/{id}`. Check `observed.state`, `observed.sleeping_since`, `observed.last_network_activity_at`, and `observed.error`.
-  - Confirm that `sleep.enabled` is true, `sleep.idle_timeout` is positive, and the VM has `is_sleepy`.
+  - Confirm that the VM has `is_sleepy` and a positive `idle_timeout_seconds` under `desired.compute`.
   - Run `systemctl show -p MainPID --value metal-vm@<id>.service`. A sleeping VM has a value of `0`.
   - Run `ls <base_dir>/machines/<id>/memory-snapshots/*/manifest.json`.
   - Run `bpftool map show`. Dump `activity_by_user_id` and `wake_state_by_user_id` with `bpftool map dump name <map>`. Use the VM user ID as the key.
@@ -101,5 +101,5 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
   ```
 
   Only host-to-guest TCP traffic updates activity or wakes a VM. The trigger packet can be lost while Firecracker starts.
-- Safe recovery: Retry the TCP connection. A metald restart rearms each sleeping VM during reconciliation. Correct a wrong `idle_timeout` or missing `is_sleepy` value.
+- Safe recovery: Retry the TCP connection. A metald restart rearms each sleeping VM during reconciliation. Correct a wrong `idle_timeout_seconds` or missing `is_sleepy` value.
 - Do not: Do not delete a sleep manifest or a snapshot generation of a sleeping VM. Do not start Firecracker directly to wake a VM.

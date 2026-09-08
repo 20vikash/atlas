@@ -51,7 +51,7 @@ The tests attach the eBPF program to `tap0` in a temporary namespace. They verif
 This test needs Linux 6.6 or newer. Start metald with a short sleep timeout, then run the test:
 
 ```sh
-sudo env METALD_SLEEP_ENABLED=true METALD_SLEEP_IDLE_TIMEOUT=30s metald serve --config /tmp/metald/metald.toml
+sudo metal/dist/metald-linux-amd64 serve --config /tmp/metald/metald.toml
 sudo metal/test/integration/sleepy-vm-test.sh
 ```
 
@@ -78,10 +78,8 @@ The test runs this cycle twice. It verifies that the same guest token and proces
 | `zfs.pool` | `metal` | ZFS pool name. |
 | `wg_mesh.enabled` | `true` | Atlas WG Mesh integration. Set `false` for a test host with no mesh; VMs then get no mesh connectivity. |
 | `wg_mesh.uplink` | none | Discovery interface. Required when mesh is enabled. |
-| `sleep.enabled` | `false` | Enable automatic sleep for sleepy VMs. |
-| `sleep.idle_timeout` | none | Idle timeout for all sleepy VMs. Must be positive when sleep is enabled. |
 
-A VM request and record contain only `is_sleepy`. The timeout applies to all sleepy VMs on the host.
+The sleep policy is per VM. A create request and a compute request carry `is_sleepy` and `idle_timeout_seconds`.
 
 ## Development environment
 
@@ -95,8 +93,7 @@ A VM request and record contain only `is_sleepy`. The timeout applies to all sle
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
 | `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
 | `METALD_WG_MESH_ENABLED` | `false` | Write `wg_mesh.enabled`. The development host boots without the mesh CLI by default. |
-| `METALD_SLEEP_ENABLED` | `false` | Write `sleep.enabled`. Enable it for a sleep test. |
-| `METALD_SLEEP_IDLE_TIMEOUT` | `30m` | Write `sleep.idle_timeout`. Use `1m` to watch a VM sleep. |
+| `METALD_SLEEP_IDLE_TIMEOUT_SECONDS` | `30` | The per-VM idle timeout the sleepy VM test requests. |
 | `METALD_IMAGE_VERSION` | `22.04` | Ubuntu version the guest image builder uses. |
 
 ## Manual access
