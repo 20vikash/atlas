@@ -25,8 +25,8 @@ type meshRegistrar interface {
 	Remove(ctx context.Context, address, interfaceName string) error
 }
 
-// activityAttacher manages VM packet activity tracking.
-type activityAttacher interface {
+// activityMonitor tracks and releases VM packet activity.
+type activityMonitor interface {
 	EnsureAttachment(request activity.AttachmentRequest) error
 	ReleaseAttachment(virtualMachineID string) error
 	LastNetworkActivity(ctx context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error)
@@ -34,13 +34,13 @@ type activityAttacher interface {
 
 // LinuxAllocator creates Linux network resources for virtual machines.
 type LinuxAllocator struct {
-	mesh     meshRegistrar
-	activity activityAttacher
+	mesh            meshRegistrar
+	activityMonitor activityMonitor
 }
 
 // NewLinuxAllocator returns a Linux network allocator.
-func NewLinuxAllocator(mesh meshRegistrar, attacher activityAttacher) *LinuxAllocator {
-	return &LinuxAllocator{mesh: mesh, activity: attacher}
+func NewLinuxAllocator(mesh meshRegistrar, activityMonitor activityMonitor) *LinuxAllocator {
+	return &LinuxAllocator{mesh: mesh, activityMonitor: activityMonitor}
 }
 
 // Ensure converges all host network resources to the requested state.
@@ -61,7 +61,7 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 	if err := allocator.converge(ctx, request); err != nil {
 		return vm.NetworkInterface{}, err
 	}
-	if err := allocator.activity.EnsureAttachment(activity.AttachmentRequest{
+	if err := allocator.activityMonitor.EnsureAttachment(activity.AttachmentRequest{
 		VirtualMachineID: request.VirtualMachineID,
 		UserID:           request.UserID,
 		NamespacePath:    namespacePath(request.VirtualMachineID),
@@ -165,7 +165,7 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
 	virtualMachineID := request.VirtualMachineID
 	// Release TCX links before tap0 is removed.
-	activityError := allocator.activity.ReleaseAttachment(virtualMachineID)
+	activityError := allocator.activityMonitor.ReleaseAttachment(virtualMachineID)
 	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
 	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
 
@@ -213,7 +213,7 @@ func (allocator *LinuxAllocator) removeMeshRegistration(ctx context.Context, use
 
 // LastNetworkActivity returns the last packet time for one VM.
 func (allocator *LinuxAllocator) LastNetworkActivity(ctx context.Context, request vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
-	return allocator.activity.LastNetworkActivity(ctx, request)
+	return allocator.activityMonitor.LastNetworkActivity(ctx, request)
 }
 
 var (

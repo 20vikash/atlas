@@ -11,31 +11,31 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// fakeActivityAttacher records the attach and release calls of the allocator.
-type fakeActivityAttacher struct {
+// fakeActivityMonitor records the attach and release calls of the allocator.
+type fakeActivityMonitor struct {
 	ensured  []activity.AttachmentRequest
 	released []string
 }
 
-func (attacher *fakeActivityAttacher) EnsureAttachment(request activity.AttachmentRequest) error {
+func (attacher *fakeActivityMonitor) EnsureAttachment(request activity.AttachmentRequest) error {
 	attacher.ensured = append(attacher.ensured, request)
 	return nil
 }
 
-func (attacher *fakeActivityAttacher) ReleaseAttachment(virtualMachineID string) error {
+func (attacher *fakeActivityMonitor) ReleaseAttachment(virtualMachineID string) error {
 	attacher.released = append(attacher.released, virtualMachineID)
 	return nil
 }
 
-func (attacher *fakeActivityAttacher) LastNetworkActivity(context.Context, vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
+func (attacher *fakeActivityMonitor) LastNetworkActivity(context.Context, vm.NetworkActivityRequest) (vm.NetworkActivity, error) {
 	return vm.NetworkActivity{}, nil
 }
 
 func TestNewLinuxAllocatorStoresTheActivityAttacher(t *testing.T) {
-	attacher := &fakeActivityAttacher{}
+	attacher := &fakeActivityMonitor{}
 	allocator := NewLinuxAllocator(nil, attacher)
-	if allocator.activity != attacher {
-		t.Error("the activity attacher was not stored")
+	if allocator.activityMonitor != attacher {
+		t.Error("the activity monitor was not stored")
 	}
 }
 
