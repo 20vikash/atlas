@@ -5,6 +5,8 @@ package network
 import (
 	"encoding/binary"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -15,6 +17,8 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"golang.org/x/sys/unix"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // sharedHashMap creates one shared hash map from the spec with the given
@@ -330,5 +334,111 @@ func TestWakeSurvivesRingPressure(t *testing.T) {
 	}
 	if _, ok := readWakeUserID(t, reader, time.Second); !ok {
 		t.Fatal("no wake event after the ring drained")
+	}
+}
+
+// readMonitorWake reads one wake event from the monitor channel, or reports false
+// when none arrives before the deadline.
+func readMonitorWake(events <-chan vm.NetworkWakeEvent, wait time.Duration) (vm.NetworkWakeEvent, bool) {
+	select {
+	case event, ok := <-events:
+		return event, ok
+	case <-time.After(wait):
+		return vm.NetworkWakeEvent{}, false
+	}
+}
+
+// setUpWakeNamespace prepares a namespace with a persistent tap0 and no reader.
+func setUpWakeNamespace(t *testing.T, namespace string) string {
+	t.Helper()
+	namespacePath := "/run/netns/" + namespace
+	runOrSkip(t, "ip", "netns", "add", namespace)
+	t.Cleanup(func() { _ = runQuietly("ip", "netns", "del", namespace) })
+	runOrSkip(t, "ip", "-n", namespace, "tuntap", "add", tapName, "mode", "tap")
+	runOrSkip(t, "ip", "-n", namespace, "addr", "add", "172.16.0.1/24", "dev", tapName)
+	runOrSkip(t, "ip", "-n", namespace, "link", "set", tapName, "up")
+	runOrSkip(t, "ip", "-n", namespace, "link", "set", "lo", "up")
+	runOrSkip(t, "ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf."+tapName+".disable_ipv6=1")
+	runOrSkip(t, "ip", "-n", namespace, "neigh", "replace", guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
+	return namespacePath
+}
+
+// TestNetworkWakeDeliversWithoutATapReader is the Phase 3 host proof. It arms a
+// VM with no Firecracker process, sends one host-to-guest TCP SYN, and reads one
+// Go wake event. It confirms deduplication, rearm, and that a reused user ID
+// cannot deliver a stale VM ID. It needs root.
+//
+//	sudo -E go test -tags integration -run TestNetworkWakeDeliversWithoutATapReader ./internal/network/
+func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+
+	namespacePath := setUpWakeNamespace(t, "metal-test-wake-deliver")
+	const userID = 100005
+
+	monitor, err := NewActivityMonitor(ActivityMonitorConfig{
+		UserIDRange: vm.DefaultUserIDRange,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+	t.Cleanup(func() { _ = monitor.Close() })
+
+	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-1", UserID: userID, NamespacePath: namespacePath}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	wakeRequest := vm.NetworkActivityRequest{VirtualMachineID: "vm-1", UserID: userID}
+	if err := monitor.ArmNetworkWake(wakeRequest); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+
+	// One armed packet delivers one Go event.
+	start := time.Now()
+	if err := trySendTcpSyn(namespacePath); err != nil {
+		t.Fatalf("send SYN: %v", err)
+	}
+	event, ok := readMonitorWake(monitor.NetworkWakeEvents(), 2*time.Second)
+	if !ok {
+		t.Fatal("no wake event was delivered")
+	}
+	if event.VirtualMachineID != "vm-1" || event.UserID != userID {
+		t.Fatalf("event = %+v", event)
+	}
+	t.Logf("wake latency %v", time.Since(start))
+
+	// A second packet is deduplicated until a rearm.
+	if err := trySendTcpSyn(namespacePath); err != nil {
+		t.Fatalf("send SYN: %v", err)
+	}
+	if _, ok := readMonitorWake(monitor.NetworkWakeEvents(), 300*time.Millisecond); ok {
+		t.Fatal("a second wake event arrived without a rearm")
+	}
+
+	// A rearm allows one more event.
+	if err := monitor.ArmNetworkWake(wakeRequest); err != nil {
+		t.Fatalf("rearm: %v", err)
+	}
+	if err := trySendTcpSyn(namespacePath); err != nil {
+		t.Fatalf("send SYN: %v", err)
+	}
+	if _, ok := readMonitorWake(monitor.NetworkWakeEvents(), 2*time.Second); !ok {
+		t.Fatal("no wake event after rearm")
+	}
+
+	// Release the VM and reuse its user ID for a new VM that is not armed. No stale
+	// event may reach the new VM.
+	if err := monitor.ReleaseAttachment("vm-1"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if err := monitor.EnsureAttachment(AttachmentRequest{VirtualMachineID: "vm-2", UserID: userID, NamespacePath: namespacePath}); err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+	if err := trySendTcpSyn(namespacePath); err != nil {
+		t.Fatalf("send SYN: %v", err)
+	}
+	if event, ok := readMonitorWake(monitor.NetworkWakeEvents(), 500*time.Millisecond); ok {
+		t.Fatalf("a reused user ID delivered a stale wake for VM %s", event.VirtualMachineID)
 	}
 }

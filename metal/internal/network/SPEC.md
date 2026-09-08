@@ -89,6 +89,20 @@ The monitor owns the shared map, one program instance for each VM, and the egres
 
 metald does not pin the programs or maps. A metald restart attaches new links and starts a new activity baseline. The baseline is the attachment time, so a restart can delay sleep by one idle timeout, which is safe. It never causes an early sleep.
 
+## Packet wake
+
+A sleeping VM has no Firecracker process to notice a packet, so the same eBPF program signals a wake. The monitor owns two more shared maps: `wake_state_by_user_id`, a hash of the wake state of each VM, and `wake_events`, a ring buffer.
+
+```text
+armed VM: host-to-guest TCP -> tap0 egress hook -> ring event -> Go worker -> wake channel
+```
+
+The manager arms a VM when it sleeps and disarms it when it wakes. `ArmNetworkWake` writes `armed` for a VM that has an attachment. On the next host-to-guest TCP segment, the program submits one wake event and sets the state to `notified`, so one armed VM produces one event until the manager rearms it. An atomic compare and swap makes concurrent packets on many CPUs submit only one event.
+
+One worker reads the ring buffer, resolves the user ID to the current VM ID under a short lock, and publishes a `NetworkWakeEvent` on a bounded channel. It drops an event for a user ID that has no attachment, so a released and reused user ID cannot deliver a stale VM ID. When the consumer is behind, the worker rearms the VM instead of blocking, so a later packet notifies again.
+
+`ReleaseAttachment` clears the wake state before the user ID can be reused. `Close` stops the reader, waits for the worker, then closes the three maps. The trigger packet can be lost while no process has `tap0` open, so a client must retry, usually over TCP.
+
 ## Atlas WG Mesh
 
 Atlas WG Mesh assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.
