@@ -8,9 +8,17 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"structs"
 
 	"github.com/cilium/ebpf"
 )
+
+type activityWakeEvent struct {
+	_          structs.HostLayout
+	UserId     uint32
+	_          [4]byte
+	PacketTime uint64
+}
 
 // loadActivity returns the embedded CollectionSpec for activity.
 func loadActivity() (*ebpf.CollectionSpec, error) {
@@ -62,6 +70,7 @@ type activityProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type activityMapSpecs struct {
 	ActivityByUserId  *ebpf.MapSpec `ebpf:"activity_by_user_id"`
+	WakeEvents        *ebpf.MapSpec `ebpf:"wake_events"`
 	WakeStateByUserId *ebpf.MapSpec `ebpf:"wake_state_by_user_id"`
 }
 
@@ -69,6 +78,7 @@ type activityMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type activityVariableSpecs struct {
+	UnusedWakeEvent      *ebpf.VariableSpec `ebpf:"unused_wake_event"`
 	VirtualMachineUserId *ebpf.VariableSpec `ebpf:"virtual_machine_user_id"`
 }
 
@@ -93,12 +103,14 @@ func (o *activityObjects) Close() error {
 // It can be passed to loadActivityObjects or ebpf.CollectionSpec.LoadAndAssign.
 type activityMaps struct {
 	ActivityByUserId  *ebpf.Map `ebpf:"activity_by_user_id"`
+	WakeEvents        *ebpf.Map `ebpf:"wake_events"`
 	WakeStateByUserId *ebpf.Map `ebpf:"wake_state_by_user_id"`
 }
 
 func (m *activityMaps) Close() error {
 	return _ActivityClose(
 		m.ActivityByUserId,
+		m.WakeEvents,
 		m.WakeStateByUserId,
 	)
 }
@@ -107,6 +119,7 @@ func (m *activityMaps) Close() error {
 //
 // It can be passed to loadActivityObjects or ebpf.CollectionSpec.LoadAndAssign.
 type activityVariables struct {
+	UnusedWakeEvent      *ebpf.Variable `ebpf:"unused_wake_event"`
 	VirtualMachineUserId *ebpf.Variable `ebpf:"virtual_machine_user_id"`
 }
 

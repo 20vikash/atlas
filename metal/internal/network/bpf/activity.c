@@ -17,6 +17,11 @@ struct {
 	__type(value, __u64);
 } activity_by_user_id SEC(".maps");
 
+/* Wake states for one VM user ID. A missing key means disarmed. */
+#define WAKE_DISARMED 0
+#define WAKE_ARMED 1
+#define WAKE_NOTIFIED 2
+
 /* wake_state_by_user_id holds the wake state of each VM user ID. A missing key
    means disarmed. Go arms a sleeping VM and disarms a running VM. metald sets the
    real capacity at load time. */
@@ -26,6 +31,24 @@ struct {
 	__type(key, __u32);
 	__type(value, __u32);
 } wake_state_by_user_id SEC(".maps");
+
+/* wake_event carries one wake signal to Go. It holds the VM user ID and the
+   monotonic packet time only. It never holds packet bytes, addresses, or ports. */
+struct wake_event {
+	__u32 user_id;
+	__u64 packet_time;
+};
+
+/* Force bpf2go to emit the Go type for wake_event. The ring buffer map carries
+   no value type, so without this anchor the type is pruned from BTF. */
+struct wake_event *unused_wake_event __attribute__((unused));
+
+/* wake_events is the shared ring buffer that carries wake events to Go. The size
+   is the byte length of the ring. One event per armed VM fits many times over. */
+struct {
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+	__uint(max_entries, 1 << 16);
+} wake_events SEC(".maps");
 
 /* virtual_machine_user_id is the map key for this program instance. metald
    rewrites it before load, so one instance serves one VM. */
@@ -54,7 +77,8 @@ static __always_inline int is_tcp(struct __sk_buff *skb) {
 }
 
 /* record_activity stores the current time for one VM on each host-to-guest TCP
-   segment. The loader attaches it to the tap0 egress hook only, which carries
+   segment. When the VM wake state is armed, it submits one wake event to the ring
+   buffer. The loader attaches it to the tap0 egress hook only, which carries
    host-to-guest traffic. It reads the ethertype and the IP protocol to select
    TCP, but it does not change the packet, and it always returns TCX_NEXT. */
 SEC("tc")
@@ -65,6 +89,18 @@ int record_activity(struct __sk_buff *skb) {
 	__u32 key = virtual_machine_user_id;
 	__u64 now = bpf_ktime_get_ns();
 	bpf_map_update_elem(&activity_by_user_id, &key, &now, BPF_ANY);
+
+	__u32 *state = bpf_map_lookup_elem(&wake_state_by_user_id, &key);
+	if (!state || *state != WAKE_ARMED)
+		return TCX_NEXT;
+
+	struct wake_event *event = bpf_ringbuf_reserve(&wake_events, sizeof(*event), 0);
+	if (!event)
+		return TCX_NEXT;
+
+	event->user_id = key;
+	event->packet_time = now;
+	bpf_ringbuf_submit(event, 0);
 	return TCX_NEXT;
 }
 

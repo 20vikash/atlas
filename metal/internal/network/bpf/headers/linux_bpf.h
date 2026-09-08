@@ -8,6 +8,7 @@ typedef unsigned long long __u64;
 
 /* BPF map types used by this module. */
 #define BPF_MAP_TYPE_HASH 1
+#define BPF_MAP_TYPE_RINGBUF 27
 
 /* Flags for bpf_map_update_elem. */
 #define BPF_ANY 0

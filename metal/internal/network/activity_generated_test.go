@@ -2,6 +2,7 @@ package network
 
 import (
 	"testing"
+	"unsafe"
 
 	"github.com/cilium/ebpf"
 )
@@ -43,6 +44,14 @@ func TestActivitySpecMatchesSource(t *testing.T) {
 		t.Errorf("wake state map value size = %d, want 4", wakeState.ValueSize)
 	}
 
+	wakeEvents := spec.Maps["wake_events"]
+	if wakeEvents == nil {
+		t.Fatal("map wake_events is missing")
+	}
+	if wakeEvents.Type != ebpf.RingBuf {
+		t.Errorf("wake events map type = %v, want RingBuf", wakeEvents.Type)
+	}
+
 	program := spec.Programs["record_activity"]
 	if program == nil {
 		t.Fatal("program record_activity is missing")
@@ -53,5 +62,19 @@ func TestActivitySpecMatchesSource(t *testing.T) {
 
 	if spec.Variables["virtual_machine_user_id"] == nil {
 		t.Error("variable virtual_machine_user_id is missing")
+	}
+}
+
+// TestWakeEventLayout confirms the generated wake event matches the C struct, so
+// the ring reader decodes the user ID and packet time at the right offsets.
+func TestWakeEventLayout(t *testing.T) {
+	if size := unsafe.Sizeof(activityWakeEvent{}); size != 16 {
+		t.Errorf("wake event size = %d, want 16", size)
+	}
+	if offset := unsafe.Offsetof(activityWakeEvent{}.UserId); offset != 0 {
+		t.Errorf("user id offset = %d, want 0", offset)
+	}
+	if offset := unsafe.Offsetof(activityWakeEvent{}.PacketTime); offset != 8 {
+		t.Errorf("packet time offset = %d, want 8", offset)
 	}
 }
