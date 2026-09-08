@@ -246,6 +246,14 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
 	)
+	// The wake worker restores a sleeping VM when a host-to-guest packet arms its
+	// wake. The activity monitor produces the events. The VM reconcile pass arms
+	// each sleeping VM, so a metald restart rearms them on its first pass.
+	networkWakeReconciler := reconciler.NewNetworkWakeReconciler(
+		virtualMachineManager,
+		activityMonitor.NetworkWakeEvents(),
+		reconciler.NetworkWakeConfig{Logger: logger},
+	)
 	wakeReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
@@ -276,5 +284,6 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	server.Listener = listener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
+	daemon.StartWorker(networkWakeReconciler.Run)
 	return daemon.Serve(server)
 }
