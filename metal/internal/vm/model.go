@@ -19,8 +19,7 @@ type Specification struct {
 	Hostname        string               `json:"hostname"`
 	UserData        string               `json:"user_data"`
 	Metadata        map[string]string    `json:"metadata"`
-	// IsSleepy lets the host sleep an idle VM. The zero value keeps a VM awake, so
-	// old create requests stay non-sleepy.
+	// IsSleepy allows automatic sleep for an idle VM.
 	IsSleepy bool `json:"is_sleepy"`
 }
 
@@ -59,8 +58,7 @@ type NetworkConfiguration struct {
 	Egress                        Egress `json:"egress"`
 }
 
-// SameReservation reports whether two specifications reserve the same VM. It
-// ignores image transport URLs, because those are signed and rotate on their own.
+// SameReservation reports whether two specifications reserve the same VM.
 func (specification Specification) SameReservation(other Specification) bool {
 	return specification.VirtualCPUCount == other.VirtualCPUCount &&
 		specification.MemoryMiB == other.MemoryMiB &&
@@ -78,9 +76,7 @@ func (specification Specification) SameReservation(other Specification) bool {
 		maps.Equal(specification.Metadata, other.Metadata)
 }
 
-// RefreshImageSource replaces expired image transport URLs and caching intent,
-// so a repeated create request can carry fresh signed URLs without changing the
-// reservation.
+// RefreshImageSource replaces image URLs and caching intent.
 func (specification Specification) RefreshImageSource(other Specification) Specification {
 	specification.Image.RootfsURL = other.Image.RootfsURL
 	specification.Image.KernelURL = other.Image.KernelURL
@@ -90,9 +86,7 @@ func (specification Specification) RefreshImageSource(other Specification) Speci
 	return specification
 }
 
-// Egress controls internet reachability for a VM. It does not control mesh
-// reachability. A VM keeps its private network attachment for every mode except
-// EgressNone.
+// Egress controls internet reachability without changing mesh access.
 type Egress string
 
 const (
@@ -140,8 +134,7 @@ const (
 	StateStopped State = "stopped"
 	// StateFailed means the runtime stopped the guest unexpectedly.
 	StateFailed State = "failed"
-	// StateSleeping means the guest is asleep. Its memory is in a saved snapshot
-	// and no Firecracker process runs. It is an observed state only.
+	// StateSleeping means the guest memory is in a snapshot and no process runs.
 	StateSleeping State = "sleeping"
 	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"
