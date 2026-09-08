@@ -1,4 +1,5 @@
 local pages = require("pages")
+local auto_proxy = require("auto_proxy")
 
 local sites = ngx.shared.sites
 
@@ -23,6 +24,16 @@ end
 -- Route reserved control subdomains before the site map.
 if atlas_control_subdomains and atlas_control_subdomains[subdomain] then
 	ngx.var.vm_upstream = "http://127.0.0.1:9000"
+	return
+end
+
+local virtual_machine_address = auto_proxy.get_virtual_machine_address(
+	subdomain,
+	atlas_auto_proxy_address_prefix,
+	atlas_auto_proxy_host_prefixes
+)
+if virtual_machine_address then
+	ngx.var.vm_upstream = "http://[" .. virtual_machine_address .. "]:80"
 	return
 end
 

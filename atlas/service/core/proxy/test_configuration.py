@@ -25,6 +25,7 @@ PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----"
 class _FakeSettings:
 	def __init__(self) -> None:
 		self.wildcard_domain = "par-1.example.com"
+		self.region_id = 1
 		self.proxy_jwks_url = "https://issuer.example.com/jwks.json"
 		self.proxy_jwks_audience_id = "atlas-proxy-control"
 		self.wildcard_tls_expires_on = None
@@ -70,6 +71,8 @@ class TestProxyConfiguration(UnitTestCase):
 
 		self.assertEqual(document["control"]["domain"], "proxy.par-1.example.com")
 		self.assertEqual(document["control"]["node_domain"], "proxy-001.par-1.example.com")
+		self.assertEqual(document["auto_proxy"]["address_prefix"], "fdaa:1")
+		self.assertEqual(document["auto_proxy"]["host_prefixes"], ["site-", "*-vm-"])
 		self.assertEqual(document["tls"]["wildcard_domain"], "*.par-1.example.com")
 		self.assertEqual(document["tls"]["fullchain_pem"].strip(), CERTIFICATE)
 		self.assertEqual(document["tls"]["private_key_pem"].strip(), PRIVATE_KEY)

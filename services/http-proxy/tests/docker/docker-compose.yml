@@ -14,6 +14,7 @@ services:
     depends_on:
       - vm-a
       - vm-b
+      - vm-auto
       - vm-bad
       - tls-vm
 
@@ -63,6 +64,17 @@ services:
     networks:
       sixnet:
         ipv6_address: fd00:a71a:5::7a
+
+  vm-auto:
+    build:
+      context: fixtures
+      dockerfile: upstream.Dockerfile
+    environment:
+      UPSTREAM_NAME: vm-auto
+    networks:
+      sixnet:
+        # This address matches site-50000-2a with prefix fd00:a71a.
+        ipv6_address: fd00:a71a:5::2a
 
   vm-bad:
     build:

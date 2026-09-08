@@ -35,6 +35,8 @@ REGION = "test"
 ZONE = "test.x.frappe.dev"
 VM_A = "fd00:a71a:5::a"
 VM_B = "fd00:a71a:5::b"
+# The image seeds the prefixes that route these hosts to vm-auto.
+AUTO_PROXY_SUBDOMAINS = ("site-50000-2a", "bench-vm-50000-2a")
 
 
 def admin(method: str, path: str, body: str | None = None) -> tuple[int, str]:
@@ -159,6 +161,50 @@ def test_tombstone_serves_503():
 	status, body, _ = fetch("paused")
 	assert status == 503
 	assert "Site not found" in body
+
+
+def test_an_auto_proxy_host_reaches_the_vm_without_a_map_entry():
+	"""The label carries the tenant and the VM, so no route has to be published."""
+	admin("POST", "/v1/sites/sync", "{}")
+
+	for subdomain in AUTO_PROXY_SUBDOMAINS:
+		for scheme in ("https", "http"):
+			status, body, _ = fetch(subdomain, scheme=scheme)
+			assert status == 200, (subdomain, scheme)
+			assert "upstream=vm-auto" in body, (subdomain, scheme)
+			assert f"host={subdomain}.{ZONE}" in body, (subdomain, scheme)
+
+
+def test_a_map_entry_never_overrides_an_auto_proxy_host():
+	"""The computed address is the only owner, thus a stale entry cannot divert it."""
+	set_site(AUTO_PROXY_SUBDOMAINS[0], VM_A)
+
+	status, body, _ = fetch(AUTO_PROXY_SUBDOMAINS[0])
+
+	assert status == 200
+	assert "upstream=vm-auto" in body
+
+	admin("POST", "/v1/sites/sync", "{}")
+
+
+@pytest.mark.parametrize(
+	"subdomain",
+	[
+		"site-50000",
+		"site-zz-2a",
+		"site-7-12345678901234567",
+	],
+)
+def test_a_name_outside_the_auto_proxy_form_reads_the_site_map(subdomain: str):
+	"""A near miss must stay an ordinary site name, never a computed route."""
+	admin("POST", "/v1/sites/sync", "{}")
+	assert fetch(subdomain)[0] == 404
+
+	set_site(subdomain, VM_A)
+	status, body, _ = fetch(subdomain)
+
+	assert status == 200
+	assert "upstream=vm-a" in body
 
 
 def test_no_region_suffix_serves_404():

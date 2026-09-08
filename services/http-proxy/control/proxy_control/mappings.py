@@ -57,6 +57,10 @@ class MappingStore:
 	def _validate_key(self, kind: str, key: str) -> None:
 		if self.is_reserved(kind, key):
 			raise HTTPException(status_code=409, detail=f"{key} is reserved for the proxy control daemon")
+
+		if kind == "domains" and key.startswith("*"):
+			raise HTTPException(status_code=422, detail="custom-domain wildcard routes are not supported")
+
 		if kind == "domains" and self._is_wildcard_subdomain(key):
 			raise HTTPException(status_code=409, detail=f"{key} belongs in the site map")
 

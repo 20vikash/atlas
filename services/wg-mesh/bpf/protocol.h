@@ -38,7 +38,7 @@
 #define ATLAS_CONTROL_NEXT_HEADER 253
 
 /*
- * VM address layout: fd aa | region 16 | tenant 32 | reserved 32 | VM ID 32.
+ * VM address layout: fd aa | region 16 | tenant 32 | VM ID 64.
  * The tenant occupies bytes 4 to 7.
  */
 #define VM_PREFIX0 0xfd

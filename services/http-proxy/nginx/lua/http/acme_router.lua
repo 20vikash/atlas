@@ -1,5 +1,4 @@
 local domains_http = ngx.shared.domains_http
-local domain_lookup = require("domain_lookup")
 
 local host = ngx.var.host or ""
 host = host:lower():gsub(":%d+$", "")
@@ -11,7 +10,7 @@ if atlas_root_domain and atlas_root_domain ~= "" then
 	end
 end
 
-local backend = domain_lookup.get(domains_http, host)
+local backend = domains_http:get(host)
 if backend then
 	if backend:sub(1, 1) == "[" then
 		backend = backend:match("^(%b[])%:%d+$") or backend
