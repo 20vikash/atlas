@@ -6,8 +6,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// virtualMachineResponse pairs what was asked for with what the host reached.
-// The controller compares the 2 generations to know when a change is applied.
+// virtualMachineResponse pairs desired and observed VM state. Their generations
+// tell the controller when a change reached the host.
 type virtualMachineResponse struct {
 	ID       string                         `json:"id"`
 	Desired  desiredVirtualMachineResponse  `json:"desired"`
@@ -26,25 +26,29 @@ type desiredVirtualMachineResponse struct {
 	Guest             guestResponse               `json:"guest"`
 }
 
-// observedVirtualMachineResponse is what the host reached, and the operation
-// that is running when it has not.
+// observedVirtualMachineResponse is the state reached by the host and any
+// operation currently in progress.
 type observedVirtualMachineResponse struct {
-	Generation        uint64                  `json:"generation"`
-	RestartGeneration uint64                  `json:"restart_generation"`
-	State             string                  `json:"state"`
-	Phase             string                  `json:"phase,omitempty"`
-	OperationID       string                  `json:"operation_id,omitempty"`
-	OperationStarted  string                  `json:"operation_started_at,omitempty"`
-	UpdatedAt         string                  `json:"updated_at"`
-	Disk              observedDiskResponse    `json:"disk"`
-	Network           observedNetworkResponse `json:"network"`
-	Error             *operationErrorResponse `json:"error"`
+	Generation            uint64                  `json:"generation"`
+	RestartGeneration     uint64                  `json:"restart_generation"`
+	State                 string                  `json:"state"`
+	Phase                 string                  `json:"phase,omitempty"`
+	OperationID           string                  `json:"operation_id,omitempty"`
+	OperationStarted      string                  `json:"operation_started_at,omitempty"`
+	UpdatedAt             string                  `json:"updated_at"`
+	LastNetworkActivityAt string                  `json:"last_network_activity_at,omitempty"`
+	SleepingSince         string                  `json:"sleeping_since,omitempty"`
+	Disk                  observedDiskResponse    `json:"disk"`
+	Network               observedNetworkResponse `json:"network"`
+	Error                 *operationErrorResponse `json:"error"`
 }
 
-// computeResponse is the CPU and memory shape.
+// computeResponse is the CPU shape, memory shape, and sleep policy.
 type computeResponse struct {
-	VirtualCPUCount int `json:"virtual_cpu_count"`
-	MemoryMiB       int `json:"memory_mib"`
+	VirtualCPUCount    int  `json:"virtual_cpu_count"`
+	MemoryMiB          int  `json:"memory_mib"`
+	IsSleepy           bool `json:"is_sleepy"`
+	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"`
 }
 
 // guestResponse is the guest-facing configuration. User data is not returned.
@@ -54,8 +58,8 @@ type guestResponse struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// virtualMachineImageResponse identifies boot content. Transport URLs are not
-// returned, because they are signed and short lived.
+// virtualMachineImageResponse identifies boot content without signed,
+// short-lived transport URLs.
 type virtualMachineImageResponse struct {
 	Ref                         string                               `json:"ref"`
 	Architecture                string                               `json:"architecture"`
@@ -104,8 +108,8 @@ type observedNetworkResponse struct {
 	MAC string `json:"mac,omitempty"`
 }
 
-// operationErrorResponse is the safe part of a reconciliation failure. Local
-// detail stays on the host.
+// operationErrorResponse contains the public part of a reconciliation failure;
+// local detail stays on the host.
 type operationErrorResponse struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
@@ -121,8 +125,10 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			RestartGeneration: information.DesiredRestartGeneration,
 			State:             string(information.DesiredState),
 			Compute: computeResponse{
-				VirtualCPUCount: information.VirtualCPUCount,
-				MemoryMiB:       information.MemoryMiB,
+				VirtualCPUCount:    information.VirtualCPUCount,
+				MemoryMiB:          information.MemoryMiB,
+				IsSleepy:           information.IsSleepy,
+				IdleTimeoutSeconds: information.IdleTimeoutSeconds,
 			},
 			Disk: diskResponse{
 				ThroughputMiBps: information.DiskThroughputMiBps,
@@ -144,16 +150,18 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			},
 		},
 		Observed: observedVirtualMachineResponse{
-			Generation:        information.ObservedGeneration,
-			RestartGeneration: information.ObservedRestartGeneration,
-			State:             string(information.State),
-			Phase:             information.Phase,
-			OperationID:       information.OperationID,
-			OperationStarted:  formatRFC3339(information.OperationStartedAt),
-			UpdatedAt:         formatRFC3339(information.UpdatedAt),
-			Disk:              observedDiskResponse{UsedMiB: information.DiskUsedMiB},
-			Network:           observedNetworkResponse{MAC: information.MAC},
-			Error:             toOperationError(information.Error),
+			Generation:            information.ObservedGeneration,
+			RestartGeneration:     information.ObservedRestartGeneration,
+			State:                 string(information.State),
+			Phase:                 information.Phase,
+			OperationID:           information.OperationID,
+			OperationStarted:      formatRFC3339(information.OperationStartedAt),
+			UpdatedAt:             formatRFC3339(information.UpdatedAt),
+			LastNetworkActivityAt: formatRFC3339(information.LastNetworkActivityAt),
+			SleepingSince:         formatRFC3339(information.SleepingSince),
+			Disk:                  observedDiskResponse{UsedMiB: information.DiskUsedMiB},
+			Network:               observedNetworkResponse{MAC: information.MAC},
+			Error:                 toOperationError(information.Error),
 		},
 	}
 }
@@ -191,7 +199,7 @@ func toVirtualMachineImage(image vm.Image) virtualMachineImageResponse {
 	}
 }
 
-// toMemorySnapshotConfiguration converts a warm image shape into the response form.
+// toMemorySnapshotConfiguration converts a warm image shape to its response form.
 func toMemorySnapshotConfiguration(configuration *vm.MemorySnapshotConfiguration) *memorySnapshotConfigurationResponse {
 	if configuration == nil {
 		return nil

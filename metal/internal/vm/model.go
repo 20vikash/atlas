@@ -21,6 +21,33 @@ type Specification struct {
 	Metadata        map[string]string    `json:"metadata"`
 }
 
+// SleepPolicy is the automatic sleep policy of one virtual machine. It is intent,
+// not machine shape, so a change to it does not raise the specification
+// generation and does not make a published memory snapshot stale.
+type SleepPolicy struct {
+	// IsSleepy allows automatic sleep for an idle VM.
+	IsSleepy bool `json:"is_sleepy,omitempty"`
+	// IdleTimeoutSeconds is the idle time before sleep. Zero disables sleep.
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds,omitempty"`
+}
+
+// IsEnabled reports whether this policy can sleep a VM.
+func (policy SleepPolicy) IsEnabled() bool {
+	return policy.IsSleepy && policy.IdleTimeoutSeconds > 0
+}
+
+// IdleTimeout returns the idle time before sleep.
+func (policy SleepPolicy) IdleTimeout() time.Duration {
+	return time.Duration(policy.IdleTimeoutSeconds) * time.Second
+}
+
+// Compute is the requested CPU shape, memory shape, and sleep policy of one VM.
+type Compute struct {
+	VirtualCPUCount int
+	MemoryMiB       int
+	Sleep           SleepPolicy
+}
+
 // Image identifies immutable boot files and their transport URLs.
 type Image struct {
 	Name                        string                       `json:"name"`
@@ -57,7 +84,7 @@ type NetworkConfiguration struct {
 }
 
 // SameReservation reports whether two specifications reserve the same VM. It
-// ignores image transport URLs, because those are signed and rotate on their own.
+// ignores signed image URLs, which can rotate without changing the reservation.
 func (specification Specification) SameReservation(other Specification) bool {
 	return specification.VirtualCPUCount == other.VirtualCPUCount &&
 		specification.MemoryMiB == other.MemoryMiB &&
@@ -74,9 +101,8 @@ func (specification Specification) SameReservation(other Specification) bool {
 		maps.Equal(specification.Metadata, other.Metadata)
 }
 
-// RefreshImageSource replaces expired image transport URLs and caching intent,
-// so a repeated create request can carry fresh signed URLs without changing the
-// reservation.
+// RefreshImageSource replaces image URLs and caching intent so a retry can use
+// fresh signed URLs without changing the reservation.
 func (specification Specification) RefreshImageSource(other Specification) Specification {
 	specification.Image.RootfsURL = other.Image.RootfsURL
 	specification.Image.KernelURL = other.Image.KernelURL
@@ -86,9 +112,7 @@ func (specification Specification) RefreshImageSource(other Specification) Speci
 	return specification
 }
 
-// Egress controls internet reachability for a VM. It does not control mesh
-// reachability. A VM keeps its private network attachment for every mode except
-// EgressNone.
+// Egress controls internet reachability without changing mesh access.
 type Egress string
 
 const (
@@ -136,6 +160,9 @@ const (
 	StateStopped State = "stopped"
 	// StateFailed means the runtime stopped the guest unexpectedly.
 	StateFailed State = "failed"
+	// StateSleeping is observed only. The guest memory is in a snapshot and no
+	// Firecracker process runs.
+	StateSleeping State = "sleeping"
 	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"
 )
@@ -153,7 +180,7 @@ func IsDesiredState(state State) bool {
 // isObservedState reports whether state is one a runtime can report.
 func isObservedState(state State) bool {
 	switch state {
-	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateDestroyed:
+	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateSleeping, StateDestroyed:
 		return true
 	default:
 		return false
@@ -176,6 +203,8 @@ type Information struct {
 	SSHKeys                       []string
 	Hostname                      string
 	Metadata                      map[string]string
+	IsSleepy                      bool
+	IdleTimeoutSeconds            int
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
@@ -190,6 +219,8 @@ type Information struct {
 	OperationID                   string
 	OperationStartedAt            time.Time
 	UpdatedAt                     time.Time
+	LastNetworkActivityAt         time.Time
+	SleepingSince                 time.Time
 }
 
 // PublicOperationError contains safe reconciliation error data.

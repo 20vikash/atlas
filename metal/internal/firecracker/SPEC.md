@@ -52,9 +52,51 @@ wait for the API socket       the process belongs to systemd, so this is the onl
 
 A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
 
-Warm launch is attempted only when the image asks for it and the VM shape matches the snapshot exactly. Any failure falls back to a cold boot, so warm boot can never make a VM unstartable. A restored guest receives its metadata before it resumes, so it never reads the values of the VM the snapshot came from.
+A start mode selects the source:
+
+```text
+StartNormal                  -> shared warm image -> failure -> cold boot
+StartFromSleepSnapshot       -> VM snapshot -> resume
+StartFromSleepSnapshotPaused -> VM snapshot -> stay paused
+```
+
+`StartNormal` uses a warm image only when the image and VM shape match. It cold boots if warm launch fails. A sleep snapshot restore returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
 
 A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
+
+## Memory snapshots
+
+A full snapshot contains a `state` file and a `memory` file. Warm image builds and warm stops use the same create path.
+
+```text
+running -> pause -> jail/memory-snapshot-pending/{state,memory}
+                    |
+                    v
+          machines/<id>/memory-snapshots/<n>/
+                    |
+                    +-> write manifest.json last
+                    |
+                    +-> warm image: promote to image store
+                    +-> warm stop: terminate Firecracker -> sleeping
+
+sleeping -> copy snapshot to new jail -> load -> update metadata -> resume
+```
+
+The manifest marks a complete generation. It records VM identity, record generations, Firecracker compatibility, creation time, fixed file names, and file sizes. Restore paths come from the VM ID, not the manifest.
+
+Each publish creates a new generation. It never overwrites memory used by a live process. A warm image build promotes its snapshot and removes its temporary VM. A warm stop keeps its snapshot on this host.
+
+The snapshot is published before Firecracker stops. This makes a warm stop safe to retry:
+
+| Runtime state | Valid snapshot | Result |
+|---|---|---|
+| stopped | yes | Warm stop is complete. |
+| paused | yes | Terminate Firecracker. |
+| running | yes | Report a conflict. |
+
+A restore uses the newest valid snapshot. It removes the external generation only after the new jail has loaded its copy. A plain stop, restart, remove, or incompatible specification change discards the snapshot. `InspectSleepSnapshot` reports absent and invalid snapshots as different errors.
+
+A requested snapshot restore never falls back to a cold boot. It can also load the guest in a paused state.
 
 ## State
 
@@ -71,9 +113,9 @@ active -> Firecracker instance state
 
 Anything else reads as `unknown`, and an API fault returns `unknown` with an error rather than a guess.
 
-Stop asks the guest to power off and kills it when it does not answer, because a guest with no ACPI handler never will. An intentional stop leaves the unit failed, so the state is cleared afterwards.
+Stop asks the guest to power off and kills it when it does not answer, because a guest with no ACPI handler never will. An intentional stop leaves the unit failed, so the state is cleared afterwards. A plain stop also discards the VM memory snapshot. A warm stop is the other stop mode, which keeps a snapshot.
 
-`Remove` stops the unit and removes runtime-owned files. The manager releases network and storage.
+`Remove` stops the unit and removes runtime-owned files, including every VM memory snapshot. The manager releases network and storage.
 
 ## Guest metadata
 

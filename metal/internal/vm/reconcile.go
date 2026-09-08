@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Phase names the host operation a reconcile pass is running. It is stored in
-// the observed record, so an operator can see where a stuck pass is waiting.
+// Phase names the host operation in progress. It is stored in the observed
+// record so an operator can find where a pass stopped.
 const (
 	phaseInspect        = "inspect"
 	phaseNetwork        = "network"
@@ -21,6 +21,8 @@ const (
 	phaseMetadata       = "metadata"
 	phaseDisk           = "disk"
 	phaseSnapshot       = "snapshot"
+	phaseSleepCheck     = "sleep-check"
+	phaseSleepSnapshot  = "sleep-snapshot"
 	phaseDestroyRuntime = "destroy-runtime"
 	phaseDestroyNetwork = "destroy-network"
 	phaseDestroyStorage = "destroy-storage"
@@ -47,14 +49,17 @@ func (manager *Manager) Reconcile(ctx context.Context, identifier string) error 
 	return manager.reconcileActive(ctx, desired, observed, operationID)
 }
 
-// reconcileActive brings a live VM to its desired record: network first, then
-// restart intent, power state, specification changes, and finally disk usage.
+// reconcileActive applies network, restart, power, shape, and disk changes.
 func (manager *Manager) reconcileActive(
 	ctx context.Context,
 	desired DesiredRecord,
 	observed ObservedRecord,
 	operationID string,
 ) error {
+	// Capture state before an operation overwrites the phase.
+	wasSleeping := observed.State == StateSleeping
+	interruptedSleep := observed.Phase == phaseSleepSnapshot
+
 	var networkInterface NetworkInterface
 	err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseNetwork, func() error {
 		var ensureError error
@@ -72,6 +77,17 @@ func (manager *Manager) reconcileActive(
 		return err
 	}
 
+	// Desired state decides whether a sleeping VM stays asleep, resumes, or
+	// discards its snapshot.
+	if wasSleeping {
+		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID, status)
+	}
+
+	// Recover a warm stop that ended before its sleeping status was written.
+	if interruptedSleep && status.State == StateStopped {
+		return manager.recoverInterruptedSleep(ctx, desired, machine, &observed, operationID)
+	}
+
 	if observed.RestartGeneration < desired.RestartGeneration {
 		status, err = manager.applyRestart(ctx, desired.ID, machine, status, &observed, operationID)
 		if err != nil {
@@ -79,6 +95,13 @@ func (manager *Manager) reconcileActive(
 		}
 		observed.RestartGeneration = desired.RestartGeneration
 	}
+
+	// A warm stop takes a live guest to sleeping.
+	if desired.State == StateStopped && desired.WarmStop &&
+		(status.State == StateRunning || status.State == StatePaused) {
+		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{RequestedAt: time.Now().UTC()})
+	}
+
 	status, err = manager.applyDesiredState(ctx, desired.ID, machine, status, desired.State, &observed, operationID)
 	if err != nil {
 		return err
@@ -97,14 +120,29 @@ func (manager *Manager) reconcileActive(
 		return err
 	}
 
+	// An idle sleepy VM enters sleeping through a warm stop.
+	now := time.Now().UTC()
+	decision, err := manager.evaluateSleepEligibility(ctx, desired, observed, status, now)
+	if err != nil {
+		return err
+	}
+	if decision.Eligible {
+		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{
+			EligibleAt:                   decision.Activity.LastSeenAt.Add(desired.Sleep.IdleTimeout()),
+			RequestedAt:                  now,
+			LastNetworkActivityAt:        decision.Activity.LastSeenAt,
+			LastNetworkActivityMonotonic: decision.Activity.LastPacketMonotonicNanoseconds,
+			AbortOnTraffic:               true,
+		})
+	}
+
 	observed.State = status.State
 	observed.completeOperation()
 
 	return manager.store.writeObserved(desired.ID, observed)
 }
 
-// inspect reads runtime state. A failed inspect stores StateUnknown, because a
-// host that cannot be asked must not keep reporting a stale state.
+// inspect reads runtime state and stores StateUnknown on failure.
 func (manager *Manager) inspect(
 	ctx context.Context,
 	identifier string,
@@ -125,8 +163,7 @@ func (manager *Manager) inspect(
 	return status, err
 }
 
-// applyRestart stops and starts a VM that carries newer restart intent. A VM
-// that is not running has nothing to restart.
+// applyRestart restarts a VM with newer restart intent.
 func (manager *Manager) applyRestart(
 	ctx context.Context,
 	identifier string,
@@ -139,10 +176,10 @@ func (manager *Manager) applyRestart(
 		return status, nil
 	}
 	err := manager.runOperation(ctx, identifier, observed, operationID, phaseRestart, func() error {
-		if err := manager.runtime.Stop(ctx, machine); err != nil {
+		if _, err := manager.runtime.Stop(ctx, machine, StopShutdown); err != nil {
 			return err
 		}
-		return manager.runtime.Start(ctx, machine)
+		return manager.runtime.Start(ctx, machine, StartNormal)
 	})
 	if err != nil {
 		return status, err
@@ -150,8 +187,8 @@ func (manager *Manager) applyRestart(
 	return RuntimeStatus{State: StateRunning}, nil
 }
 
-// applyDesiredState moves the runtime to the requested power state. Reaching
-// paused from a stopped VM needs a start first.
+// applyDesiredState moves the runtime to the requested power state. Sleeping
+// VMs use their snapshot path instead of this method.
 func (manager *Manager) applyDesiredState(
 	ctx context.Context,
 	identifier string,
@@ -161,17 +198,20 @@ func (manager *Manager) applyDesiredState(
 	observed *ObservedRecord,
 	operationID string,
 ) (RuntimeStatus, error) {
+	start := func(ctx context.Context, machine RuntimeMachine) error {
+		return manager.runtime.Start(ctx, machine, StartNormal)
+	}
 	switch desiredState {
 	case StateRunning:
 		if status.State == StatePaused {
 			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseResume, StateRunning, manager.runtime.Resume)
 		}
 		if status.State != StateRunning {
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, manager.runtime.Start)
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start)
 		}
 	case StatePaused:
 		if status.State != StateRunning && status.State != StatePaused {
-			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, manager.runtime.Start); err != nil {
+			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start); err != nil {
 				return status, err
 			}
 			status.State = StateRunning
@@ -181,7 +221,11 @@ func (manager *Manager) applyDesiredState(
 		}
 	case StateStopped:
 		if status.State != StateStopped {
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, manager.runtime.Stop)
+			stopShutdown := func(ctx context.Context, machine RuntimeMachine) error {
+				_, err := manager.runtime.Stop(ctx, machine, StopShutdown)
+				return err
+			}
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopShutdown)
 		}
 	default:
 		return status, &TransitionError{DesiredState: desiredState, ObservedState: status.State}
@@ -206,8 +250,7 @@ func (manager *Manager) runRuntimeTransition(
 	return RuntimeStatus{State: resultState}, err
 }
 
-// applyDesiredSpecification applies specification changes. Disk always grows on
-// the host. A live guest is also told about its new disk and metadata.
+// applyDesiredSpecification applies specification changes.
 func (manager *Manager) applyDesiredSpecification(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -236,9 +279,8 @@ func (manager *Manager) applyDesiredSpecification(
 	return nil
 }
 
-// reconcileDestroyed releases host resources in order and records each step, so
-// an interrupted destroy resumes instead of repeating work. Records are removed
-// only after every step succeeds.
+// reconcileDestroyed releases host resources in order and records each step
+// before removing records, so an interrupted destroy resumes safely.
 func (manager *Manager) reconcileDestroyed(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -280,8 +322,8 @@ func (manager *Manager) reconcileDestroyed(
 	return nil
 }
 
-// runOperation stores the phase before one host operation and records failures.
-// The caller records the successful state after the operation completes.
+// runOperation stores the phase before a host call and records failures. The
+// caller records successful state after the call completes.
 func (manager *Manager) runOperation(
 	ctx context.Context,
 	identifier string,

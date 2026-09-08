@@ -18,9 +18,10 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [api](api/SPEC.md) | Authenticated HTTP API. |
 | [host](host/SPEC.md) | Host synchronization and capacity. |
 | [console](console/SPEC.md) | VM serial consoles over PTYs. |
-| [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, and staging cleanup loops. |
+| [reconciler](reconciler/SPEC.md) | VM state, image cache, warm artifact, network wake, and staging cleanup loops. |
 | [storage](storage/SPEC.md) | ZFS pool, VM disks, images, and snapshot staging. |
-| [network](network/SPEC.md) | VM namespaces and managed WireGuard peers. |
+| [network](network/SPEC.md) | VM namespaces, host rules, and managed WireGuard peers. |
+| [network/activity](network/activity/SPEC.md) | eBPF packet activity tracking and network wake. |
 | [platform](platform/SPEC.md) | Host files, commands, and systemd control. |
 
 ## Dependency graph
@@ -32,7 +33,8 @@ cmd/metald
    ├─ reconciler -> vm.Manager, storage stores
    ├─ firecracker -> vm, storage, platform, console, firecracker/api
    ├─ storage -> vm, platform
-   └─ network -> vm, platform
+   ├─ network -> vm, platform, network/activity
+   └─ network/activity -> vm
 ```
 
 The `vm` package defines small host service interfaces. The `vm.Manager` owns VM state, operations, and warm-image orchestration.

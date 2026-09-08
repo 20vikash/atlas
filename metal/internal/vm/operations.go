@@ -7,20 +7,6 @@ import (
 	"slices"
 )
 
-// SetPowerState stores a requested power state.
-func (manager *Manager) SetPowerState(ctx context.Context, identifier string, state State) error {
-	if state != StateRunning && state != StateStopped && state != StatePaused {
-		return ErrConflict
-	}
-	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		if record.State == state {
-			return false, nil
-		}
-		record.State = state
-		return true, nil
-	})
-}
-
 // RequestRestart stores durable restart intent.
 func (manager *Manager) RequestRestart(ctx context.Context, identifier string) error {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
@@ -39,24 +25,38 @@ func (manager *Manager) RequestRestart(ctx context.Context, identifier string) e
 	return manager.store.writeDesired(record)
 }
 
-// SetCompute stores the complete requested CPU and memory shape.
-func (manager *Manager) SetCompute(ctx context.Context, identifier string, virtualCPUCount, memoryMiB int) error {
+// SetCompute stores the complete requested CPU shape, memory shape, and sleep
+// policy. A shape change needs a stopped VM and starts it again. A sleep policy
+// change is accepted in any state and leaves the power state alone, because the
+// policy is not part of the machine shape.
+func (manager *Manager) SetCompute(ctx context.Context, identifier string, compute Compute) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
-		observed, err := manager.store.readObserved(identifier)
-		if err != nil {
-			return false, err
-		}
-		if observed.State != StateStopped {
+		if record.State == StateDestroyed {
 			return false, ErrConflict
 		}
-		if record.Specification.VirtualCPUCount == virtualCPUCount &&
-			record.Specification.MemoryMiB == memoryMiB &&
-			record.State == StateRunning {
+
+		shapeChanged := record.Specification.VirtualCPUCount != compute.VirtualCPUCount ||
+			record.Specification.MemoryMiB != compute.MemoryMiB
+		sleepChanged := record.Sleep != compute.Sleep
+		if !shapeChanged && !sleepChanged && record.State == StateRunning {
 			return false, nil
 		}
-		record.Specification.VirtualCPUCount = virtualCPUCount
-		record.Specification.MemoryMiB = memoryMiB
-		record.State = StateRunning
+
+		if shapeChanged {
+			observed, err := manager.store.readObserved(identifier)
+			if err != nil {
+				return false, err
+			}
+			if observed.State != StateStopped {
+				return false, ErrConflict
+			}
+			record.Specification.VirtualCPUCount = compute.VirtualCPUCount
+			record.Specification.MemoryMiB = compute.MemoryMiB
+			record.SpecificationGeneration++
+			record.State = StateRunning
+		}
+
+		record.Sleep = compute.Sleep
 		return true, nil
 	})
 }
@@ -72,6 +72,7 @@ func (manager *Manager) SetDisk(ctx context.Context, identifier string, diskMiB 
 		}
 		record.Specification.DiskMiB = diskMiB
 		record.Specification.Disk = limits
+		record.SpecificationGeneration++
 		return true, nil
 	})
 }
@@ -98,6 +99,7 @@ func (manager *Manager) SetNetwork(ctx context.Context, identifier string, confi
 		return ErrConflict
 	}
 	record.Specification.Network = configuration
+	record.SpecificationGeneration++
 	record.Generation++
 	return manager.store.writeDesired(record)
 }
@@ -221,10 +223,7 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 	return snapshot, nil
 }
 
-// applyMetadata pushes new guest metadata immediately and reports whether the
-// guest took it. A failure is not an error: the desired record is already
-// stored, so the next reconcile pass applies it. The short timeout keeps an
-// unreachable guest from holding up the API response.
+// applyMetadata pushes guest metadata without blocking the API for long.
 func (manager *Manager) applyMetadata(ctx context.Context, identifier string) (bool, error) {
 	operationContext, cancel := context.WithTimeout(ctx, manager.configuration.FastApplyTimeout)
 	defer cancel()
@@ -266,9 +265,7 @@ func (manager *Manager) mutate(ctx context.Context, identifier string, change fu
 	return err
 }
 
-// mutateAndReport applies one change under the VM lock and reports whether the
-// record changed. The generation increases only on a real change, so a repeated
-// request does not make the reconciler redo work.
+// mutateAndReport applies one change and reports whether the record changed.
 func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) (bool, error) {
 	unlock, err := manager.operationLocks.lock(ctx, identifier)
 	if err != nil {

@@ -2,7 +2,9 @@ package firecracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"syscall"
 	"time"
 
@@ -11,13 +13,11 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// defaultStopTimeout is how long a guest has to shut itself down after
-// Ctrl+Alt+Del before it is killed.
+// defaultStopTimeout bounds graceful guest shutdown after Ctrl+Alt+Del.
 const defaultStopTimeout = 30 * time.Second
 
-// machine binds a runtime to one VM for the length of an operation. State comes
-// from two places: systemd owns whether the process runs, and Firecracker owns
-// what the guest is doing inside it.
+// machine binds a runtime to one VM for one operation. systemd owns process
+// lifetime, while Firecracker owns guest state.
 type machine struct {
 	runtime     *Runtime
 	input       vm.RuntimeMachine
@@ -45,8 +45,8 @@ func (m *machine) status(ctx context.Context) (vm.State, error) {
 	return m.state(ctx, unitStatus)
 }
 
-// state maps a unit state to a VM state. Only an active unit has a guest worth
-// asking, so the other unit states answer on their own.
+// state maps a systemd unit state to a VM state. Only an active unit is asked
+// for Firecracker state.
 func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, error) {
 	switch status.ActiveState {
 	case "failed":
@@ -75,9 +75,8 @@ func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, 
 	}
 }
 
-// Start boots a VM. It tries the warm image first and falls back to a cold boot,
-// because warm boot is an optimization and cold boot is the reliable path. A
-// failed warm boot releases the disk it prepared before starting again.
+// Start uses a matching shared warm image when available, then falls back to a
+// cold boot. It never restores a VM-local sleep snapshot.
 func (m *machine) Start(ctx context.Context) error {
 	if m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
 		err := m.runtime.launchWarmImage(ctx, m.input, m.input.Specification.Image.Name)
@@ -95,6 +94,11 @@ func (m *machine) Start(ctx context.Context) error {
 		}
 	}
 
+	return m.coldBoot(ctx)
+}
+
+// coldBoot discards the previous jail and boots the guest fresh.
+func (m *machine) coldBoot(ctx context.Context) error {
 	if err := m.runtime.relaunch(ctx, m.input); err != nil {
 		return err
 	}
@@ -106,7 +110,69 @@ func (m *machine) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop shuts the guest down and clears the unit failure the exit records.
+// memorySnapshotRequirement describes the generations and build a snapshot must
+// match before this VM restores it.
+func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
+	return memorySnapshotRequirement{
+		VirtualMachineID:         m.input.ID,
+		UserID:                   m.input.UserID,
+		SpecificationGeneration:  m.input.SpecificationGeneration,
+		RestartGeneration:        m.input.RestartGeneration,
+		FirecrackerCompatibility: m.runtime.firecrackerCompatibility(),
+	}
+}
+
+// restoreMemorySnapshot restores the newest valid VM-local snapshot. The new jail
+// receives its own copy before the external generation is purged.
+func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool, error) {
+	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
+	if errors.Is(err, errMemorySnapshotNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	metadata := metadataServiceData(
+		m.input.ID, m.input.NetworkInterface.GuestIPAddress, m.input.NetworkInterface.MACAddress, m.input.Specification,
+	)
+	if err := m.runtime.launchMemorySnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata, resume); err != nil {
+		return false, err
+	}
+	if err := m.runtime.purgeMemorySnapshots(m.input.ID); err != nil {
+		m.runtime.logger.Warn("remove restored snapshots failed", "virtual_machine_id", m.input.ID, "error", err)
+	}
+
+	return true, nil
+}
+
+// latestMemorySnapshot returns the newest valid snapshot, or false when none
+// validates.
+func (m *machine) latestMemorySnapshot() (validatedMemorySnapshot, bool) {
+	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
+	if err != nil {
+		return validatedMemorySnapshot{}, false
+	}
+	return snapshot, true
+}
+
+// startFromMemorySnapshot restores a required VM-local snapshot without cold
+// booting. A missing or invalid snapshot is an error.
+func (m *machine) startFromMemorySnapshot(ctx context.Context, resume bool) error {
+	restored, err := m.restoreMemorySnapshot(ctx, resume)
+	if err != nil {
+		return err
+	}
+	if !restored {
+		return fmt.Errorf("start from sleep snapshot: %w", errMemorySnapshotNotFound)
+	}
+	m.recordImageUse()
+
+	return nil
+}
+
+// Stop shuts down the guest and discards its memory snapshot, so a later start
+// cold boots.
 func (m *machine) Stop(ctx context.Context) error {
 	if err := m.shutdownGuest(ctx); err != nil {
 		return err
@@ -116,8 +182,84 @@ func (m *machine) Stop(ctx context.Context) error {
 	}
 	_ = m.runtime.serialBroker.Close(m.input.ID)
 
+	if err := m.runtime.purgeMemorySnapshots(m.input.ID); err != nil {
+		return err
+	}
+
 	// An intentional stop leaves the unit failed, because the process was killed.
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)
+}
+
+// warmStop pauses the guest, publishes a full snapshot, then terminates
+// Firecracker. Publication first makes an interrupted stop recoverable.
+func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
+	state, err := m.status(ctx)
+	if err != nil {
+		return vm.StopOutcome{}, err
+	}
+
+	// Recover a snapshot published before a daemon crash.
+	if snapshot, ok := m.latestMemorySnapshot(); ok {
+		switch state {
+		case vm.StateStopped:
+			return stopOutcome(snapshot), nil
+		case vm.StatePaused:
+			if err := m.kill(ctx); err != nil {
+				return vm.StopOutcome{}, err
+			}
+			return stopOutcome(snapshot), nil
+		default:
+			// A complete snapshot and a running VM are inconsistent.
+			return vm.StopOutcome{}, vm.ErrConflict
+		}
+	}
+
+	pausedByThisCall := false
+	switch state {
+	case vm.StateRunning:
+		if err := m.api.Pause(ctx); err != nil {
+			return vm.StopOutcome{}, fmt.Errorf("pause for warm stop: %w", err)
+		}
+		pausedByThisCall = true
+	case vm.StatePaused:
+		// An already paused guest needs no second pause.
+	default:
+		return vm.StopOutcome{}, vm.ErrConflict
+	}
+
+	published, err := m.runtime.createAndPublishMemorySnapshot(ctx, m.input)
+	if err != nil {
+		return vm.StopOutcome{}, m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
+	}
+
+	if err := m.kill(ctx); err != nil {
+		return vm.StopOutcome{}, err
+	}
+
+	return stopOutcome(published), nil
+}
+
+// stopOutcome reports the published generation and creation time of a snapshot.
+func stopOutcome(snapshot validatedMemorySnapshot) vm.StopOutcome {
+	return vm.StopOutcome{
+		MemorySnapshotGeneration: snapshot.Generation,
+		MemorySnapshotCreatedAt:  snapshot.Manifest.CreatedAt,
+	}
+}
+
+// recoverFailedWarmStop removes the pending snapshot and resumes only a guest
+// paused by this call.
+func (m *machine) recoverFailedWarmStop(ctx context.Context, pausedByThisCall bool, cause error) error {
+	recovery := []error{cause}
+	if err := os.RemoveAll(m.runtime.configuration.pendingMemorySnapshotDirectory(m.input.ID)); err != nil {
+		recovery = append(recovery, fmt.Errorf("remove pending snapshot: %w", err))
+	}
+	if pausedByThisCall {
+		if err := m.api.Resume(ctx); err != nil {
+			recovery = append(recovery, fmt.Errorf("resume after failed warm stop: %w", err))
+		}
+	}
+	return errors.Join(recovery...)
 }
 
 // Pause halts the guest virtual CPUs.
@@ -159,8 +301,7 @@ func (m *machine) kill(ctx context.Context) error {
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)
 }
 
-// shutdownGuest asks the guest to power off and kills it when it does not. A
-// guest with no ACPI handler never answers Ctrl+Alt+Del, so the wait is bounded.
+// shutdownGuest asks the guest to power off, then kills it after a timeout.
 func (m *machine) shutdownGuest(ctx context.Context) error {
 	if m.api.SendCtrlAltDel(ctx) == nil {
 		wait, cancel := context.WithTimeout(ctx, m.stopTimeout)
@@ -191,8 +332,7 @@ func (m *machine) cleanupSystemd(ctx context.Context) error {
 	return nil
 }
 
-// recordImageUse marks the image as used, so pruning keeps it. A failure here
-// must not fail a started VM, so it is logged instead.
+// recordImageUse marks the image as used without failing a started VM.
 func (m *machine) recordImageUse() {
 	if err := m.runtime.imageStore.RecordImageUse(m.input.Specification.Image.Name, time.Now()); err != nil {
 		m.runtime.logger.Error("record image use failed", "virtual_machine_id", m.input.ID, "error", err)

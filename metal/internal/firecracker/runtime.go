@@ -3,6 +3,7 @@ package firecracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -44,9 +45,7 @@ type serialBroker interface {
 	Close(id string) error
 }
 
-// Runtime manages Firecracker virtual machines on one host. Each VM runs as a
-// systemd unit, so the process lifetime belongs to systemd and this package
-// controls only what happens inside it.
+// Runtime manages Firecracker virtual machines on one host.
 type Runtime struct {
 	configuration         Config
 	units                 platform.UnitManager
@@ -93,14 +92,51 @@ func (runtime *Runtime) Inspect(ctx context.Context, input vm.RuntimeMachine) (v
 	return vm.RuntimeStatus{State: state}, nil
 }
 
-// Start launches a stopped Firecracker virtual machine.
-func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) error {
-	return runtime.newMachine(input).Start(ctx)
+// Start launches a VM using the selected start mode.
+func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode vm.StartMode) error {
+	switch mode {
+	case vm.StartNormal:
+		return runtime.newMachine(input).Start(ctx)
+	case vm.StartFromSleepSnapshot:
+		return runtime.newMachine(input).startFromMemorySnapshot(ctx, true)
+	case vm.StartFromSleepSnapshotPaused:
+		return runtime.newMachine(input).startFromMemorySnapshot(ctx, false)
+	default:
+		return fmt.Errorf("unknown start mode %d", mode)
+	}
 }
 
-// Stop stops a Firecracker virtual machine.
-func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine) error {
-	return runtime.newMachine(input).Stop(ctx)
+// Stop stops a VM using the selected stop mode.
+func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) (vm.StopOutcome, error) {
+	switch mode {
+	case vm.StopShutdown:
+		return vm.StopOutcome{}, runtime.newMachine(input).Stop(ctx)
+	case vm.StopWithSleepSnapshot:
+		return runtime.newMachine(input).warmStop(ctx)
+	default:
+		return vm.StopOutcome{}, fmt.Errorf("unknown stop mode %d", mode)
+	}
+}
+
+// InspectSleepSnapshot returns the newest valid sleep snapshot or an error.
+func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.RuntimeMachine) (vm.SleepSnapshot, error) {
+	machine := runtime.newMachine(input)
+	snapshot, err := runtime.configuration.latestValidMemorySnapshot(machine.memorySnapshotRequirement())
+	if errors.Is(err, errMemorySnapshotNotFound) {
+		return vm.SleepSnapshot{}, vm.ErrNotFound
+	}
+	if err != nil {
+		return vm.SleepSnapshot{}, err
+	}
+	return vm.SleepSnapshot{Generation: snapshot.Generation, CreatedAt: snapshot.Manifest.CreatedAt}, nil
+}
+
+// DiscardSleepSnapshot removes a VM's sleep snapshots and runtime unit.
+func (runtime *Runtime) DiscardSleepSnapshot(ctx context.Context, input vm.RuntimeMachine) error {
+	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
+		return fmt.Errorf("discard sleep snapshot: %w", err)
+	}
+	return runtime.purgeMemorySnapshots(input.ID)
 }
 
 // Pause pauses a running Firecracker virtual machine.
@@ -113,8 +149,7 @@ func (runtime *Runtime) Resume(ctx context.Context, input vm.RuntimeMachine) err
 	return runtime.newMachine(input).Resume(ctx)
 }
 
-// Remove stops the process and removes every runtime-owned file, so the VM ID
-// can be used again.
+// Remove stops the process and removes runtime-owned files.
 func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) error {
 	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
 		return err
@@ -129,12 +164,14 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	if err := os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(input.ID))); err != nil {
 		return fmt.Errorf("remove Firecracker jail: %w", err)
 	}
+	if err := runtime.purgeMemorySnapshots(input.ID); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-// RefreshDisk applies current disk limits and refreshes the guest block device.
-// A VM that is not live has nothing to refresh: its next boot reads the limits.
+// RefreshDisk applies current disk limits to a live guest.
 func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine) error {
 	status, err := runtime.Inspect(ctx, input)
 	if err != nil {
