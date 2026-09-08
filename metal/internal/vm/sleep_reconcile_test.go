@@ -334,8 +334,7 @@ func TestDisableSleepyWhileSleepingResumes(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
 	autoSleepToSleeping(t, manager, monitor)
 
-	// Disabling the policy keeps the shape, so the compatible snapshot resumes
-	// instead of cold booting.
+	// Disabling sleep keeps the snapshot compatible.
 	if err := manager.SetSleepPolicy(context.Background(), "machine-1", false); err != nil {
 		t.Fatal(err)
 	}
@@ -368,8 +367,7 @@ func TestDestroyWhileSleepingRemovesArtifacts(t *testing.T) {
 	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
 	autoSleepToSleeping(t, manager, monitor)
 
-	// A destroy removes the runtime, which drops the sleep snapshot, then the
-	// network and storage, and finally the records.
+	// Destroy removes the snapshot, network, storage, and records.
 	if err := manager.Delete(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
 	}
