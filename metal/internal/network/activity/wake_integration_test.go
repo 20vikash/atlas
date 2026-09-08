@@ -21,8 +21,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// sharedHashMap creates one shared hash map from the spec with the given
-// capacity. The test owns it and closes it.
+// sharedHashMap creates a test shared hash map.
 func sharedHashMap(t *testing.T, spec *ebpf.CollectionSpec, name string, capacity uint32) *ebpf.Map {
 	t.Helper()
 	mapSpec := spec.Maps[name].Copy()
@@ -35,8 +34,7 @@ func sharedHashMap(t *testing.T, spec *ebpf.CollectionSpec, name string, capacit
 	return handle
 }
 
-// sharedRingMap creates one shared ring buffer map from the spec. The test owns
-// it and closes it.
+// sharedRingMap creates a test shared ring buffer.
 func sharedRingMap(t *testing.T, spec *ebpf.CollectionSpec, name string) *ebpf.Map {
 	t.Helper()
 	handle, err := ebpf.NewMap(spec.Maps[name].Copy())
@@ -47,15 +45,13 @@ func sharedRingMap(t *testing.T, spec *ebpf.CollectionSpec, name string) *ebpf.M
 	return handle
 }
 
-// loadWakeProgram loads the activity program with its three maps replaced by the
-// given shared maps. It rewrites the user ID constant, like the real loader.
+// loadWakeProgram loads the activity program with shared maps.
 func loadWakeProgram(t *testing.T, spec *ebpf.CollectionSpec, userID uint32, activity, wakeState, wakeEvents *ebpf.Map) *ebpf.Program {
 	t.Helper()
 	if err := spec.Variables["virtual_machine_user_id"].Set(userID); err != nil {
 		t.Fatalf("set user id: %v", err)
 	}
-	// Match the small C capacities to the shared maps, so the replacement passes
-	// the compatibility check.
+	// Match C capacities to the shared maps.
 	spec.Maps["activity_by_user_id"].MaxEntries = activity.MaxEntries()
 	spec.Maps["wake_state_by_user_id"].MaxEntries = wakeState.MaxEntries()
 
@@ -78,9 +74,7 @@ func loadWakeProgram(t *testing.T, spec *ebpf.CollectionSpec, userID uint32, act
 	return programs.RecordActivity
 }
 
-// TestWakeProgramLoadsWithSharedMaps loads the wake program into the kernel and
-// replaces its three maps with shared maps. It proves the program verifies and
-// the shared map definitions are compatible replacements. It needs root.
+// TestWakeProgramLoadsWithSharedMaps checks shared-map compatibility.
 //
 //	sudo -E go test -tags integration -run TestWakeProgramLoadsWithSharedMaps ./internal/network/
 func TestWakeProgramLoadsWithSharedMaps(t *testing.T) {
@@ -101,8 +95,7 @@ func TestWakeProgramLoadsWithSharedMaps(t *testing.T) {
 	loadWakeProgram(t, spec, 100001, activity, wakeState, wakeEvents)
 }
 
-// wakeHarness holds one armed VM: a namespace with tap0, the wake program on the
-// tap0 egress hook, and the shared wake state and ring buffer maps.
+// wakeHarness holds one armed VM and its shared wake maps.
 type wakeHarness struct {
 	namespacePath string
 	userID        uint32
@@ -110,9 +103,7 @@ type wakeHarness struct {
 	wakeEvents    *ebpf.Map
 }
 
-// newWakeHarness prepares a namespace with tap0, loads the wake program with
-// shared maps, and attaches it to the tap0 egress hook. ringBytes sets the ring
-// buffer size, so a pressure test can use a small ring.
+// newWakeHarness prepares a namespace and attaches the shared wake program.
 func newWakeHarness(t *testing.T, namespace string, userID, ringBytes uint32) wakeHarness {
 	t.Helper()
 	namespacePath := "/run/netns/" + namespace
@@ -183,8 +174,7 @@ func lookupWakeState(t *testing.T, wakeState *ebpf.Map, userID uint32) uint32 {
 	return state
 }
 
-// trySendTcpSyn sends one TCP SYN toward the guest from inside the namespace. It
-// uses a non-blocking connect, so it returns as soon as the SYN leaves on tap0.
+// trySendTcpSyn sends a non-blocking TCP SYN through tap0.
 func trySendTcpSyn(namespacePath string) error {
 	return inNamespace(osNamespaceSyscalls{}, namespacePath, func() error {
 		fileDescriptor, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, 0)
@@ -203,8 +193,7 @@ func trySendTcpSyn(namespacePath string) error {
 	})
 }
 
-// readWakeUserID reads one wake event and returns its user ID. ok is false when
-// no event arrives before the deadline.
+// readWakeUserID reads one event before the deadline.
 func readWakeUserID(t *testing.T, reader *ringbuf.Reader, wait time.Duration) (uint32, bool) {
 	t.Helper()
 	reader.SetDeadline(time.Now().Add(wait))
@@ -221,9 +210,7 @@ func readWakeUserID(t *testing.T, reader *ringbuf.Reader, wait time.Duration) (u
 	return binary.LittleEndian.Uint32(record.RawSample[0:4]), true
 }
 
-// TestWakeDeduplicatesConcurrentPackets proves that many packets on an armed VM
-// create one wake event, and that a rearm is needed before the next event. It
-// needs root.
+// TestWakeDeduplicatesConcurrentPackets checks one event per arm.
 //
 //	sudo -E go test -tags integration -run TestWakeDeduplicatesConcurrentPackets ./internal/network/
 func TestWakeDeduplicatesConcurrentPackets(t *testing.T) {
@@ -284,9 +271,7 @@ func TestWakeDeduplicatesConcurrentPackets(t *testing.T) {
 	}
 }
 
-// TestWakeSurvivesRingPressure proves a full ring buffer never loses wake intent.
-// It fills a small ring without reading, then confirms a rearmed VM still
-// notifies after the ring drains. It needs root.
+// TestWakeSurvivesRingPressure checks wake delivery after ring pressure.
 //
 //	sudo -E go test -tags integration -run TestWakeSurvivesRingPressure ./internal/network/
 func TestWakeSurvivesRingPressure(t *testing.T) {
@@ -337,8 +322,7 @@ func TestWakeSurvivesRingPressure(t *testing.T) {
 	}
 }
 
-// readMonitorWake reads one wake event from the monitor channel, or reports false
-// when none arrives before the deadline.
+// readMonitorWake reads one monitor event before the deadline.
 func readMonitorWake(events <-chan vm.NetworkWakeEvent, wait time.Duration) (vm.NetworkWakeEvent, bool) {
 	select {
 	case event, ok := <-events:
@@ -348,7 +332,7 @@ func readMonitorWake(events <-chan vm.NetworkWakeEvent, wait time.Duration) (vm.
 	}
 }
 
-// setUpWakeNamespace prepares a namespace with a persistent tap0 and no reader.
+// setUpWakeNamespace prepares a namespace with tap0 and no reader.
 func setUpWakeNamespace(t *testing.T, namespace string) string {
 	t.Helper()
 	namespacePath := "/run/netns/" + namespace
@@ -363,10 +347,7 @@ func setUpWakeNamespace(t *testing.T, namespace string) string {
 	return namespacePath
 }
 
-// TestNetworkWakeDeliversWithoutATapReader is the Phase 3 host proof. It arms a
-// VM with no Firecracker process, sends one host-to-guest TCP SYN, and reads one
-// Go wake event. It confirms deduplication, rearm, and that a reused user ID
-// cannot deliver a stale VM ID. It needs root.
+// TestNetworkWakeDeliversWithoutATapReader checks wake delivery without a reader.
 //
 //	sudo -E go test -tags integration -run TestNetworkWakeDeliversWithoutATapReader ./internal/network/
 func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
@@ -427,8 +408,7 @@ func TestNetworkWakeDeliversWithoutATapReader(t *testing.T) {
 		t.Fatal("no wake event after rearm")
 	}
 
-	// Release the VM and reuse its user ID for a new VM that is not armed. No stale
-	// event may reach the new VM.
+	// Reused user IDs must not receive stale events.
 	if err := monitor.ReleaseAttachment("vm-1"); err != nil {
 		t.Fatalf("release: %v", err)
 	}
