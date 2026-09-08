@@ -38,9 +38,25 @@ type ActivityMonitor struct {
 	wallClock      func() time.Time
 	monotonicClock func() (uint64, error)
 
+	// wakeReader reads the shared ring buffer. The worker owns the read loop and
+	// closes wakeEvents once when it stops. Close stops the reader and waits for
+	// the worker.
+	wakeReader wakeEventReader
+	wakeEvents chan vm.NetworkWakeEvent
+	workerDone chan struct{}
+	closeOnce  sync.Once
+
 	mu          sync.Mutex
 	attachments map[string]*attachment
+	// byUserID maps a VM user ID to the current VM ID, so the worker can resolve a
+	// wake event. A released user ID is removed, so a reused ID cannot resolve to a
+	// stale VM.
+	byUserID map[uint32]string
 }
+
+// wakeEventChannelSize bounds the wake event channel. A behind consumer causes a
+// rearm, not a block, so this is a soft buffer, not a correctness limit.
+const wakeEventChannelSize = 128
 
 // attachment owns the activity resources of one VM.
 type attachment struct {
@@ -53,8 +69,11 @@ type attachment struct {
 	baseline time.Time
 }
 
-// Compile-time proof that the monitor satisfies the manager seam.
-var _ vm.NetworkActivityMonitor = (*ActivityMonitor)(nil)
+// Compile-time proof that the monitor satisfies the manager seams.
+var (
+	_ vm.NetworkActivityMonitor = (*ActivityMonitor)(nil)
+	_ vm.NetworkWakeMonitor     = (*ActivityMonitor)(nil)
+)
 
 // AttachmentRequest identifies one VM activity attachment.
 type AttachmentRequest struct {
@@ -163,20 +182,74 @@ func newActivityMonitor(config ActivityMonitorConfig, loader activityLoader) (*A
 		return nil, fmt.Errorf("create shared maps: %w", err)
 	}
 
+	reader, err := shared.wakeEvents.newReader()
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("open wake event reader: %w", err),
+			shared.activity.Close(), shared.wakeState.Close(), shared.wakeEvents.Close())
+	}
+
 	logger := config.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	return &ActivityMonitor{
+	monitor := &ActivityMonitor{
 		loader:         loader,
 		capacity:       capacity,
 		shared:         shared,
 		logger:         logger,
 		wallClock:      time.Now,
 		monotonicClock: readMonotonicNanoseconds,
+		wakeReader:     reader,
+		wakeEvents:     make(chan vm.NetworkWakeEvent, wakeEventChannelSize),
+		workerDone:     make(chan struct{}),
 		attachments:    map[string]*attachment{},
-	}, nil
+		byUserID:       map[uint32]string{},
+	}
+	go monitor.runWakeReader()
+	return monitor, nil
+}
+
+// runWakeReader reads wake events until the reader closes. It closes the event
+// channel once when it stops.
+func (monitor *ActivityMonitor) runWakeReader() {
+	defer close(monitor.workerDone)
+	defer close(monitor.wakeEvents)
+	for {
+		userID, packetTime, err := monitor.wakeReader.read()
+		if err != nil {
+			return
+		}
+		monitor.handleWakeEvent(userID, packetTime)
+	}
+}
+
+// handleWakeEvent resolves the VM ID for a wake event and publishes it. It drops
+// an event for a released user ID. When the consumer is behind, it rearms the VM
+// instead of blocking, so a later packet notifies again.
+func (monitor *ActivityMonitor) handleWakeEvent(userID uint32, packetTime uint64) {
+	monitor.mu.Lock()
+	virtualMachineID, resolved := monitor.byUserID[userID]
+	monitor.mu.Unlock()
+	if !resolved {
+		return
+	}
+
+	event := vm.NetworkWakeEvent{VirtualMachineID: virtualMachineID, UserID: userID, PacketTime: packetTime}
+	select {
+	case monitor.wakeEvents <- event:
+	default:
+		if err := monitor.shared.wakeState.setState(userID, wakeArmed); err != nil {
+			monitor.logger.Warn("rearm after a full wake channel failed",
+				"virtual_machine_id", virtualMachineID, "user_id", userID, "error", err)
+		}
+	}
+}
+
+// NetworkWakeEvents returns the shared read-only channel of wake events. The
+// channel is closed once, when the monitor shuts down.
+func (monitor *ActivityMonitor) NetworkWakeEvents() <-chan vm.NetworkWakeEvent {
+	return monitor.wakeEvents
 }
 
 // readMonotonicNanoseconds reads CLOCK_MONOTONIC, the same clock as the eBPF
@@ -228,6 +301,9 @@ func (monitor *ActivityMonitor) EnsureAttachment(request AttachmentRequest) erro
 
 	monitor.mu.Lock()
 	replaced := monitor.attachments[request.VirtualMachineID]
+	if replaced != nil && replaced.userID != request.UserID {
+		delete(monitor.byUserID, replaced.userID)
+	}
 	monitor.attachments[request.VirtualMachineID] = &attachment{
 		userID:         request.UserID,
 		namespacePath:  request.NamespacePath,
@@ -235,6 +311,7 @@ func (monitor *ActivityMonitor) EnsureAttachment(request AttachmentRequest) erro
 		program:        program,
 		baseline:       monitor.wallClock(),
 	}
+	monitor.byUserID[request.UserID] = request.VirtualMachineID
 	monitor.mu.Unlock()
 
 	if replaced != nil {
@@ -251,6 +328,9 @@ func (monitor *ActivityMonitor) ReleaseAttachment(virtualMachineID string) error
 	monitor.mu.Lock()
 	released := monitor.attachments[virtualMachineID]
 	delete(monitor.attachments, virtualMachineID)
+	if released != nil {
+		delete(monitor.byUserID, released.userID)
+	}
 	monitor.mu.Unlock()
 
 	if released == nil {
@@ -335,21 +415,29 @@ func (monitor *ActivityMonitor) LastNetworkActivity(_ context.Context, request v
 	return vm.NetworkActivity{LastSeenAt: lastSeenAt, HasBeenSeen: true}, nil
 }
 
-// Close releases every attachment and the three shared maps. It is the one
-// owner of the monitor shutdown.
+// Close stops the wake reader, waits for the worker, then releases every
+// attachment and the three shared maps. It is the one owner of the monitor
+// shutdown and is safe to call more than once.
 func (monitor *ActivityMonitor) Close() error {
-	monitor.mu.Lock()
-	attachments := monitor.attachments
-	monitor.attachments = map[string]*attachment{}
-	monitor.mu.Unlock()
-
 	var closeErrors []error
-	for _, current := range attachments {
-		closeErrors = append(closeErrors, current.program.Close())
-	}
-	closeErrors = append(closeErrors,
-		monitor.shared.activity.Close(),
-		monitor.shared.wakeState.Close(),
-		monitor.shared.wakeEvents.Close())
+	monitor.closeOnce.Do(func() {
+		// Stop the reader first, so the worker exits before the maps close.
+		closeErrors = append(closeErrors, monitor.wakeReader.Close())
+		<-monitor.workerDone
+
+		monitor.mu.Lock()
+		attachments := monitor.attachments
+		monitor.attachments = map[string]*attachment{}
+		monitor.byUserID = map[uint32]string{}
+		monitor.mu.Unlock()
+
+		for _, current := range attachments {
+			closeErrors = append(closeErrors, current.program.Close())
+		}
+		closeErrors = append(closeErrors,
+			monitor.shared.activity.Close(),
+			monitor.shared.wakeState.Close(),
+			monitor.shared.wakeEvents.Close())
+	})
 	return errors.Join(closeErrors...)
 }

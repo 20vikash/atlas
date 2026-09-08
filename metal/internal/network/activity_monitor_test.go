@@ -23,7 +23,8 @@ func readMonitor(t *testing.T, wallNow time.Time, monotonicNow uint64) (*Activit
 	monitor := newTestMonitor(t, loader)
 	monitor.wallClock = func() time.Time { return wallNow }
 	monitor.monotonicClock = func() (uint64, error) { return monotonicNow, nil }
-	monitor.attachments["vm-1"] = &attachment{userID: 100001, baseline: wallNow}
+	monitor.attachments["vm-1"] = &attachment{userID: 100001, baseline: wallNow, program: &fakeActivityProgram{}}
+	monitor.byUserID[100001] = "vm-1"
 	return monitor, loader.createdMap
 }
 
@@ -93,7 +94,7 @@ type fakeWakeEvent struct {
 }
 
 func (m *fakeWakeEventMap) newReader() (wakeEventReader, error) {
-	return &fakeWakeEventReader{events: m.events}, nil
+	return &fakeWakeEventReader{events: m.events, done: make(chan struct{})}, nil
 }
 
 func (m *fakeWakeEventMap) Close() error {
@@ -101,23 +102,31 @@ func (m *fakeWakeEventMap) Close() error {
 	return nil
 }
 
-// fakeWakeEventReader returns events until its channel closes. A closed reader
-// returns io.EOF, like a real closed ring reader returns ringbuf.ErrClosed.
+// fakeWakeEventReader returns queued events, and returns io.EOF when its channel
+// closes or Close stops it. A real closed ring reader returns ringbuf.ErrClosed.
 type fakeWakeEventReader struct {
 	events chan fakeWakeEvent
+	done   chan struct{}
 	closed bool
 }
 
 func (r *fakeWakeEventReader) read() (uint32, uint64, error) {
-	event, ok := <-r.events
-	if !ok {
+	select {
+	case event, ok := <-r.events:
+		if !ok {
+			return 0, 0, io.EOF
+		}
+		return event.userID, event.packetTime, nil
+	case <-r.done:
 		return 0, 0, io.EOF
 	}
-	return event.userID, event.packetTime, nil
 }
 
 func (r *fakeWakeEventReader) Close() error {
-	r.closed = true
+	if !r.closed {
+		r.closed = true
+		close(r.done)
+	}
 	return nil
 }
 
@@ -286,6 +295,7 @@ func newTestMonitor(t *testing.T, loader *fakeActivityLoader) *ActivityMonitor {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = monitor.Close() })
 	return monitor
 }
 
@@ -463,6 +473,76 @@ func TestReleaseAttachmentDeletesTheWakeState(t *testing.T) {
 	}
 	if want := []uint32{100001}; !slices.Equal(loader.createdWakeState.deletedUserIDs, want) {
 		t.Errorf("deleted wake user IDs = %v, want %v", loader.createdWakeState.deletedUserIDs, want)
+	}
+}
+
+func TestHandleWakeEventDeliversAResolvedEvent(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	monitor.handleWakeEvent(100001, 42)
+	select {
+	case event := <-monitor.NetworkWakeEvents():
+		if event.VirtualMachineID != "vm-1" || event.UserID != 100001 || event.PacketTime != 42 {
+			t.Fatalf("event = %+v", event)
+		}
+	default:
+		t.Fatal("no wake event was delivered")
+	}
+}
+
+func TestHandleWakeEventDropsAnUnresolvedEvent(t *testing.T) {
+	loader := &fakeActivityLoader{}
+	monitor := newTestMonitor(t, loader)
+
+	// User 999 has no attachment, so a released or stale event must be dropped.
+	monitor.handleWakeEvent(999, 1)
+	select {
+	case <-monitor.NetworkWakeEvents():
+		t.Fatal("an event for a user ID with no attachment must not be delivered")
+	default:
+	}
+}
+
+func TestHandleWakeEventRearmsWhenTheChannelIsFull(t *testing.T) {
+	loader := &fakeActivityLoader{attachIndex: 5}
+	monitor := newTestMonitor(t, loader)
+	request := AttachmentRequest{VirtualMachineID: "vm-1", UserID: 100001, NamespacePath: "/run/netns/metal-vm-1"}
+	if err := monitor.EnsureAttachment(request); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fill the channel, because there is no consumer.
+	for i := 0; i < wakeEventChannelSize; i++ {
+		monitor.handleWakeEvent(100001, uint64(i))
+	}
+
+	// The eBPF program set notified. The next event cannot be delivered, so the
+	// worker must rearm the VM.
+	loader.createdWakeState.states = map[uint32]uint32{100001: wakeNotified}
+	monitor.handleWakeEvent(100001, 999)
+	if state := loader.createdWakeState.states[100001]; state != wakeArmed {
+		t.Errorf("wake state = %d, want armed after a full channel", state)
+	}
+}
+
+func TestNetworkWakeEventsClosesOnShutdown(t *testing.T) {
+	loader := &fakeActivityLoader{}
+	monitor, err := newActivityMonitor(ActivityMonitorConfig{UserIDRange: testUserIDRange()}, loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := monitor.NetworkWakeEvents()
+
+	if err := monitor.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, open := <-events; open {
+		t.Fatal("the wake event channel must be closed after shutdown")
 	}
 }
 
