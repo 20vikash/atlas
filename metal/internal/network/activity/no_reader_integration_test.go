@@ -14,12 +14,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// TestActivityAdvancesWithoutATapReader is the Gate 1 host proof for Phase 3. A
-// sleeping VM has no Firecracker process, so nothing reads tap0. This test
-// confirms the egress TCX hook still runs and updates activity in that state.
-//
-// If this test fails on the target host, stop and revise the attachment design
-// before any sleep code is added. Network wake depends on this behavior.
+// TestActivityAdvancesWithoutATapReader checks activity without a tap reader.
 //
 //	sudo -E go test -tags integration -run TestActivityAdvancesWithoutATapReader ./internal/network/
 func TestActivityAdvancesWithoutATapReader(t *testing.T) {
