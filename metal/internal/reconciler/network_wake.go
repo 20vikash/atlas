@@ -8,8 +8,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// defaultNetworkWakeTimeout bounds one wake restore. A snapshot restore is a
-// local operation, so the limit is short.
+// defaultNetworkWakeTimeout bounds one wake restore.
 const defaultNetworkWakeTimeout = 2 * time.Minute
 
 // NetworkWakeManager restores a sleeping VM after a network wake event.
@@ -25,9 +24,7 @@ type NetworkWakeConfig struct {
 	OperationTimeout time.Duration
 }
 
-// NetworkWakeReconciler restores sleeping VMs from packet wake events. It reads
-// one shared event channel and processes one event at a time, so it never runs
-// two wake operations at once.
+// NetworkWakeReconciler restores sleeping VMs from packet wake events.
 type NetworkWakeReconciler struct {
 	manager          NetworkWakeManager
 	events           <-chan vm.NetworkWakeEvent
@@ -71,8 +68,7 @@ func (r *NetworkWakeReconciler) Run(ctx context.Context) {
 	}
 }
 
-// wake restores one VM under the operation timeout. It does not retry, because
-// the eBPF program produces one event until the manager rearms the VM.
+// wake restores one VM under the operation timeout.
 func (r *NetworkWakeReconciler) wake(ctx context.Context, event vm.NetworkWakeEvent) {
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
@@ -83,8 +79,7 @@ func (r *NetworkWakeReconciler) wake(ctx context.Context, event vm.NetworkWakeEv
 	}
 }
 
-// logFailure reports an error unless ctx ended, because a canceled worker fails
-// its in-flight operation and that error says nothing about the host.
+// logFailure reports errors from active workers.
 func (r *NetworkWakeReconciler) logFailure(ctx context.Context, message string, err error, fields ...any) {
 	if ctx.Err() != nil {
 		return
