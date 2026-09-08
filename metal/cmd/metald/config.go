@@ -54,8 +54,7 @@ func defaultOpts() opts {
 	return o
 }
 
-// deriveDirs places the directories metald owns under baseDir. They are a
-// convention, not separate keys, so one base_dir moves all of them.
+// deriveDirs places all metald directories under baseDir.
 func (o *opts) deriveDirs() {
 	o.cfg.MachinesDir = filepath.Join(o.baseDir, "machines")
 	o.imagesDir = filepath.Join(o.baseDir, "images")
@@ -130,8 +129,7 @@ func load(path string) (opts, error) {
 	return o, nil
 }
 
-// applyFile overlays the configuration file onto o. A missing default file is
-// not an error; a missing explicit path is.
+// applyFile overlays a configuration file onto o.
 func applyFile(o *opts, path string) error {
 	explicit := path != ""
 	if path == "" {
