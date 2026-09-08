@@ -2,8 +2,7 @@
 
 package activity
 
-// The integration tests build their own VM namespace. These values mirror the
-// guest fixtures that the network allocator gives a real VM.
+// These values mirror the real VM network fixtures.
 const (
 	tapName         = "tap0"
 	guestIPAddress  = "172.16.0.2"
