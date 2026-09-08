@@ -12,12 +12,10 @@ import (
 
 // Bounds on caller-supplied values.
 const (
-	// maximumResourceIDLength keeps an identifier usable as a path segment, a ZFS
-	// dataset name, and a systemd unit instance name.
+	// maximumResourceIDLength bounds host resource names.
 	maximumResourceIDLength = 64
 
-	// maximumMemoryMiB is the largest request that cannot overflow the unit memory
-	// limit, which is twice the guest size plus overhead.
+	// maximumMemoryMiB prevents unit memory overflow.
 	maximumMemoryMiB = (math.MaxInt - 128) / 2
 )
 
@@ -31,8 +29,7 @@ var (
 	wireGuardMeshPrefix = netip.MustParsePrefix("fdaa::/16")
 )
 
-// createRequest is the complete desired specification of a new VM. Every group
-// is required, because a create stores state rather than merging into it.
+// createRequest is the complete desired specification of a new VM.
 type createRequest struct {
 	Compute  computeRequest `json:"compute"`
 	Disk     diskRequest    `json:"disk"`
@@ -112,16 +109,13 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
-// powerRequest is the desired power state. Warm asks a stop to save a memory
-// snapshot instead of shutting the guest down. It is valid only with a stopped
-// state. A later start resumes the VM from the snapshot.
+// powerRequest is the desired power state and optional warm-stop request.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
 	Warm  bool   `json:"warm"`
 }
 
-// sleepPolicyRequest is the complete sleep policy. It carries only is_sleepy.
-// The idle timeout is one Metal-wide host value and is not part of this request.
+// sleepPolicyRequest carries the per-VM sleep flag.
 type sleepPolicyRequest struct {
 	IsSleepy bool `json:"is_sleepy"`
 }
@@ -281,8 +275,7 @@ func validHTTPURL(value string) bool {
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
-// validImageReference reports whether value is usable as a directory and a
-// dataset name.
+// validImageReference reports whether value is a valid image name.
 func validImageReference(value string) bool {
 	return imageReferencePattern.MatchString(value)
 }
