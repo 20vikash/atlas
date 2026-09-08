@@ -5,6 +5,7 @@ RUN chmod +x /src/proxy/nginx/setup.sh && /src/proxy/nginx/setup.sh
 
 RUN printf 'test.x.frappe.dev\n' > /var/lib/nginx/region \
     && printf 'proxy-001\n' > /var/lib/nginx/control-subdomain \
+    && printf 'fd00:a71a\nsite-,*-vm-\n' > /var/lib/nginx/auto-proxy \
     && mkdir -p /var/lib/nginx/certs/test \
     && cp /var/lib/nginx/certs/_placeholder/fullchain.pem /var/lib/nginx/certs/test/fullchain.pem \
     && cp /var/lib/nginx/certs/_placeholder/privkey.pem   /var/lib/nginx/certs/test/privkey.pem \

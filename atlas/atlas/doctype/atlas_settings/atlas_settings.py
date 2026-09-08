@@ -147,6 +147,16 @@ class AtlasSettings(Document):
 
 	def validate(self) -> None:
 		"""Reject settings that would leave Atlas unable to reach a provider."""
+		if not self.is_new() and self.has_value_changed("region_id"):
+			if frappe.db.exists("Virtual Machine") or frappe.db.exists(
+				"Proxy Server", {"status": ["!=", "Archived"]}
+			):
+				frappe.throw(
+					_(
+						"Region ID cannot change while a Virtual Machine or a non-archived Proxy Server exists."
+					)
+				)
+
 		if self.is_setup_completed and not (
 			self.is_server_provider_setup_completed and self.is_dns_setup_completed
 		):

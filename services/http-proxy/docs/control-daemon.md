@@ -71,7 +71,7 @@ curl -X PUT \
   "$ATLAS_PROXY_CONTROL_URL/v1/domains"
 ```
 
-A custom-domain map can use a wildcard suffix key. `*-shop.example.com` matches `a-shop.example.com` and `a-b-shop.example.com`. Exact keys have priority, followed by the most specific wildcard suffix. A domain that equals the regional wildcard zone or sits below it returns `409`. Use the sites API for names in that zone.
+A custom-domain map accepts exact domain names only. A domain that equals the regional wildcard zone or sits below it returns `409`. Use the sites API for names in that zone.
 
 ## Errors
 
@@ -79,7 +79,7 @@ A custom-domain map can use a wildcard suffix key. `*-shop.example.com` matches 
 | ------ | ------------------------------------------------------------------------------------------- |
 | `401`  | The Bearer credential is missing or invalid.                                                |
 | `409`  | A site name is reserved, a domain belongs to the wildcard zone, or cluster state conflicts. |
-| `422`  | The request does not match the API schema.                                                  |
+| `422`  | The request does not match the API schema, or a custom-domain key starts with `*`.           |
 | `502`  | OpenResty cannot apply or return a map.                                                     |
 | `503`  | The cluster or OpenResty is not ready, or the replication threshold was not met.            |
 

@@ -1,6 +1,6 @@
 
 local pages = require("pages")
-local domain_lookup = require("domain_lookup")
+local auto_proxy = require("auto_proxy")
 
 local sites = ngx.shared.sites
 local domains_http = ngx.shared.domains_http
@@ -19,6 +19,16 @@ else
 end
 
 if subdomain and subdomain ~= "" then
+	local virtual_machine_address = auto_proxy.get_virtual_machine_address(
+		subdomain,
+		atlas_auto_proxy_address_prefix,
+		atlas_auto_proxy_host_prefixes
+	)
+	if virtual_machine_address then
+		ngx.var.vm_upstream = "http://[" .. virtual_machine_address .. "]:80"
+		return
+	end
+
 	local address = sites:get(subdomain)
 	if not address then
 		return pages.serve("not_found", ngx.HTTP_NOT_FOUND)
@@ -30,7 +40,7 @@ if subdomain and subdomain ~= "" then
 	return
 end
 
-local backend = domain_lookup.get(domains_http, host)
+local backend = domains_http:get(host)
 if not backend then
 	return pages.serve("domain_unconfigured", ngx.HTTP_NOT_FOUND)
 end

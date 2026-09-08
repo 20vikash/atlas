@@ -35,7 +35,6 @@ control/
 nginx/
   setup.sh                        Install the proxy on Ubuntu.
   nginx.conf                      Main OpenResty configuration.
-  lua/domain_lookup.lua           Find an exact or wildcard custom domain.
   lua/http/                       HTTP routes, maps, and map storage.
   lua/stream/                     TLS SNI routes and the SNI bridge.
   pages/                          HTML error pages.

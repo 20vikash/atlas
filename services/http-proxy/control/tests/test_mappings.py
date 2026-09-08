@@ -97,3 +97,13 @@ def test_external_custom_domain_is_allowed():
 	asyncio.run(store.update("domains", "shop.example.net", "2001:db8::1"))
 
 	assert client.requests[0][1] == "/v1/domains/shop.example.net"
+
+
+def test_a_custom_domain_wildcard_is_refused():
+	store, client = _store()
+
+	with pytest.raises(HTTPException) as raised:
+		asyncio.run(store.update("domains", "*-shop.example.com", "2001:db8::1"))
+
+	assert raised.value.status_code == 422
+	assert client.requests == []

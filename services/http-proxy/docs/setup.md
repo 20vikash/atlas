@@ -28,6 +28,10 @@ node_domain = "proxy-001.par-1.example.com"
 admin_socket = "/run/nginx/admin.sock"
 cert_dir = "/var/lib/nginx/certs"
 
+[auto_proxy]
+address_prefix = "fdaa:1"
+host_prefixes = ["site-", "*-vm-"]
+
 [auth]
 password_hash = "$2b$12$replace-with-the-current-bcrypt-hash"
 previous_password_hash = "$2b$12$replace-with-the-previous-bcrypt-hash"
@@ -62,6 +66,8 @@ private_key_pem = '''
 ```
 
 `control.domain` is the regional address. `control.node_domain` is the local node address. Both names must be one label below the wildcard zone. The apply command writes both labels to `/var/lib/nginx/control-subdomain`, so OpenResty sends them to the daemon before it checks the site map.
+
+`auto_proxy.address_prefix` contains the first two hextets of the regional VM mesh address. `auto_proxy.host_prefixes` lists literal prefixes. A leading `*` matches any non-empty prefix before the remaining text. Leave the section out to turn static routing off.
 
 `auth` protects the public map API. The daemon accepts the current password hash. It accepts the previous hash until `previous_password_valid_until`. This value is a Unix time in seconds. The daemon also accepts JWTs from `jwks_url` when the audience matches `jwks_audience_id`.
 
