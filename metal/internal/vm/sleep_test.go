@@ -26,6 +26,7 @@ func buildSleepManager(t *testing.T, config SleepConfig, monitor NetworkActivity
 			Storage:                &fakeStorage{},
 			Snapshots:              fakeSnapshots{},
 			NetworkActivityMonitor: monitor,
+			NetworkWakeMonitor:     &fakeNetworkWakeMonitor{},
 		},
 	)
 	if err != nil {
@@ -51,17 +52,20 @@ func sleepObserved() ObservedRecord {
 
 func TestNewManagerValidatesSleepConfiguration(t *testing.T) {
 	monitor := &fakeNetworkActivityMonitor{}
+	wake := &fakeNetworkWakeMonitor{}
 	cases := []struct {
 		name    string
 		config  SleepConfig
 		monitor NetworkActivityMonitor
+		wake    NetworkWakeMonitor
 		wantErr bool
 	}{
-		{name: "disabled needs nothing", config: SleepConfig{}, monitor: nil, wantErr: false},
-		{name: "enabled needs a timeout", config: SleepConfig{Enabled: true}, monitor: monitor, wantErr: true},
-		{name: "enabled needs a positive timeout", config: SleepConfig{Enabled: true, IdleTimeout: -time.Minute}, monitor: monitor, wantErr: true},
-		{name: "enabled needs a monitor", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: nil, wantErr: true},
-		{name: "enabled with both is accepted", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: monitor, wantErr: false},
+		{name: "disabled needs nothing", config: SleepConfig{}, wantErr: false},
+		{name: "enabled needs a timeout", config: SleepConfig{Enabled: true}, monitor: monitor, wake: wake, wantErr: true},
+		{name: "enabled needs a positive timeout", config: SleepConfig{Enabled: true, IdleTimeout: -time.Minute}, monitor: monitor, wake: wake, wantErr: true},
+		{name: "enabled needs an activity monitor", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: nil, wake: wake, wantErr: true},
+		{name: "enabled needs a wake monitor", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: monitor, wake: nil, wantErr: true},
+		{name: "enabled with all is accepted", config: SleepConfig{Enabled: true, IdleTimeout: time.Minute}, monitor: monitor, wake: wake, wantErr: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -73,6 +77,7 @@ func TestNewManagerValidatesSleepConfiguration(t *testing.T) {
 					Storage:                &fakeStorage{},
 					Snapshots:              fakeSnapshots{},
 					NetworkActivityMonitor: testCase.monitor,
+					NetworkWakeMonitor:     testCase.wake,
 				},
 			)
 			if testCase.wantErr != (err != nil) {

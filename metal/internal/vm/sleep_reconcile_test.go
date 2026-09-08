@@ -29,6 +29,7 @@ func newSleepyManager(t *testing.T, timeout time.Duration) (*Manager, *fakeRunti
 			Storage:                &fakeStorage{},
 			Snapshots:              fakeSnapshots{},
 			NetworkActivityMonitor: monitor,
+			NetworkWakeMonitor:     &fakeNetworkWakeMonitor{},
 		},
 	)
 	if err != nil {
@@ -146,6 +147,60 @@ func TestSleepAbortsWhenTrafficArrives(t *testing.T) {
 	}
 	if observed.State != StateRunning || observed.Sleep != nil {
 		t.Fatalf("observed after abort = %+v, want running with no sleep", observed)
+	}
+}
+
+func TestSleepAbortsBeforeSnapshotWhenTrafficArrives(t *testing.T) {
+	manager, runtime, monitor := newSleepyManager(t, 30*time.Minute)
+	wake := &fakeNetworkWakeMonitor{}
+	manager.networkWakeMonitor = wake
+	if _, err := manager.Create(context.Background(), "machine-1", sleepySpecification()); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh attachment keeps the VM running on the first pass.
+	monitor.activity = NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: false}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The idle decision sees old activity, but the final check after arming sees a
+	// newer packet. The sleep aborts before any warm stop.
+	idle := NetworkActivity{LastSeenAt: time.Now().Add(-time.Hour).UTC(), HasBeenSeen: true}
+	advanced := NetworkActivity{LastSeenAt: time.Now().UTC(), HasBeenSeen: true}
+	monitor.sequence = []NetworkActivity{idle, advanced}
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.stops != 0 {
+		t.Fatalf("stops = %d, want no warm stop before the snapshot", runtime.stops)
+	}
+	if len(wake.armed) == 0 || len(wake.disarmed) == 0 {
+		t.Fatalf("wake arm/disarm = %d/%d, want an arm then a disarm", len(wake.armed), len(wake.disarmed))
+	}
+	observed, err := manager.store.readObserved("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.State != StateRunning || observed.Sleep != nil {
+		t.Fatalf("observed = %+v, want running with no sleep", observed)
+	}
+}
+
+func TestHeldSleepingVMRearmsWake(t *testing.T) {
+	manager, _, monitor := newSleepyManager(t, 30*time.Minute)
+	wake := &fakeNetworkWakeMonitor{}
+	manager.networkWakeMonitor = wake
+	autoSleepToSleeping(t, manager, monitor)
+
+	armsAfterSleep := len(wake.armed)
+	// A later hold pass rearms the VM, so a failed wake is armed again.
+	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(wake.armed) <= armsAfterSleep {
+		t.Fatalf("armed = %d, want a rearm above %d", len(wake.armed), armsAfterSleep)
 	}
 }
 
@@ -380,6 +435,7 @@ func TestRecoverInterruptedSleepPublishesSleeping(t *testing.T) {
 		Storage:                &fakeStorage{},
 		Snapshots:              fakeSnapshots{},
 		NetworkActivityMonitor: monitor,
+		NetworkWakeMonitor:     &fakeNetworkWakeMonitor{},
 	})
 	if err != nil {
 		t.Fatal(err)

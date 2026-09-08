@@ -42,7 +42,21 @@ func (manager *Manager) enterSleep(
 		return err
 	}
 
+	// Arm the wake before the final idle check. A packet after this point produces
+	// a wake event that waits for this VM lock, so no wake is lost during the warm
+	// stop. A manual warm stop does not arm, because it wants the VM stopped.
+	if request.AbortOnTraffic {
+		if err := manager.armNetworkWake(desired); err != nil {
+			return err
+		}
+	}
+
 	before, beforeError := manager.sampleActivityForAbort(ctx, desired, request)
+
+	// A packet since the idle decision aborts the sleep before any snapshot.
+	if request.AbortOnTraffic && beforeError == nil && before.LastSeenAt.After(request.LastNetworkActivityAt) {
+		return manager.abortSleepBeforeSnapshot(desired, observed)
+	}
 
 	var outcome StopOutcome
 	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseSleepSnapshot, func() error {
@@ -73,6 +87,20 @@ func (manager *Manager) enterSleep(
 	observed.RestartGeneration = desired.RestartGeneration
 	observed.completeOperation()
 
+	return manager.store.writeObserved(desired.ID, *observed)
+}
+
+// abortSleepBeforeSnapshot cancels an automatic sleep that a packet interrupted
+// before the warm stop. It disarms the wake and keeps the VM running, so no
+// snapshot is made and the new traffic continues.
+func (manager *Manager) abortSleepBeforeSnapshot(desired DesiredRecord, observed *ObservedRecord) error {
+	manager.disarmNetworkWake(desired)
+	manager.logger.Info("automatic sleep aborted by traffic before snapshot",
+		"component", "vm", "vm_id", desired.ID)
+
+	observed.Sleep = nil
+	observed.State = StateRunning
+	observed.completeOperation()
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
@@ -188,6 +216,7 @@ func (manager *Manager) restartFromSleep(
 		return err
 	}
 
+	manager.disarmNetworkWake(desired)
 	observed.Sleep = nil
 	observed.State = StateRunning
 	observed.RestartGeneration = desired.RestartGeneration
@@ -220,6 +249,7 @@ func (manager *Manager) coldBootFromSleep(
 		return err
 	}
 
+	manager.disarmNetworkWake(desired)
 	observed.Sleep = nil
 	observed.State = StateRunning
 	observed.completeOperation()
@@ -227,9 +257,15 @@ func (manager *Manager) coldBootFromSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// holdSleeping keeps a VM asleep for another pass. It does not copy generations,
-// so a pending change applies when the VM later resumes.
+// holdSleeping keeps a VM asleep for another pass. It rearms the wake, so a wake
+// that failed to restore is armed again and a later packet notifies again. Arm
+// is idempotent. It does not copy generations, so a pending change applies when
+// the VM later resumes.
 func (manager *Manager) holdSleeping(desired DesiredRecord, observed *ObservedRecord) error {
+	if err := manager.armNetworkWake(desired); err != nil {
+		return err
+	}
+
 	observed.State = StateSleeping
 	observed.completeOperation()
 	return manager.store.writeObserved(desired.ID, *observed)
@@ -250,6 +286,7 @@ func (manager *Manager) loadPausedFromSleep(
 		return err
 	}
 
+	manager.disarmNetworkWake(desired)
 	observed.Sleep = nil
 	observed.State = StatePaused
 	observed.completeOperation()
@@ -272,6 +309,7 @@ func (manager *Manager) discardSleepToStopped(
 		return err
 	}
 
+	manager.disarmNetworkWake(desired)
 	observed.Sleep = nil
 	observed.State = StateStopped
 	observed.completeOperation()
@@ -296,6 +334,7 @@ func (manager *Manager) resumeFromSleep(
 		return err
 	}
 
+	manager.disarmNetworkWake(desired)
 	observed.Sleep = nil
 	observed.State = StateRunning
 	observed.completeOperation()

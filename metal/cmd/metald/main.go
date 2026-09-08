@@ -221,6 +221,7 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 			Storage:                stores.VirtualMachines,
 			Snapshots:              stores.Snapshots,
 			NetworkActivityMonitor: networkManager,
+			NetworkWakeMonitor:     activityMonitor,
 			Logger:                 logger,
 		},
 	)

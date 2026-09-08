@@ -102,6 +102,20 @@ func (manager *Manager) restoreFromNetworkWake(
 	return nil
 }
 
+// armNetworkWake makes the next host-to-guest packet for the VM produce a wake
+// event. It returns an error, because a VM that cannot arm must not sleep: it
+// would never wake on a packet. It is a no-op when no wake monitor is set.
+func (manager *Manager) armNetworkWake(desired DesiredRecord) error {
+	if manager.networkWakeMonitor == nil {
+		return nil
+	}
+	request := NetworkActivityRequest{VirtualMachineID: desired.ID, UserID: desired.UserID}
+	if err := manager.networkWakeMonitor.ArmNetworkWake(request); err != nil {
+		return fmt.Errorf("arm network wake for VM %s: %w", desired.ID, err)
+	}
+	return nil
+}
+
 // disarmNetworkWake stops further wake events for a woken VM. A disarm failure is
 // logged, not returned, because the VM is already running and the eBPF program
 // only produces one event until the next arm.

@@ -88,6 +88,9 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 		if dependencies.NetworkActivityMonitor == nil {
 			return nil, fmt.Errorf("automatic sleep needs a network activity monitor")
 		}
+		if dependencies.NetworkWakeMonitor == nil {
+			return nil, fmt.Errorf("automatic sleep needs a network wake monitor")
+		}
 	}
 	if dependencies.Logger == nil {
 		dependencies.Logger = slog.Default()
