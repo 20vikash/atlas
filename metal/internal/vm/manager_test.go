@@ -21,14 +21,11 @@ type fakeRuntime struct {
 	metadata     int
 	diskRefresh  int
 	inspectError error
-	// startFromSnapshotError makes a StartFromSleepSnapshot fail, so a test can
-	// drive the cold-boot fallback.
+	// startFromSnapshotError makes snapshot restore fail.
 	startFromSnapshotError error
-	// stopOutcome is returned by a warm stop, so a test can set the published
-	// snapshot generation.
+	// stopOutcome is returned by a warm stop.
 	stopOutcome StopOutcome
-	// sleepSnapshot and sleepSnapshotError drive InspectSleepSnapshot, so a test
-	// can model a present, absent, or invalid sleep snapshot.
+	// sleepSnapshot and sleepSnapshotError control snapshot inspection.
 	sleepSnapshot      SleepSnapshot
 	sleepSnapshotError error
 	// discards counts DiscardSleepSnapshot calls.
@@ -258,8 +255,7 @@ func TestSpecificationGenerationTracksShapeNotPower(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A warm stop and a start move the desired generation but must leave the
-	// specification generation alone, so the snapshot stays valid across them.
+	// Power changes leave the specification generation unchanged.
 	if err := manager.StopWarm(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -411,8 +407,7 @@ func TestSnapshotResumeFailureKeepsSleeping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The snapshot cannot be restored. A resume failure must keep the VM sleeping
-	// and never cold boot, so the in-memory guest is not lost.
+	// A restore failure keeps the VM sleeping and never cold boots.
 	runtime.startFromSnapshotError = errors.New("snapshot incompatible")
 	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
 		t.Fatal(err)
