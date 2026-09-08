@@ -25,11 +25,11 @@ This document explains packet paths, BPF state, and recovery behavior. Read the 
 Each host has a WireGuard address in `fdab::/16`. Each VM has an address in `fdaa::/16`.
 
 ```text
-Bytes:  0  1 |  2  3 |  4  5  6  7 |  8  9 10 11 | 12 13 14 15
-Field: fd aa | region |    tenant    |   reserved   |    VM ID
+Bytes:  0  1 |  2  3 |  4  5  6  7 |  8  9 10 11 12 13 14 15
+Field: fd aa | region |    tenant   |          VM ID
 ```
 
-The data path uses the tenant field. Region and reserved fields are available to provisioning.
+The data path uses the tenant field. Region and VM ID fields are available to provisioning.
 
 Atlas WG Mesh owns traffic between VM addresses. A source address must be registered on the ingress VM interface, and VMs cannot reach host WireGuard addresses in `fdab::/16`. Linux owns other host traffic. WireGuard encrypts host-to-host traffic. Atlas WG Mesh does not configure WireGuard, NAT, DNS, DHCP, or firewall rules.
 
