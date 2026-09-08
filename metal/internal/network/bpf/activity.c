@@ -98,6 +98,13 @@ int record_activity(struct __sk_buff *skb) {
 	if (!event)
 		return TCX_NEXT;
 
+	/* Change armed to notified once. Another CPU that runs a packet at the same
+	   time loses the swap, so only one CPU submits one event for this VM. */
+	if (__sync_val_compare_and_swap(state, WAKE_ARMED, WAKE_NOTIFIED) != WAKE_ARMED) {
+		bpf_ringbuf_discard(event, 0);
+		return TCX_NEXT;
+	}
+
 	event->user_id = key;
 	event->packet_time = now;
 	bpf_ringbuf_submit(event, 0);

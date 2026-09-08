@@ -20,5 +20,6 @@ static long (*bpf_skb_load_bytes)(const void *skb, __u32 offset, void *to, __u32
 static void *(*bpf_map_lookup_elem)(void *map, const void *key) = (void *)1;
 static void *(*bpf_ringbuf_reserve)(void *ringbuf, __u64 size, __u64 flags) = (void *)131;
 static void (*bpf_ringbuf_submit)(void *data, __u64 flags) = (void *)132;
+static void (*bpf_ringbuf_discard)(void *data, __u64 flags) = (void *)133;
 
 #endif /* ATLAS_BPF_HELPERS_H */
