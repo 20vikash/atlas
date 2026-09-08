@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -60,6 +61,44 @@ func ethernetFrame(ethertype uint16, payload []byte) []byte {
 	return append(frame, payload...)
 }
 
+// ipv4Frame builds one Ethernet frame that carries a minimal IPv4 header with
+// the given protocol. The activity hook reads only the ethertype and the IP
+// protocol, so the header does not need valid addresses or a checksum.
+func ipv4Frame(protocol byte) []byte {
+	header := make([]byte, 20)
+	header[0] = 0x45 // version 4, header length 5 words
+	header[9] = protocol
+	return ethernetFrame(0x0800, header) // 0x0800 is the IPv4 ethertype
+}
+
+// sendHostToGuest sends one packet toward the guest from inside the namespace.
+// The kernel routes it out on tap0 egress, which is the host-to-guest direction.
+// A TCP dial sends one SYN even with no listener. A UDP dial sends one datagram.
+func sendHostToGuest(t *testing.T, namespacePath, transport string) {
+	t.Helper()
+	address := net.JoinHostPort(guestIPAddress, "9")
+	err := inNamespace(osNamespaceSyscalls{}, namespacePath, func() error {
+		switch transport {
+		case "tcp":
+			connection, _ := net.DialTimeout("tcp", address, 300*time.Millisecond)
+			if connection != nil {
+				_ = connection.Close()
+			}
+		case "udp":
+			connection, dialError := net.Dial("udp", address)
+			if dialError != nil {
+				return dialError
+			}
+			_, _ = connection.Write([]byte{0})
+			_ = connection.Close()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("send %s toward guest: %v", transport, err)
+	}
+}
+
 // waitForFreshActivity polls until the last-seen time moves past mark.
 func waitForFreshActivity(t *testing.T, monitor *ActivityMonitor, request vm.NetworkActivityRequest, mark time.Time) vm.NetworkActivity {
 	t.Helper()
@@ -87,17 +126,19 @@ func assertNoActivity(t *testing.T, monitor *ActivityMonitor, request vm.Network
 		t.Fatal(err)
 	}
 	if activity.HasBeenSeen {
-		t.Fatal("guest-to-host traffic must not register as activity")
+		t.Fatal("only a host-to-guest TCP segment must register as activity")
 	}
 }
 
-// TestActivityCountsHostToGuestOnly proves a host-to-guest frame advances the
-// activity time and a guest-to-host frame does not. So the guest's own traffic,
-// such as link-local IPv6 housekeeping, does not keep a sleepy VM awake. It needs
-// root, the ip command, and TCX support. Run it with:
+// TestActivityCountsHostToGuestTcpOnly proves the activity hook counts only a
+// host-to-guest TCP segment. A guest-to-host frame does not count, because the
+// guest's own traffic must not keep a sleepy VM awake. A host-to-guest UDP
+// datagram does not count either, so link-local housekeeping such as IPv6 MLD
+// and ARP does not keep the VM awake. It needs root, the ip command, and TCX
+// support. Run it with:
 //
-//	sudo -E go test -tags integration -run TestActivityCountsHostToGuestOnly ./internal/network/
-func TestActivityCountsHostToGuestOnly(t *testing.T) {
+//	sudo -E go test -tags integration -run TestActivityCountsHostToGuestTcpOnly ./internal/network/
+func TestActivityCountsHostToGuestTcpOnly(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
 	}
@@ -142,15 +183,20 @@ func TestActivityCountsHostToGuestOnly(t *testing.T) {
 	tapQueue := openTapQueue(t, namespacePath, tapName)
 	t.Cleanup(func() { _ = unix.Close(tapQueue) })
 
-	// A guest-to-host frame written into the tap enters the kernel on tap0 ingress.
-	// It must not count, because the guest's own traffic must not keep it awake.
-	arpPayload := make([]byte, 28)
-	if _, err := unix.Write(tapQueue, ethernetFrame(0x0806, arpPayload)); err != nil {
+	// A guest-to-host TCP frame written into the tap enters the kernel on tap0
+	// ingress. It must not count, because the guest's own traffic must not keep it
+	// awake, even when it is TCP.
+	if _, err := unix.Write(tapQueue, ipv4Frame(6)); err != nil {
 		t.Fatalf("write guest frame: %v", err)
 	}
 	assertNoActivity(t, monitor, request)
 
-	// A host-to-guest packet toward the guest leaves on tap0 egress and counts.
-	_ = runQuietly("ip", "netns", "exec", namespace, "ping", "-c", "1", "-W", "1", guestIPAddress)
+	// A host-to-guest UDP datagram leaves on tap0 egress but is not TCP. It must
+	// not count, so housekeeping traffic does not keep the VM awake.
+	sendHostToGuest(t, namespacePath, "udp")
+	assertNoActivity(t, monitor, request)
+
+	// A host-to-guest TCP SYN leaves on tap0 egress and counts.
+	sendHostToGuest(t, namespacePath, "tcp")
 	waitForFreshActivity(t, monitor, request, baseline.LastSeenAt)
 }

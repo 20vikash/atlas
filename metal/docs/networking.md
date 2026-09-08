@@ -58,7 +58,7 @@ Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [int
 
 Metal records the last packet time of each VM, so a sleepy VM can sleep after an idle timeout. One eBPF program hooks the `tap0` egress path, which carries host-to-guest traffic, inside the namespace and stores the time in a map keyed by VM user ID. The program only observes and never changes a packet.
 
-Only host-to-guest frames count, and every such frame counts, including incoming ARP and neighbour discovery, so an incoming frame can wake a sleeping VM before the first IP packet. The guest's own frames arrive on the ingress path and are not hooked, so the guest's housekeeping, such as link-local IPv6, does not keep a sleepy VM awake. A daemon restart starts a new safe baseline, which can delay sleep by one idle timeout but never causes an early sleep. Detail: [internal/network/SPEC.md](../internal/network/SPEC.md).
+Only a host-to-guest TCP segment counts. Host measurement showed that link-local IPv6 MLD and ARP housekeeping on the host end of the tap kept a VM awake, so the program counts TCP over IPv4 or IPv6 only and ignores ARP, neighbour discovery, and other non-TCP frames. A client wakes a sleeping VM with TCP and must retry, because the first packet can be lost. The guest's own frames arrive on the ingress path and are not hooked, so the guest's housekeeping does not keep a sleepy VM awake. A daemon restart starts a new safe baseline, which can delay sleep by one idle timeout but never causes an early sleep. Detail: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
 ## WireGuard peers
 

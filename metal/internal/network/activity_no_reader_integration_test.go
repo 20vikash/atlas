@@ -66,8 +66,8 @@ func TestActivityAdvancesWithoutATapReader(t *testing.T) {
 	_ = unix.Uname(&kernel)
 	release := unix.ByteSliceToString(kernel.Release[:])
 
-	// Send a packet toward the guest with no tap reader present.
-	_ = runQuietly("ip", "netns", "exec", namespace, "ping", "-c", "1", "-W", "1", guestIPAddress)
+	// Send a host-to-guest TCP SYN with no tap reader present.
+	sendHostToGuest(t, namespacePath, "tcp")
 
 	activity := waitForFreshActivity(t, monitor, request, baseline.LastSeenAt)
 	t.Logf("kernel %s: egress hook updated activity without a tap reader; last seen %v", release, activity.LastSeenAt)

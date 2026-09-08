@@ -76,11 +76,12 @@ Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `
 One eBPF program attaches to the `tap0` egress path, which carries host-to-guest traffic, inside the VM namespace. The guest's own frames arrive on the ingress path and are not hooked, so the guest's housekeeping does not count as activity. The program does not attach to the veth pair, because Atlas WG Mesh owns the host end.
 
 ```text
-host-to-guest packet -> tap0 egress hook -> activity_by_user_id[user_id]
-guest-to-host packet -> tap0 ingress     -> not hooked, not counted
+host-to-guest TCP     -> tap0 egress hook -> activity_by_user_id[user_id]
+host-to-guest non-TCP -> tap0 egress hook -> not counted
+guest-to-host packet  -> tap0 ingress     -> not hooked, not counted
 ```
 
-The program only observes. It updates the map and returns `TCX_NEXT`, so it never drops or changes a packet. It does not read packet bytes, so every host-to-guest Ethernet frame counts. Incoming ARP and neighbour discovery count too, so an incoming frame can wake a VM before the first IP packet.
+The program only observes. It reads the ethertype and the IP protocol field, then updates the map and returns `TCX_NEXT`, so it never drops or changes a packet. It counts a host-to-guest TCP segment over IPv4 or IPv6 only. Host measurement on the development host showed that link-local IPv6 MLD and ARP housekeeping on the host end of the tap kept a VM awake. So the program counts TCP only. This overrides the first plan that counted every Ethernet frame. A non-TCP frame, such as ARP or neighbour discovery, no longer wakes a VM. A client must retry over TCP.
 
 `activity_by_user_id` is one shared hash map. The key is the VM user ID. The value is a monotonic nanosecond time from `bpf_ktime_get_ns`. `LastNetworkActivity` reads the value, reads `CLOCK_MONOTONIC` right after, and converts the age to a UTC wall-clock time. A wall-clock change never makes a VM sleep early, because the age comes from the monotonic clock.
 
