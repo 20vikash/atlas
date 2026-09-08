@@ -23,7 +23,7 @@ This package makes one virtual machine network agree with its desired state, and
 | `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network` and `vm.NetworkActivityMonitor`. |
 | `Mesh` | Registration of VM addresses through the Atlas WG Mesh CLI. |
 | `WireGuardManager` | The managed peer set of one WireGuard interface. |
-| `activity.Monitor` | VM packet activity tracking. One shared map and one eBPF program for each VM. It lives in the `activity` package. |
+| `activity.Monitor` | Tracking of packet activity for one VM. Three shared maps and one eBPF program for each VM. It lives in the `activity` package. |
 
 ## Convergence
 
@@ -71,7 +71,7 @@ Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `
 
 ## Packet activity
 
-`ActivityMonitor` tracks host-to-guest TCP traffic. It attaches one eBPF program to the `tap0` egress hook in each VM namespace. It does not attach to the veth pair, which Atlas WG Mesh owns.
+`activity.Monitor` tracks host-to-guest TCP traffic. It attaches one eBPF program to the `tap0` egress hook in each VM namespace. It does not attach to the veth pair, which Atlas WG Mesh owns.
 
 ```text
 host TCP -> tap0 egress -> activity_by_user_id[user_id]

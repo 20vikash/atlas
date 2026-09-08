@@ -48,7 +48,7 @@ func (manager *Manager) enterSleep(
 
 	// A packet since the idle decision aborts the sleep before any snapshot.
 	if request.AbortOnTraffic && beforeError == nil && before.LastPacketMonotonicNanoseconds > request.LastNetworkActivityMonotonic {
-		return manager.abortSleepBeforeSnapshot(desired, observed)
+		return manager.abortSleepBeforeMemorySnapshot(desired, observed)
 	}
 
 	var outcome StopOutcome
@@ -82,8 +82,8 @@ func (manager *Manager) enterSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// abortSleepBeforeSnapshot cancels automatic sleep before snapshotting.
-func (manager *Manager) abortSleepBeforeSnapshot(desired DesiredRecord, observed *ObservedRecord) error {
+// abortSleepBeforeMemorySnapshot cancels automatic sleep before snapshotting.
+func (manager *Manager) abortSleepBeforeMemorySnapshot(desired DesiredRecord, observed *ObservedRecord) error {
 	manager.disarmNetworkWake(desired)
 	manager.logger.Info("automatic sleep aborted by traffic before snapshot",
 		"component", "vm", "vm_id", desired.ID)
@@ -166,12 +166,12 @@ func (manager *Manager) reconcileSleeping(
 		if desired.Specification.IsSleepy && caughtUp {
 			return manager.holdSleeping(desired, observed)
 		}
-		if manager.isSnapshotStale(desired, observed) {
+		if manager.isMemorySnapshotStale(desired, observed) {
 			return manager.coldBootFromSleep(ctx, desired, machine, observed, operationID)
 		}
 		return manager.resumeFromSleep(ctx, desired, machine, observed, operationID)
 	case StatePaused:
-		if manager.isSnapshotStale(desired, observed) {
+		if manager.isMemorySnapshotStale(desired, observed) {
 			return manager.coldBootFromSleep(ctx, desired, machine, observed, operationID)
 		}
 		return manager.loadPausedFromSleep(ctx, desired, machine, observed, operationID)
@@ -223,8 +223,8 @@ func (manager *Manager) restartFromSleep(
 	return manager.store.writeObserved(desired.ID, *observed)
 }
 
-// isSnapshotStale reports whether the snapshot shape is incompatible.
-func (manager *Manager) isSnapshotStale(desired DesiredRecord, observed *ObservedRecord) bool {
+// isMemorySnapshotStale reports whether the snapshot shape is incompatible.
+func (manager *Manager) isMemorySnapshotStale(desired DesiredRecord, observed *ObservedRecord) bool {
 	return observed.Sleep != nil && observed.Sleep.SpecificationGeneration != desired.SpecificationGeneration
 }
 

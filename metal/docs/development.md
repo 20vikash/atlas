@@ -17,7 +17,7 @@ Run `gofmt` only on changed Go files. Regenerate OpenAPI after an API annotation
 
 ## eBPF generation
 
-The network package embeds compiled eBPF objects. The committed objects and Go bindings match the C source under `internal/network/activity/bpf/`. A normal build does not run Clang, because the objects are committed.
+The `activity` package embeds compiled eBPF objects. The committed objects and Go bindings match the C source under `internal/network/activity/bpf/`. A normal build does not run Clang, because the objects are committed.
 
 Regenerate after a change to the C source, then confirm the tree is clean:
 

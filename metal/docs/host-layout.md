@@ -38,7 +38,7 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
                     ├── firecracker jailer copies the exec file in
                     ├── vmlinux     hard link to the kernel
                     ├── rootfs.img  block node for the VM zvol
-                    ├── memory-snapshot-pending/  one being written, before publish
+                    ├── memory-snapshot-pending/  a snapshot before publish
                     └── run/
                         └── firecracker.socket
 

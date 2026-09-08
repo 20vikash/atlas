@@ -30,7 +30,7 @@ func newMemorySnapshotManifest(base memorySnapshotManifest) memorySnapshotManife
 	return base
 }
 
-// encode renders the manifest.
+// encodeMemorySnapshotManifest renders the manifest as indented JSON.
 func encodeMemorySnapshotManifest(manifest memorySnapshotManifest) ([]byte, error) {
 	return json.MarshalIndent(manifest, "", "  ")
 }

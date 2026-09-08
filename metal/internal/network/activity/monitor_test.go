@@ -202,7 +202,7 @@ func (loader *fakeActivityLoader) resolveInterfaceIndex(_, _ string) (int, error
 
 func testUserIDRange() vm.UserIDRange { return vm.UserIDRange{Min: 100000, Max: 165535} }
 
-func TestNewActivityMonitorCreatesTheSharedMapFromTheRange(t *testing.T) {
+func TestNewMonitorCreatesTheSharedMapFromTheRange(t *testing.T) {
 	loader := &fakeActivityLoader{}
 	monitor, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestNewActivityMonitorCreatesTheSharedMapFromTheRange(t *testing.T) {
 	}
 }
 
-func TestNewActivityMonitorRejectsAZeroCapacityRange(t *testing.T) {
+func TestNewMonitorRejectsAZeroCapacityRange(t *testing.T) {
 	loader := &fakeActivityLoader{}
 	// Max below Min gives a zero capacity.
 	_, err := newMonitor(MonitorConfig{UserIDRange: vm.UserIDRange{Min: 10, Max: 9}}, loader)
@@ -229,7 +229,7 @@ func TestNewActivityMonitorRejectsAZeroCapacityRange(t *testing.T) {
 	}
 }
 
-func TestNewActivityMonitorRejectsACapacityOverTheLimit(t *testing.T) {
+func TestNewMonitorRejectsACapacityOverTheLimit(t *testing.T) {
 	loader := &fakeActivityLoader{}
 	tooLarge := vm.UserIDRange{Min: 0, Max: maxActivityMapEntries}
 	_, err := newMonitor(MonitorConfig{UserIDRange: tooLarge}, loader)
@@ -238,7 +238,7 @@ func TestNewActivityMonitorRejectsACapacityOverTheLimit(t *testing.T) {
 	}
 }
 
-func TestNewActivityMonitorWrapsTheCreateError(t *testing.T) {
+func TestNewMonitorWrapsTheCreateError(t *testing.T) {
 	loader := &fakeActivityLoader{createErr: errors.New("kernel rejected map")}
 	_, err := newMonitor(MonitorConfig{UserIDRange: testUserIDRange()}, loader)
 	if err == nil || !strings.Contains(err.Error(), "shared maps") {

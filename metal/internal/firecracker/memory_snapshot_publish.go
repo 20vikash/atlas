@@ -17,7 +17,7 @@ func (runtime *Runtime) createAndPublishMemorySnapshot(ctx context.Context, mach
 	if err != nil {
 		return validatedMemorySnapshot{}, err
 	}
-	if _, _, err := runtime.createFullMemorySnapshot(ctx, machine, pendingMemorySnapshotDirName); err != nil {
+	if _, _, err := runtime.createFullMemorySnapshot(ctx, machine, pendingMemorySnapshotDirectoryName); err != nil {
 		return validatedMemorySnapshot{}, err
 	}
 	return runtime.publishPendingMemorySnapshot(machine, generation)
@@ -37,7 +37,7 @@ func (runtime *Runtime) publishPendingMemorySnapshot(machine vm.RuntimeMachine, 
 
 	generationDirectory := runtime.configuration.memorySnapshotGenerationDirectory(machine.ID, generation)
 	if err := os.MkdirAll(runtime.configuration.memorySnapshotRoot(machine.ID), 0o750); err != nil {
-		return validatedMemorySnapshot{}, fmt.Errorf("create memory snapshot generations directory: %w", err)
+		return validatedMemorySnapshot{}, fmt.Errorf("create memory snapshot directory: %w", err)
 	}
 	if err := os.Rename(pending, generationDirectory); err != nil {
 		return validatedMemorySnapshot{}, fmt.Errorf("publish memory snapshot generation %d: %w", generation, err)

@@ -84,7 +84,7 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 ## Sleepy VM does not sleep or wake
 
 - Symptom: An idle sleepy VM does not reach `sleeping`, or a packet does not wake a sleeping VM.
-- Owner: `network.ActivityMonitor` tracks activity and wake events. `vm.Manager` controls sleep and wake.
+- Owner: `activity.Monitor` tracks activity and wake events. `vm.Manager` controls sleep and wake.
 - Safe checks:
   - Read `GET /v1/vms/{id}`. Check `observed.state`, `observed.sleeping_since`, `observed.last_network_activity_at`, and `observed.error`.
   - Confirm that `sleep.enabled` is true, `sleep.idle_timeout` is positive, and the VM has `is_sleepy`.

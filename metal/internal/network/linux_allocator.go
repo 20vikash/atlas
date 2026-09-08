@@ -39,8 +39,8 @@ type LinuxAllocator struct {
 }
 
 // NewLinuxAllocator returns a Linux network allocator.
-func NewLinuxAllocator(mesh meshRegistrar, activity activityAttacher) *LinuxAllocator {
-	return &LinuxAllocator{mesh: mesh, activity: activity}
+func NewLinuxAllocator(mesh meshRegistrar, attacher activityAttacher) *LinuxAllocator {
+	return &LinuxAllocator{mesh: mesh, activity: attacher}
 }
 
 // Ensure converges all host network resources to the requested state.

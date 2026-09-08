@@ -135,7 +135,7 @@ func TestWakeFromNetworkWrongDesiredStateIsANoOp(t *testing.T) {
 
 func TestWakeFromNetworkRestoreErrorKeepsTheSnapshot(t *testing.T) {
 	manager, runtime, wakeMonitor, userID := sleepingWakeManager(t)
-	runtime.startFromSnapshotError = errors.New("load snapshot failed")
+	runtime.startFromMemorySnapshotError = errors.New("load snapshot failed")
 
 	event := NetworkWakeEvent{VirtualMachineID: "machine-1", UserID: userID, PacketTime: 1}
 	if err := manager.WakeFromNetwork(context.Background(), event); err == nil {

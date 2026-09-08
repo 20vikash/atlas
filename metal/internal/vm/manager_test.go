@@ -21,8 +21,8 @@ type fakeRuntime struct {
 	metadata     int
 	diskRefresh  int
 	inspectError error
-	// startFromSnapshotError makes snapshot restore fail.
-	startFromSnapshotError error
+	// startFromMemorySnapshotError makes snapshot restore fail.
+	startFromMemorySnapshotError error
 	// stopOutcome is returned by a warm stop.
 	stopOutcome StopOutcome
 	// sleepSnapshot and sleepSnapshotError control snapshot inspection.
@@ -38,8 +38,8 @@ func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeSta
 
 func (runtime *fakeRuntime) Start(_ context.Context, _ RuntimeMachine, mode StartMode) error {
 	runtime.startMode = mode
-	if mode == StartFromSleepSnapshot && runtime.startFromSnapshotError != nil {
-		return runtime.startFromSnapshotError
+	if mode == StartFromSleepSnapshot && runtime.startFromMemorySnapshotError != nil {
+		return runtime.startFromMemorySnapshotError
 	}
 	runtime.starts++
 	runtime.state = StateRunning
@@ -408,7 +408,7 @@ func TestSnapshotResumeFailureKeepsSleeping(t *testing.T) {
 	}
 
 	// A restore failure keeps the VM sleeping and never cold boots.
-	runtime.startFromSnapshotError = errors.New("snapshot incompatible")
+	runtime.startFromMemorySnapshotError = errors.New("snapshot incompatible")
 	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
 		t.Fatal(err)
 	}

@@ -15,14 +15,14 @@ import (
 //	machines/<id>/memory-snapshots/<n>/memory
 //	machines/<id>/memory-snapshots/<n>/manifest.json
 const (
-	memorySnapshotDirName          = "memory-snapshots"
-	pendingMemorySnapshotDirName   = "memory-snapshot-pending"
-	memorySnapshotManifestFileName = "manifest.json"
+	memorySnapshotDirectoryName        = "memory-snapshots"
+	pendingMemorySnapshotDirectoryName = "memory-snapshot-pending"
+	memorySnapshotManifestFileName     = "manifest.json"
 )
 
 // memorySnapshotRoot holds one directory for each published generation.
 func (configuration Config) memorySnapshotRoot(id string) string {
-	return filepath.Join(configuration.vmDir(id), memorySnapshotDirName)
+	return filepath.Join(configuration.vmDir(id), memorySnapshotDirectoryName)
 }
 
 // memorySnapshotGenerationDirectory is the published directory of one generation.
@@ -32,7 +32,7 @@ func (configuration Config) memorySnapshotGenerationDirectory(id string, generat
 
 // pendingMemorySnapshotDirectory is where Firecracker writes a new generation.
 func (configuration Config) pendingMemorySnapshotDirectory(id string) string {
-	return filepath.Join(configuration.chrootRoot(id), pendingMemorySnapshotDirName)
+	return filepath.Join(configuration.chrootRoot(id), pendingMemorySnapshotDirectoryName)
 }
 
 // latestMemorySnapshotGeneration returns the highest valid generation.
@@ -75,7 +75,7 @@ func (configuration Config) nextMemorySnapshotGeneration(id string) (uint64, err
 // errMemorySnapshotNotFound reports that no complete memory snapshot exists.
 var errMemorySnapshotNotFound = errors.New("memory snapshot not found")
 
-// memorySnapshotRequirement is what a restore needs a published memory snapshot to be.
+// memorySnapshotRequirement describes a required memory snapshot.
 type memorySnapshotRequirement struct {
 	VirtualMachineID         string
 	UserID                   uint32
@@ -84,7 +84,7 @@ type memorySnapshotRequirement struct {
 	FirecrackerCompatibility string
 }
 
-// validatedMemorySnapshot is a memory snapshot proven complete and compatible.
+// validatedMemorySnapshot is a complete, compatible memory snapshot.
 type validatedMemorySnapshot struct {
 	Generation uint64
 	Manifest   memorySnapshotManifest
