@@ -44,11 +44,11 @@ func TestPublishPendingMemorySnapshotMovesAndValidates(t *testing.T) {
 		t.Errorf("manifest sizes = %+v", published.Manifest)
 	}
 
-	// The pending directory is consumed by the move.
+	// Publishing consumes the pending directory.
 	if _, err := os.Stat(configuration.pendingMemorySnapshotDirectory("vm-1")); !os.IsNotExist(err) {
 		t.Error("pending directory was not moved")
 	}
-	// The published generation holds all three files.
+	// The published generation contains three files.
 	generationDirectory := configuration.memorySnapshotGenerationDirectory("vm-1", 1)
 	for _, name := range []string{memorySnapshotStateFileName, memorySnapshotMemoryFileName, memorySnapshotManifestFileName} {
 		if _, err := os.Stat(filepath.Join(generationDirectory, name)); err != nil {
