@@ -16,8 +16,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// TestWarmStopRejectsANonRunningVM confirms the state guard rejects a VM that is
-// neither running nor paused, before it reaches the snapshot step.
+// TestWarmStopRejectsANonRunningVM checks the state guard before snapshotting.
 func TestWarmStopRejectsANonRunningVM(t *testing.T) {
 	units := &stubUnits{active: false} // inactive reports stopped
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
@@ -27,9 +26,7 @@ func TestWarmStopRejectsANonRunningVM(t *testing.T) {
 	}
 }
 
-// stubUnits is a platform.UnitManager whose unit stays active until it is stopped or
-// killed. Wait blocks while the unit is active, like the D-Bus manager does.
-// A killed unit reports "failed" until ResetFailed clears it, as systemd does.
+// stubUnits models a systemd unit that stays active until stopped or killed.
 type stubUnits struct {
 	mu     sync.Mutex
 	active bool
@@ -117,8 +114,7 @@ func (s *stubUnits) counts() (stops, kills, waits int) {
 	return s.stops, s.kills, s.waits
 }
 
-// fcSocket serves a firecracker API socket that accepts every request and runs
-// onRequest, which stands in for the guest reacting to the action.
+// fcSocket serves a Firecracker API socket and invokes onRequest.
 func fcSocket(t *testing.T, onRequest func()) string {
 	t.Helper()
 	sock := filepath.Join(t.TempDir(), "fc.socket")
