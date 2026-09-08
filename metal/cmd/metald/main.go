@@ -146,8 +146,7 @@ func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
 	return connectMesh(o)
 }
 
-// connectMesh prepares the Atlas WG Mesh integration. It configures the host on
-// every start, so a reinstalled or reset host recovers without an operator.
+// connectMesh prepares Atlas WG Mesh and configures the host.
 func connectMesh(o opts) (*network.Mesh, error) {
 	mesh, err := network.NewMesh(network.MeshConfig{
 		CommandPath:   o.mesh.binaryPath,
