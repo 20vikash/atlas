@@ -76,7 +76,6 @@ install -m 0644 "$SERVICE_DIR/nginx/lua/stream/sni_bridge.lua"    "$LUA_DIR/sni_
 install -m 0644 "$SERVICE_DIR/nginx/lua/stream/sni_router.lua"      "$LUA_DIR/sni_router.lua"
 install -m 0644 "$SERVICE_DIR/nginx/lua/stream/sni_persist.lua"     "$LUA_DIR/sni_persist.lua"
 install -m 0644 "$SERVICE_DIR/nginx/lua/http/unconfigured.lua"    "$LUA_DIR/unconfigured.lua"
-install -m 0644 "$SERVICE_DIR/nginx/lua/domain_lookup.lua"        "$LUA_DIR/domain_lookup.lua"
 install -m 0644 "$SERVICE_DIR/nginx/lua/http/auto_proxy.lua"      "$LUA_DIR/auto_proxy.lua"
 install -m 0644 "$SERVICE_DIR/nginx/pages/not_found.html" "$HTML_DIR/not_found.html"
 install -m 0644 "$SERVICE_DIR/nginx/pages/domain_unconfigured.html" "$HTML_DIR/domain_unconfigured.html"
