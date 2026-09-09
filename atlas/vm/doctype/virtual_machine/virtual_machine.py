@@ -137,7 +137,7 @@ class VirtualMachine(Document):
 
 	@property
 	def is_sleepy(self) -> bool:
-		"""Report whether Metal may put this idle VM to sleep."""
+		"""Report whether Metal sleeps this VM when it is idle."""
 		information = self.get_metal_vm_info()
 		return information.desired.compute.is_sleepy if information else False
 
@@ -345,7 +345,7 @@ class VirtualMachine(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def update_sleep_policy(self, is_sleepy: bool | int | str, idle_timeout_seconds: int) -> dict[str, Any]:
-		"""Change automatic sleep without a VM restart. An idle timeout of 0 disables sleep."""
+		"""Change automatic sleep. An idle timeout of 0 disables sleep."""
 		try:
 			sleepy = strict_bool(is_sleepy, "is_sleepy")
 		except ValueError as error:
@@ -360,7 +360,7 @@ class VirtualMachine(Document):
 		)
 
 	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
-		"""Apply selected CPU, memory, and sleep policy changes."""
+		"""Apply selected compute changes."""
 		self.check_permission("write")
 		if self.is_draft:
 			frappe.throw(_("Wait for Virtual Machine creation before a compute change."), exc=AtlasUserError)

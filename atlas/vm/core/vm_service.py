@@ -240,11 +240,7 @@ class VirtualMachineService:
 		return information.as_dict()
 
 	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
-		"""Apply selected compute changes and keep the stored shape in step.
-
-		Only a CPU or memory change needs a stopped VM. The sleep policy is
-		intent, not machine shape, so Metal accepts it in any state.
-		"""
+		"""Apply selected compute changes. Only a shape change needs a stopped VM."""
 		information = self.require_information()
 		current_compute = information.desired.compute
 		request = {

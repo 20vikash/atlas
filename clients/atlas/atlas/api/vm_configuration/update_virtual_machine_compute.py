@@ -67,11 +67,11 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
-    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
+    memory change. A sleep policy change applies in any state.
 
     With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
-    wakes it on the next packet. An idle timeout of 0 disables sleep.
+    wakes it on the next packet. 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
@@ -108,11 +108,11 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
-    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
+    memory change. A sleep policy change applies in any state.
 
     With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
-    wakes it on the next packet. An idle timeout of 0 disables sleep.
+    wakes it on the next packet. 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
@@ -144,11 +144,11 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
-    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
+    memory change. A sleep policy change applies in any state.
 
     With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
-    wakes it on the next packet. An idle timeout of 0 disables sleep.
+    wakes it on the next packet. 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
@@ -183,11 +183,11 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
-    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
+    memory change. A sleep policy change applies in any state.
 
     With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
-    wakes it on the next packet. An idle timeout of 0 disables sleep.
+    wakes it on the next packet. 0 disables sleep.
 
     Args:
         virtual_machine_id (str):

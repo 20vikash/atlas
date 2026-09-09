@@ -1839,7 +1839,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/compute": {
       "patch": {
-        "description": "Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas changes the vCPU count or the memory size. A sleep policy change applies in any state.\n\nWith `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and wakes it on the next packet. An idle timeout of 0 disables sleep.",
+        "description": "Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or memory change. A sleep policy change applies in any state.\n\nWith `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and wakes it on the next packet. 0 disables sleep.",
         "operationId": "update_virtual_machine_compute",
         "parameters": [
           {

@@ -354,7 +354,6 @@ function showEditSleepPolicyDialog(frm) {
 				fieldtype: "Check",
 				label: __("Is Sleepy"),
 				default: frm.doc.is_sleepy,
-				description: __("The host sleeps an idle VM and wakes it on a network packet."),
 			},
 			{
 				fieldname: "idle_timeout_seconds",

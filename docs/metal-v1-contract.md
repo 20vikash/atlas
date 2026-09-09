@@ -171,7 +171,7 @@ Valid states are `running`, `stopped`, and `paused`. Delete records the desired 
 
 Restart has no request body. Each accepted request increases `restart_generation`.
 
-Compute replaces the complete compute object. It carries the CPU shape, the memory shape, and the sleep policy. Metal needs a stopped VM for a shape change and accepts a sleep policy change in any state. An `idle_timeout_seconds` of `0` disables sleep.
+Compute replaces the complete compute object: the CPU shape, the memory shape, and the sleep policy. A shape change needs a stopped VM. A sleep policy change does not. An `idle_timeout_seconds` of `0` disables sleep.
 
 ```json
 {"virtual_cpu_count": 4, "memory_mib": 4096, "is_sleepy": true, "idle_timeout_seconds": 1800}

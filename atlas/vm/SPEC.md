@@ -158,11 +158,9 @@ Active connections can stop when the public IPv4 address or the egress mode chan
 
 ## Sleep policy
 
-Metal can put an idle VM to sleep and wake it on the next network packet. The policy is per VM: `is_sleepy` allows automatic sleep, and `idle_timeout_seconds` is the idle time before sleep. An idle timeout of `0` disables sleep.
+`is_sleepy` allows the host to sleep an idle VM. `idle_timeout_seconds` is the idle time before sleep, and `0` disables it. Set both during creation or with the Edit Sleep Policy action.
 
-The policy is intent, not machine shape, so Metal accepts a change in any state. Atlas reads both values through to Metal and sets them with the Edit Sleep Policy action or during creation.
-
-`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas reads the desired compute object, applies the requested change, and sends every value. A vCPU or memory change still needs a stopped VM.
+`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas reads the desired compute object, applies the change, and sends every value. Only a vCPU or memory change needs a stopped VM.
 
 ## Disk limits
 
