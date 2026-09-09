@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import now_datetime
 
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 
 if TYPE_CHECKING:
@@ -63,13 +64,14 @@ class PlacementService:
 		"""Return one locked Server that can hold the request."""
 		servers = self.get_ready_servers()
 		if not servers:
-			frappe.throw(_("No running Metal Server is ready for Virtual Machines."))
+			frappe.throw(_("No running Metal Server is ready for Virtual Machines."), exc=AtlasUserError)
 
 		architecture_by_server = {server.name: server.architecture for server in servers}
 		capacities = self.get_latest_capacities(architecture_by_server)
 		if not capacities:
 			frappe.throw(
-				_("No current Metal Server capacity sample is available. Check Server synchronization.")
+				_("No current Metal Server capacity sample is available. Check Server synchronization."),
+				exc=AtlasUserError,
 			)
 		candidates = sorted(
 			(self.subtract_local_reservations(capacity) for capacity in capacities.values()),
@@ -93,7 +95,7 @@ class PlacementService:
 			if current_capacity.can_host(request, architecture):
 				return server
 
-		frappe.throw(_("No Metal Server has current capacity for this Virtual Machine."))
+		frappe.throw(_("No Metal Server has current capacity for this Virtual Machine."), exc=AtlasUserError)
 		raise AssertionError
 
 	def get_ready_servers(self) -> list[frappe._dict]:

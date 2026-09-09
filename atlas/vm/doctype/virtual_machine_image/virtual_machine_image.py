@@ -8,8 +8,11 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from atlas.atlas.core.exceptions import AtlasUserError
+
 SIGNED_URL_EXPIRY_SECONDS = 86400
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -166,19 +169,24 @@ class VirtualMachineImage(Document):
 	def validate_is_available(self) -> None:
 		"""Reject an image that is not ready to boot a VM."""
 		if self.status != "Available":
-			frappe.throw(_("Virtual Machine Image {0} is not available.").format(self.title))
+			frappe.throw(
+				_("Virtual Machine Image {0} is not available.").format(self.title), exc=AtlasUserError
+			)
 
 	def validate_compatibility(self, disk_mib: int) -> None:
 		"""Check that the requested disk can hold the image."""
 		if disk_mib < self.image_size_mib:
 			frappe.throw(
-				_("Disk must be at least {0} MiB for image {1}.").format(self.image_size_mib, self.title)
+				_("Disk must be at least {0} MiB for image {1}.").format(self.image_size_mib, self.title),
+				exc=AtlasUserError,
 			)
 
 	def validate_user_data(self, user_data: str) -> None:
 		"""Reject user data that the guest cannot accept."""
 		if user_data and not self.supports_cloud_init:
-			frappe.throw(_("This Virtual Machine Image does not support cloud-init user data."))
+			frappe.throw(
+				_("This Virtual Machine Image does not support cloud-init user data."), exc=AtlasUserError
+			)
 
 	def get_object_url(self, object_key: str | None, expiry_seconds: int) -> str:
 		"""Return a signed URL for one stored object."""
@@ -190,7 +198,7 @@ class VirtualMachineImage(Document):
 	@frappe.whitelist(methods=["POST"])
 	def retry_transfer(self) -> None:
 		"""Start the image transfer again, keeping the existing identifiers."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		if self.image_type != "Machine" or self.status != "Failed":
 			frappe.throw(_("Only a failed Machine image transfer can be retried."))
 
@@ -201,7 +209,7 @@ class VirtualMachineImage(Document):
 	@frappe.whitelist(methods=["POST"])
 	def request_deletion(self) -> None:
 		"""Queue deletion of this unused Machine image."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 
 		from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
 

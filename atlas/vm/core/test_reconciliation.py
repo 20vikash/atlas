@@ -39,7 +39,7 @@ class TestReconciliation(UnitTestCase):
 	def test_a_confirmed_absence_deletes_the_record(self) -> None:
 		virtual_machine = self.settle(side_effect=metal_error(404))
 
-		virtual_machine.delete.assert_called_once_with(ignore_permissions=True)
+		virtual_machine.delete.assert_called_once_with()
 		self.assertTrue(virtual_machine.flags.metal_absence_confirmed)
 		virtual_machine.database.commit.assert_called_once()
 

@@ -5,6 +5,12 @@ app_description = "Building block of Frappe Cloud V2 for vm management"
 app_email = "developers@frappe.io"
 app_license = "agpl-3.0"
 
+fixtures = [
+	{"dt": "Role", "filters": [["name", "=", "Atlas Admin"]]},
+	{"dt": "Role Profile", "filters": [["name", "=", "Atlas Admin"]]},
+]
+
+
 # Apps
 # ------------------
 
@@ -141,13 +147,33 @@ after_migrate = [
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+permission_query_conditions = {
+	"Atlas Settings": "atlas.auth.overrides.get_permission_query_conditions",
+	"SSH Task": "atlas.auth.overrides.get_permission_query_conditions",
+	"Metal Server": "atlas.auth.overrides.get_permission_query_conditions",
+	"Metal Server Disk": "atlas.auth.overrides.get_permission_query_conditions",
+	"Metal Server Image": "atlas.auth.overrides.get_permission_query_conditions",
+	"Metal Server IP Address": "atlas.auth.overrides.get_permission_query_conditions",
+	"Metal Server Size": "atlas.auth.overrides.get_permission_query_conditions",
+	"Metal Server Usage": "atlas.auth.overrides.get_permission_query_conditions",
+	"Proxy Server": "atlas.auth.overrides.get_permission_query_conditions",
+	"Virtual Machine": "atlas.auth.overrides.get_permission_query_conditions",
+	"Virtual Machine Image": "atlas.auth.overrides.get_permission_query_conditions",
+}
+
+has_permission = {
+	"Atlas Settings": "atlas.auth.overrides.has_permission",
+	"SSH Task": "atlas.auth.overrides.has_permission",
+	"Metal Server": "atlas.auth.overrides.has_permission",
+	"Metal Server Disk": "atlas.auth.overrides.has_permission",
+	"Metal Server Image": "atlas.auth.overrides.has_permission",
+	"Metal Server IP Address": "atlas.auth.overrides.has_permission",
+	"Metal Server Size": "atlas.auth.overrides.has_permission",
+	"Metal Server Usage": "atlas.auth.overrides.has_permission",
+	"Proxy Server": "atlas.auth.overrides.has_permission",
+	"Virtual Machine": "atlas.auth.overrides.has_permission",
+	"Virtual Machine Image": "atlas.auth.overrides.has_permission",
+}
 
 # Document Events
 # ---------------
@@ -250,7 +276,10 @@ scheduler_events = {
 
 # Request Events
 # ----------------
-# before_request = ["atlas.utils.before_request"]
+before_request = [
+	# Register the Atlas API routes before Frappe matches an API request.
+	"atlas.api.router.register_atlas_api"
+]
 # after_request = ["atlas.utils.after_request"]
 
 # Job Events

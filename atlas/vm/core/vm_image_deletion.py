@@ -6,6 +6,7 @@ import frappe
 from frappe import _
 
 from atlas.atlas.core.background_jobs import as_administrator
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 DELETION_TIMEOUT_SECONDS = 900
 
 
-class VirtualMachineImageInUse(frappe.ValidationError):
+class VirtualMachineImageInUse(AtlasUserError):
 	"""Report that a virtual machine uses the image."""
 
 	http_status_code = 409
@@ -31,9 +32,9 @@ class VirtualMachineImageDeletionService:
 	def request(self, image: VirtualMachineImage) -> None:
 		"""Mark one unused Machine image for deletion and queue its cleanup."""
 		if image.image_type != "Machine":
-			frappe.throw(_("Only a Machine image can be deleted."))
+			frappe.throw(_("Only a Machine image can be deleted."), exc=AtlasUserError)
 		if image.status != "Available":
-			frappe.throw(_("Only an Available Machine image can be deleted."))
+			frappe.throw(_("Only an Available Machine image can be deleted."), exc=AtlasUserError)
 		self.validate_is_unused(cast(str, image.name))
 
 		image.status = "Deleting"

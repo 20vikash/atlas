@@ -5,6 +5,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.api.core.errors import InvalidRequest
 from atlas.api.tests.test_support import api_request
+from atlas.auth.overrides import get_permission_query_conditions, has_permission
 from atlas.auth.request import validate_auth
 from atlas.auth.roles import has_role
 from atlas.auth.tenant import (
@@ -13,6 +14,16 @@ from atlas.auth.tenant import (
 	get_tenant_id,
 	parse_tenant_id,
 )
+from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
+
+
+def build_image(tenant_id: int, image_type: str) -> VirtualMachineImage:
+	"""Return one image document that answers the tenant visibility rule."""
+	image = VirtualMachineImage.__new__(VirtualMachineImage)
+	image.doctype = "Virtual Machine Image"
+	image.tenant_id = tenant_id
+	image.image_type = image_type
+	return image
 
 
 class TestTenantHeader(UnitTestCase):
@@ -49,6 +60,74 @@ class TestTenantHeader(UnitTestCase):
 				get_tenant_id()
 		finally:
 			frappe.local.request = previous_request
+
+
+class TestTenantDocumentPermissions(UnitTestCase):
+	def test_has_role_reads_the_cached_roles(self) -> None:
+		with patch("frappe.get_roles", return_value=["Atlas Admin"]) as get_roles:
+			self.assertTrue(has_role("Atlas Admin", "atlas@example.com"))
+
+		get_roles.assert_called_once_with("atlas@example.com")
+
+	def test_profile_user_list_is_filtered_by_request_tenant(self) -> None:
+		with (
+			api_request(tenant_id=9),
+			patch("atlas.auth.overrides.has_role", return_value=False),
+		):
+			condition = get_permission_query_conditions(doctype="Virtual Machine")
+
+		self.assertEqual(condition, "`tabVirtual Machine`.`tenant_id` = 9")
+
+	def test_profile_user_without_tenant_cannot_list_documents(self) -> None:
+		with (
+			api_request(),
+			patch("atlas.auth.overrides.has_role", return_value=False),
+		):
+			condition = get_permission_query_conditions(doctype="Virtual Machine")
+
+		self.assertEqual(condition, "1=0")
+
+	def test_profile_user_cannot_read_another_tenant_document(self) -> None:
+		document = frappe._dict(doctype="Virtual Machine", tenant_id=8)
+		with (
+			api_request(tenant_id=7),
+			patch("atlas.auth.overrides.has_role", return_value=False),
+		):
+			allowed = has_permission(document, "read")
+
+		self.assertFalse(allowed)
+
+	def test_profile_user_can_read_but_cannot_change_a_system_image(self) -> None:
+		document = build_image(tenant_id=0, image_type="System")
+		with (
+			api_request(tenant_id=7),
+			patch("atlas.auth.overrides.has_role", return_value=False),
+		):
+			self.assertTrue(has_permission(document, "read"))
+			self.assertFalse(has_permission(document, "write"))
+			self.assertFalse(has_permission(document, "delete"))
+
+	def test_system_images_are_in_the_image_permission_query(self) -> None:
+		with (
+			api_request(tenant_id=7),
+			patch("atlas.auth.overrides.has_role", return_value=False),
+		):
+			condition = get_permission_query_conditions(doctype="Virtual Machine Image")
+
+		self.assertIn("tenant_id` = 7", condition)
+		self.assertIn("image_type` = 'System'", condition)
+
+	def test_system_manager_bypasses_tenant_filter(self) -> None:
+		with patch("atlas.auth.overrides.has_role", return_value=True):
+			condition = get_permission_query_conditions(doctype="Virtual Machine")
+
+		self.assertEqual(condition, "")
+
+	def test_unhandled_doctype_is_denied(self) -> None:
+		document = frappe._dict(doctype="Unmanaged Atlas Document", tenant_id=7)
+		with patch("atlas.auth.overrides.has_role", return_value=False):
+			self.assertEqual(get_permission_query_conditions(doctype=document.doctype), "1=0")
+			self.assertFalse(has_permission(document, "read"))
 
 
 class TestAuthValidator(UnitTestCase):

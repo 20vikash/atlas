@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Never, cast
 import frappe
 from frappe import _
 
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
@@ -21,7 +22,13 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 
-class VirtualMachineCreateError(frappe.ValidationError):
+class MetalOperationError(frappe.ValidationError):
+	"""Report that the assigned host could not complete the request."""
+
+	http_status_code = 502
+
+
+class VirtualMachineCreateError(MetalOperationError):
 	"""Report a failed create and the draft that records it."""
 
 	def __init__(self, virtual_machine_name: str, error: MetalClientError) -> None:
@@ -64,7 +71,7 @@ class VirtualMachineService:
 			raise VirtualMachineCreateError(virtual_machine_name, error) from error
 
 		virtual_machine.is_draft = 0
-		virtual_machine.save(ignore_permissions=True)
+		virtual_machine.save()
 		return {"name": virtual_machine_name, "is_draft": False}
 
 	@staticmethod
@@ -77,7 +84,7 @@ class VirtualMachineService:
 				exc=frappe.DoesNotExistError,
 			)
 		if not image.enabled:
-			frappe.throw(_("Virtual Machine Image {0} is disabled.").format(image.title))
+			frappe.throw(_("Virtual Machine Image {0} is disabled.").format(image.title), exc=AtlasUserError)
 		image.validate_is_available()
 		return image
 
@@ -100,7 +107,7 @@ class VirtualMachineService:
 			}
 		)
 		virtual_machine.flags.created_by_virtual_machine_api = True
-		return cast("VirtualMachine", virtual_machine.insert(ignore_permissions=True))
+		return cast("VirtualMachine", virtual_machine.insert())
 
 	def get_metal_request(
 		self,
@@ -148,7 +155,10 @@ class VirtualMachineService:
 		"""Allow deletion only after Metal confirms absence."""
 		is_absence_confirmed = getattr(self.virtual_machine.flags, "metal_absence_confirmed", False)
 		if self.virtual_machine.is_draft and not is_absence_confirmed:
-			frappe.throw(_("Wait for Virtual Machine creation reconciliation before deletion."))
+			frappe.throw(
+				_("Wait for Virtual Machine creation reconciliation before deletion."),
+				exc=AtlasUserError,
+			)
 
 		if not is_absence_confirmed:
 			try:
@@ -158,7 +168,8 @@ class VirtualMachineService:
 					self.raise_metal_error(error)
 			else:
 				frappe.throw(
-					_("Terminate Virtual Machine {0} before deletion.").format(self.virtual_machine.name)
+					_("Terminate Virtual Machine {0} before deletion.").format(self.virtual_machine.name),
+					exc=AtlasUserError,
 				)
 		self.release_ip_address()
 
@@ -231,7 +242,7 @@ class VirtualMachineService:
 		current_disk = self.require_information().desired.disk
 		size_mib = changes.get("size_mib", current_disk.size_mib)
 		if size_mib < current_disk.size_mib:
-			frappe.throw(_("Disk size can only increase."))
+			frappe.throw(_("Disk size can only increase."), exc=AtlasUserError)
 
 		information = self.set_disk(
 			size_mib,
@@ -266,9 +277,12 @@ class VirtualMachineService:
 		self.virtual_machine.validate_network_change()
 		egress = changes.get("egress")
 		if egress is not None and egress not in EGRESS_MODES:
-			frappe.throw(_("Egress must be uplink, mesh, or none."))
+			frappe.throw(_("Egress must be uplink, mesh, or none."), exc=AtlasUserError)
 		if egress not in (None, "uplink") and self.get_attached_ip_address_name():
-			frappe.throw(_("Detach the public IPv4 address before you remove the internet path."))
+			frappe.throw(
+				_("Detach the public IPv4 address before you remove the internet path."),
+				exc=AtlasUserError,
+			)
 
 		return self.update_network(changes)
 
@@ -336,5 +350,5 @@ class VirtualMachineService:
 	@staticmethod
 	def raise_metal_error(error: MetalClientError) -> Never:
 		"""Raise one safe Metal failure at the Frappe boundary."""
-		frappe.throw(_("Metal request failed: {0}").format(error))
+		frappe.throw(_("Metal request failed: {0}").format(error), exc=MetalOperationError)
 		raise AssertionError from error

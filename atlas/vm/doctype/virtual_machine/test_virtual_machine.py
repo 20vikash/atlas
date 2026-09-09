@@ -588,11 +588,14 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		return (
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
-			patch.object(virtual_machine_module.frappe, "only_for"),
+			patch.object(VirtualMachine, "check_permission"),
 			patch.object(
 				virtual_machine_module.frappe,
 				"db",
-				Mock(exists=Mock(return_value=address_name)),
+				Mock(
+					exists=Mock(return_value=address_name),
+					get_value=Mock(return_value=address_name),
+				),
 			),
 		)
 
@@ -611,7 +614,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
 		):
-			virtual_machine.update_network(public_network_throughput_mibps=25)
+			VirtualMachineService(virtual_machine).apply_network_changes(
+				{"public_network_throughput_mibps": 25}
+			)
 
 		client.set_virtual_machine_network.assert_called_once_with(
 			"VM-00001",
@@ -633,7 +638,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
 			self.assertRaises(frappe.ValidationError),
 		):
-			virtual_machine.update_network(public_network_throughput_mibps=25)
+			VirtualMachineService(virtual_machine).apply_network_changes(
+				{"public_network_throughput_mibps": 25}
+			)
 
 		client.set_virtual_machine_network.assert_not_called()
 
@@ -645,17 +652,19 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			self.assertRaises(frappe.ValidationError),
 		):
-			virtual_machine.update_network(public_network_throughput_mibps=25)
+			VirtualMachineService(virtual_machine).apply_network_changes(
+				{"public_network_throughput_mibps": 25}
+			)
 
 	def test_attach_ip_address_requests_host_egress(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "none"})
 		address = SimpleNamespace(address="203.0.113.10")
-		metal_client, get_doc, only_for, database = self.patches(client, None)
+		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
 		with (
 			metal_client,
 			get_doc,
-			only_for,
+			check_permission,
 			database,
 			patch.object(VirtualMachineService, "assign_ip_address", return_value=address) as assign,
 		):
@@ -668,9 +677,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 
 	def test_attach_ip_address_rejects_a_second_address(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
-		metal_client, get_doc, only_for, database = self.patches(client, "203.0.113.10")
+		metal_client, get_doc, check_permission, database = self.patches(client, "203.0.113.10")
 
-		with metal_client, get_doc, only_for, database, self.assertRaises(frappe.ValidationError):
+		with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
 			virtual_machine.attach_ip_address("203.0.113.11")
 
 		client.set_virtual_machine_network.assert_not_called()
@@ -684,12 +693,12 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		client.set_virtual_machine_network.side_effect = lambda *arguments: (
 			calls.append("metal") or information
 		)
-		metal_client, get_doc, only_for, database = self.patches(client, "203.0.113.10")
+		metal_client, get_doc, check_permission, database = self.patches(client, "203.0.113.10")
 
 		with (
 			metal_client,
 			get_doc,
-			only_for,
+			check_permission,
 			database,
 			patch.object(
 				VirtualMachineService,
@@ -706,18 +715,18 @@ class TestVirtualMachineNetwork(UnitTestCase):
 
 	def test_update_egress_sends_the_new_mode(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
-		metal_client, get_doc, only_for, database = self.patches(client, None)
+		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
-		with metal_client, get_doc, only_for, database:
+		with metal_client, get_doc, check_permission, database:
 			virtual_machine.update_egress("mesh")
 
 		self.assertEqual(client.set_virtual_machine_network.call_args.args[1]["egress"], "mesh")
 
 	def test_update_egress_rejects_an_unknown_mode(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
-		metal_client, get_doc, only_for, database = self.patches(client, None)
+		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
-		with metal_client, get_doc, only_for, database, self.assertRaises(frappe.ValidationError):
+		with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
 			virtual_machine.update_egress("server")
 
 		client.set_virtual_machine_network.assert_not_called()
@@ -729,8 +738,8 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		)
 
 		for egress in ("mesh", "none"):
-			metal_client, get_doc, only_for, database = self.patches(client, "203.0.113.10")
-			with metal_client, get_doc, only_for, database, self.assertRaises(frappe.ValidationError):
+			metal_client, get_doc, check_permission, database = self.patches(client, "203.0.113.10")
+			with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
 				virtual_machine.update_egress(egress)
 
 		client.set_virtual_machine_network.assert_not_called()
@@ -740,8 +749,8 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 
 		for private, public in ((-1, 0), ("abc", 0), (0, "")):
-			metal_client, get_doc, only_for, database = self.patches(client, None)
-			with metal_client, get_doc, only_for, database, self.assertRaises(frappe.ValidationError):
+			metal_client, get_doc, check_permission, database = self.patches(client, None)
+			with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
 				virtual_machine.update_network_throughput(private, public)
 
 		client.set_virtual_machine_network.assert_not_called()
@@ -749,12 +758,12 @@ class TestVirtualMachineNetwork(UnitTestCase):
 	def test_update_disk_limits_names_the_failing_limit(self) -> None:
 		"""The IOPS limit must not report a throughput unit."""
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
-		metal_client, get_doc, only_for, database = self.patches(client, None)
+		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
 		with (
 			metal_client,
 			get_doc,
-			only_for,
+			check_permission,
 			database,
 			self.assertRaisesRegex(frappe.ValidationError, "Disk IOPS"),
 		):
@@ -763,9 +772,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 	def test_update_disk_rejects_a_draft(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 		virtual_machine.is_draft = 1
-		metal_client, get_doc, only_for, database = self.patches(client, None)
+		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
-		with metal_client, get_doc, only_for, database, self.assertRaises(frappe.ValidationError):
+		with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
 			virtual_machine.update_disk({"size_mib": 40960})
 
 		client.set_virtual_machine_disk.assert_not_called()
@@ -775,9 +784,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		virtual_machine, client = self.build_virtual_machine(
 			{"egress": "uplink", "public_network_throughput_mibps": 31}
 		)
-		metal_client, get_doc, only_for, database = self.patches(client, None)
+		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
-		with metal_client, get_doc, only_for, database:
+		with metal_client, get_doc, check_permission, database:
 			virtual_machine.update_egress("mesh")
 
 		request = client.set_virtual_machine_network.call_args.args[1]
@@ -893,3 +902,26 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 	def test_validate_allows_tenant_zero_without_privilege(self) -> None:
 		"""Tenant 0 alone is not privileged, so a plain tenant-0 VM is valid."""
 		self.build_virtual_machine(tenant_id=0).validate()
+
+	def test_create_requires_system_manager_for_a_privileged_vm(self) -> None:
+		request = VirtualMachineCreateRequest.from_value(
+			{
+				"virtual_machine_image": "image-1",
+				"vcpus": 2,
+				"memory_mib": 1024,
+				"disk_mib": 1024,
+				"tenant_id": 0,
+				"is_privileged": True,
+			}
+		)
+
+		with (
+			patch.object(virtual_machine_module.frappe, "has_permission", return_value=True),
+			patch.object(virtual_machine_module.frappe, "only_for") as only_for,
+			patch.object(
+				VirtualMachineService, "create", return_value={"name": "VM-00001", "is_draft": False}
+			),
+		):
+			virtual_machine_module.create(request)
+
+		only_for.assert_called_once_with("System Manager")

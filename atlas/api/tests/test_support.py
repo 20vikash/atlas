@@ -38,6 +38,7 @@ def api_request(
 		with (
 			patch("atlas.auth.request.has_role", side_effect=lambda role, user=None: role == "Atlas Admin"),
 			patch("atlas.api.core.base.has_role", side_effect=lambda role, user=None: role == "Atlas Admin"),
+			patch("atlas.auth.overrides.has_role", side_effect=lambda role, user=None: role == "Atlas Admin"),
 		):
 			yield frappe.local.request
 	finally:

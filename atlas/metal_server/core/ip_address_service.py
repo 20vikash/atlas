@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 import frappe
 from frappe import _
 
+from atlas.atlas.core.exceptions import AtlasUserError
+
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
 		MetalServerIPAddress,
@@ -14,13 +16,13 @@ POOL_SEARCH_LIMIT = 20
 RESERVATION_SOURCES = ("pool", "provider")
 
 
-class IPAddressPoolEmpty(frappe.ValidationError):
+class IPAddressPoolEmpty(AtlasUserError):
 	"""Report that the shared pool holds no free address."""
 
 	http_status_code = 409
 
 
-class IPAddressInUse(frappe.ValidationError):
+class IPAddressInUse(AtlasUserError):
 	"""Report that an address cannot return to the shared pool."""
 
 	http_status_code = 409

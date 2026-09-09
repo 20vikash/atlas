@@ -36,7 +36,7 @@ class MultipartUploadService:
 			)
 
 		if save:
-			self.image.save(ignore_permissions=True)
+			self.image.save()
 
 	def get_upload_request(self) -> dict[str, Any]:
 		"""Return signed upload parts for each image artifact."""

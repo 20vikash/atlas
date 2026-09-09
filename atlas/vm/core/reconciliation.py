@@ -52,7 +52,7 @@ def delete_virtual_machine(virtual_machine: VirtualMachine, description: str) ->
 	virtual_machine.flags.metal_absence_confirmed = True
 
 	try:
-		virtual_machine.delete(ignore_permissions=True)
+		virtual_machine.delete()
 		frappe.db.commit()
 	except Exception:
 		frappe.db.rollback()

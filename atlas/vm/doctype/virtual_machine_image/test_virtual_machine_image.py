@@ -155,6 +155,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			server="server-1",
 			virtual_machine_image="system-image",
 			disk_mib=1024,
+			tenant_id=7,
 		)
 		original_image = SimpleNamespace(
 			platform="amd64",
@@ -188,7 +189,6 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 		self.assertEqual(image_name, "01900000-0000-7000-8000-000000000001")
 		image.insert.assert_called_once_with(
-			ignore_permissions=True,
 			set_name="01900000-0000-7000-8000-000000000001",
 		)
 		enqueue_transfer.assert_called_once_with("01900000-0000-7000-8000-000000000001")
@@ -366,4 +366,4 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 		self.assertEqual(image.rootfs_multipart_upload_id, "rootfs-upload")
 		self.assertEqual(image.kernel_multipart_upload_id, "kernel-upload")
-		image.save.assert_called_once_with(ignore_permissions=True)
+		image.save.assert_called_once_with()

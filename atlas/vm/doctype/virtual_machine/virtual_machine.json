@@ -147,7 +147,8 @@
    "read_only": 1,
    "reqd": 1,
    "set_only_once": 1,
-   "show_description_on_click": 1
+   "show_description_on_click": 1,
+   "search_index": 1
   },
   {
    "default": "0",
@@ -260,6 +261,13 @@
  "owner": "Administrator",
  "permissions": [
   {
+   "create": 1,
+   "read": 1,
+   "role": "Atlas Admin",
+   "write": 1
+  },
+  {
+   "create": 1,
    "delete": 1,
    "read": 1,
    "role": "System Manager",

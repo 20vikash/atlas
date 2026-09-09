@@ -79,7 +79,7 @@ class VirtualMachineImageTransferService:
 			}
 		)
 		try:
-			image.insert(ignore_permissions=True, set_name=snapshot_id)
+			image.insert(set_name=snapshot_id)
 		except Exception:
 			self.delete_abandoned_snapshot(metal_client, snapshot_id)
 			raise
@@ -164,7 +164,7 @@ class VirtualMachineImageTransferService:
 		image.transfer_progress = 0
 		image.transfer_error = None
 		multipart_upload.ensure_uploads(save=False)
-		image.save(ignore_permissions=True)
+		image.save()
 		metal_client.start_snapshot_upload(cast(str, image.name), multipart_upload.get_upload_request())
 
 	def finalize(
@@ -194,7 +194,7 @@ class VirtualMachineImageTransferService:
 		image.status = "Completing"
 		image.transfer_progress = 100
 		image.transfer_error = None
-		image.save(ignore_permissions=True)
+		image.save()
 
 	@staticmethod
 	def require_artifact_sha256(status: dict[str, Any], artifact: str) -> str:
@@ -247,7 +247,7 @@ class VirtualMachineImageTransferService:
 		"""Save one active transfer status."""
 		image.status = status
 		image.transfer_error = None
-		image.save(ignore_permissions=True)
+		image.save()
 
 	@staticmethod
 	def mark_available(image: VirtualMachineImage) -> None:
@@ -256,14 +256,14 @@ class VirtualMachineImageTransferService:
 		image.rootfs_multipart_upload_id = None
 		image.kernel_multipart_upload_id = None
 		image.transfer_error = None
-		image.save(ignore_permissions=True)
+		image.save()
 
 	@staticmethod
 	def mark_failed(image: VirtualMachineImage, message: str) -> None:
 		"""Store a transfer error without clearing retry identifiers."""
 		image.status = "Failed"
 		image.transfer_error = message[:1000]
-		image.save(ignore_permissions=True)
+		image.save()
 
 
 def enqueue_pending_machine_image_transfers() -> None:

@@ -70,7 +70,7 @@ class MetalServerIPAddress(Document):
 		self.server = server
 		self.virtual_machine = virtual_machine
 		self.intent_version = (self.intent_version or 0) + 1
-		self.save(ignore_permissions=True)
+		self.save()
 		self.queue_reconcile()
 
 	def release(self) -> None:
@@ -82,12 +82,12 @@ class MetalServerIPAddress(Document):
 			self.status = "Detaching"
 		else:
 			self.status = "Allocated"
-		self.save(ignore_permissions=True)
+		self.save()
 		self.queue_reconcile()
 
 	def release_to_pool(self) -> None:
 		"""Release this unused address to the shared pool."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		IPAddressService().release(self)
 
 	def queue_reconcile(self) -> None:
