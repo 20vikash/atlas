@@ -903,6 +903,27 @@ func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 	}
 }
 
+// A host not-found has no addressed resource. A 404 tells the controller to
+// stop, so the sync must report a retryable host fault instead.
+func TestSyncReportsHostNotFoundAsUnavailable(t *testing.T) {
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}, listError: vm.ErrNotFound}
+	server := newServerWithServices(t, driver, newFakeRuntimeServices(), &fakeWireGuardManager{})
+
+	recorder := do(
+		t, server, http.MethodPost, "/v1/sync",
+		`{"wireguard_peers":[],"images":[],"privileged_vm_addresses":[]}`,
+		http.StatusServiceUnavailable,
+	)
+
+	var response errorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Error.Retryable || response.Error.Code != "unavailable" {
+		t.Fatalf("error = %+v", response.Error)
+	}
+}
+
 // A missing collection would read as an empty set and clear host state.
 func TestSyncRequiresControllerCollections(t *testing.T) {
 	server := newTestServer(t)

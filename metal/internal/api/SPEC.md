@@ -98,6 +98,8 @@ A domain error is mapped to one status and one safe message. An unrecognized err
 
 Every error body carries a `retryable` flag, so a caller does not have to know which statuses are worth another attempt. `501` is excluded: repeating it cannot change the answer.
 
+`POST /v1/sync` addresses no resource, so it maps a not-found from host state to `503` `unavailable`. A `404` would tell the controller to stop when it must try the request again.
+
 Responses never carry host command output, signed URL query values, or local error detail.
 
 ## Response shape

@@ -225,6 +225,77 @@ class TestVirtualMachineDisk(UnitTestCase):
 		set_disk.assert_not_called()
 
 
+class TestVirtualMachineCompute(UnitTestCase):
+	def build_service(self, observed_state: str = "running") -> tuple[VirtualMachineService, SimpleNamespace]:
+		"""Return a service whose host reports one desired compute object."""
+		virtual_machine = SimpleNamespace(name="VM-00001", db_set=Mock())
+		information = SimpleNamespace(
+			desired=SimpleNamespace(
+				compute=SimpleNamespace(
+					virtual_cpu_count=2,
+					memory_mib=2048,
+					is_sleepy=False,
+					idle_timeout_seconds=0,
+				)
+			),
+			observed=SimpleNamespace(state=observed_state),
+		)
+		return VirtualMachineService(virtual_machine), information
+
+	def test_a_sleep_policy_change_does_not_need_a_stopped_virtual_machine(self) -> None:
+		service, information = self.build_service("running")
+
+		with (
+			patch.object(service, "require_information", return_value=information),
+			patch.object(service, "set_compute", return_value={}) as set_compute,
+		):
+			service.update_compute({"is_sleepy": True, "idle_timeout_seconds": 1800})
+
+		set_compute.assert_called_once_with(
+			{
+				"virtual_cpu_count": 2,
+				"memory_mib": 2048,
+				"is_sleepy": True,
+				"idle_timeout_seconds": 1800,
+			}
+		)
+		service.virtual_machine.db_set.assert_not_called()
+
+	def test_a_shape_change_keeps_the_stored_sleep_policy(self) -> None:
+		"""Metal replaces the complete compute object, so a resize must resend the policy."""
+		service, information = self.build_service("stopped")
+		information.desired.compute.is_sleepy = True
+		information.desired.compute.idle_timeout_seconds = 1800
+
+		with (
+			patch.object(service, "require_information", return_value=information),
+			patch.object(service, "set_compute", return_value={}) as set_compute,
+		):
+			service.update_compute({"virtual_cpu_count": 4})
+
+		set_compute.assert_called_once_with(
+			{
+				"virtual_cpu_count": 4,
+				"memory_mib": 2048,
+				"is_sleepy": True,
+				"idle_timeout_seconds": 1800,
+			}
+		)
+		service.virtual_machine.db_set.assert_called_once_with({"vcpus": 4, "memory_mib": 2048})
+
+	def test_a_shape_change_needs_a_stopped_virtual_machine(self) -> None:
+		service, information = self.build_service("running")
+
+		with (
+			patch.object(service, "require_information", return_value=information),
+			patch.object(service, "set_compute") as set_compute,
+			self.assertRaises(frappe.ValidationError),
+		):
+			service.update_compute({"memory_mib": 4096})
+
+		set_compute.assert_not_called()
+
+
 class TestVirtualMachineNetworkChanges(UnitTestCase):
 	def build_service(self, attached: str | None) -> VirtualMachineService:
 		"""Return a service for a managed virtual machine."""

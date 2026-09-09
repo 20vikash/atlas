@@ -47,7 +47,13 @@ class VirtualMachine(Document):
 
 	@request_cache
 	def get_metal_vm_info(self) -> MetalVirtualMachine | None:
-		"""Return the Metal record for this VM, cached for one request."""
+		"""Return the Metal record for this VM, cached for one request.
+
+		A record with no Server holds no Metal state. Frappe reads every virtual
+		field to build the new document template, so this runs before placement.
+		"""
+		if not self.server:
+			return None
 		return VirtualMachineService(self).get_information()
 
 	def before_insert(self) -> None:
@@ -135,6 +141,18 @@ class VirtualMachine(Document):
 			)
 
 		return self.public_ipv4
+
+	@property
+	def is_sleepy(self) -> bool:
+		"""Report whether the host sleeps this VM when it is idle."""
+		information = self.get_metal_vm_info()
+		return information.desired.compute.is_sleepy if information else False
+
+	@property
+	def idle_timeout_seconds(self) -> int:
+		"""Return the idle time before sleep. Zero disables sleep."""
+		information = self.get_metal_vm_info()
+		return information.desired.compute.idle_timeout_seconds if information else 0
 
 	@property
 	def disk_throughput_mibps(self) -> int:
@@ -328,24 +346,33 @@ class VirtualMachine(Document):
 		return self.update_disk({"size_mib": int(disk_mib)})
 
 	@frappe.whitelist(methods=["POST"])
-	def resize_compute(self, vcpus: int, memory_mib: int) -> None:
+	def resize_compute(self, vcpus: int, memory_mib: int) -> dict[str, Any]:
 		"""Ask Metal to change this VM CPU and memory. The VM must be stopped."""
-		self.update_compute(int(vcpus), int(memory_mib))
+		return self.update_compute({"virtual_cpu_count": int(vcpus), "memory_mib": int(memory_mib)})
 
-	def update_compute(self, vcpus: int | None, memory_mib: int | None) -> None:
-		"""Change the VM CPU and memory when the VM is stopped."""
-		self.check_permission("write")
-		service = VirtualMachineService(self)
-		information = service.require_information()
-		if information.observed.state != "stopped":
-			frappe.throw(
-				_("Stop the Virtual Machine before you change its compute values."), exc=AtlasUserError
-			)
+	@frappe.whitelist(methods=["POST"])
+	def update_sleep_policy(self, is_sleepy: bool | int | str, idle_timeout_seconds: int) -> dict[str, Any]:
+		"""Change automatic sleep. An idle timeout of 0 disables it."""
+		try:
+			sleepy = strict_bool(is_sleepy, "is_sleepy")
+		except ValueError as error:
+			frappe.throw(_(str(error)), exc=AtlasUserError)
+			raise AssertionError from error
 
-		service.set_compute(
-			vcpus if vcpus is not None else information.desired.compute.virtual_cpu_count,
-			memory_mib if memory_mib is not None else information.desired.compute.memory_mib,
+		return self.update_compute(
+			{
+				"is_sleepy": sleepy,
+				"idle_timeout_seconds": self.parse_limit(idle_timeout_seconds, _("Idle timeout")),
+			}
 		)
+
+	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
+		"""Apply selected compute changes."""
+		self.check_permission("write")
+		if self.is_draft:
+			frappe.throw(_("Wait for Virtual Machine creation before a compute change."), exc=AtlasUserError)
+
+		return VirtualMachineService(self).update_compute(changes)
 
 	def update_disk(self, changes: dict[str, int]) -> dict[str, Any]:
 		"""Apply selected disk size and limit changes."""

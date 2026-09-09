@@ -186,6 +186,9 @@ func (manager *Manager) RunTemporary(
 				WireGuardMeshIPv6: specification.Network.WireGuardMeshIPv6,
 			}),
 			manager.storage.Release(cleanupContext, identifier),
+			// The runtime makes a machine directory. A temporary VM keeps no
+			// records, so the directory must not stay and look like a reserved VM.
+			manager.store.remove(identifier),
 		)
 	}()
 	if err := manager.runtime.Start(ctx, machine, StartNormal); err != nil {

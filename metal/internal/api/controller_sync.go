@@ -1,12 +1,15 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -64,6 +67,7 @@ type capacityResponse struct {
 // @Failure	409		{object}	errorResponse
 // @Failure	422		{object}	errorResponse
 // @Failure	500		{object}	errorResponse
+// @Failure	503		{object}	errorResponse
 // @Router		/v1/sync [post]
 func (s *Server) exchangeControllerState(c echo.Context) error {
 	var request syncRequest
@@ -91,13 +95,24 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 		PrivilegedVirtualMachineAddresses: request.PrivilegedVMAddresses,
 	})
 	if err != nil {
-		return err
+		return synchronizationFailure(err)
 	}
 
 	return c.JSON(http.StatusOK, syncResponse{
 		Capacity:        capacityResponseFromHost(result.Capacity),
 		VirtualMachines: virtualMachineStateResponses(result.VirtualMachineStates),
 	})
+}
+
+// synchronizationFailure keeps a host not-found out of the response. This
+// endpoint addresses no resource, so a 404 stops the controller when it must
+// try the request again.
+func synchronizationFailure(err error) error {
+	if errors.Is(err, vm.ErrNotFound) || errors.Is(err, storage.ErrNotFound) {
+		unavailable := newAPIError(http.StatusServiceUnavailable, "unavailable", "host state is incomplete")
+		return fmt.Errorf("%w: %w", unavailable, err)
+	}
+	return err
 }
 
 // imagePolicies converts the requested images into image policies.

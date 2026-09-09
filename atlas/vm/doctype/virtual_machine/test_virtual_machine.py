@@ -20,7 +20,12 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 		"generation": 2,
 		"restart_generation": 1,
 		"state": "running",
-		"compute": {"virtual_cpu_count": 2, "memory_mib": 2048},
+		"compute": {
+			"virtual_cpu_count": 2,
+			"memory_mib": 2048,
+			"is_sleepy": True,
+			"idle_timeout_seconds": 1800,
+		},
 		"disk": {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000},
 		"image": {
 			"ref": "ubuntu",
@@ -56,6 +61,14 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 		"network": {"mac": "06:00:00:00:00:01"},
 		"error": None,
 	},
+}
+
+
+COMPUTE_REQUEST = {
+	"virtual_cpu_count": 2,
+	"memory_mib": 2048,
+	"is_sleepy": True,
+	"idle_timeout_seconds": 1800,
 }
 
 
@@ -211,6 +224,18 @@ class TestVirtualMachineRequest(UnitTestCase):
 			)
 
 
+class TestVirtualMachineDocument(UnitTestCase):
+	# Frappe reads every virtual field to build the new document template. A new
+	# record has no Server, so the Metal lookup must not run.
+	def test_new_document_reads_virtual_fields_without_a_server(self) -> None:
+		virtual_machine = frappe.new_doc("Virtual Machine")
+
+		self.assertIsNone(virtual_machine.get_metal_vm_info())
+		self.assertEqual(virtual_machine.current_state, "unknown")
+		self.assertIsNone(virtual_machine.desired_state)
+		self.assertFalse(virtual_machine.is_sleepy)
+
+
 class TestVirtualMachineService(UnitTestCase):
 	def test_machine_image_uses_its_own_artifacts(self) -> None:
 		request = VirtualMachineCreateRequest("machine-image", 2, 2048, 10240, 7)
@@ -251,7 +276,12 @@ class TestVirtualMachineService(UnitTestCase):
 
 		self.assertEqual(
 			metal_request["compute"],
-			{"virtual_cpu_count": 2, "memory_mib": 2048},
+			{
+				"virtual_cpu_count": 2,
+				"memory_mib": 2048,
+				"is_sleepy": False,
+				"idle_timeout_seconds": 0,
+			},
 		)
 		self.assertEqual(metal_request["disk"]["size_mib"], 10240)
 		self.assertEqual(metal_request["guest"]["ssh_keys"], [])
@@ -303,7 +333,7 @@ class TestMetalClient(UnitTestCase):
 			client.set_virtual_machine_power_state("VM-00001", "running")
 			client.request_virtual_machine_restart("VM-00001")
 			client.set_virtual_machine_disk("VM-00001", {"size_mib": 2048, "throughput_mibps": 0, "iops": 0})
-			client.set_virtual_machine_compute("VM-00001", 2, 2048)
+			client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST)
 			client.delete_virtual_machine("VM-00001")
 
 		paths = [call.args[1] for call in request.call_args_list]
@@ -321,10 +351,7 @@ class TestMetalClient(UnitTestCase):
 			request.call_args_list[2].kwargs["json"],
 			{"size_mib": 2048, "throughput_mibps": 0, "iops": 0},
 		)
-		self.assertEqual(
-			request.call_args_list[3].kwargs["json"],
-			{"virtual_cpu_count": 2, "memory_mib": 2048},
-		)
+		self.assertEqual(request.call_args_list[3].kwargs["json"], COMPUTE_REQUEST)
 
 	def test_console_connection_builds_websocket_url(self) -> None:
 		client = MetalClient.__new__(MetalClient)
@@ -486,7 +513,7 @@ class TestMetalClient(UnitTestCase):
 			"metadata": lambda: client.replace_virtual_machine_metadata("VM-00001", {}),
 			"network": lambda: client.set_virtual_machine_network("VM-00001", {}),
 			"disk": lambda: client.set_virtual_machine_disk("VM-00001", {}),
-			"compute": lambda: client.set_virtual_machine_compute("VM-00001", 2, 2048),
+			"compute": lambda: client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST),
 			"sync": lambda: client.sync([], [], []),
 		}
 
@@ -550,6 +577,8 @@ class TestMetalVirtualMachineModel(UnitTestCase):
 		self.assertEqual(virtual_machine.egress, "uplink")
 		self.assertEqual(virtual_machine.wireguard_mesh_ipv6, "fdaa:1::1")
 		self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
+		self.assertTrue(virtual_machine.is_sleepy)
+		self.assertEqual(virtual_machine.idle_timeout_seconds, 1800)
 		self.assertEqual(virtual_machine.disk_throughput_mibps, 50)
 		self.assertEqual(virtual_machine.disk_iops, 2000)
 		self.assertEqual(virtual_machine.private_network_throughput_mibps, 100)

@@ -56,7 +56,9 @@ Secure Shell key and metadata updates use an immediate operation with a 2-second
 {
   "compute": {
     "virtual_cpu_count": 2,
-    "memory_mib": 2048
+    "memory_mib": 2048,
+    "is_sleepy": true,
+    "idle_timeout_seconds": 1800
   },
   "disk": {
     "size_mib": 20480,
@@ -108,7 +110,9 @@ Create, read, and mutation routes return the same nested resource shape.
     "state": "running",
     "compute": {
       "virtual_cpu_count": 2,
-      "memory_mib": 2048
+      "memory_mib": 2048,
+      "is_sleepy": true,
+      "idle_timeout_seconds": 1800
     },
     "disk": {
       "size_mib": 20480,
@@ -167,10 +171,10 @@ Valid states are `running`, `stopped`, and `paused`. Delete records the desired 
 
 Restart has no request body. Each accepted request increases `restart_generation`.
 
-Compute replaces the complete compute object:
+Compute replaces the CPU shape, the memory shape, and the sleep policy. A shape change needs a stopped VM. A sleep policy change does not, and `idle_timeout_seconds` `0` disables sleep.
 
 ```json
-{"virtual_cpu_count": 4, "memory_mib": 4096}
+{"virtual_cpu_count": 4, "memory_mib": 4096, "is_sleepy": true, "idle_timeout_seconds": 1800}
 ```
 
 Disk replaces the complete mutable disk object. Metal rejects disk shrink requests.

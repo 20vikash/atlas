@@ -147,7 +147,9 @@ func (store *recordStore) validateAll() error {
 	return nil
 }
 
-// listIDs returns every reserved identifier in sorted order.
+// listIDs returns every reserved identifier in sorted order. A directory
+// without a desired record is not a reserved VM: a temporary VM keeps no
+// records, and a stopped build leaves its directory behind.
 func (store *recordStore) listIDs() ([]string, error) {
 	entries, err := os.ReadDir(store.directory)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -158,9 +160,16 @@ func (store *recordStore) listIDs() ([]string, error) {
 	}
 	identifiers := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() {
-			identifiers = append(identifiers, entry.Name())
+		if !entry.IsDir() {
+			continue
 		}
+		if _, err := os.Stat(store.desiredPath(entry.Name())); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("list virtual machine records: %w", err)
+		}
+		identifiers = append(identifiers, entry.Name())
 	}
 	sort.Strings(identifiers)
 	return identifiers, nil

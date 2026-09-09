@@ -204,6 +204,8 @@ class CreateVirtualMachinePayload(StrictModel):
 	metadata: dict[str, str] = Field(default_factory=dict)
 	ip_address_id: str | None = None
 	egress: EgressMode = "uplink"
+	is_sleepy: bool = False
+	idle_timeout_seconds: int = Field(default=0, ge=0)
 	disk_throughput_mibps: int = Field(default=0, ge=0)
 	disk_iops: int = Field(default=0, ge=0)
 	private_network_throughput_mibps: int = Field(default=0, ge=0)
@@ -224,6 +226,8 @@ class CreateVirtualMachinePayload(StrictModel):
 			user_data=self.user_data,
 			metadata=self.metadata,
 			egress=self.egress,
+			is_sleepy=self.is_sleepy,
+			idle_timeout_seconds=self.idle_timeout_seconds,
 			disk_throughput_mibps=self.disk_throughput_mibps,
 			disk_iops=self.disk_iops,
 			private_network_throughput_mibps=self.private_network_throughput_mibps,
@@ -233,10 +237,19 @@ class CreateVirtualMachinePayload(StrictModel):
 
 
 class ComputeUpdatePayload(PatchPayload):
-	"""New CPU and memory values for a stopped virtual machine."""
+	"""New CPU shape, memory shape, and sleep policy."""
 
 	vcpus: int | None = Field(default=None, gt=0)
 	memory_mib: int | None = Field(default=None, gt=0)
+	is_sleepy: bool | None = None
+	idle_timeout_seconds: int | None = Field(default=None, ge=0)
+
+	def to_domain_changes(self) -> dict[str, Any]:
+		"""Return the field names that the VM service accepts."""
+		changes = self.model_dump(exclude_none=True)
+		if "vcpus" in changes:
+			changes["virtual_cpu_count"] = changes.pop("vcpus")
+		return changes
 
 
 class DiskUpdatePayload(PatchPayload):

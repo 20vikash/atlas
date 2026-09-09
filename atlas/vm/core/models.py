@@ -24,6 +24,8 @@ class VirtualMachineCreateRequest:
 	ssh_keys: tuple[str, ...] = ()
 	user_data: str = ""
 	egress: str = "uplink"
+	is_sleepy: bool = False
+	idle_timeout_seconds: int = 0
 	disk_throughput_mibps: int = 0
 	disk_iops: int = 0
 	private_network_throughput_mibps: int = 0
@@ -53,7 +55,7 @@ class VirtualMachineCreateRequest:
 		if egress not in EGRESS_MODES:
 			raise ValueError("Egress must be uplink, mesh, or none.")
 
-		public_network_throughput_mibps = cls.throughput(payload, "public_network_throughput_mibps")
+		public_network_throughput_mibps = cls.non_negative_integer(payload, "public_network_throughput_mibps")
 		server_ip_address = payload.get("server_ip_address") or None
 		if egress != "uplink" and server_ip_address:
 			raise ValueError("A public IPv4 address requires uplink egress.")
@@ -69,9 +71,13 @@ class VirtualMachineCreateRequest:
 			ssh_keys=cls.ssh_keys_tuple(payload),
 			user_data=str(payload.get("user_data") or ""),
 			egress=egress,
-			disk_throughput_mibps=cls.throughput(payload, "disk_throughput_mibps"),
-			disk_iops=cls.throughput(payload, "disk_iops"),
-			private_network_throughput_mibps=cls.throughput(payload, "private_network_throughput_mibps"),
+			is_sleepy=strict_bool(payload.get("is_sleepy"), "is_sleepy"),
+			idle_timeout_seconds=cls.non_negative_integer(payload, "idle_timeout_seconds"),
+			disk_throughput_mibps=cls.non_negative_integer(payload, "disk_throughput_mibps"),
+			disk_iops=cls.non_negative_integer(payload, "disk_iops"),
+			private_network_throughput_mibps=cls.non_negative_integer(
+				payload, "private_network_throughput_mibps"
+			),
 			public_network_throughput_mibps=public_network_throughput_mibps,
 			server_ip_address=server_ip_address,
 			metadata=cls.metadata_map(payload),
@@ -89,8 +95,8 @@ class VirtualMachineCreateRequest:
 		return tuple(key.strip() for key in value if key.strip())
 
 	@staticmethod
-	def throughput(payload: dict[str, Any], field_name: str) -> int:
-		"""Return one throughput limit in MiB/s. A value of 0 applies no limit."""
+	def non_negative_integer(payload: dict[str, Any], field_name: str) -> int:
+		"""Return one optional non-negative integer."""
 		value = payload.get(field_name) or 0
 		if not isinstance(value, int) or isinstance(value, bool) or value < 0:
 			raise ValueError(f"{field_name} must be a non-negative integer.")
