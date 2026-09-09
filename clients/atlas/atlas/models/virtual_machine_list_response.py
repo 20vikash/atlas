@@ -30,6 +30,7 @@ class VirtualMachineListResponse:
             image_id (str):
             last_known_state (str):
             memory_mib (int):
+            sleep_after_idle_seconds (int):
             state_synced_at (int | None):
             tenant_id (int):
             vcpus (int):
@@ -41,6 +42,7 @@ class VirtualMachineListResponse:
     image_id: str
     last_known_state: str
     memory_mib: int
+    sleep_after_idle_seconds: int
     state_synced_at: int | None
     tenant_id: int
     vcpus: int
@@ -63,6 +65,8 @@ class VirtualMachineListResponse:
 
         memory_mib = self.memory_mib
 
+        sleep_after_idle_seconds = self.sleep_after_idle_seconds
+
         state_synced_at: int | None
         state_synced_at = self.state_synced_at
 
@@ -80,6 +84,7 @@ class VirtualMachineListResponse:
             "image_id": image_id,
             "last_known_state": last_known_state,
             "memory_mib": memory_mib,
+            "sleep_after_idle_seconds": sleep_after_idle_seconds,
             "state_synced_at": state_synced_at,
             "tenant_id": tenant_id,
             "vcpus": vcpus,
@@ -104,6 +109,8 @@ class VirtualMachineListResponse:
 
         memory_mib = d.pop("memory_mib")
 
+        sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
+
         def _parse_state_synced_at(data: object) -> int | None:
             if data is None:
                 return data
@@ -123,6 +130,7 @@ class VirtualMachineListResponse:
             image_id=image_id,
             last_known_state=last_known_state,
             memory_mib=memory_mib,
+            sleep_after_idle_seconds=sleep_after_idle_seconds,
             state_synced_at=state_synced_at,
             tenant_id=tenant_id,
             vcpus=vcpus,

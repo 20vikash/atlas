@@ -36,12 +36,11 @@ class CreateVirtualMachinePayload:
             disk_throughput_mibps (int | Unset):  Default: 0.
             egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
             hostname (str | Unset):  Default: ''.
-            idle_timeout_seconds (int | Unset):  Default: 0.
             ip_address_id (None | str | Unset):
-            is_sleepy (bool | Unset):  Default: False.
             metadata (CreateVirtualMachinePayloadMetadata | Unset):
             private_network_throughput_mibps (int | Unset):  Default: 0.
             public_network_throughput_mibps (int | Unset):  Default: 0.
+            sleep_after_idle_seconds (int | Unset):  Default: 0.
             ssh_keys (list[str] | Unset):
             user_data (str | Unset):  Default: ''.
      """
@@ -54,12 +53,11 @@ class CreateVirtualMachinePayload:
     disk_throughput_mibps: int | Unset = 0
     egress: CreateVirtualMachinePayloadEgress | Unset = CreateVirtualMachinePayloadEgress.UPLINK
     hostname: str | Unset = ''
-    idle_timeout_seconds: int | Unset = 0
     ip_address_id: None | str | Unset = UNSET
-    is_sleepy: bool | Unset = False
     metadata: CreateVirtualMachinePayloadMetadata | Unset = UNSET
     private_network_throughput_mibps: int | Unset = 0
     public_network_throughput_mibps: int | Unset = 0
+    sleep_after_idle_seconds: int | Unset = 0
     ssh_keys: list[str] | Unset = UNSET
     user_data: str | Unset = ''
 
@@ -88,15 +86,11 @@ class CreateVirtualMachinePayload:
 
         hostname = self.hostname
 
-        idle_timeout_seconds = self.idle_timeout_seconds
-
         ip_address_id: None | str | Unset
         if isinstance(self.ip_address_id, Unset):
             ip_address_id = UNSET
         else:
             ip_address_id = self.ip_address_id
-
-        is_sleepy = self.is_sleepy
 
         metadata: dict[str, Any] | Unset = UNSET
         if not isinstance(self.metadata, Unset):
@@ -105,6 +99,8 @@ class CreateVirtualMachinePayload:
         private_network_throughput_mibps = self.private_network_throughput_mibps
 
         public_network_throughput_mibps = self.public_network_throughput_mibps
+
+        sleep_after_idle_seconds = self.sleep_after_idle_seconds
 
         ssh_keys: list[str] | Unset = UNSET
         if not isinstance(self.ssh_keys, Unset):
@@ -131,18 +127,16 @@ class CreateVirtualMachinePayload:
             field_dict["egress"] = egress
         if hostname is not UNSET:
             field_dict["hostname"] = hostname
-        if idle_timeout_seconds is not UNSET:
-            field_dict["idle_timeout_seconds"] = idle_timeout_seconds
         if ip_address_id is not UNSET:
             field_dict["ip_address_id"] = ip_address_id
-        if is_sleepy is not UNSET:
-            field_dict["is_sleepy"] = is_sleepy
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
         if private_network_throughput_mibps is not UNSET:
             field_dict["private_network_throughput_mibps"] = private_network_throughput_mibps
         if public_network_throughput_mibps is not UNSET:
             field_dict["public_network_throughput_mibps"] = public_network_throughput_mibps
+        if sleep_after_idle_seconds is not UNSET:
+            field_dict["sleep_after_idle_seconds"] = sleep_after_idle_seconds
         if ssh_keys is not UNSET:
             field_dict["ssh_keys"] = ssh_keys
         if user_data is not UNSET:
@@ -180,8 +174,6 @@ class CreateVirtualMachinePayload:
 
         hostname = d.pop("hostname", UNSET)
 
-        idle_timeout_seconds = d.pop("idle_timeout_seconds", UNSET)
-
         def _parse_ip_address_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -191,8 +183,6 @@ class CreateVirtualMachinePayload:
 
         ip_address_id = _parse_ip_address_id(d.pop("ip_address_id", UNSET))
 
-
-        is_sleepy = d.pop("is_sleepy", UNSET)
 
         _metadata = d.pop("metadata", UNSET)
         metadata: CreateVirtualMachinePayloadMetadata | Unset
@@ -208,6 +198,8 @@ class CreateVirtualMachinePayload:
 
         public_network_throughput_mibps = d.pop("public_network_throughput_mibps", UNSET)
 
+        sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds", UNSET)
+
         ssh_keys = cast(list[str], d.pop("ssh_keys", UNSET))
 
 
@@ -222,12 +214,11 @@ class CreateVirtualMachinePayload:
             disk_throughput_mibps=disk_throughput_mibps,
             egress=egress,
             hostname=hostname,
-            idle_timeout_seconds=idle_timeout_seconds,
             ip_address_id=ip_address_id,
-            is_sleepy=is_sleepy,
             metadata=metadata,
             private_network_throughput_mibps=private_network_throughput_mibps,
             public_network_throughput_mibps=public_network_throughput_mibps,
+            sleep_after_idle_seconds=sleep_after_idle_seconds,
             ssh_keys=ssh_keys,
             user_data=user_data,
         )

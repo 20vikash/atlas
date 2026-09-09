@@ -67,7 +67,7 @@ frappe.ui.form.on("Virtual Machine", {
 			);
 		}
 		frm.add_custom_button(
-			__("Edit Idle Shutdown"),
+			__("Edit Idle Sleep"),
 			() => showEditIdleShutdownDialog(frm),
 			__("Actions")
 		);
@@ -352,9 +352,9 @@ function showEditIdleShutdownDialog(frm) {
 			{
 				fieldname: "sleep_after_idle_seconds",
 				fieldtype: "Int",
-				label: __("Stop After Idle (Seconds)"),
+				label: __("Sleep After Idle (Seconds)"),
 				default: frm.doc.sleep_after_idle_seconds,
-				description: __("0 disables automatic idle shutdown."),
+				description: __("0 disables automatic idle sleep."),
 			},
 		],
 		(values) =>
@@ -364,10 +364,10 @@ function showEditIdleShutdownDialog(frm) {
 					doc: frm.doc,
 					args: values,
 					freeze: true,
-					freeze_message: __("Updating idle shutdown..."),
+					freeze_message: __("Updating idle sleep..."),
 				})
 				.then(() => frm.reload_doc()),
-		__("Edit Idle Shutdown"),
+		__("Edit Idle Sleep"),
 		__("Save")
 	);
 }
