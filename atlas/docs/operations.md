@@ -38,7 +38,7 @@ Use Frappe Desk Error Log and the named documents first. Keep the durable Atlas 
 
 ## Virtual machine stays unknown or failed
 
-- Symptom: The Atlas form shows `unknown` or `failed` after the normal reconcile interval.
+- Symptom: The Atlas form shows `unknown` or `failed` after the normal reconcile interval. A draft shows `pending`.
 - Owner: An uncertain Atlas create request or Metal runtime reconciliation.
 - Safe checks: Check whether the Atlas record is a draft. Read `GET /v1/vms/{id}`. Check the Metal log and `systemctl status metal-vm@<id>.service`.
 - Expected evidence: HTTP `404` confirms an absent draft. A present record reports desired state, observed state, and an error.

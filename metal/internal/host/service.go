@@ -18,6 +18,12 @@ type DesiredState struct {
 	PrivilegedVirtualMachineAddresses []string
 }
 
+// SyncResult contains what the controller reads back from one sync exchange.
+type SyncResult struct {
+	Capacity             Capacity
+	VirtualMachineStates map[string]vm.State
+}
+
 // Capacity contains current host compute and storage capacity.
 type Capacity struct {
 	TotalCPUCount       int
@@ -93,23 +99,38 @@ func NewService(dependencies Dependencies) (*Service, error) {
 	}, nil
 }
 
-// Synchronize applies controller-owned state and returns current capacity. Each
+// Synchronize applies controller-owned state and returns the sync result. Each
 // set is replaced in full, so the controller never sends incremental changes.
-func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (Capacity, error) {
+func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (SyncResult, error) {
 	addresses := desired.PrivilegedVirtualMachineAddresses
 	if err := service.mesh.ApplyPrivilegedAddresses(ctx, addresses); err != nil {
-		return Capacity{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
+		return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
 	}
 	if err := service.wireGuard.Apply(ctx, desired.WireGuardPeers); err != nil {
-		return Capacity{}, fmt.Errorf("apply WireGuard peers: %w", err)
+		return SyncResult{}, fmt.Errorf("apply WireGuard peers: %w", err)
 	}
 	if err := service.images.SetImagePolicies(ctx, desired.Images); err != nil {
-		return Capacity{}, fmt.Errorf("apply image policies: %w", err)
+		return SyncResult{}, fmt.Errorf("apply image policies: %w", err)
 	}
 
 	service.wake()
 
-	return service.Capacity(ctx)
+	virtualMachines, err := service.virtualMachines.List(ctx)
+	if err != nil {
+		return SyncResult{}, fmt.Errorf("list virtual machine reservations: %w", err)
+	}
+
+	capacity, err := service.capacityOf(ctx, virtualMachines)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	states := make(map[string]vm.State, len(virtualMachines))
+	for _, information := range virtualMachines {
+		states[information.ID] = information.State
+	}
+
+	return SyncResult{Capacity: capacity, VirtualMachineStates: states}, nil
 }
 
 // Capacity returns current host capacity and valid VM reservations. CPU is
@@ -120,6 +141,11 @@ func (service *Service) Capacity(ctx context.Context) (Capacity, error) {
 		return Capacity{}, fmt.Errorf("list virtual machine reservations: %w", err)
 	}
 
+	return service.capacityOf(ctx, virtualMachines)
+}
+
+// capacityOf reports capacity against reservations the caller already listed.
+func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Information) (Capacity, error) {
 	reservedCPUCount := 0
 	for _, information := range virtualMachines {
 		reservedCPUCount += information.VirtualCPUCount

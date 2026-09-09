@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class ImageDownloadResponseArtifact(StrEnum):
     KERNEL = "kernel"
     ROOTFS = "rootfs"

@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class ReserveIPAddressPayloadSource(StrEnum):
     POOL = "pool"
     PROVIDER = "provider"

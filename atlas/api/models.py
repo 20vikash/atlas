@@ -294,6 +294,15 @@ class ConsoleTokenPayload(StrictModel):
 	mode: Literal["tty", "ssh"] = "tty"
 
 
+def get_current_state(virtual_machine: VirtualMachine, reported_state: str | None) -> str:
+	"""Return the state a caller sees. An Atlas transition hides the host state."""
+	if virtual_machine.is_draft:
+		return "pending"
+	if virtual_machine.is_terminating:
+		return "terminating"
+	return reported_state or "unknown"
+
+
 class VirtualMachineResponse(BaseModel):
 	"""A stored tenant virtual machine."""
 
@@ -335,6 +344,37 @@ class VirtualMachineResponse(BaseModel):
 		)
 
 
+class VirtualMachineListResponse(VirtualMachineResponse):
+	"""A stored virtual machine with its last known host state."""
+
+	model_config = ConfigDict(
+		json_schema_extra={
+			"examples": [
+				{
+					**VirtualMachineResponse.model_config["json_schema_extra"]["examples"][0],
+					"last_known_state": "running",
+					"state_synced_at": 1788834165,
+				}
+			]
+		}
+	)
+
+	last_known_state: str
+	state_synced_at: int | None
+
+	@classmethod
+	def from_document_and_state(
+		cls, virtual_machine: VirtualMachine, state: Any | None
+	) -> VirtualMachineListResponse:
+		"""Build a list response from Atlas and the stored host state."""
+		stored = VirtualMachineResponse.from_document(virtual_machine)
+		return cls(
+			**stored.model_dump(),
+			last_known_state=get_current_state(virtual_machine, state.status if state else None),
+			state_synced_at=to_unix_timestamp(state.synced_at) if state else None,
+		)
+
+
 class VirtualMachineDetailResponse(VirtualMachineResponse):
 	"""A stored virtual machine with its live host state."""
 
@@ -359,18 +399,12 @@ class VirtualMachineDetailResponse(VirtualMachineResponse):
 	) -> VirtualMachineDetailResponse:
 		"""Build a detailed response from Atlas and Metal state."""
 		stored = VirtualMachineResponse.from_document(virtual_machine)
-		desired_state = information.desired.state if information else None
-		if virtual_machine.is_draft:
-			current_state = "unknown"
-		elif virtual_machine.is_terminating:
-			current_state = "terminating"
-		else:
-			current_state = information.observed.state if information else "unknown"
-
 		return cls(
 			**stored.model_dump(),
-			desired_state=desired_state,
-			current_state=current_state,
+			desired_state=information.desired.state if information else None,
+			current_state=get_current_state(
+				virtual_machine, information.observed.state if information else None
+			),
 		)
 
 

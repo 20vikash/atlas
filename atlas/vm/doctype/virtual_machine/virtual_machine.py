@@ -68,12 +68,13 @@ class VirtualMachine(Document):
 		"""Delete only after Metal confirms that the VM is absent."""
 		VirtualMachineService(self).validate_deletion()
 		delete_tasks_for_target(self.doctype, self.name)
+		frappe.db.delete("Virtual Machine State", {"name": self.name})
 
 	@property
 	def current_state(self) -> str:
-		"""Return the state a user sees. A draft or an absent VM is unknown."""
+		"""Return the state a user sees. A draft is pending, an absent VM is unknown."""
 		if self.is_draft:
-			return "unknown"
+			return "pending"
 
 		if self.is_terminating:
 			return "terminating"

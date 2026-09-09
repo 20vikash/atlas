@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class ConsoleTokenResponseMode(StrEnum):
     SSH = "ssh"
     TTY = "tty"

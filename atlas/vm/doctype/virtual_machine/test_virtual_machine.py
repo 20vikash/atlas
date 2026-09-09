@@ -797,19 +797,21 @@ class TestVirtualMachineNetwork(UnitTestCase):
 class TestVirtualMachineTrash(UnitTestCase):
 	"""Cover the cleanup that lets a terminated VM record be deleted."""
 
-	def test_trash_removes_the_ssh_tasks_of_the_machine(self) -> None:
-		"""SSH Task holds a dynamic link. Frappe refuses the delete while one exists."""
+	def test_trash_removes_dependent_records(self) -> None:
+		"""Dependent records must not prevent the virtual machine deletion."""
 		virtual_machine = Mock(doctype="Virtual Machine")
 		virtual_machine.name = "vm-00003"
 
 		with (
 			patch.object(virtual_machine_module, "VirtualMachineService") as service,
 			patch.object(virtual_machine_module, "delete_tasks_for_target") as delete_tasks,
+			patch.object(virtual_machine_module.frappe.db, "delete") as delete,
 		):
 			virtual_machine_module.VirtualMachine.on_trash(virtual_machine)
 
 		service.return_value.validate_deletion.assert_called_once()
 		delete_tasks.assert_called_once_with("Virtual Machine", "vm-00003")
+		delete.assert_called_once_with("Virtual Machine State", {"name": "vm-00003"})
 
 
 class TestReconcileTerminating(UnitTestCase):

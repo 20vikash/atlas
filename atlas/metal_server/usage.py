@@ -8,6 +8,7 @@ from frappe.utils import now_datetime
 
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
+from atlas.vm.core.vm_state import store_reported_states
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -43,11 +44,12 @@ def sync_server(
 	wireguard_peers: list[dict[str, Any]],
 	privileged_vm_addresses: list[str],
 ) -> None:
-	"""Exchange state with one host and store its capacity."""
+	"""Exchange state with one host, then store its capacity and VM states."""
 	server = cast("MetalServer", frappe.get_doc("Metal Server", server_name))
 	try:
 		response = MetalClient(server).sync(wireguard_peers, get_desired_images(), privileged_vm_addresses)
 		values = get_usage_values(response.get("capacity"))
+		store_reported_states(server_name, response.get("virtual_machines"))
 	except MetalClientError:
 		frappe.log_error(
 			frappe.get_traceback(),
@@ -57,7 +59,7 @@ def sync_server(
 	except ValueError:
 		frappe.log_error(
 			frappe.get_traceback(),
-			f"Invalid capacity response from Server {server.name}",
+			f"Invalid synchronization response from Server {server.name}",
 		)
 		return
 

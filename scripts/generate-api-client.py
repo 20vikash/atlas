@@ -77,7 +77,10 @@ class Client:
 		with tempfile.TemporaryDirectory() as directory:
 			configuration = Path(directory) / "config.yml"
 			configuration.write_text(
-				f"package_name_override: {self.package}\nproject_name_override: {self.name}\n"
+				f"package_name_override: {self.package}\n"
+				f"project_name_override: {self.name}\n"
+				# No post hooks. The generated client is not linted or formatted.
+				"post_hooks: []\n"
 			)
 			subprocess.run(
 				[

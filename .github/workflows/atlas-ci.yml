@@ -100,7 +100,7 @@ jobs:
         working-directory: /home/runner/frappe-bench
         run: |
           python -m venv "$RUNNER_TEMP/openapi-generator"
-          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1 ruff==0.16.6
+          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
           export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
           PYTHONPATH="$GITHUB_WORKSPACE" ./env/bin/python "$GITHUB_WORKSPACE/scripts/generate-api-client.py" atlas
           git -C "$GITHUB_WORKSPACE" add --all --intent-to-add clients

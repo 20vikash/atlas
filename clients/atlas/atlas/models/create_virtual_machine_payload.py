@@ -1,40 +1,48 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
+from attrs import field as _attrs_field
+
+from ..types import UNSET, Unset
 
 from ..models.create_virtual_machine_payload_egress import CreateVirtualMachinePayloadEgress
 from ..types import UNSET, Unset
+from typing import cast
 
 if TYPE_CHECKING:
-    from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata
+  from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata
+
+
+
 
 
 T = TypeVar("T", bound="CreateVirtualMachinePayload")
 
 
+
 @_attrs_define
 class CreateVirtualMachinePayload:
-    """Values that create one virtual machine.
+    """ Values that create one virtual machine.
 
-    Attributes:
-        disk_mib (int):
-        image_id (str):
-        memory_mib (int):
-        vcpus (int):
-        disk_iops (int | Unset):  Default: 0.
-        disk_throughput_mibps (int | Unset):  Default: 0.
-        egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
-        hostname (str | Unset):  Default: ''.
-        ip_address_id (None | str | Unset):
-        metadata (CreateVirtualMachinePayloadMetadata | Unset):
-        private_network_throughput_mibps (int | Unset):  Default: 0.
-        public_network_throughput_mibps (int | Unset):  Default: 0.
-        ssh_keys (list[str] | Unset):
-        user_data (str | Unset):  Default: ''.
-    """
+        Attributes:
+            disk_mib (int):
+            image_id (str):
+            memory_mib (int):
+            vcpus (int):
+            disk_iops (int | Unset):  Default: 0.
+            disk_throughput_mibps (int | Unset):  Default: 0.
+            egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
+            hostname (str | Unset):  Default: ''.
+            ip_address_id (None | str | Unset):
+            metadata (CreateVirtualMachinePayloadMetadata | Unset):
+            private_network_throughput_mibps (int | Unset):  Default: 0.
+            public_network_throughput_mibps (int | Unset):  Default: 0.
+            ssh_keys (list[str] | Unset):
+            user_data (str | Unset):  Default: ''.
+     """
 
     disk_mib: int
     image_id: str
@@ -43,15 +51,20 @@ class CreateVirtualMachinePayload:
     disk_iops: int | Unset = 0
     disk_throughput_mibps: int | Unset = 0
     egress: CreateVirtualMachinePayloadEgress | Unset = CreateVirtualMachinePayloadEgress.UPLINK
-    hostname: str | Unset = ""
+    hostname: str | Unset = ''
     ip_address_id: None | str | Unset = UNSET
     metadata: CreateVirtualMachinePayloadMetadata | Unset = UNSET
     private_network_throughput_mibps: int | Unset = 0
     public_network_throughput_mibps: int | Unset = 0
     ssh_keys: list[str] | Unset = UNSET
-    user_data: str | Unset = ""
+    user_data: str | Unset = ''
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata # noqa: PLC0415
         disk_mib = self.disk_mib
 
         image_id = self.image_id
@@ -67,6 +80,7 @@ class CreateVirtualMachinePayload:
         egress: str | Unset = UNSET
         if not isinstance(self.egress, Unset):
             egress = self.egress.value
+
 
         hostname = self.hostname
 
@@ -88,18 +102,19 @@ class CreateVirtualMachinePayload:
         if not isinstance(self.ssh_keys, Unset):
             ssh_keys = self.ssh_keys
 
+
+
         user_data = self.user_data
+
 
         field_dict: dict[str, Any] = {}
 
-        field_dict.update(
-            {
-                "disk_mib": disk_mib,
-                "image_id": image_id,
-                "memory_mib": memory_mib,
-                "vcpus": vcpus,
-            }
-        )
+        field_dict.update({
+            "disk_mib": disk_mib,
+            "image_id": image_id,
+            "memory_mib": memory_mib,
+            "vcpus": vcpus,
+        })
         if disk_iops is not UNSET:
             field_dict["disk_iops"] = disk_iops
         if disk_throughput_mibps is not UNSET:
@@ -123,12 +138,11 @@ class CreateVirtualMachinePayload:
 
         return field_dict
 
+
+
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.create_virtual_machine_payload_metadata import (
-            CreateVirtualMachinePayloadMetadata,  # noqa: PLC0415
-        )
-
+        from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata # noqa: PLC0415
         d = dict(src_dict)
         disk_mib = d.pop("disk_mib")
 
@@ -144,10 +158,13 @@ class CreateVirtualMachinePayload:
 
         _egress = d.pop("egress", UNSET)
         egress: CreateVirtualMachinePayloadEgress | Unset
-        if isinstance(_egress, Unset):
+        if isinstance(_egress,  Unset):
             egress = UNSET
         else:
             egress = CreateVirtualMachinePayloadEgress(_egress)
+
+
+
 
         hostname = d.pop("hostname", UNSET)
 
@@ -160,18 +177,23 @@ class CreateVirtualMachinePayload:
 
         ip_address_id = _parse_ip_address_id(d.pop("ip_address_id", UNSET))
 
+
         _metadata = d.pop("metadata", UNSET)
         metadata: CreateVirtualMachinePayloadMetadata | Unset
-        if isinstance(_metadata, Unset):
+        if isinstance(_metadata,  Unset):
             metadata = UNSET
         else:
             metadata = CreateVirtualMachinePayloadMetadata.from_dict(_metadata)
+
+
+
 
         private_network_throughput_mibps = d.pop("private_network_throughput_mibps", UNSET)
 
         public_network_throughput_mibps = d.pop("public_network_throughput_mibps", UNSET)
 
         ssh_keys = cast(list[str], d.pop("ssh_keys", UNSET))
+
 
         user_data = d.pop("user_data", UNSET)
 
@@ -193,3 +215,4 @@ class CreateVirtualMachinePayload:
         )
 
         return create_virtual_machine_payload
+

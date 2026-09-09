@@ -1,42 +1,56 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+
+
+
+
+
+
 T = TypeVar("T", bound="DomainMapping")
+
 
 
 @_attrs_define
 class DomainMapping:
-    """One custom domain as the proxy stored it.
+    """ One custom domain as the proxy stored it.
 
-    Attributes:
-        address (str): The backend IPv6 address.
-        domain (str): The custom domain.
-    """
+        Attributes:
+            address (str): The backend IPv6 address.
+            domain (str): The custom domain.
+     """
 
     address: str
     domain: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
         address = self.address
 
         domain = self.domain
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "address": address,
-                "domain": domain,
-            }
-        )
+        field_dict.update({
+            "address": address,
+            "domain": domain,
+        })
 
         return field_dict
+
+
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
@@ -49,6 +63,7 @@ class DomainMapping:
             address=address,
             domain=domain,
         )
+
 
         domain_mapping.additional_properties = d
         return domain_mapping

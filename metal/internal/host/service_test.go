@@ -43,7 +43,7 @@ func (dependencies *testHostDependencies) Capacity(context.Context) (storage.Cap
 
 func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 	dependencies := &testHostDependencies{
-		virtualMachines: []vm.Information{{VirtualCPUCount: 2}},
+		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, VirtualCPUCount: 2}},
 	}
 	service, err := NewService(Dependencies{
 		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,
@@ -59,7 +59,7 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 		WireGuardPeers:                    []network.WireGuardPeer{{Node: "node-2"}},
 		Images:                            []vm.Image{{Name: "ubuntu"}},
 	}
-	capacity, err := service.Synchronize(t.Context(), desired)
+	result, err := service.Synchronize(t.Context(), desired)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,11 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 	if dependencies.wakeCount != 1 {
 		t.Fatalf("wake count = %d, want 1", dependencies.wakeCount)
 	}
+	capacity := result.Capacity
 	if capacity.AvailableCPUCount != max(runtime.NumCPU()-2, 0) || capacity.TotalStorageMiB != 4096 || capacity.AvailableStorageMiB != 3072 {
 		t.Fatalf("capacity = %+v", capacity)
+	}
+	if result.VirtualMachineStates["vm-00001"] != vm.StateRunning {
+		t.Fatalf("virtual machine states = %+v", result.VirtualMachineStates)
 	}
 }

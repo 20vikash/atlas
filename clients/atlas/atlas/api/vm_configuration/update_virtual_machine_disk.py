@@ -1,14 +1,17 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.disk_update_payload import DiskUpdatePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
-from ...types import Response
+from typing import cast
+
 
 
 def _get_kwargs(
@@ -16,15 +19,21 @@ def _get_kwargs(
     *,
     body: DiskUpdatePayload,
     x_tenant_id: int,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     headers["X-Tenant-ID"] = str(x_tenant_id)
 
+
+
+
+    
+
+    
+
     _kwargs: dict[str, Any] = {
         "method": "patch",
-        "url": "/api/atlas/virtual-machines/{virtual_machine_id}/disk".format(
-            virtual_machine_id=quote(str(virtual_machine_id), safe=""),
-        ),
+        "url": "/api/atlas/virtual-machines/{virtual_machine_id}/disk".format(virtual_machine_id=quote(str(virtual_machine_id), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
@@ -35,9 +44,12 @@ def _get_kwargs(
     return _kwargs
 
 
+
 def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> VirtualMachineResponse | None:
     if response.status_code == 202:
         response_202 = VirtualMachineResponse.from_dict(response.json())
+
+
 
         return response_202
 
@@ -47,9 +59,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -64,8 +74,9 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: DiskUpdatePayload,
     x_tenant_id: int,
+
 ) -> Response[VirtualMachineResponse]:
-    """Resize disk
+    """ Resize disk
 
      Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease,
     and a limit of 0 removes that limit.
@@ -81,12 +92,14 @@ def sync_detailed(
 
     Returns:
         Response[VirtualMachineResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         virtual_machine_id=virtual_machine_id,
-        body=body,
-        x_tenant_id=x_tenant_id,
+body=body,
+x_tenant_id=x_tenant_id,
+
     )
 
     response = client.get_httpx_client().request(
@@ -95,15 +108,15 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: DiskUpdatePayload,
     x_tenant_id: int,
+
 ) -> VirtualMachineResponse | None:
-    """Resize disk
+    """ Resize disk
 
      Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease,
     and a limit of 0 removes that limit.
@@ -119,15 +132,16 @@ def sync(
 
     Returns:
         VirtualMachineResponse
-    """
+     """
+
 
     return sync_detailed(
         virtual_machine_id=virtual_machine_id,
-        client=client,
-        body=body,
-        x_tenant_id=x_tenant_id,
-    ).parsed
+client=client,
+body=body,
+x_tenant_id=x_tenant_id,
 
+    ).parsed
 
 async def asyncio_detailed(
     virtual_machine_id: str,
@@ -135,8 +149,9 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     body: DiskUpdatePayload,
     x_tenant_id: int,
+
 ) -> Response[VirtualMachineResponse]:
-    """Resize disk
+    """ Resize disk
 
      Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease,
     and a limit of 0 removes that limit.
@@ -152,18 +167,21 @@ async def asyncio_detailed(
 
     Returns:
         Response[VirtualMachineResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         virtual_machine_id=virtual_machine_id,
-        body=body,
-        x_tenant_id=x_tenant_id,
+body=body,
+x_tenant_id=x_tenant_id,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     virtual_machine_id: str,
@@ -171,8 +189,9 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     body: DiskUpdatePayload,
     x_tenant_id: int,
+
 ) -> VirtualMachineResponse | None:
-    """Resize disk
+    """ Resize disk
 
      Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease,
     and a limit of 0 removes that limit.
@@ -188,13 +207,13 @@ async def asyncio(
 
     Returns:
         VirtualMachineResponse
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            virtual_machine_id=virtual_machine_id,
-            client=client,
-            body=body,
-            x_tenant_id=x_tenant_id,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        virtual_machine_id=virtual_machine_id,
+client=client,
+body=body,
+x_tenant_id=x_tenant_id,
+
+    )).parsed

@@ -48,7 +48,7 @@ jobs:
         run: |
           control_python="$(command -v python)"
           python -m venv "$RUNNER_TEMP/openapi-generator"
-          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1 ruff==0.16.6
+          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
           export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
           "$control_python" scripts/generate-api-client.py atlas-http-proxy
           git add --all --intent-to-add clients

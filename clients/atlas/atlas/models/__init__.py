@@ -1,4 +1,4 @@
-"""Contains all the data models used in inputs/outputs"""
+""" Contains all the data models used in inputs/outputs """
 
 from .compute_update_payload import ComputeUpdatePayload
 from .console_token_payload import ConsoleTokenPayload
@@ -21,12 +21,13 @@ from .network_update_payload import NetworkUpdatePayload
 from .network_update_payload_egress_type_0 import NetworkUpdatePayloadEgressType0
 from .page_image_response import PageImageResponse
 from .page_ip_address_response import PageIPAddressResponse
-from .page_virtual_machine_response import PageVirtualMachineResponse
+from .page_virtual_machine_list_response import PageVirtualMachineListResponse
 from .reserve_ip_address_payload import ReserveIPAddressPayload
 from .reserve_ip_address_payload_source import ReserveIPAddressPayloadSource
 from .snapshot_payload import SnapshotPayload
 from .ssh_keys_replacement_payload import SSHKeysReplacementPayload
 from .virtual_machine_detail_response import VirtualMachineDetailResponse
+from .virtual_machine_list_response import VirtualMachineListResponse
 from .virtual_machine_response import VirtualMachineResponse
 
 __all__ = (
@@ -51,11 +52,12 @@ __all__ = (
     "NetworkUpdatePayloadEgressType0",
     "PageImageResponse",
     "PageIPAddressResponse",
-    "PageVirtualMachineResponse",
+    "PageVirtualMachineListResponse",
     "ReserveIPAddressPayload",
     "ReserveIPAddressPayloadSource",
     "SnapshotPayload",
     "SSHKeysReplacementPayload",
     "VirtualMachineDetailResponse",
+    "VirtualMachineListResponse",
     "VirtualMachineResponse",
 )

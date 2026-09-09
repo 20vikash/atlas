@@ -1,21 +1,31 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.http_validation_error import HTTPValidationError
 from ...models.map_replaced import MapReplaced
 from ...models.replace_domains_values import ReplaceDomainsValues
-from ...types import Response
+from typing import cast
+
 
 
 def _get_kwargs(
     *,
     body: ReplaceDomainsValues,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
+
+
+    
+
+    
 
     _kwargs: dict[str, Any] = {
         "method": "put",
@@ -30,16 +40,19 @@ def _get_kwargs(
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> HTTPValidationError | MapReplaced | None:
+
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> HTTPValidationError | MapReplaced | None:
     if response.status_code == 200:
         response_200 = MapReplaced.from_dict(response.json())
+
+
 
         return response_200
 
     if response.status_code == 422:
         response_422 = HTTPValidationError.from_dict(response.json())
+
+
 
         return response_422
 
@@ -49,9 +62,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[HTTPValidationError | MapReplaced]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[HTTPValidationError | MapReplaced]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -64,8 +75,9 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
     body: ReplaceDomainsValues,
+
 ) -> Response[HTTPValidationError | MapReplaced]:
-    """Sync domain routes
+    """ Sync domain routes
 
      Replace every custom-domain route after a controller restart or full reconciliation. Example:
     `www.example.com` routes to `2001:db8::20`.
@@ -79,10 +91,12 @@ def sync_detailed(
 
     Returns:
         Response[HTTPValidationError | MapReplaced]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         body=body,
+
     )
 
     response = client.get_httpx_client().request(
@@ -91,13 +105,13 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     *,
     client: AuthenticatedClient,
     body: ReplaceDomainsValues,
+
 ) -> HTTPValidationError | MapReplaced | None:
-    """Sync domain routes
+    """ Sync domain routes
 
      Replace every custom-domain route after a controller restart or full reconciliation. Example:
     `www.example.com` routes to `2001:db8::20`.
@@ -111,20 +125,22 @@ def sync(
 
     Returns:
         HTTPValidationError | MapReplaced
-    """
+     """
+
 
     return sync_detailed(
         client=client,
-        body=body,
-    ).parsed
+body=body,
 
+    ).parsed
 
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
     body: ReplaceDomainsValues,
+
 ) -> Response[HTTPValidationError | MapReplaced]:
-    """Sync domain routes
+    """ Sync domain routes
 
      Replace every custom-domain route after a controller restart or full reconciliation. Example:
     `www.example.com` routes to `2001:db8::20`.
@@ -138,23 +154,27 @@ async def asyncio_detailed(
 
     Returns:
         Response[HTTPValidationError | MapReplaced]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         body=body,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     *,
     client: AuthenticatedClient,
     body: ReplaceDomainsValues,
+
 ) -> HTTPValidationError | MapReplaced | None:
-    """Sync domain routes
+    """ Sync domain routes
 
      Replace every custom-domain route after a controller restart or full reconciliation. Example:
     `www.example.com` routes to `2001:db8::20`.
@@ -168,11 +188,11 @@ async def asyncio(
 
     Returns:
         HTTPValidationError | MapReplaced
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            client=client,
-            body=body,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        client=client,
+body=body,
+
+    )).parsed
