@@ -26,8 +26,7 @@ class _FakeSettings:
 	def __init__(self) -> None:
 		self.wildcard_domain = "par-1.example.com"
 		self.region_id = 1
-		self.proxy_jwks_url = "https://issuer.example.com/jwks.json"
-		self.proxy_jwks_audience_id = "atlas-proxy-control"
+		self.central_jwks_url = "https://issuer.example.com/jwks.json"
 		self.wildcard_tls_expires_on = None
 		self.proxy_cluster_password_rotated_on = now_datetime() - timedelta(minutes=5)
 		self.passwords = {
@@ -36,6 +35,10 @@ class _FakeSettings:
 			"proxy_cluster_password": "a-control-password",
 			"previous_proxy_cluster_password": "previous-control-password",
 		}
+
+	@property
+	def proxy_audience_id(self) -> str:
+		return f"atlas-{self.region_id}-proxy"
 
 	def get_password(self, fieldname: str, raise_exception: bool = True) -> str | None:
 		return self.passwords.get(fieldname)
@@ -76,7 +79,7 @@ class TestProxyConfiguration(UnitTestCase):
 		self.assertEqual(document["tls"]["wildcard_domain"], "*.par-1.example.com")
 		self.assertEqual(document["tls"]["fullchain_pem"].strip(), CERTIFICATE)
 		self.assertEqual(document["tls"]["private_key_pem"].strip(), PRIVATE_KEY)
-		self.assertEqual(document["auth"]["jwks_audience_id"], "atlas-proxy-control")
+		self.assertEqual(document["auth"]["jwks_audience_id"], "atlas-1-proxy")
 		self.assertTrue(bcrypt.checkpw(b"a-control-password", document["auth"]["password_hash"].encode()))
 		self.assertEqual(document["cluster"]["node_id"], "proxy-001")
 		self.assertEqual(document["cluster"]["password"], "a-control-password")
@@ -97,7 +100,7 @@ class TestProxyConfiguration(UnitTestCase):
 			document["auth"]["previous_password_valid_until"],
 		)
 		self.assertEqual(document["auth"]["jwks_url"], "https://issuer.example.com/jwks.json")
-		self.assertEqual(document["auth"]["jwks_audience_id"], "atlas-proxy-control")
+		self.assertEqual(document["auth"]["jwks_audience_id"], "atlas-1-proxy")
 		self.assertEqual(document["cluster"]["password"], "a-control-password")
 		self.assertEqual(document["cluster"]["previous_password"], "previous-control-password")
 
