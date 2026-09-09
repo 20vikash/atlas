@@ -5,6 +5,7 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.metal_server.core.ip_address_service import (
+	UNOWNED_TENANT_ID,
 	IPAddressPoolEmpty,
 	IPAddressService,
 )
@@ -81,7 +82,7 @@ class TestIPAddressRelease(UnitTestCase):
 			IPAddressService().release(ip_address)
 
 		get_doc.assert_called_once_with("Metal Server IP Address", "203.0.113.10", for_update=True)
-		locked_address.db_set.assert_called_once_with("tenant_id", None)
+		locked_address.db_set.assert_called_once_with("tenant_id", UNOWNED_TENANT_ID)
 
 	def test_an_attached_address_cannot_be_released(self) -> None:
 		for values in (

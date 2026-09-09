@@ -67,7 +67,8 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Tenant that reserved this address. An empty value means that the address is in the shared pool.",
+   "default": "-1",
+   "description": "Tenant that reserved this address. The value -1 means that the address is in the shared pool.",
    "fieldname": "tenant_id",
    "fieldtype": "Int",
    "in_standard_filter": 1,

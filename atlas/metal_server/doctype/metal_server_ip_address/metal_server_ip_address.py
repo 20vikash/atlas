@@ -8,7 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 
 from atlas.atlas.core.background_jobs import run_as_admin
-from atlas.metal_server.core.ip_address_service import IPAddressService
+from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID, IPAddressService
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,7 @@ class MetalServerIPAddress(Document):
 		provider_resource_id: DF.Data
 		server: DF.Link | None
 		status: DF.Literal["Allocated", "Attaching", "Attached", "Detaching"]
-		tenant_id: DF.Int | None
+		tenant_id: DF.Int
 		virtual_machine: DF.Link | None
 	# end: auto-generated types
 
@@ -170,7 +170,7 @@ def enqueue_pending_ip_address_reconcilation() -> None:
 def reserve() -> str:
 	"""Reserve one public IPv4 address from the provider for the shared pool."""
 	frappe.only_for("System Manager")
-	return IPAddressService().reserve_from_provider(None)
+	return IPAddressService().reserve_from_provider(UNOWNED_TENANT_ID)
 
 
 def reserve_for_tenant(tenant_id: int, source: str) -> str:

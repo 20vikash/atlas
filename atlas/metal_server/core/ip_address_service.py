@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 	)
 
 POOL_SEARCH_LIMIT = 20
+UNOWNED_TENANT_ID = -1
 RESERVATION_SOURCES = ("pool", "provider")
 
 
@@ -48,7 +49,7 @@ class IPAddressService:
 		for name in self.get_pool_candidates():
 			locked = frappe.db.get_value(
 				"Metal Server IP Address",
-				{"name": name, "tenant_id": ["is", "not set"], "status": "Allocated"},
+				{"name": name, "tenant_id": UNOWNED_TENANT_ID, "status": "Allocated"},
 				"name",
 				for_update=True,
 			)
@@ -63,7 +64,7 @@ class IPAddressService:
 		return frappe.get_all(
 			"Metal Server IP Address",
 			filters={
-				"tenant_id": ["is", "not set"],
+				"tenant_id": UNOWNED_TENANT_ID,
 				"status": "Allocated",
 				"virtual_machine": ["is", "not set"],
 			},
@@ -72,7 +73,7 @@ class IPAddressService:
 			order_by="creation asc",
 		)
 
-	def reserve_from_provider(self, tenant_id: int | None) -> str:
+	def reserve_from_provider(self, tenant_id: int) -> str:
 		"""Create one provider reservation and assign its tenant."""
 		provider = frappe.get_single("Atlas Settings").server_provider_controller
 		reserved = provider.reserve_public_ipv4_address()
@@ -98,5 +99,5 @@ class IPAddressService:
 		locked_address = frappe.get_doc("Metal Server IP Address", ip_address.name, for_update=True)
 		if locked_address.status != "Allocated" or locked_address.virtual_machine:
 			frappe.throw(_("Detach this IP address before you release it."), exc=IPAddressInUse)
-		locked_address.db_set("tenant_id", None)
-		ip_address.tenant_id = None
+		locked_address.db_set("tenant_id", UNOWNED_TENANT_ID)
+		ip_address.tenant_id = UNOWNED_TENANT_ID
