@@ -4,35 +4,44 @@ from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.http_validation_error import HTTPValidationError
-from ...types import Response
+from typing import cast
+
 
 
 def _get_kwargs(
     name: str,
+
 ) -> dict[str, Any]:
+    
+
+    
+
+    
 
     _kwargs: dict[str, Any] = {
         "method": "delete",
-        "url": "/v1/sites/{name}".format(
-            name=quote(str(name), safe=""),
-        ),
+        "url": "/v1/sites/{name}".format(name=quote(str(name), safe=""),),
     }
+
 
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Any | HTTPValidationError | None:
+
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | HTTPValidationError | None:
     if response.status_code == 204:
         response_204 = cast(Any, None)
         return response_204
 
     if response.status_code == 422:
         response_422 = HTTPValidationError.from_dict(response.json())
+
+
 
         return response_422
 
@@ -42,9 +51,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[Any | HTTPValidationError]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | HTTPValidationError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -57,8 +64,9 @@ def sync_detailed(
     name: str,
     *,
     client: AuthenticatedClient,
+
 ) -> Response[Any | HTTPValidationError]:
-    """Remove site route
+    """ Remove site route
 
      Remove one site route when it no longer needs proxy traffic. This succeeds when the site is absent.
 
@@ -71,10 +79,12 @@ def sync_detailed(
 
     Returns:
         Response[Any | HTTPValidationError]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         name=name,
+
     )
 
     response = client.get_httpx_client().request(
@@ -83,13 +93,13 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     name: str,
     *,
     client: AuthenticatedClient,
+
 ) -> Any | HTTPValidationError | None:
-    """Remove site route
+    """ Remove site route
 
      Remove one site route when it no longer needs proxy traffic. This succeeds when the site is absent.
 
@@ -102,20 +112,22 @@ def sync(
 
     Returns:
         Any | HTTPValidationError
-    """
+     """
+
 
     return sync_detailed(
         name=name,
-        client=client,
-    ).parsed
+client=client,
 
+    ).parsed
 
 async def asyncio_detailed(
     name: str,
     *,
     client: AuthenticatedClient,
+
 ) -> Response[Any | HTTPValidationError]:
-    """Remove site route
+    """ Remove site route
 
      Remove one site route when it no longer needs proxy traffic. This succeeds when the site is absent.
 
@@ -128,23 +140,27 @@ async def asyncio_detailed(
 
     Returns:
         Response[Any | HTTPValidationError]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         name=name,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     name: str,
     *,
     client: AuthenticatedClient,
+
 ) -> Any | HTTPValidationError | None:
-    """Remove site route
+    """ Remove site route
 
      Remove one site route when it no longer needs proxy traffic. This succeeds when the site is absent.
 
@@ -157,11 +173,11 @@ async def asyncio(
 
     Returns:
         Any | HTTPValidationError
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            name=name,
-            client=client,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        name=name,
+client=client,
+
+    )).parsed

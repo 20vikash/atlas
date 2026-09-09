@@ -1,29 +1,36 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.address_update import AddressUpdate
 from ...models.http_validation_error import HTTPValidationError
 from ...models.site_mapping import SiteMapping
-from ...types import Response
+from typing import cast
+
 
 
 def _get_kwargs(
     name: str,
     *,
     body: AddressUpdate,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
 
+
+    
+
+    
+
     _kwargs: dict[str, Any] = {
         "method": "patch",
-        "url": "/v1/sites/{name}".format(
-            name=quote(str(name), safe=""),
-        ),
+        "url": "/v1/sites/{name}".format(name=quote(str(name), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
@@ -34,16 +41,19 @@ def _get_kwargs(
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> HTTPValidationError | SiteMapping | None:
+
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> HTTPValidationError | SiteMapping | None:
     if response.status_code == 200:
         response_200 = SiteMapping.from_dict(response.json())
+
+
 
         return response_200
 
     if response.status_code == 422:
         response_422 = HTTPValidationError.from_dict(response.json())
+
+
 
         return response_422
 
@@ -53,9 +63,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[HTTPValidationError | SiteMapping]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[HTTPValidationError | SiteMapping]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -69,8 +77,9 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
     body: AddressUpdate,
+
 ) -> Response[HTTPValidationError | SiteMapping]:
-    """Update site route
+    """ Update site route
 
      Add or change one site route without changing other sites. Example: route `erp` to `2001:db8::10`.
 
@@ -84,11 +93,13 @@ def sync_detailed(
 
     Returns:
         Response[HTTPValidationError | SiteMapping]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         name=name,
-        body=body,
+body=body,
+
     )
 
     response = client.get_httpx_client().request(
@@ -97,14 +108,14 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     name: str,
     *,
     client: AuthenticatedClient,
     body: AddressUpdate,
+
 ) -> HTTPValidationError | SiteMapping | None:
-    """Update site route
+    """ Update site route
 
      Add or change one site route without changing other sites. Example: route `erp` to `2001:db8::10`.
 
@@ -118,22 +129,24 @@ def sync(
 
     Returns:
         HTTPValidationError | SiteMapping
-    """
+     """
+
 
     return sync_detailed(
         name=name,
-        client=client,
-        body=body,
-    ).parsed
+client=client,
+body=body,
 
+    ).parsed
 
 async def asyncio_detailed(
     name: str,
     *,
     client: AuthenticatedClient,
     body: AddressUpdate,
+
 ) -> Response[HTTPValidationError | SiteMapping]:
-    """Update site route
+    """ Update site route
 
      Add or change one site route without changing other sites. Example: route `erp` to `2001:db8::10`.
 
@@ -147,25 +160,29 @@ async def asyncio_detailed(
 
     Returns:
         Response[HTTPValidationError | SiteMapping]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         name=name,
-        body=body,
+body=body,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     name: str,
     *,
     client: AuthenticatedClient,
     body: AddressUpdate,
+
 ) -> HTTPValidationError | SiteMapping | None:
-    """Update site route
+    """ Update site route
 
      Add or change one site route without changing other sites. Example: route `erp` to `2001:db8::10`.
 
@@ -179,12 +196,12 @@ async def asyncio(
 
     Returns:
         HTTPValidationError | SiteMapping
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            name=name,
-            client=client,
-            body=body,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        name=name,
+client=client,
+body=body,
+
+    )).parsed

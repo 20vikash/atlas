@@ -16,6 +16,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 |---|---|
 | `VirtualMachine` (DocType) | The reservation, permissions, and the whitelisted API. Runtime values read through. |
 | `VirtualMachineImage` (DocType) | The durable boot artifact and its immutable reference. |
+| `Virtual Machine State` (DocType) | The last status a host reported for one VM. The name is the VM name. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
 | `PlacementService` | Choosing and locking the host for a new VM. |
 | `MetalClient` | `/v1` HTTP transport and error classification. |
@@ -23,6 +24,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 | `VirtualMachineCreateRequest` | Validated create input. |
 | `vm_image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
+| `vm_state` | The only writer of Virtual Machine State. The host sync job calls it. |
 
 ## Create
 
@@ -48,7 +50,10 @@ A sample older than the freshness limit is not used. Placement reports a synchro
 
 ## Reading state
 
-A Virtual Machine property calls Metal once per request and caches the result. A draft or a VM that Metal reports as absent reads as `unknown`. Any other Metal failure is raised, so a read fault is never shown as a state.
+A Virtual Machine property calls Metal once per request and caches the result. A draft reads as `pending`, and a VM that Metal reports as absent reads as `unknown`. Any other Metal failure is raised, so a read fault is never shown as a state.
+
+The list route does not call Metal. It returns `last_known_state` from Virtual Machine State, which holds the last status each host reported. `POST /v1/sync` carries that status for every VM on the host, so one exchange per host refreshes every record. The status is as fresh as the last host reconcile pass, and `state_synced_at` records when Atlas last stored it.
+
 
 ## Reconciliation
 

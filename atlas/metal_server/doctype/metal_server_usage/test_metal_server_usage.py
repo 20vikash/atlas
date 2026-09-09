@@ -14,6 +14,16 @@ from atlas.metal_server.usage import (
 )
 from atlas.vm.core.metal_client import MetalClientError
 
+CAPACITY = {
+	"total_cpu_count": 8,
+	"available_cpu_count": 6,
+	"virtual_machine_count": 1,
+	"total_memory_mib": 16384,
+	"available_memory_mib": 8192,
+	"total_storage_mib": 102400,
+	"available_storage_mib": 51200,
+}
+
 
 class TestServerUsage(UnitTestCase):
 	def test_sync_logs_a_metal_connection_failure(self) -> None:
@@ -44,7 +54,23 @@ class TestServerUsage(UnitTestCase):
 		):
 			sync_server("server-1", [], [])
 
-		self.assertEqual(log_error.call_args.args[1], "Invalid capacity response from Server server-1")
+		self.assertEqual(log_error.call_args.args[1], "Invalid synchronization response from Server server-1")
+
+	def test_sync_logs_an_invalid_virtual_machine_response(self) -> None:
+		server = SimpleNamespace(name="server-1")
+		client = Mock()
+		client.sync.return_value = {"capacity": CAPACITY, "virtual_machines": {"vm-00001": {}}}
+
+		with (
+			patch("atlas.metal_server.usage.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.usage.MetalClient", return_value=client),
+			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
+			patch("atlas.metal_server.usage.store_reported_states", side_effect=ValueError("bad")),
+			patch("atlas.metal_server.usage.frappe.log_error") as log_error,
+		):
+			sync_server("server-1", [], [])
+
+		self.assertEqual(log_error.call_args.args[1], "Invalid synchronization response from Server server-1")
 
 	def test_enqueue_uses_one_exchange_per_server(self) -> None:
 		peers = [{"node": "server-1"}]

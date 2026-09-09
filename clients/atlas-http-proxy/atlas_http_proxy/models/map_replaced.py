@@ -1,42 +1,56 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+
+
+
+
+
+
 T = TypeVar("T", bound="MapReplaced")
+
 
 
 @_attrs_define
 class MapReplaced:
-    """Result of a full map replacement.
+    """ Result of a full map replacement.
 
-    Attributes:
-        entries (int): Number of entries in the replacement map.
-        synced (bool): Whether the complete map was applied.
-    """
+        Attributes:
+            entries (int): Number of entries in the replacement map.
+            synced (bool): Whether the complete map was applied.
+     """
 
     entries: int
     synced: bool
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
         entries = self.entries
 
         synced = self.synced
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "entries": entries,
-                "synced": synced,
-            }
-        )
+        field_dict.update({
+            "entries": entries,
+            "synced": synced,
+        })
 
         return field_dict
+
+
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
@@ -49,6 +63,7 @@ class MapReplaced:
             entries=entries,
             synced=synced,
         )
+
 
         map_replaced.additional_properties = d
         return map_replaced

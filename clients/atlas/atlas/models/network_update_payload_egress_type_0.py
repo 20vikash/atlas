@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class NetworkUpdatePayloadEgressType0(StrEnum):
     MESH = "mesh"
     NONE = "none"

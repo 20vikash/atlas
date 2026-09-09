@@ -1,29 +1,42 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.get_sites_response_get_sites import GetSitesResponseGetSites
-from ...types import Response
+from typing import cast
 
 
-def _get_kwargs() -> dict[str, Any]:
+
+def _get_kwargs(
+    
+) -> dict[str, Any]:
+    
+
+    
+
+    
 
     _kwargs: dict[str, Any] = {
         "method": "get",
         "url": "/v1/sites",
     }
 
+
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> GetSitesResponseGetSites | None:
+
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> GetSitesResponseGetSites | None:
     if response.status_code == 200:
         response_200 = GetSitesResponseGetSites.from_dict(response.json())
+
+
 
         return response_200
 
@@ -33,9 +46,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[GetSitesResponseGetSites]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[GetSitesResponseGetSites]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -47,8 +58,9 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient,
+
 ) -> Response[GetSitesResponseGetSites]:
-    """List site routes
+    """ List site routes
 
      Read site routes during reconciliation.
 
@@ -58,9 +70,12 @@ def sync_detailed(
 
     Returns:
         Response[GetSitesResponseGetSites]
-    """
+     """
 
-    kwargs = _get_kwargs()
+
+    kwargs = _get_kwargs(
+        
+    )
 
     response = client.get_httpx_client().request(
         **kwargs,
@@ -68,12 +83,12 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     *,
     client: AuthenticatedClient,
+
 ) -> GetSitesResponseGetSites | None:
-    """List site routes
+    """ List site routes
 
      Read site routes during reconciliation.
 
@@ -83,18 +98,20 @@ def sync(
 
     Returns:
         GetSitesResponseGetSites
-    """
+     """
+
 
     return sync_detailed(
         client=client,
-    ).parsed
 
+    ).parsed
 
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
+
 ) -> Response[GetSitesResponseGetSites]:
-    """List site routes
+    """ List site routes
 
      Read site routes during reconciliation.
 
@@ -104,20 +121,25 @@ async def asyncio_detailed(
 
     Returns:
         Response[GetSitesResponseGetSites]
-    """
+     """
 
-    kwargs = _get_kwargs()
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    kwargs = _get_kwargs(
+        
+    )
+
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     *,
     client: AuthenticatedClient,
+
 ) -> GetSitesResponseGetSites | None:
-    """List site routes
+    """ List site routes
 
      Read site routes during reconciliation.
 
@@ -127,10 +149,10 @@ async def asyncio(
 
     Returns:
         GetSitesResponseGetSites
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            client=client,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        client=client,
+
+    )).parsed

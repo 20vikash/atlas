@@ -29,9 +29,17 @@ type wireGuardPeerRequest struct {
 	Address   string `json:"address"`
 }
 
-// syncResponse returns host capacity in the same exchange as the sync.
+// syncResponse returns host capacity and virtual machine state in the same
+// exchange as the sync.
 type syncResponse struct {
 	Capacity capacityResponse `json:"capacity"`
+	// VirtualMachines maps a VM identifier to its last observed state.
+	VirtualMachines map[string]virtualMachineStateResponse `json:"virtual_machines"`
+}
+
+// virtualMachineStateResponse is the state of one virtual machine on this host.
+type virtualMachineStateResponse struct {
+	Status string `json:"status"`
 }
 
 // capacityResponse is what the controller needs to place the next VM.
@@ -82,7 +90,7 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 		}
 	}
 
-	capacity, err := s.hostService.Synchronize(c.Request().Context(), host.DesiredState{
+	result, err := s.hostService.Synchronize(c.Request().Context(), host.DesiredState{
 		WireGuardPeers: request.wireGuardPeers(), Images: request.imagePolicies(),
 		PrivilegedVirtualMachineAddresses: request.PrivilegedVMAddresses,
 	})
@@ -90,7 +98,10 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 		return synchronizationFailure(err)
 	}
 
-	return c.JSON(http.StatusOK, syncResponse{Capacity: capacityResponseFromHost(capacity)})
+	return c.JSON(http.StatusOK, syncResponse{
+		Capacity:        capacityResponseFromHost(result.Capacity),
+		VirtualMachines: virtualMachineStateResponses(result.VirtualMachineStates),
+	})
 }
 
 // synchronizationFailure keeps a host not-found out of the response. This
@@ -138,4 +149,13 @@ func capacityResponseFromHost(capacity host.Capacity) capacityResponse {
 		TotalStorageMiB:     capacity.TotalStorageMiB,
 		AvailableStorageMiB: capacity.AvailableStorageMiB,
 	}
+}
+
+// virtualMachineStateResponses converts host states into the response form.
+func virtualMachineStateResponses(states map[string]vm.State) map[string]virtualMachineStateResponse {
+	responses := make(map[string]virtualMachineStateResponse, len(states))
+	for identifier, state := range states {
+		responses[identifier] = virtualMachineStateResponse{Status: string(state)}
+	}
+	return responses
 }

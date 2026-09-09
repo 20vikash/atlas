@@ -12,8 +12,9 @@ Each set arrives complete and replaces the previous one. The controller sends no
 
 | Type | Responsibility |
 |---|---|
-| `Service` | Applies desired host state, then reports capacity. |
+| `Service` | Applies desired host state, then reports the sync result. |
 | `DesiredState` | The 3 controller-owned sets, each complete. |
+| `SyncResult` | What one sync returns: capacity and VM states. |
 | `Capacity` | What the controller needs to place the next VM. |
 | `PrivilegedMesh`, `WireGuardManager`, `ImagePolicyStore`, `VirtualMachineSource`, `StorageCapacitySource` | The services a sync calls out to. |
 
@@ -28,7 +29,8 @@ POST /v1/sync
    +-> Apply                      WireGuard peers
    +-> SetImagePolicies           image policies
    +-> Wake                       start a reconcile pass now
-   +-> Capacity                   returned in the same response
+   +-> List                       one read, used for capacity and states
+   +-> SyncResult                 returned in the same response
 ```
 
 The steps run in order and stop at the first error, so a failed step leaves the later sets untouched and the controller retries the whole sync. `Wake` follows the writes, so the reconciler acts on the new policies at once instead of at its next tick.
@@ -40,6 +42,10 @@ CPU is reported against reservations, not against host load: available CPU is th
 Memory and storage are read from the host instead. Available memory comes from `MemAvailable` in `/proc/meminfo`, which counts cache the kernel can reclaim. Free memory alone would understate what a new guest can use.
 
 A VM that is created or destroyed now holds one record for a short time. `VirtualMachineSource` skips it, so capacity reports the VMs that have both records instead of failing the sync.
+
+## Virtual machine states
+
+`SyncResult.VirtualMachineStates` maps each VM identifier to its last observed state. The states come from the same `List` call that capacity uses, so the sync makes one read. `List` reads the stored observed record of each VM, which the reconciler writes. It does not inspect the runtime, so the state is as fresh as the last reconcile pass.
 
 ## Related
 

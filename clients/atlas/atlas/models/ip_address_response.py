@@ -1,26 +1,36 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+from typing import cast
+
+
+
+
+
+
 T = TypeVar("T", bound="IPAddressResponse")
+
 
 
 @_attrs_define
 class IPAddressResponse:
-    """A tenant public IPv4 address.
+    """ A tenant public IPv4 address.
 
-    Attributes:
-        address (str):
-        created_at (int):
-        id (str):
-        state (str):
-        tenant_id (int):
-        virtual_machine_id (None | str):
-    """
+        Attributes:
+            address (str):
+            created_at (int):
+            id (str):
+            state (str):
+            tenant_id (int):
+            virtual_machine_id (None | str):
+     """
 
     address: str
     created_at: int
@@ -29,6 +39,10 @@ class IPAddressResponse:
     tenant_id: int
     virtual_machine_id: None | str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
         address = self.address
@@ -44,20 +58,21 @@ class IPAddressResponse:
         virtual_machine_id: None | str
         virtual_machine_id = self.virtual_machine_id
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "address": address,
-                "created_at": created_at,
-                "id": id,
-                "state": state,
-                "tenant_id": tenant_id,
-                "virtual_machine_id": virtual_machine_id,
-            }
-        )
+        field_dict.update({
+            "address": address,
+            "created_at": created_at,
+            "id": id,
+            "state": state,
+            "tenant_id": tenant_id,
+            "virtual_machine_id": virtual_machine_id,
+        })
 
         return field_dict
+
+
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
@@ -79,6 +94,7 @@ class IPAddressResponse:
 
         virtual_machine_id = _parse_virtual_machine_id(d.pop("virtual_machine_id"))
 
+
         ip_address_response = cls(
             address=address,
             created_at=created_at,
@@ -87,6 +103,7 @@ class IPAddressResponse:
             tenant_id=tenant_id,
             virtual_machine_id=virtual_machine_id,
         )
+
 
         ip_address_response.additional_properties = d
         return ip_address_response

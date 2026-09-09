@@ -1,5 +1,5 @@
-"""A client library for accessing Atlas API"""
 
+""" A client library for accessing Atlas API """
 from .client import AuthenticatedClient, Client
 
 __all__ = (

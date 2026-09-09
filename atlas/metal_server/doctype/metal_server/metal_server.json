@@ -208,9 +208,14 @@
    "group": "Logs",
    "link_doctype": "Metal Server Usage",
    "link_fieldname": "server"
+  },
+  {
+   "group": "Resources",
+   "link_doctype": "Virtual Machine",
+   "link_fieldname": "server"
   }
  ],
- "modified": "2026-09-03 22:00:13.169319",
+ "modified": "2026-09-09 16:54:30.933302",
  "modified_by": "Administrator",
  "module": "Metal Server",
  "name": "Metal Server",

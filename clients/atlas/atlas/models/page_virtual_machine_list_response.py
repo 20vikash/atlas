@@ -1,35 +1,48 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+from typing import cast
+
 if TYPE_CHECKING:
-    from ..models.virtual_machine_response import VirtualMachineResponse
+  from ..models.virtual_machine_list_response import VirtualMachineListResponse
 
 
-T = TypeVar("T", bound="PageVirtualMachineResponse")
+
+
+
+T = TypeVar("T", bound="PageVirtualMachineListResponse")
+
 
 
 @_attrs_define
-class PageVirtualMachineResponse:
-    """
-    Attributes:
-        has_more (bool):
-        items (list[VirtualMachineResponse]):
-        limit (int):
-        offset (int):
-    """
+class PageVirtualMachineListResponse:
+    """ 
+        Attributes:
+            has_more (bool):
+            items (list[VirtualMachineListResponse]):
+            limit (int):
+            offset (int):
+     """
 
     has_more: bool
-    items: list[VirtualMachineResponse]
+    items: list[VirtualMachineListResponse]
     limit: int
     offset: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
+
+
+
+
     def to_dict(self) -> dict[str, Any]:
+        from ..models.virtual_machine_list_response import VirtualMachineListResponse # noqa: PLC0415
         has_more = self.has_more
 
         items = []
@@ -37,50 +50,56 @@ class PageVirtualMachineResponse:
             items_item = items_item_data.to_dict()
             items.append(items_item)
 
+
+
         limit = self.limit
 
         offset = self.offset
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "has_more": has_more,
-                "items": items,
-                "limit": limit,
-                "offset": offset,
-            }
-        )
+        field_dict.update({
+            "has_more": has_more,
+            "items": items,
+            "limit": limit,
+            "offset": offset,
+        })
 
         return field_dict
 
+
+
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.virtual_machine_response import VirtualMachineResponse  # noqa: PLC0415
-
+        from ..models.virtual_machine_list_response import VirtualMachineListResponse # noqa: PLC0415
         d = dict(src_dict)
         has_more = d.pop("has_more")
 
         items = []
         _items = d.pop("items")
-        for items_item_data in _items:
-            items_item = VirtualMachineResponse.from_dict(items_item_data)
+        for items_item_data in (_items):
+            items_item = VirtualMachineListResponse.from_dict(items_item_data)
+
+
 
             items.append(items_item)
+
 
         limit = d.pop("limit")
 
         offset = d.pop("offset")
 
-        page_virtual_machine_response = cls(
+        page_virtual_machine_list_response = cls(
             has_more=has_more,
             items=items,
             limit=limit,
             offset=offset,
         )
 
-        page_virtual_machine_response.additional_properties = d
-        return page_virtual_machine_response
+
+        page_virtual_machine_list_response.additional_properties = d
+        return page_virtual_machine_list_response
 
     @property
     def additional_keys(self) -> list[str]:

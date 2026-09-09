@@ -1,4 +1,4 @@
-"""Contains all the data models used in inputs/outputs"""
+""" Contains all the data models used in inputs/outputs """
 
 from .address_update import AddressUpdate
 from .cluster_status_response_cluster_status import ClusterStatusResponseClusterStatus

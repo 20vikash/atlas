@@ -1,37 +1,47 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+from typing import cast
+
+
+
+
+
+
 T = TypeVar("T", bound="ImageResponse")
+
 
 
 @_attrs_define
 class ImageResponse:
-    """A tenant virtual machine image.
+    """ A tenant virtual machine image.
 
-    Attributes:
-        cache_image (bool):
-        created_at (int):
-        enabled (bool):
-        id (str):
-        image_type (str):
-        kernel_size_mib (int):
-        memory_snapshot (bool):
-        operating_system (str):
-        operating_system_version (str):
-        platform (str):
-        rootfs_size_mib (int):
-        status (str):
-        supports_cloud_init (bool):
-        tenant_id (int):
-        title (str):
-        transfer_error (None | str):
-        transfer_progress (int):
-    """
+        Attributes:
+            cache_image (bool):
+            created_at (int):
+            enabled (bool):
+            id (str):
+            image_type (str):
+            kernel_size_mib (int):
+            memory_snapshot (bool):
+            operating_system (str):
+            operating_system_version (str):
+            platform (str):
+            rootfs_size_mib (int):
+            status (str):
+            supports_cloud_init (bool):
+            tenant_id (int):
+            title (str):
+            transfer_error (None | str):
+            transfer_progress (int):
+     """
 
     cache_image: bool
     created_at: int
@@ -51,6 +61,10 @@ class ImageResponse:
     transfer_error: None | str
     transfer_progress: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
         cache_image = self.cache_image
@@ -88,31 +102,32 @@ class ImageResponse:
 
         transfer_progress = self.transfer_progress
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "cache_image": cache_image,
-                "created_at": created_at,
-                "enabled": enabled,
-                "id": id,
-                "image_type": image_type,
-                "kernel_size_mib": kernel_size_mib,
-                "memory_snapshot": memory_snapshot,
-                "operating_system": operating_system,
-                "operating_system_version": operating_system_version,
-                "platform": platform,
-                "rootfs_size_mib": rootfs_size_mib,
-                "status": status,
-                "supports_cloud_init": supports_cloud_init,
-                "tenant_id": tenant_id,
-                "title": title,
-                "transfer_error": transfer_error,
-                "transfer_progress": transfer_progress,
-            }
-        )
+        field_dict.update({
+            "cache_image": cache_image,
+            "created_at": created_at,
+            "enabled": enabled,
+            "id": id,
+            "image_type": image_type,
+            "kernel_size_mib": kernel_size_mib,
+            "memory_snapshot": memory_snapshot,
+            "operating_system": operating_system,
+            "operating_system_version": operating_system_version,
+            "platform": platform,
+            "rootfs_size_mib": rootfs_size_mib,
+            "status": status,
+            "supports_cloud_init": supports_cloud_init,
+            "tenant_id": tenant_id,
+            "title": title,
+            "transfer_error": transfer_error,
+            "transfer_progress": transfer_progress,
+        })
 
         return field_dict
+
+
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
@@ -154,6 +169,7 @@ class ImageResponse:
 
         transfer_error = _parse_transfer_error(d.pop("transfer_error"))
 
+
         transfer_progress = d.pop("transfer_progress")
 
         image_response = cls(
@@ -175,6 +191,7 @@ class ImageResponse:
             transfer_error=transfer_error,
             transfer_progress=transfer_progress,
         )
+
 
         image_response.additional_properties = d
         return image_response
