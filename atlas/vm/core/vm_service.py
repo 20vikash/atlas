@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Never, cast
+from typing import TYPE_CHECKING, Any, Never, TypedDict, cast
 
 import frappe
 from frappe import _
@@ -36,6 +36,13 @@ class VirtualMachineCreateError(MetalOperationError):
 		self.virtual_machine_name = virtual_machine_name
 
 
+class VirtualMachineCreateResult(TypedDict):
+	"""The stored result of one virtual machine create request."""
+
+	name: str
+	is_draft: bool
+
+
 class VirtualMachineService:
 	"""Own Atlas orchestration for one virtual machine."""
 
@@ -43,13 +50,16 @@ class VirtualMachineService:
 		self.virtual_machine = virtual_machine
 
 	@classmethod
-	def create(cls, value: str | dict[str, Any]) -> dict[str, str | bool]:
+	def create(cls, value: str | dict[str, Any] | VirtualMachineCreateRequest) -> VirtualMachineCreateResult:
 		"""Create and commit an Atlas request before the Metal request."""
-		try:
-			request = VirtualMachineCreateRequest.from_value(value)
-		except ValueError as error:
-			frappe.throw(_(str(error)))
-			raise AssertionError from error
+		if isinstance(value, VirtualMachineCreateRequest):
+			request = value
+		else:
+			try:
+				request = VirtualMachineCreateRequest.from_value(value)
+			except ValueError as error:
+				frappe.throw(_(str(error)))
+				raise AssertionError from error
 
 		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)

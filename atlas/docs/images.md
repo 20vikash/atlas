@@ -26,7 +26,7 @@ Retry Transfer uses these durable values. It does not create a second image reco
 
 Only an Available Machine image can enter deletion. Deletion marks the image `Deleting` and queues a cleanup job. The job deletes the root file system and kernel objects, removes the Metal staging data, and then deletes the record.
 
-Atlas refuses deletion while a virtual machine uses the image.
+Atlas refuses deletion while a virtual machine uses the image. A System image cannot be deleted through the tenant API.
 
 If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and tries the job again every 30 seconds.
 

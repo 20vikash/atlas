@@ -383,13 +383,17 @@ class VirtualMachine(Document):
 
 
 @frappe.whitelist(methods=["POST"])
-def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
+def create(request: str | dict[str, Any] | VirtualMachineCreateRequest) -> dict[str, str | bool]:
 	"""Create one Atlas VM request and send its intent to Metal."""
 	if not frappe.has_permission("Virtual Machine", ptype="create"):
 		raise frappe.PermissionError
 
 	try:
-		request_value = VirtualMachineCreateRequest.from_value(request)
+		request_value = (
+			request
+			if isinstance(request, VirtualMachineCreateRequest)
+			else VirtualMachineCreateRequest.from_value(request)
+		)
 	except ValueError as error:
 		frappe.throw(_(str(error)))
 		raise AssertionError from error

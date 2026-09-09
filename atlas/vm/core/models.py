@@ -66,7 +66,7 @@ class VirtualMachineCreateRequest:
 			tenant_id=tenant_id,
 			is_privileged=strict_bool(payload.get("is_privileged"), "is_privileged"),
 			hostname=str(payload.get("hostname") or ""),
-			ssh_keys=tuple(str(payload.get("ssh_keys") or "").splitlines()),
+			ssh_keys=cls.ssh_keys_tuple(payload),
 			user_data=str(payload.get("user_data") or ""),
 			egress=egress,
 			disk_throughput_mibps=cls.throughput(payload, "disk_throughput_mibps"),
@@ -76,6 +76,17 @@ class VirtualMachineCreateRequest:
 			server_ip_address=server_ip_address,
 			metadata=cls.metadata_map(payload),
 		)
+
+	@staticmethod
+	def ssh_keys_tuple(payload: dict[str, Any]) -> tuple[str, ...]:
+		"""Return the authorized keys from a list or from a newline-separated block."""
+		value = payload.get("ssh_keys") or []
+		if isinstance(value, str):
+			value = value.splitlines()
+		if not isinstance(value, list) or any(not isinstance(key, str) for key in value):
+			raise ValueError("SSH keys must be a list of strings.")
+
+		return tuple(key.strip() for key in value if key.strip())
 
 	@staticmethod
 	def throughput(payload: dict[str, Any], field_name: str) -> int:

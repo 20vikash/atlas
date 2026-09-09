@@ -2,16 +2,28 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import add_to_date, now_datetime
 
 from atlas.atlas.core.exceptions import AtlasUserError
 
 SIGNED_URL_EXPIRY_SECONDS = 86400
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+class ImageDownload(TypedDict):
+	"""One signed image artifact download."""
+
+	artifact: Literal["rootfs", "kernel"]
+	url: str
+	size_mib: int
+	sha256: str
+	expires_in: int
+	expires_at: str
 
 
 if TYPE_CHECKING:
@@ -99,8 +111,8 @@ class VirtualMachineImage(Document):
 		return {
 			"ref": self.immutable_reference,
 			"architecture": self.platform,
-			"rootfs": {"url": self.get_image_url(expiry_seconds), "sha256": self.image_sha256},
-			"kernel": {"url": self.get_kernel_url(expiry_seconds), "sha256": self.kernel_sha256},
+			"rootfs": {"url": self.get_presigned_image_url(expiry_seconds), "sha256": self.image_sha256},
+			"kernel": {"url": self.get_presigned_kernel_url(expiry_seconds), "sha256": self.kernel_sha256},
 		}
 
 	@property
@@ -129,11 +141,32 @@ class VirtualMachineImage(Document):
 			"disk_mib": self.memory_snapshot_disk_mib,
 		}
 
-	def get_image_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+	def get_presigned_download_url(self, artifact: Literal["rootfs", "kernel"]) -> ImageDownload:
+		"""Return one signed artifact URL with its size, digest, and expiry time."""
+		self.validate_is_available()
+		if artifact == "rootfs":
+			url = self.get_presigned_image_url()
+			size_mib = self.image_size_mib
+			sha256 = self.image_sha256
+		else:
+			url = self.get_presigned_kernel_url()
+			size_mib = self.kernel_size_mib
+			sha256 = self.kernel_sha256
+
+		return {
+			"artifact": artifact,
+			"url": url,
+			"size_mib": size_mib,
+			"sha256": sha256,
+			"expires_in": SIGNED_URL_EXPIRY_SECONDS,
+			"expires_at": str(add_to_date(now_datetime(), seconds=SIGNED_URL_EXPIRY_SECONDS)),
+		}
+
+	def get_presigned_image_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
 		"""Return a signed URL for the root file system object."""
 		return self.get_object_url(self.image_object_key, expiry_seconds)
 
-	def get_kernel_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+	def get_presigned_kernel_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
 		"""Return a signed URL for the kernel object."""
 		return self.get_object_url(self.kernel_object_key, expiry_seconds)
 

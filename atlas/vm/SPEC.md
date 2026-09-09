@@ -52,6 +52,8 @@ A Virtual Machine property calls Metal once per request and caches the result. A
 
 ## Reconciliation
 
+Termination detaches the public IPv4 address and keeps its tenant reservation. The record stays until Metal confirms the VM is absent.
+
 Two scheduled jobs settle records that a lost response left uncertain: stale drafts and terminating VMs. Both ask Metal the same question and share one settle path. Metal is the authority: a confirmed absence deletes the record, and any other failure is logged and left alone, because an unreachable host says nothing about whether the VM exists.
 
 ## Images

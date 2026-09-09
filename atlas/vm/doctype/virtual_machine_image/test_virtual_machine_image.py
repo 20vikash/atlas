@@ -43,13 +43,34 @@ class TestVirtualMachineImage(UnitTestCase):
 			setattr(image, key, value)
 		return image
 
+	def test_download_returns_only_the_selected_artifact(self) -> None:
+		image = self.make_image()
+		with (
+			patch.object(VirtualMachineImage, "validate_is_available"),
+			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs-url"),
+			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel-url"),
+		):
+			rootfs = image.get_presigned_download_url("rootfs")
+			kernel = image.get_presigned_download_url("kernel")
+
+		self.assertEqual(rootfs["artifact"], "rootfs")
+		self.assertEqual(rootfs["url"], "rootfs-url")
+		self.assertEqual(rootfs["size_mib"], 10)
+		self.assertEqual(kernel["artifact"], "kernel")
+		self.assertEqual(kernel["url"], "kernel-url")
+		self.assertEqual(kernel["size_mib"], 5)
+
 	def test_metal_request_contains_immutable_image_data(self) -> None:
 		image = self.make_image()
 
 		with (
 			patch.object(VirtualMachineImage, "validate_user_data"),
-			patch.object(VirtualMachineImage, "get_image_url", return_value="https://example.test/image"),
-			patch.object(VirtualMachineImage, "get_kernel_url", return_value="https://example.test/kernel"),
+			patch.object(
+				VirtualMachineImage, "get_presigned_image_url", return_value="https://example.test/image"
+			),
+			patch.object(
+				VirtualMachineImage, "get_presigned_kernel_url", return_value="https://example.test/kernel"
+			),
 		):
 			request = image.get_metal_image_request("#cloud-config")
 
@@ -101,8 +122,8 @@ class TestVirtualMachineImage(UnitTestCase):
 			memory_snapshot_disk_mib=10240,
 		)
 		with (
-			patch.object(VirtualMachineImage, "get_image_url", return_value="rootfs"),
-			patch.object(VirtualMachineImage, "get_kernel_url", return_value="kernel"),
+			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs"),
+			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel"),
 		):
 			request = image.get_metal_image_request()
 
@@ -118,8 +139,8 @@ class TestVirtualMachineImage(UnitTestCase):
 			memory_snapshot_disk_mib=10240,
 		)
 		with (
-			patch.object(VirtualMachineImage, "get_image_url", return_value="rootfs"),
-			patch.object(VirtualMachineImage, "get_kernel_url", return_value="kernel"),
+			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs"),
+			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel"),
 		):
 			request = image.get_metal_image_request()
 
@@ -135,8 +156,8 @@ class TestVirtualMachineImage(UnitTestCase):
 			memory_snapshot_disk_mib=10240,
 		)
 		with (
-			patch.object(VirtualMachineImage, "get_image_url", return_value="rootfs"),
-			patch.object(VirtualMachineImage, "get_kernel_url", return_value="kernel"),
+			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs"),
+			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel"),
 		):
 			request = image.get_desired_image()
 
