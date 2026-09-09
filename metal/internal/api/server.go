@@ -35,7 +35,7 @@ type SnapshotStore interface {
 
 // HostService synchronizes controller-owned host state and reports capacity.
 type HostService interface {
-	Synchronize(context.Context, host.DesiredState) (host.Capacity, error)
+	Synchronize(context.Context, host.DesiredState) (host.SyncResult, error)
 	Capacity(context.Context) (host.Capacity, error)
 }
 

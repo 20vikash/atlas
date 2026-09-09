@@ -146,9 +146,9 @@
    "label": "Tenant ID",
    "read_only": 1,
    "reqd": 1,
+   "search_index": 1,
    "set_only_once": 1,
-   "show_description_on_click": 1,
-   "search_index": 1
+   "show_description_on_click": 1
   },
   {
    "default": "0",
@@ -251,9 +251,13 @@
   {
    "link_doctype": "SSH Task",
    "link_fieldname": "target"
+  },
+  {
+   "link_doctype": "Virtual Machine State",
+   "link_fieldname": "virtual_machine"
   }
  ],
- "modified": "2026-09-07 22:00:01.466665",
+ "modified": "2026-09-09 16:55:01.265692",
  "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine",

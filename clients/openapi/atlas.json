@@ -632,7 +632,7 @@
         "title": "Page[ImageResponse]",
         "type": "object"
       },
-      "Page[VirtualMachineResponse]": {
+      "Page[VirtualMachineListResponse]": {
         "examples": [
           {
             "has_more": false,
@@ -648,7 +648,7 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/VirtualMachineResponse"
+              "$ref": "#/components/schemas/VirtualMachineListResponse"
             },
             "title": "Items",
             "type": "array"
@@ -668,7 +668,7 @@
           "limit",
           "has_more"
         ],
-        "title": "Page[VirtualMachineResponse]",
+        "title": "Page[VirtualMachineListResponse]",
         "type": "object"
       },
       "ReserveIPAddressPayload": {
@@ -804,6 +804,80 @@
           "current_state"
         ],
         "title": "VirtualMachineDetailResponse",
+        "type": "object"
+      },
+      "VirtualMachineListResponse": {
+        "description": "A stored virtual machine with its last known host state.",
+        "examples": [
+          {
+            "created_at": 1788834165,
+            "disk_mib": 20480,
+            "id": "vm-00001",
+            "image_id": "8f1c2d3e4b5a6978",
+            "last_known_state": "running",
+            "memory_mib": 2048,
+            "state_synced_at": 1788834165,
+            "tenant_id": 7,
+            "vcpus": 2
+          }
+        ],
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "disk_mib": {
+            "title": "Disk Mib",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_id": {
+            "title": "Image Id",
+            "type": "string"
+          },
+          "last_known_state": {
+            "title": "Last Known State",
+            "type": "string"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "state_synced_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Synced At"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "integer"
+          },
+          "vcpus": {
+            "title": "Vcpus",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "image_id",
+          "vcpus",
+          "memory_mib",
+          "disk_mib",
+          "created_at",
+          "last_known_state",
+          "state_synced_at"
+        ],
+        "title": "VirtualMachineListResponse",
         "type": "object"
       },
       "VirtualMachineResponse": {
@@ -1279,7 +1353,7 @@
     },
     "/api/atlas/virtual-machines": {
       "get": {
-        "description": "Returns one page of tenant VM records in newest-first order. This request does not contact the host.",
+        "description": "Returns one page of tenant VM records in newest-first order, with the state each host last reported. This request does not contact the host.",
         "operationId": "list_virtual_machines",
         "parameters": [
           {
@@ -1322,7 +1396,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page[VirtualMachineResponse]"
+                  "$ref": "#/components/schemas/Page[VirtualMachineListResponse]"
                 }
               }
             },

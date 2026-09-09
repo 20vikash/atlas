@@ -7,24 +7,24 @@ from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
 if TYPE_CHECKING:
-    from ..models.virtual_machine_response import VirtualMachineResponse
+    from ..models.virtual_machine_list_response import VirtualMachineListResponse
 
 
-T = TypeVar("T", bound="PageVirtualMachineResponse")
+T = TypeVar("T", bound="PageVirtualMachineListResponse")
 
 
 @_attrs_define
-class PageVirtualMachineResponse:
+class PageVirtualMachineListResponse:
     """
     Attributes:
         has_more (bool):
-        items (list[VirtualMachineResponse]):
+        items (list[VirtualMachineListResponse]):
         limit (int):
         offset (int):
     """
 
     has_more: bool
-    items: list[VirtualMachineResponse]
+    items: list[VirtualMachineListResponse]
     limit: int
     offset: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -56,7 +56,7 @@ class PageVirtualMachineResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.virtual_machine_response import VirtualMachineResponse  # noqa: PLC0415
+        from ..models.virtual_machine_list_response import VirtualMachineListResponse  # noqa: PLC0415
 
         d = dict(src_dict)
         has_more = d.pop("has_more")
@@ -64,7 +64,7 @@ class PageVirtualMachineResponse:
         items = []
         _items = d.pop("items")
         for items_item_data in _items:
-            items_item = VirtualMachineResponse.from_dict(items_item_data)
+            items_item = VirtualMachineListResponse.from_dict(items_item_data)
 
             items.append(items_item)
 
@@ -72,15 +72,15 @@ class PageVirtualMachineResponse:
 
         offset = d.pop("offset")
 
-        page_virtual_machine_response = cls(
+        page_virtual_machine_list_response = cls(
             has_more=has_more,
             items=items,
             limit=limit,
             offset=offset,
         )
 
-        page_virtual_machine_response.additional_properties = d
-        return page_virtual_machine_response
+        page_virtual_machine_list_response.additional_properties = d
+        return page_virtual_machine_list_response
 
     @property
     def additional_keys(self) -> list[str]:

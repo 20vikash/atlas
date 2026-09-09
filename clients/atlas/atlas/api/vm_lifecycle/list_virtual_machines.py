@@ -5,7 +5,7 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.page_virtual_machine_response import PageVirtualMachineResponse
+from ...models.page_virtual_machine_list_response import PageVirtualMachineListResponse
 from ...types import UNSET, Response, Unset
 
 
@@ -38,9 +38,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> PageVirtualMachineResponse | None:
+) -> PageVirtualMachineListResponse | None:
     if response.status_code == 200:
-        response_200 = PageVirtualMachineResponse.from_dict(response.json())
+        response_200 = PageVirtualMachineListResponse.from_dict(response.json())
 
         return response_200
 
@@ -52,7 +52,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[PageVirtualMachineResponse]:
+) -> Response[PageVirtualMachineListResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -67,10 +67,11 @@ def sync_detailed(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
-) -> Response[PageVirtualMachineResponse]:
+) -> Response[PageVirtualMachineListResponse]:
     """List VMs
 
-     Returns one page of tenant VM records in newest-first order. This request does not contact the host.
+     Returns one page of tenant VM records in newest-first order, with the state each host last reported.
+    This request does not contact the host.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -82,7 +83,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageVirtualMachineResponse]
+        Response[PageVirtualMachineListResponse]
     """
 
     kwargs = _get_kwargs(
@@ -104,10 +105,11 @@ def sync(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
-) -> PageVirtualMachineResponse | None:
+) -> PageVirtualMachineListResponse | None:
     """List VMs
 
-     Returns one page of tenant VM records in newest-first order. This request does not contact the host.
+     Returns one page of tenant VM records in newest-first order, with the state each host last reported.
+    This request does not contact the host.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -119,7 +121,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageVirtualMachineResponse
+        PageVirtualMachineListResponse
     """
 
     return sync_detailed(
@@ -136,10 +138,11 @@ async def asyncio_detailed(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
-) -> Response[PageVirtualMachineResponse]:
+) -> Response[PageVirtualMachineListResponse]:
     """List VMs
 
-     Returns one page of tenant VM records in newest-first order. This request does not contact the host.
+     Returns one page of tenant VM records in newest-first order, with the state each host last reported.
+    This request does not contact the host.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -151,7 +154,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageVirtualMachineResponse]
+        Response[PageVirtualMachineListResponse]
     """
 
     kwargs = _get_kwargs(
@@ -171,10 +174,11 @@ async def asyncio(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
-) -> PageVirtualMachineResponse | None:
+) -> PageVirtualMachineListResponse | None:
     """List VMs
 
-     Returns one page of tenant VM records in newest-first order. This request does not contact the host.
+     Returns one page of tenant VM records in newest-first order, with the state each host last reported.
+    This request does not contact the host.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -186,7 +190,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageVirtualMachineResponse
+        PageVirtualMachineListResponse
     """
 
     return (

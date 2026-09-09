@@ -28,6 +28,7 @@ from atlas.api.models import (
 	SnapshotPayload,
 	SSHKeysReplacementPayload,
 	VirtualMachineDetailResponse,
+	VirtualMachineListResponse,
 	VirtualMachineResponse,
 )
 from atlas.api.router import (
@@ -40,6 +41,7 @@ from atlas.api.routes.images import get_owned_image
 from atlas.api.routes.ip_addresses import get_owned_ip_address
 from atlas.auth.tenant import get_tenant_id
 from atlas.vm.core.console_token import CONSOLE_TOKEN_TTL_SECONDS
+from atlas.vm.core.vm_state import get_reported_state_rows
 from atlas.vm.doctype.virtual_machine.virtual_machine import create as create_virtual_machine_request
 
 if TYPE_CHECKING:
@@ -115,10 +117,10 @@ def create_virtual_machine(
 
 @virtual_machines.get("")
 @api_docs()
-def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineResponse]:
+def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 	"""List VMs.
 
-	Returns one page of tenant VM records in newest-first order. This request does not contact the host.
+	Returns one page of tenant VM records in newest-first order, with the state each host last reported. This request does not contact the host.
 	"""
 	rows: list[VirtualMachine] = frappe.get_all(
 		"Virtual Machine",
@@ -138,7 +140,11 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineResponse]:
 		start=query.offset,
 		limit=query.fetch_limit,
 	)
-	return build_page([VirtualMachineResponse.from_document(row) for row in rows], query)
+	states = get_reported_state_rows([row.name for row in rows])
+	return build_page(
+		[VirtualMachineListResponse.from_document_and_state(row, states.get(row.name)) for row in rows],
+		query,
+	)
 
 
 @virtual_machines.get("<virtual_machine_id>")

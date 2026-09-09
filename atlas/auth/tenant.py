@@ -26,6 +26,7 @@ def parse_tenant_id(value: str) -> int:
 
 	if tenant_id == 0:
 		raise invalid_tenant("Tenant 0 is reserved.")
+
 	if not 1 <= tenant_id <= MAXIMUM_TENANT_ID:
 		raise invalid_tenant("The tenant ID must be an unsigned 32-bit integer.")
 	return tenant_id

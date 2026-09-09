@@ -223,6 +223,8 @@ The snapshot status reports `pending`, `uploading`, `completing`, `completed`, o
 
 The response contains current host capacity. CPU, memory, storage, and virtual machine counts use complete field names and binary units.
 
+The response also contains `virtual_machines`. It maps each VM identifier on the host to an object with its last observed `status`. Metal reads the stored observed record of each VM, so the status is as fresh as the last reconcile pass.
+
 ## Errors
 
 Every HTTP error uses one safe object:

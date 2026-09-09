@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.api.models import VirtualMachineDetailResponse, VirtualMachineResponse
@@ -48,6 +49,16 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
+
+
+def stored_rows(rows: list[SimpleNamespace]):
+	"""Patch the Virtual Machine query and leave every other query alone."""
+	query = frappe.get_all
+
+	def get_all(doctype, *args, **kwargs):
+		return rows if doctype == "Virtual Machine" else query(doctype, *args, **kwargs)
+
+	return patch("atlas.api.routes.virtual_machines.frappe.get_all", side_effect=get_all)
 
 
 def owned_document(virtual_machine: SimpleNamespace, tenant_id: int = TENANT_ID):
@@ -141,7 +152,8 @@ class TestReadVirtualMachines(UnitTestCase):
 			api_request(
 				"GET", "/api/atlas/virtual-machines", tenant_id=TENANT_ID, query_string={"limit": "2"}
 			),
-			patch("atlas.api.routes.virtual_machines.frappe.get_all", return_value=rows) as get_all,
+			stored_rows(rows) as get_all,
+			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
 		):
 			status, body = call_route(list_virtual_machines)
 
@@ -150,6 +162,39 @@ class TestReadVirtualMachines(UnitTestCase):
 		self.assertEqual(get_all.call_args.kwargs["limit"], 3)
 		self.assertEqual(len(body["items"]), 2)
 		self.assertTrue(body["has_more"])
+
+	def test_list_adds_the_last_reported_state(self) -> None:
+		"""The list route reads stored state and does not contact the host."""
+		rows = [build_virtual_machine(), build_virtual_machine(name="vm-00002")]
+		state = SimpleNamespace(status="running", synced_at="2026-09-08 10:05:00")
+		with (
+			api_request("GET", "/api/atlas/virtual-machines", tenant_id=TENANT_ID),
+			stored_rows(rows),
+			patch(
+				"atlas.api.routes.virtual_machines.get_reported_state_rows",
+				return_value={"vm-00001": state},
+			),
+		):
+			status, body = call_route(list_virtual_machines)
+
+		self.assertEqual(status, 200)
+		self.assertEqual(body["items"][0]["last_known_state"], "running")
+		self.assertIsNotNone(body["items"][0]["state_synced_at"])
+		self.assertEqual(body["items"][1]["last_known_state"], "unknown")
+		self.assertIsNone(body["items"][1]["state_synced_at"])
+		rows[0].get_metal_vm_info.assert_not_called()
+
+	def test_list_shows_a_draft_as_pending(self) -> None:
+		rows = [build_virtual_machine(is_draft=1)]
+		with (
+			api_request("GET", "/api/atlas/virtual-machines", tenant_id=TENANT_ID),
+			stored_rows(rows),
+			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
+		):
+			status, body = call_route(list_virtual_machines)
+
+		self.assertEqual(status, 200)
+		self.assertEqual(body["items"][0]["last_known_state"], "pending")
 
 	def test_read_adds_the_live_host_state(self) -> None:
 		virtual_machine = build_virtual_machine()
