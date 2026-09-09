@@ -23,7 +23,7 @@ class MachineImageTransferError(Exception):
 	"""Report invalid Machine image transfer data."""
 
 
-class MachineImageTransferService:
+class VirtualMachineImageTransferService:
 	"""Create and transfer one Machine image."""
 
 	def create_from_virtual_machine(
@@ -90,7 +90,7 @@ class MachineImageTransferService:
 	) -> None:
 		"""Enqueue one idempotent Machine image transfer."""
 		frappe.enqueue(
-			"atlas.vm.core.image_transfer.transfer_machine_image",
+			"atlas.vm.core.vm_image_transfer.transfer_machine_image",
 			queue=queue,
 			timeout=timeout,
 			image_name=image_name,
@@ -272,11 +272,11 @@ def enqueue_pending_machine_image_transfers() -> None:
 		},
 		pluck="name",
 	)
-	service = MachineImageTransferService()
+	service = VirtualMachineImageTransferService()
 	for name in names:
 		service.enqueue(name)
 
 
 def transfer_machine_image(image_name: str) -> None:
 	"""Advance one queued Machine image transfer."""
-	MachineImageTransferService().transfer(image_name)
+	VirtualMachineImageTransferService().transfer(image_name)

@@ -21,7 +21,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 | `MetalClient` | `/v1` HTTP transport and error classification. |
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
-| `image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
+| `vm_image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
 
 ## Create

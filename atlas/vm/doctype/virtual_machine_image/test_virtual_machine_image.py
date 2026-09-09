@@ -6,7 +6,6 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.object_storage import ObjectStorageError
-from atlas.vm.core.image_transfer import MachineImageTransferService
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.multipart_upload import (
 	MEBIBYTE,
@@ -15,6 +14,7 @@ from atlas.vm.core.multipart_upload import (
 	bytes_to_mib,
 	get_multipart_part_count,
 )
+from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 
@@ -170,7 +170,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			"rootfs": {"size_bytes": 1024 * 1024},
 			"kernel": {"size_bytes": 1024 * 1024},
 		}
-		service = MachineImageTransferService()
+		service = VirtualMachineImageTransferService()
 
 		def get_doc(doctype, name=None):
 			if isinstance(doctype, dict):
@@ -180,8 +180,8 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			return server
 
 		with (
-			patch("atlas.vm.core.image_transfer.frappe.get_doc", side_effect=get_doc),
-			patch("atlas.vm.core.image_transfer.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", side_effect=get_doc),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
 			patch.object(service, "enqueue") as enqueue_transfer,
 		):
 			image_name = service.create_from_virtual_machine(virtual_machine, "Machine image")
@@ -240,12 +240,12 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		server = SimpleNamespace(name="server-1")
 		metal_client = Mock()
 		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
-		service = MachineImageTransferService()
+		service = VirtualMachineImageTransferService()
 
 		with (
-			patch("atlas.vm.core.image_transfer.frappe.get_doc", return_value=server),
-			patch("atlas.vm.core.image_transfer.frappe.get_single", return_value=settings),
-			patch("atlas.vm.core.image_transfer.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", return_value=server),
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_single", return_value=settings),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
 			patch.object(MultipartUploadService, "complete_stored_uploads"),
 		):
 			service.advance(image)
@@ -271,15 +271,15 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			"kernel": {"sha256": "b" * 64},
 		}
 		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
-		service = MachineImageTransferService()
+		service = VirtualMachineImageTransferService()
 
 		with (
 			patch(
-				"atlas.vm.core.image_transfer.frappe.get_doc",
+				"atlas.vm.core.vm_image_transfer.frappe.get_doc",
 				return_value=SimpleNamespace(name="server-1"),
 			),
-			patch("atlas.vm.core.image_transfer.frappe.get_single", return_value=settings),
-			patch("atlas.vm.core.image_transfer.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_single", return_value=settings),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
 			patch.object(MultipartUploadService, "complete_stored_uploads"),
 		):
 			# First poll records the checksums; finalize runs on the next poll.
@@ -305,15 +305,15 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		metal_client = Mock()
 		metal_client.get_snapshot.return_value = {"state": "pending"}
 		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
-		service = MachineImageTransferService()
+		service = VirtualMachineImageTransferService()
 
 		with (
 			patch(
-				"atlas.vm.core.image_transfer.frappe.get_doc",
+				"atlas.vm.core.vm_image_transfer.frappe.get_doc",
 				return_value=SimpleNamespace(name="server-1"),
 			),
-			patch("atlas.vm.core.image_transfer.frappe.get_single", return_value=settings),
-			patch("atlas.vm.core.image_transfer.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_single", return_value=settings),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
 			patch.object(service, "start_upload") as start_upload,
 		):
 			service.advance(image)
@@ -323,11 +323,11 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 	def test_transfer_failure_keeps_identifiers_and_sets_actionable_error(self) -> None:
 		image = SimpleNamespace(name="image-1", status="Uploading", transfer_error=None, save=Mock())
-		service = MachineImageTransferService()
+		service = VirtualMachineImageTransferService()
 
 		with (
-			patch("atlas.vm.core.image_transfer.frappe.get_doc", return_value=image),
-			patch("atlas.vm.core.image_transfer.frappe.log_error"),
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_transfer.frappe.log_error"),
 			patch.object(service, "advance", side_effect=ObjectStorageError("upload failed")),
 		):
 			service.transfer("image-1")
@@ -355,7 +355,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		)
 		object_storage_client = Mock()
 		object_storage_client.create_multipart_upload.side_effect = ["rootfs-upload", "kernel-upload"]
-		service = MachineImageTransferService()
+		service = VirtualMachineImageTransferService()
 
 		with self.assertRaises(MetalClientError):
 			service.start_upload(

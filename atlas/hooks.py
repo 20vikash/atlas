@@ -191,7 +191,7 @@ scheduler_events = {
 		],
 		"* * * * * */30": [
 			# Poll and advance in-progress Machine image uploads every 30 seconds.
-			"atlas.vm.core.image_transfer.enqueue_pending_machine_image_transfers",
+			"atlas.vm.core.vm_image_transfer.enqueue_pending_machine_image_transfers",
 		],
 		"*/15 * * * *": [
 			# Remove the published files that a newer build replaced.
