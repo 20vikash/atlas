@@ -48,7 +48,14 @@ class VirtualMachineImage(Document):
 		source_server: DF.Data | None
 		source_virtual_machine: DF.Data | None
 		status: DF.Literal[
-			"Pending", "Snapshotting", "Uploading", "Completing", "Cleaning", "Available", "Failed"
+			"Pending",
+			"Snapshotting",
+			"Uploading",
+			"Completing",
+			"Cleaning",
+			"Available",
+			"Failed",
+			"Deleting",
 		]
 		supports_cloud_init: DF.Check
 		title: DF.Data
@@ -180,3 +187,12 @@ class VirtualMachineImage(Document):
 		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 
 		VirtualMachineImageTransferService().enqueue(self.name, queue="long", timeout=7200)
+
+	@frappe.whitelist(methods=["POST"])
+	def request_deletion(self) -> None:
+		"""Queue deletion of this unused Machine image."""
+		frappe.only_for("System Manager")
+
+		from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
+
+		VirtualMachineImageDeletionService().request(self)

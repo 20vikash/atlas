@@ -67,7 +67,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Pending\nSnapshotting\nUploading\nCompleting\nCleaning\nAvailable\nFailed",
+   "options": "Pending\nSnapshotting\nUploading\nCompleting\nCleaning\nAvailable\nFailed\nDeleting",
    "read_only": 1,
    "reqd": 1
   },
@@ -330,6 +330,10 @@
   {
    "color": "Red",
    "title": "Failed"
+  },
+  {
+   "color": "Red",
+   "title": "Deleting"
   }
  ],
  "title_field": "title"

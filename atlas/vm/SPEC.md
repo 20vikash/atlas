@@ -83,6 +83,12 @@ The Create Machine Image action calls `POST /v1/vms/{id}/snapshots`. Metal retur
 
 The image record keeps the source server, upload IDs, status, and errors. Atlas saves the upload IDs before it asks Metal to start. A start or finalization error marks the image as Failed and keeps the retry values. Retry Transfer uses these values. `source_virtual_machine` is audit text only. Metal deletes staging after 48 hours without activity.
 
+## Machine image deletion
+
+`vm_image_deletion.py` owns Machine image removal. The request marks the image `Deleting`, disables it, and queues a repeatable cleanup job. Atlas refuses the request while a virtual machine uses the image.
+
+The job aborts every incomplete multipart upload, deletes both stored objects, removes the remaining Metal staging data, and then deletes the record. If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and queues it again every 30 seconds.
+
 ## System image publisher
 
 Build and publish a pinned Ubuntu image:
