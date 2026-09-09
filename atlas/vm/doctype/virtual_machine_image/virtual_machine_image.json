@@ -9,12 +9,13 @@
   "status",
   "title",
   "image_type",
-  "platform",
+  "tenant_id",
+  "supports_cloud_init",
   "column_break_identity",
   "operating_system",
   "operating_system_version",
+  "platform",
   "transfer_progress",
-  "supports_cloud_init",
   "cache_image",
   "memory_snapshot",
   "section_break_memory_snapshot_config",
@@ -76,8 +77,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Title",
-   "reqd": 1,
-   "unique": 1
+   "reqd": 1
   },
   {
    "fieldname": "platform",
@@ -281,11 +281,21 @@
    "fieldtype": "Data",
    "label": "Source Local Snapshot ID",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "tenant_id",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Tenant ID",
+   "read_only": 1,
+   "search_index": 1,
+   "set_only_once": 1
   }
  ],
  "links": [],
- "modified": "2026-09-04 03:44:34.257430",
- "modified_by": "Administrator",
+ "modified": "2026-09-09 10:17:25.885323",
+ "modified_by": "test@gmail.com",
  "module": "VM",
  "name": "Virtual Machine Image",
  "naming_rule": "Random",

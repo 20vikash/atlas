@@ -57,6 +57,7 @@ class VirtualMachineImageTransferService:
 				"doctype": "Virtual Machine Image",
 				"title": title,
 				"image_type": "Machine",
+				"tenant_id": virtual_machine.tenant_id,
 				"status": "Pending",
 				"enabled": 1,
 				"platform": original_image.platform,

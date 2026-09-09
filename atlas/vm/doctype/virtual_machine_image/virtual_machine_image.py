@@ -58,6 +58,7 @@ class VirtualMachineImage(Document):
 			"Deleting",
 		]
 		supports_cloud_init: DF.Check
+		tenant_id: DF.Int
 		title: DF.Data
 		transfer_error: DF.SmallText | None
 		transfer_progress: DF.Int
@@ -98,6 +99,15 @@ class VirtualMachineImage(Document):
 			"rootfs": {"url": self.get_image_url(expiry_seconds), "sha256": self.image_sha256},
 			"kernel": {"url": self.get_kernel_url(expiry_seconds), "sha256": self.kernel_sha256},
 		}
+
+	@property
+	def is_shared(self) -> bool:
+		"""Return whether every tenant can read and boot this image."""
+		return self.image_type == "System"
+
+	def is_visible_to_tenant(self, tenant_id: int) -> bool:
+		"""Return whether one tenant can read and boot this image."""
+		return self.is_shared or self.tenant_id == tenant_id
 
 	@property
 	def immutable_reference(self) -> str:

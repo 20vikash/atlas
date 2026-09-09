@@ -44,7 +44,7 @@ class VirtualMachineService:
 			frappe.throw(_(str(error)))
 			raise AssertionError from error
 
-		image = cls.get_image(request.virtual_machine_image)
+		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
 		server = PlacementService().select_server(request, image.platform)
 		virtual_machine = cls.insert_draft(request, cast(str, image.name), cast(str, server.name))
@@ -68,9 +68,14 @@ class VirtualMachineService:
 		return {"name": virtual_machine_name, "is_draft": False}
 
 	@staticmethod
-	def get_image(image_name: str) -> VirtualMachineImage:
+	def get_image(image_name: str, tenant_id: int) -> VirtualMachineImage:
 		"""Return one enabled and available virtual machine image."""
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
+		if not image.is_visible_to_tenant(tenant_id):
+			frappe.throw(
+				_("Virtual Machine Image {0} is not available.").format(image.title),
+				exc=frappe.DoesNotExistError,
+			)
 		if not image.enabled:
 			frappe.throw(_("Virtual Machine Image {0} is disabled.").format(image.title))
 		image.validate_is_available()
