@@ -21,5 +21,5 @@ if ! command -v uv >/dev/null; then
 	exit 1
 fi
 
-"$ATLAS_PYTHON" "$GENERATE" atlas
-uv run --no-project --with "$ROOT/services/http-proxy/control" python "$GENERATE" atlas-http-proxy
+"$ATLAS_PYTHON" "$GENERATE" atlas-client
+uv run --no-project --with "$ROOT/services/http-proxy/control" python "$GENERATE" atlas-proxy-client

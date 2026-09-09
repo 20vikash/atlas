@@ -103,8 +103,8 @@ class Client:
 CLIENTS_BY_NAME = {
 	client.name: client
 	for client in (
-		Client("atlas", "atlas", build_atlas_specification),
-		Client("atlas-http-proxy", "atlas_http_proxy", build_http_proxy_specification),
+		Client("atlas-client", "atlas_client", build_atlas_specification),
+		Client("atlas-proxy-client", "atlas_proxy_client", build_http_proxy_specification),
 	)
 }
 
