@@ -1,0 +1,616 @@
+{
+  "components": {
+    "schemas": {
+      "AddressUpdate": {
+        "additionalProperties": false,
+        "description": "One address for one site or custom domain.",
+        "properties": {
+          "address": {
+            "description": "The backend IPv6 address. Use `-` only for a site to stop its traffic.",
+            "examples": [
+              "2001:db8::10"
+            ],
+            "minLength": 1,
+            "title": "Address",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "AddressUpdate",
+        "type": "object"
+      },
+      "DomainMapping": {
+        "description": "One custom domain as the proxy stored it.",
+        "properties": {
+          "address": {
+            "description": "The backend IPv6 address.",
+            "title": "Address",
+            "type": "string"
+          },
+          "domain": {
+            "description": "The custom domain.",
+            "title": "Domain",
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "address"
+        ],
+        "title": "DomainMapping",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MapReplaced": {
+        "description": "Result of a full map replacement.",
+        "properties": {
+          "entries": {
+            "description": "Number of entries in the replacement map.",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "synced": {
+            "description": "Whether the complete map was applied.",
+            "title": "Synced",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "synced",
+          "entries"
+        ],
+        "title": "MapReplaced",
+        "type": "object"
+      },
+      "SiteMapping": {
+        "description": "One site as the proxy stored it.",
+        "properties": {
+          "address": {
+            "description": "The backend IPv6 address.",
+            "title": "Address",
+            "type": "string"
+          },
+          "site": {
+            "description": "The site subdomain.",
+            "title": "Site",
+            "type": "string"
+          }
+        },
+        "required": [
+          "site",
+          "address"
+        ],
+        "title": "SiteMapping",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "bearerFormat": "password or JWT",
+        "description": "Use the regional proxy password or a valid JWT.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Route sites and custom domains to backend IPv6 addresses. Sync all routes after a controller restart, or change one route when an address changes.",
+    "title": "Atlas proxy control",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "description": "Use this route for the DNS health check. It checks OpenResty and the routes it holds.",
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check traffic health",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "Use this route before a controller sends routing updates. It checks the OpenResty admin API.",
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Check OpenResty readiness",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/v1/cluster/status": {
+      "get": {
+        "description": "Return the local cluster status.",
+        "operationId": "cluster_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cluster Status",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cluster Status",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/v1/domains": {
+      "get": {
+        "description": "Read custom-domain routes during reconciliation.",
+        "operationId": "get_domains",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Domains",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List domain routes",
+        "tags": [
+          "Domains"
+        ]
+      },
+      "put": {
+        "description": "Replace every custom-domain route after a controller restart or full reconciliation. Example: `www.example.com` routes to `2001:db8::20`.",
+        "operationId": "replace_domains",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "The complete desired custom-domain map.",
+                "examples": [
+                  {
+                    "www.example.com": "2001:db8::20"
+                  }
+                ],
+                "title": "Values",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapReplaced"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Sync domain routes",
+        "tags": [
+          "Domains"
+        ]
+      }
+    },
+    "/v1/domains/{domain}": {
+      "delete": {
+        "description": "Remove one custom-domain route when it no longer needs proxy traffic. This succeeds when the domain is absent.",
+        "operationId": "delete_domain",
+        "parameters": [
+          {
+            "description": "The complete custom domain.",
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "description": "The complete custom domain.",
+              "title": "Domain",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove domain route",
+        "tags": [
+          "Domains"
+        ]
+      },
+      "patch": {
+        "description": "Add or change one custom-domain route without changing other domains. Example: route `www.example.com` to `2001:db8::20`.",
+        "operationId": "patch_domain",
+        "parameters": [
+          {
+            "description": "The complete custom domain.",
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "description": "The complete custom domain.",
+              "title": "Domain",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainMapping"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update domain route",
+        "tags": [
+          "Domains"
+        ]
+      }
+    },
+    "/v1/sites": {
+      "get": {
+        "description": "Read site routes during reconciliation.",
+        "operationId": "get_sites",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Sites",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List site routes",
+        "tags": [
+          "Sites"
+        ]
+      },
+      "put": {
+        "description": "Replace every site route after a controller restart or full reconciliation. Example: `erp` routes to `2001:db8::10`.",
+        "operationId": "replace_sites",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "The complete desired site map.",
+                "examples": [
+                  {
+                    "erp": "2001:db8::10",
+                    "shop": "2001:db8::11"
+                  }
+                ],
+                "title": "Values",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapReplaced"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Sync site routes",
+        "tags": [
+          "Sites"
+        ]
+      }
+    },
+    "/v1/sites/{name}": {
+      "delete": {
+        "description": "Remove one site route when it no longer needs proxy traffic. This succeeds when the site is absent.",
+        "operationId": "delete_site",
+        "parameters": [
+          {
+            "description": "The site subdomain.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The site subdomain.",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove site route",
+        "tags": [
+          "Sites"
+        ]
+      },
+      "patch": {
+        "description": "Add or change one site route without changing other sites. Example: route `erp` to `2001:db8::10`.",
+        "operationId": "patch_site",
+        "parameters": [
+          {
+            "description": "The site subdomain.",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "The site subdomain.",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteMapping"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update site route",
+        "tags": [
+          "Sites"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Use these routes for liveness and readiness checks.",
+      "name": "Health"
+    },
+    {
+      "description": "Route wildcard subdomains to backend IPv6 addresses.",
+      "name": "Sites"
+    },
+    {
+      "description": "Route custom domains to backend IPv6 addresses.",
+      "name": "Domains"
+    }
+  ]
+}
