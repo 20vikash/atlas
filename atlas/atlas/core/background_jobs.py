@@ -7,7 +7,7 @@ from typing import Any
 import frappe
 
 
-def as_administrator[Result](function: Callable[..., Result]) -> Callable[..., Result]:
+def run_as_admin[Result](function: Callable[..., Result]) -> Callable[..., Result]:
 	"""Run one background job as Administrator."""
 
 	@functools.wraps(function)

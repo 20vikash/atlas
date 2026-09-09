@@ -7,7 +7,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from atlas.atlas.core.background_jobs import as_administrator
+from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.metal_server.core.ip_address_service import IPAddressService
 
 
@@ -102,7 +102,7 @@ class MetalServerIPAddress(Document):
 			enqueue_after_commit=True,
 		)
 
-	@as_administrator
+	@run_as_admin
 	def reconcile(self) -> None:
 		"""Apply the current provider intent."""
 		current = frappe.get_doc(self.doctype, self.name)

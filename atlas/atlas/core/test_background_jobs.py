@@ -1,10 +1,10 @@
 import frappe
 from frappe.tests import UnitTestCase
 
-from atlas.atlas.core.background_jobs import as_administrator
+from atlas.atlas.core.background_jobs import run_as_admin
 
 
-@as_administrator
+@run_as_admin
 def read_job_user() -> str:
 	return frappe.session.user
 
