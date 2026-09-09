@@ -1,42 +1,56 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+
+
+
+
+
+
 T = TypeVar("T", bound="SiteMapping")
+
 
 
 @_attrs_define
 class SiteMapping:
-    """One site as the proxy stored it.
+    """ One site as the proxy stored it.
 
-    Attributes:
-        address (str): The backend IPv6 address.
-        site (str): The site subdomain.
-    """
+        Attributes:
+            address (str): The backend IPv6 address.
+            site (str): The site subdomain.
+     """
 
     address: str
     site: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
         address = self.address
 
         site = self.site
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "address": address,
-                "site": site,
-            }
-        )
+        field_dict.update({
+            "address": address,
+            "site": site,
+        })
 
         return field_dict
+
+
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
@@ -49,6 +63,7 @@ class SiteMapping:
             address=address,
             site=site,
         )
+
 
         site_mapping.additional_properties = d
         return site_mapping

@@ -1,14 +1,17 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.download_image_artifact import DownloadImageArtifact
 from ...models.image_download_response import ImageDownloadResponse
-from ...types import UNSET, Response
+from typing import cast
+
 
 
 def _get_kwargs(
@@ -16,32 +19,42 @@ def _get_kwargs(
     *,
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     headers["X-Tenant-ID"] = str(x_tenant_id)
+
+
+
+
+    
 
     params: dict[str, Any] = {}
 
     json_artifact = artifact.value
     params["artifact"] = json_artifact
 
+
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
+
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/atlas/images/{image_id}/download".format(
-            image_id=quote(str(image_id), safe=""),
-        ),
+        "url": "/api/atlas/images/{image_id}/download".format(image_id=quote(str(image_id), safe=""),),
         "params": params,
     }
+
 
     _kwargs["headers"] = headers
     return _kwargs
 
 
+
 def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ImageDownloadResponse | None:
     if response.status_code == 200:
         response_200 = ImageDownloadResponse.from_dict(response.json())
+
+
 
         return response_200
 
@@ -51,9 +64,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[ImageDownloadResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ImageDownloadResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -68,8 +79,9 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
+
 ) -> Response[ImageDownloadResponse]:
-    """Download image
+    """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
     size, SHA-256 value, and expiry time and cannot be cached.
@@ -85,12 +97,14 @@ def sync_detailed(
 
     Returns:
         Response[ImageDownloadResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         image_id=image_id,
-        artifact=artifact,
-        x_tenant_id=x_tenant_id,
+artifact=artifact,
+x_tenant_id=x_tenant_id,
+
     )
 
     response = client.get_httpx_client().request(
@@ -99,15 +113,15 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     image_id: str,
     *,
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
+
 ) -> ImageDownloadResponse | None:
-    """Download image
+    """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
     size, SHA-256 value, and expiry time and cannot be cached.
@@ -123,15 +137,16 @@ def sync(
 
     Returns:
         ImageDownloadResponse
-    """
+     """
+
 
     return sync_detailed(
         image_id=image_id,
-        client=client,
-        artifact=artifact,
-        x_tenant_id=x_tenant_id,
-    ).parsed
+client=client,
+artifact=artifact,
+x_tenant_id=x_tenant_id,
 
+    ).parsed
 
 async def asyncio_detailed(
     image_id: str,
@@ -139,8 +154,9 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
+
 ) -> Response[ImageDownloadResponse]:
-    """Download image
+    """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
     size, SHA-256 value, and expiry time and cannot be cached.
@@ -156,18 +172,21 @@ async def asyncio_detailed(
 
     Returns:
         Response[ImageDownloadResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         image_id=image_id,
-        artifact=artifact,
-        x_tenant_id=x_tenant_id,
+artifact=artifact,
+x_tenant_id=x_tenant_id,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     image_id: str,
@@ -175,8 +194,9 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
+
 ) -> ImageDownloadResponse | None:
-    """Download image
+    """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
     size, SHA-256 value, and expiry time and cannot be cached.
@@ -192,13 +212,13 @@ async def asyncio(
 
     Returns:
         ImageDownloadResponse
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            image_id=image_id,
-            client=client,
-            artifact=artifact,
-            x_tenant_id=x_tenant_id,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        image_id=image_id,
+client=client,
+artifact=artifact,
+x_tenant_id=x_tenant_id,
+
+    )).parsed

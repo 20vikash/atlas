@@ -1,29 +1,39 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, BinaryIO, TextIO, TYPE_CHECKING, Generator
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
+from ..types import UNSET, Unset
+
+from typing import cast
+
+
+
+
+
+
 T = TypeVar("T", bound="VirtualMachineListResponse")
+
 
 
 @_attrs_define
 class VirtualMachineListResponse:
-    """A stored virtual machine with its last known host state.
+    """ A stored virtual machine with its last known host state.
 
-    Attributes:
-        created_at (int):
-        disk_mib (int):
-        id (str):
-        image_id (str):
-        last_known_state (str):
-        memory_mib (int):
-        state_synced_at (int | None):
-        tenant_id (int):
-        vcpus (int):
-    """
+        Attributes:
+            created_at (int):
+            disk_mib (int):
+            id (str):
+            image_id (str):
+            last_known_state (str):
+            memory_mib (int):
+            state_synced_at (int | None):
+            tenant_id (int):
+            vcpus (int):
+     """
 
     created_at: int
     disk_mib: int
@@ -35,6 +45,10 @@ class VirtualMachineListResponse:
     tenant_id: int
     vcpus: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+
+
+
+
 
     def to_dict(self) -> dict[str, Any]:
         created_at = self.created_at
@@ -56,23 +70,24 @@ class VirtualMachineListResponse:
 
         vcpus = self.vcpus
 
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
-        field_dict.update(
-            {
-                "created_at": created_at,
-                "disk_mib": disk_mib,
-                "id": id,
-                "image_id": image_id,
-                "last_known_state": last_known_state,
-                "memory_mib": memory_mib,
-                "state_synced_at": state_synced_at,
-                "tenant_id": tenant_id,
-                "vcpus": vcpus,
-            }
-        )
+        field_dict.update({
+            "created_at": created_at,
+            "disk_mib": disk_mib,
+            "id": id,
+            "image_id": image_id,
+            "last_known_state": last_known_state,
+            "memory_mib": memory_mib,
+            "state_synced_at": state_synced_at,
+            "tenant_id": tenant_id,
+            "vcpus": vcpus,
+        })
 
         return field_dict
+
+
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
@@ -96,6 +111,7 @@ class VirtualMachineListResponse:
 
         state_synced_at = _parse_state_synced_at(d.pop("state_synced_at"))
 
+
         tenant_id = d.pop("tenant_id")
 
         vcpus = d.pop("vcpus")
@@ -111,6 +127,7 @@ class VirtualMachineListResponse:
             tenant_id=tenant_id,
             vcpus=vcpus,
         )
+
 
         virtual_machine_list_response.additional_properties = d
         return virtual_machine_list_response

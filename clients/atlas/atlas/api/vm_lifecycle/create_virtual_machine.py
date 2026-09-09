@@ -1,22 +1,34 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.create_virtual_machine_payload import CreateVirtualMachinePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
-from ...types import Response
+from typing import cast
+
 
 
 def _get_kwargs(
     *,
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     headers["X-Tenant-ID"] = str(x_tenant_id)
+
+
+
+
+    
+
+    
 
     _kwargs: dict[str, Any] = {
         "method": "post",
@@ -31,9 +43,12 @@ def _get_kwargs(
     return _kwargs
 
 
+
 def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> VirtualMachineResponse | None:
     if response.status_code == 201:
         response_201 = VirtualMachineResponse.from_dict(response.json())
+
+
 
         return response_201
 
@@ -43,9 +58,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -59,8 +72,9 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
+
 ) -> Response[VirtualMachineResponse]:
-    """Create VM
+    """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration.
@@ -75,11 +89,13 @@ def sync_detailed(
 
     Returns:
         Response[VirtualMachineResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         body=body,
-        x_tenant_id=x_tenant_id,
+x_tenant_id=x_tenant_id,
+
     )
 
     response = client.get_httpx_client().request(
@@ -88,14 +104,14 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
+
 ) -> VirtualMachineResponse | None:
-    """Create VM
+    """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration.
@@ -110,22 +126,24 @@ def sync(
 
     Returns:
         VirtualMachineResponse
-    """
+     """
+
 
     return sync_detailed(
         client=client,
-        body=body,
-        x_tenant_id=x_tenant_id,
-    ).parsed
+body=body,
+x_tenant_id=x_tenant_id,
 
+    ).parsed
 
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
+
 ) -> Response[VirtualMachineResponse]:
-    """Create VM
+    """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration.
@@ -140,25 +158,29 @@ async def asyncio_detailed(
 
     Returns:
         Response[VirtualMachineResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         body=body,
-        x_tenant_id=x_tenant_id,
+x_tenant_id=x_tenant_id,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
+
 ) -> VirtualMachineResponse | None:
-    """Create VM
+    """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration.
@@ -173,12 +195,12 @@ async def asyncio(
 
     Returns:
         VirtualMachineResponse
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            client=client,
-            body=body,
-            x_tenant_id=x_tenant_id,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        client=client,
+body=body,
+x_tenant_id=x_tenant_id,
+
+    )).parsed

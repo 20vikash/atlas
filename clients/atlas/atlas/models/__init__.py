@@ -1,4 +1,4 @@
-"""Contains all the data models used in inputs/outputs"""
+""" Contains all the data models used in inputs/outputs """
 
 from .compute_update_payload import ComputeUpdatePayload
 from .console_token_payload import ConsoleTokenPayload

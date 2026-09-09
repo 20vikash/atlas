@@ -1,31 +1,41 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...types import Response
+from ...types import Response, UNSET
+from ... import errors
+
+
 
 
 def _get_kwargs(
     ip_address_id: str,
     *,
     x_tenant_id: int,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     headers["X-Tenant-ID"] = str(x_tenant_id)
 
+
+
+
+    
+
+    
+
     _kwargs: dict[str, Any] = {
         "method": "delete",
-        "url": "/api/atlas/ip-addresses/{ip_address_id}".format(
-            ip_address_id=quote(str(ip_address_id), safe=""),
-        ),
+        "url": "/api/atlas/ip-addresses/{ip_address_id}".format(ip_address_id=quote(str(ip_address_id), safe=""),),
     }
+
 
     _kwargs["headers"] = headers
     return _kwargs
+
 
 
 def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | None:
@@ -55,8 +65,9 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
+
 ) -> Response[Any]:
-    """Release IP address
+    """ Release IP address
 
      Returns an unattached address to the shared pool and keeps its provider reservation. An attached or
     detaching address cannot be released.
@@ -71,11 +82,13 @@ def sync_detailed(
 
     Returns:
         Response[Any]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         ip_address_id=ip_address_id,
-        x_tenant_id=x_tenant_id,
+x_tenant_id=x_tenant_id,
+
     )
 
     response = client.get_httpx_client().request(
@@ -90,8 +103,9 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
+
 ) -> Response[Any]:
-    """Release IP address
+    """ Release IP address
 
      Returns an unattached address to the shared pool and keeps its provider reservation. An attached or
     detaching address cannot be released.
@@ -106,13 +120,18 @@ async def asyncio_detailed(
 
     Returns:
         Response[Any]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         ip_address_id=ip_address_id,
-        x_tenant_id=x_tenant_id,
+x_tenant_id=x_tenant_id,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
+

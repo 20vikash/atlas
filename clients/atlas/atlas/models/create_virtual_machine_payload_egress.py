@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class CreateVirtualMachinePayloadEgress(StrEnum):
     MESH = "mesh"
     NONE = "none"

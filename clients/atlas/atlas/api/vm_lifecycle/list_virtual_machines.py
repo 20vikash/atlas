@@ -1,12 +1,17 @@
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
-from ... import errors
 from ...client import AuthenticatedClient, Client
+from ...types import Response, UNSET
+from ... import errors
+
 from ...models.page_virtual_machine_list_response import PageVirtualMachineListResponse
-from ...types import UNSET, Response, Unset
+from ...types import UNSET, Unset
+from typing import cast
+
 
 
 def _get_kwargs(
@@ -14,9 +19,15 @@ def _get_kwargs(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
+
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     headers["X-Tenant-ID"] = str(x_tenant_id)
+
+
+
+
+    
 
     params: dict[str, Any] = {}
 
@@ -24,7 +35,9 @@ def _get_kwargs(
 
     params["limit"] = limit
 
+
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
+
 
     _kwargs: dict[str, Any] = {
         "method": "get",
@@ -32,15 +45,17 @@ def _get_kwargs(
         "params": params,
     }
 
+
     _kwargs["headers"] = headers
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> PageVirtualMachineListResponse | None:
+
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PageVirtualMachineListResponse | None:
     if response.status_code == 200:
         response_200 = PageVirtualMachineListResponse.from_dict(response.json())
+
+
 
         return response_200
 
@@ -50,9 +65,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[PageVirtualMachineListResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PageVirtualMachineListResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -67,8 +80,9 @@ def sync_detailed(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
+
 ) -> Response[PageVirtualMachineListResponse]:
-    """List VMs
+    """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
@@ -84,12 +98,14 @@ def sync_detailed(
 
     Returns:
         Response[PageVirtualMachineListResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         offset=offset,
-        limit=limit,
-        x_tenant_id=x_tenant_id,
+limit=limit,
+x_tenant_id=x_tenant_id,
+
     )
 
     response = client.get_httpx_client().request(
@@ -98,15 +114,15 @@ def sync_detailed(
 
     return _build_response(client=client, response=response)
 
-
 def sync(
     *,
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
+
 ) -> PageVirtualMachineListResponse | None:
-    """List VMs
+    """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
@@ -122,15 +138,16 @@ def sync(
 
     Returns:
         PageVirtualMachineListResponse
-    """
+     """
+
 
     return sync_detailed(
         client=client,
-        offset=offset,
-        limit=limit,
-        x_tenant_id=x_tenant_id,
-    ).parsed
+offset=offset,
+limit=limit,
+x_tenant_id=x_tenant_id,
 
+    ).parsed
 
 async def asyncio_detailed(
     *,
@@ -138,8 +155,9 @@ async def asyncio_detailed(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
+
 ) -> Response[PageVirtualMachineListResponse]:
-    """List VMs
+    """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
@@ -155,18 +173,21 @@ async def asyncio_detailed(
 
     Returns:
         Response[PageVirtualMachineListResponse]
-    """
+     """
+
 
     kwargs = _get_kwargs(
         offset=offset,
-        limit=limit,
-        x_tenant_id=x_tenant_id,
+limit=limit,
+x_tenant_id=x_tenant_id,
+
     )
 
-    response = await client.get_async_httpx_client().request(**kwargs)
+    response = await client.get_async_httpx_client().request(
+        **kwargs
+    )
 
     return _build_response(client=client, response=response)
-
 
 async def asyncio(
     *,
@@ -174,8 +195,9 @@ async def asyncio(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     x_tenant_id: int,
+
 ) -> PageVirtualMachineListResponse | None:
-    """List VMs
+    """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
@@ -191,13 +213,13 @@ async def asyncio(
 
     Returns:
         PageVirtualMachineListResponse
-    """
+     """
 
-    return (
-        await asyncio_detailed(
-            client=client,
-            offset=offset,
-            limit=limit,
-            x_tenant_id=x_tenant_id,
-        )
-    ).parsed
+
+    return (await asyncio_detailed(
+        client=client,
+offset=offset,
+limit=limit,
+x_tenant_id=x_tenant_id,
+
+    )).parsed
