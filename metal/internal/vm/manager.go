@@ -177,7 +177,9 @@ func (manager *Manager) Information(ctx context.Context, identifier string) (Inf
 	return manager.information(identifier)
 }
 
-// List returns all valid virtual machine records.
+// List returns all valid virtual machine records. A directory without both
+// records is skipped, because a VM that is created or destroyed now must not
+// fail the whole list.
 func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	identifiers, err := manager.store.listIDs()
 	if err != nil {
@@ -186,6 +188,11 @@ func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	information := make([]Information, 0, len(identifiers))
 	for _, identifier := range identifiers {
 		current, err := manager.Information(ctx, identifier)
+		if errors.Is(err, ErrNotFound) {
+			manager.logger.WarnContext(ctx, "skipped incomplete virtual machine records",
+				"virtual_machine_id", identifier, "error", err)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

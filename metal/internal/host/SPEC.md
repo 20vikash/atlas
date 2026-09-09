@@ -39,6 +39,8 @@ CPU is reported against reservations, not against host load: available CPU is th
 
 Memory and storage are read from the host instead. Available memory comes from `MemAvailable` in `/proc/meminfo`, which counts cache the kernel can reclaim. Free memory alone would understate what a new guest can use.
 
+A VM that is created or destroyed now holds one record for a short time. `VirtualMachineSource` skips it, so capacity reports the VMs that have both records instead of failing the sync.
+
 ## Related
 
 - [docs/architecture.md](../../docs/architecture.md) places the sync in the daemon.

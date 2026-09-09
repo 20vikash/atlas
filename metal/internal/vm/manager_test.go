@@ -570,6 +570,46 @@ func TestNewManagerRejectsUnknownAndTrailingRecordData(t *testing.T) {
 	}
 }
 
+// A create or a destroy leaves a directory with one record for a short time.
+// Capacity reads must not fail for the whole host in that window.
+func TestListSkipsIncompleteRecords(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	for _, identifier := range []string{"machine-1", "machine-2"} {
+		if _, err := manager.Create(context.Background(), identifier, testSpecification(), SleepPolicy{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(manager.store.observedPath("machine-2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(manager.store.directory, "machine-3"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	information, err := manager.List(context.Background())
+	if err != nil {
+		t.Fatalf("List = %v", err)
+	}
+	if len(information) != 1 || information[0].ID != "machine-1" {
+		t.Fatalf("information = %+v", information)
+	}
+}
+
+// A record that is present but corrupt is a host fault, not a VM in flux.
+func TestListReportsCorruptRecords(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification(), SleepPolicy{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manager.store.observedPath("machine-1"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := manager.List(context.Background()); err == nil {
+		t.Fatal("List accepted a corrupt record")
+	}
+}
+
 func TestReconcileUsesRuntimeAndResourceDependencies(t *testing.T) {
 	manager, runtime, network, storage := newTestManager(t)
 	if _, err := manager.Create(context.Background(), "machine-1", testSpecification(), SleepPolicy{}); err != nil {
@@ -717,6 +757,30 @@ func TestRunTemporaryRemovesMachineDirectory(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(manager.store.directory, identifier)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("machine directory stat = %v, want not exist", err)
+	}
+}
+
+// A host that stops during a temporary build keeps the directory. metald must
+// still start, because a directory without a desired record is not a VM.
+func TestNewManagerStartsWithLeftoverTemporaryDirectory(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification(), SleepPolicy{}); err != nil {
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(manager.store.directory, "warm-529e5118abe6", "firecracker")
+	if err := os.MkdirAll(leftover, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.store.validateAll(); err != nil {
+		t.Fatalf("validateAll = %v", err)
+	}
+	identifiers, err := manager.store.listIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identifiers) != 1 || identifiers[0] != "machine-1" {
+		t.Fatalf("identifiers = %v", identifiers)
 	}
 }
 
