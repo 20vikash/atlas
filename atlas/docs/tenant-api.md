@@ -8,6 +8,8 @@ Use `GET /api/atlas/docs` to explore every route, request body, and response. Th
 
 Each request needs Frappe authentication from a user with the `Atlas Admin` role. This role does not grant Desk access. A System Manager can also use these routes.
 
+A request can also carry `Authorization: Bearer <token>` with a token from the central issuer. Atlas reads the key set from `central_jwks_url` in Atlas Settings and accepts a token that is unexpired and carries the audience `atlas-<region ID>-admin`. A valid token signs the request in as `central-admin@atlas.local`, which holds the `Atlas Admin` role alone. Atlas creates this user after install and after migrate.
+
 The authentication validator restricts an Atlas Admin who is not a System Manager to `/api/atlas` routes. Frappe handles authentication and access for every other user and route.
 
 ## Tenant
@@ -34,7 +36,7 @@ Use [the virtual machine specification](../vm/SPEC.md) for the virtual machine a
 
 ## Layout
 
-`atlas/api/core/` holds the typed HTTP framework. `base.py` registers routes on the Frappe API URL map and builds responses, `binding.py` owns request decoding, `errors.py` owns the API failures, and `docs.py` owns the OpenAPI document and the Scalar reference page. `atlas/api/router.py`, `atlas/api/models.py`, and `atlas/api/routes/` hold the Atlas surface. `atlas/auth/request.py` owns API route authentication, `atlas/auth/roles.py` owns role checks, `atlas/auth/tenant.py` owns tenant parsing, and `atlas/auth/overrides.py` owns the shared tenant permission overrides that each Atlas DocType registers.
+`atlas/api/core/` holds the typed HTTP framework. `base.py` registers routes on the Frappe API URL map and builds responses, `binding.py` owns request decoding, `errors.py` owns the API failures, and `docs.py` owns the OpenAPI document and the Scalar reference page. `atlas/api/router.py`, `atlas/api/models.py`, and `atlas/api/routes/` hold the Atlas surface. `atlas/auth/request.py` owns API route authentication, `atlas/auth/token.py` owns central token validation, `atlas/auth/user.py` owns the Atlas Admin user, `atlas/auth/roles.py` owns role checks, `atlas/auth/tenant.py` owns tenant parsing, and `atlas/auth/overrides.py` owns the shared tenant permission overrides that each Atlas DocType registers.
 
 `atlas.api.router.register_atlas_api` imports every route module. The `before_request` hook calls it, so the routes exist before Frappe matches an API request.
 

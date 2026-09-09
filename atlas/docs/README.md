@@ -15,6 +15,7 @@ Each guide covers one topic. Use [SPEC.md](../SPEC.md) for the app layout, the o
 | --------------------------- | ----------------------------------------------------------------------------- |
 | [Tenant API](tenant-api.md) | Access rules, request conventions, and how to add a route below `/api/atlas`. |
 | [Providers](providers.md)   | The `ServerProvider` extension point and the provider registry.               |
+| [Security model](security.md) | Trust boundaries, tenant isolation, and the accepted risks.                 |
 
 ## Behavior
 

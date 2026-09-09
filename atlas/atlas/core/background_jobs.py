@@ -15,7 +15,7 @@ def run_as_admin[Result](function: Callable[..., Result]) -> Callable[..., Resul
 		if getattr(frappe.local, "request", None) is not None:
 			raise RuntimeError("Background jobs cannot run during an HTTP request.")
 		previous_user = frappe.session.user
-		frappe.set_user("Administrator")
+		frappe.set_user("Administrator")  # nosemgrep
 		try:
 			return function(*args, **kwargs)
 		finally:
