@@ -20,7 +20,7 @@ TRANSFER_TIMEOUT_SECONDS = 900
 ImageStatus = Literal["Pending", "Uploading", "Completing", "Cleaning", "Available", "Failed"]
 
 
-class MachineImageTransferError(Exception):
+class VirtualMachineImageTransferError(Exception):
 	"""Report invalid Machine image transfer data."""
 
 
@@ -110,7 +110,7 @@ class VirtualMachineImageTransferService:
 			MetalClientError,
 			ObjectStorageError,
 			MultipartUploadError,
-			MachineImageTransferError,
+			VirtualMachineImageTransferError,
 		) as error:
 			self.mark_failed(image, str(error))
 			frappe.log_error(
@@ -121,7 +121,7 @@ class VirtualMachineImageTransferService:
 	def advance(self, image: VirtualMachineImage) -> None:
 		"""Move one Machine image transfer forward by one step."""
 		server = cast(
-			"Metal Server",
+			"MetalServer",
 			frappe.get_doc("Metal Server", self.require_value(image.source_server, "source server")),
 		)
 		metal_client = MetalClient(server)
@@ -138,7 +138,9 @@ class VirtualMachineImageTransferService:
 			status = metal_client.get_snapshot(cast(str, image.name))
 		except MetalClientError as error:
 			if error.is_not_found:
-				raise MachineImageTransferError("Metal has no staged snapshot for this image") from error
+				raise VirtualMachineImageTransferError(
+					"Metal has no staged snapshot for this image"
+				) from error
 			raise
 
 		state = status.get("state")
@@ -200,9 +202,9 @@ class VirtualMachineImageTransferService:
 		value = status.get(artifact)
 		sha256 = value.get("sha256") if isinstance(value, dict) else None
 		if not isinstance(sha256, str) or len(sha256) != 64:
-			raise MachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
 		if any(character not in "0123456789abcdef" for character in sha256):
-			raise MachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
 		return sha256
 
 	@staticmethod
@@ -210,7 +212,7 @@ class VirtualMachineImageTransferService:
 		"""Return the valid snapshot identifier from Metal."""
 		snapshot_id = response.get("id")
 		if not isinstance(snapshot_id, str) or not snapshot_id:
-			raise MachineImageTransferError("Metal returned an invalid snapshot ID")
+			raise VirtualMachineImageTransferError("Metal returned an invalid snapshot ID")
 		return snapshot_id
 
 	@staticmethod
@@ -219,14 +221,14 @@ class VirtualMachineImageTransferService:
 		value = response.get(artifact)
 		size_bytes = value.get("size_bytes") if isinstance(value, dict) else None
 		if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
-			raise MachineImageTransferError(f"Metal returned an invalid {artifact} size")
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} size")
 		return bytes_to_mib(size_bytes)
 
 	@staticmethod
 	def require_value(value: str | None, label: str) -> str:
 		"""Return one required transfer value."""
 		if not value:
-			raise MachineImageTransferError(f"Machine image has no {label}")
+			raise VirtualMachineImageTransferError(f"Machine image has no {label}")
 		return value
 
 	@staticmethod
