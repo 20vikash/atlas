@@ -35,6 +35,11 @@ jobs:
       - name: Generate the API specification
         run: make openapi
 
+      # clang compiles the eBPF object. Its headers come from libbpf-dev and
+      # linux-libc-dev.
+      - name: Install the eBPF build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang libbpf-dev
+
       - name: Build the eBPF object
         run: make bpf
 

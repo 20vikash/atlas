@@ -17,8 +17,12 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$(VE
 
 bpf: $(BPF_OBJECT)
 
+# Debian keeps the asm headers in a multiarch directory. The bpfel target stops
+# clang from searching it, so name it. The directory is absent on other layouts.
+BPF_INCLUDE_FLAGS := -I/usr/include/$(shell uname -m)-linux-gnu
+
 $(BPF_OBJECT): $(BPF_SOURCE)
-	clang -target bpfel -O2 -g -Wall -c $(BPF_SOURCE) -o $@
+	clang -target bpfel -O2 -g -Wall $(BPF_INCLUDE_FLAGS) -c $(BPF_SOURCE) -o $@
 
 test: bpf
 	go test ./...
