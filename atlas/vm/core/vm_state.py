@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 import frappe
@@ -8,7 +7,7 @@ from frappe.utils import now_datetime
 
 
 def store_reported_states(server_name: str, reported: object) -> None:
-	"""Replace the stored virtual machine states of one host."""
+	"""Store the reported virtual machine states of one host."""
 	statuses = get_reported_statuses(reported)
 	names = frappe.get_all("Virtual Machine", filters={"server": server_name}, pluck="name")
 	if not names:
@@ -17,22 +16,24 @@ def store_reported_states(server_name: str, reported: object) -> None:
 	stored = set(frappe.get_all("Virtual Machine State", filters={"name": ["in", names]}, pluck="name"))
 	synced_at = now_datetime()
 
-	updated_names: dict[str, list[str]] = {}
 	for name in names:
 		status = statuses.get(name)
 		if status is None:
 			continue
-		if name in stored:
-			updated_names.setdefault(status, []).append(name)
-		else:
-			insert_state(name, status, synced_at)
 
-	for status, group in updated_names.items():
-		update_states(group, status, synced_at)
+		try:
+			if name in stored:
+				state = frappe.get_doc("Virtual Machine State", name)
+			else:
+				state = frappe.new_doc("Virtual Machine State")
+				state.virtual_machine = name
 
-	absent = [name for name in names if name in stored and name not in statuses]
-	if absent:
-		frappe.db.delete("Virtual Machine State", {"name": ["in", absent]})
+			state.status = status
+			state.synced_at = synced_at
+			state.save(ignore_permissions=True)
+			frappe.db.commit()
+		except Exception:
+			frappe.log_error(f"Virtual Machine State write failed: {name}")
 
 
 def get_reported_statuses(reported: object) -> dict[str, str]:
@@ -47,29 +48,6 @@ def get_reported_statuses(reported: object) -> dict[str, str]:
 			raise ValueError("Metal virtual machine response has invalid values")
 		statuses[name] = status
 	return statuses
-
-
-def insert_state(name: str, status: str, synced_at: datetime) -> None:
-	"""Store the first reported state of one virtual machine."""
-	frappe.get_doc(
-		{
-			"doctype": "Virtual Machine State",
-			"virtual_machine": name,
-			"status": status,
-			"synced_at": synced_at,
-		}
-	).insert(ignore_permissions=True)
-
-
-def update_states(names: list[str], status: str, synced_at: datetime) -> None:
-	"""Store one status for every named virtual machine in one statement."""
-	table = frappe.qb.DocType("Virtual Machine State")
-	(
-		frappe.qb.update(table)
-		.set(table.status, status)
-		.set(table.synced_at, synced_at)
-		.where(table.name.isin(names))
-	).run()
 
 
 def get_reported_state_rows(names: list[str]) -> dict[str, Any]:
