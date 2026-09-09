@@ -240,7 +240,7 @@ class VirtualMachineService:
 		return information.as_dict()
 
 	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
-		"""Apply selected compute changes. Only a shape change needs a stopped VM."""
+		"""Apply selected compute changes."""
 		information = self.require_information()
 		current_compute = information.desired.compute
 		request = {

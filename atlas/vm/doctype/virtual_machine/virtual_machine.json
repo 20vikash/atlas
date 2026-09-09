@@ -120,7 +120,7 @@
    "set_only_once": 1
   },
   {
-   "description": "The host sleeps an idle VM and wakes it on a network packet.",
+   "description": "The host sleeps an idle VM and wakes it on a packet.",
    "fieldname": "is_sleepy",
    "fieldtype": "Check",
    "is_virtual": 1,

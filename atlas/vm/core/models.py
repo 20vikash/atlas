@@ -96,7 +96,7 @@ class VirtualMachineCreateRequest:
 
 	@staticmethod
 	def non_negative_integer(payload: dict[str, Any], field_name: str) -> int:
-		"""Return one optional whole number. An absent value is 0."""
+		"""Return one optional non-negative integer."""
 		value = payload.get(field_name) or 0
 		if not isinstance(value, int) or isinstance(value, bool) or value < 0:
 			raise ValueError(f"{field_name} must be a non-negative integer.")

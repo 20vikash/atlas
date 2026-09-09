@@ -158,9 +158,9 @@ Active connections can stop when the public IPv4 address or the egress mode chan
 
 ## Sleep policy
 
-`is_sleepy` allows the host to sleep an idle VM. `idle_timeout_seconds` is the idle time before sleep, and `0` disables it. Set both during creation or with the Edit Sleep Policy action.
+`is_sleepy` lets the host sleep an idle VM after `idle_timeout_seconds`. `0` disables sleep. Set both during creation or with the Edit Sleep Policy action.
 
-`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas reads the desired compute object, applies the change, and sends every value. Only a vCPU or memory change needs a stopped VM.
+`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas merges each change into the desired compute object. Only a vCPU or memory change needs a stopped VM.
 
 ## Disk limits
 

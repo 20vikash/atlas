@@ -67,10 +67,10 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
-    memory change. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
+    stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
     wakes it on the next packet. 0 disables sleep.
 
     Args:
@@ -108,10 +108,10 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
-    memory change. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
+    stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
     wakes it on the next packet. 0 disables sleep.
 
     Args:
@@ -144,10 +144,10 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
-    memory change. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
+    stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
     wakes it on the next packet. 0 disables sleep.
 
     Args:
@@ -183,10 +183,10 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped for a vCPU or
-    memory change. A sleep policy change applies in any state.
+     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
+    stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
     wakes it on the next packet. 0 disables sleep.
 
     Args:

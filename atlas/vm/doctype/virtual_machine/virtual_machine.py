@@ -143,7 +143,7 @@ class VirtualMachine(Document):
 
 	@property
 	def is_sleepy(self) -> bool:
-		"""Report whether Metal sleeps this VM when it is idle."""
+		"""Report whether the host sleeps this VM when it is idle."""
 		information = self.get_metal_vm_info()
 		return information.desired.compute.is_sleepy if information else False
 
@@ -351,7 +351,7 @@ class VirtualMachine(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def update_sleep_policy(self, is_sleepy: bool | int | str, idle_timeout_seconds: int) -> dict[str, Any]:
-		"""Change automatic sleep. An idle timeout of 0 disables sleep."""
+		"""Change automatic sleep. An idle timeout of 0 disables it."""
 		try:
 			sleepy = strict_bool(is_sleepy, "is_sleepy")
 		except ValueError as error:
