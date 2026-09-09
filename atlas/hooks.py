@@ -285,9 +285,7 @@ scheduler_events = {
 # Authentication and authorization
 # --------------------------------
 
-# auth_hooks = [
-# 	"atlas.auth.validate"
-# ]
+auth_hooks = ["atlas.auth.request.validate_auth"]
 
 # Automatically update python controller files with type annotations for this app.
 export_python_type_annotations = True

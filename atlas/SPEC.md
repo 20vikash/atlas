@@ -11,9 +11,12 @@ The Atlas app uses Frappe to manage provider hosts, virtual machines, images, an
 ## Layout
 
 ```text
+api/                           Tenant API routes and models
+  core/                        HTTP router, request decoding, errors, and API documentation
 atlas/                         Site settings, provider behavior, TLS, and host binary builds
   core/                        Provider clients, TLS issuance, background jobs, and the host binary builder
   doctype/                     Atlas Settings and SSH Task
+auth/                          Role checks, tenant parsing, and permission overrides
 metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
   doctype/                     Metal Server records and catalog DocTypes
@@ -58,6 +61,8 @@ See [docs/development.md](docs/development.md) for the commands to run.
 - [Realtime console bridge](realtime/SPEC.md)
 
 ## Ownership
+
+Keep the HTTP framework in `api/core/`: routing in `base.py`, request decoding in `binding.py`, failures in `errors.py`, and documentation generation in `docs.py`. Keep authorization in `auth/`: route authentication in `auth/request.py`, role checks in `auth/roles.py`, and tenant parsing in `auth/tenant.py`.
 
 Keep the Administrator job decorator in `atlas/core/background_jobs.py`. Every queued job entry point uses it. Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
 
