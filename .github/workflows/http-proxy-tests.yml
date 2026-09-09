@@ -46,10 +46,11 @@ jobs:
       - name: Check the generated API client
         working-directory: ${{ github.workspace }}
         run: |
+          control_python="$(command -v python)"
           python -m venv "$RUNNER_TEMP/openapi-generator"
-          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
+          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1 ruff==0.16.6
           export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
-          python scripts/generate-api-client.py atlas-http-proxy
+          "$control_python" scripts/generate-api-client.py atlas-http-proxy
           git add --all --intent-to-add clients
           git diff --exit-code -- clients \
             || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-http-proxy and commit clients/."; exit 1; }
