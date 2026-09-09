@@ -67,7 +67,7 @@ private_key_pem = '''
 
 `control.domain` is the regional address. `control.node_domain` is the local node address. Both names must be one label below the wildcard zone. The apply command writes both labels to `/var/lib/nginx/control-subdomain`, so OpenResty sends them to the daemon before it checks the site map.
 
-`auto_proxy.address_prefix` contains the first two hextets of the regional VM mesh address. `auto_proxy.host_prefixes` lists literal prefixes. A leading `*` matches any non-empty prefix before the remaining text. Leave the section out to turn static routing off.
+`auto_proxy.address_prefix` contains the first two hextets of the regional VM mesh address. `auto_proxy.host_prefixes` lists literal prefixes. A leading `*` matches any non-empty prefix before the remaining text. Leave the section out to turn static routing off. Read [`openresty.md`](openresty.md) for the label form.
 
 `auth` protects the public map API. The daemon accepts the current password hash. It accepts the previous hash until `previous_password_valid_until`. This value is a Unix time in seconds. The daemon also accepts JWTs from `jwks_url` when the audience matches `jwks_audience_id`.
 

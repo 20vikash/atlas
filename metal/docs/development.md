@@ -15,6 +15,21 @@ make build
 
 Run `gofmt` only on changed Go files. Regenerate OpenAPI after an API annotation or schema change.
 
+## eBPF generation
+
+The `activity` package embeds compiled eBPF objects. The committed objects and Go bindings match the C source under `internal/network/activity/bpf/`. A normal build does not run Clang, because the objects are committed.
+
+Regenerate after a change to the C source, then confirm the tree is clean:
+
+```sh
+make generate-network
+git diff --exit-code -- internal/network
+```
+
+Generation needs Clang 12 or newer. The vendored headers under `internal/network/activity/bpf/headers/` remove the dependency on host kernel headers.
+
+The programs need Linux 6.6 or newer for TCX. The activity tests also need root. See [integration testing](testing.md).
+
 ## Package changes
 
 Read the nearest `SPEC.md` before a structural change. Keep interfaces small and define them in the consuming package. Add package and exported declaration comments.

@@ -73,7 +73,7 @@ services:
       UPSTREAM_NAME: vm-auto
     networks:
       sixnet:
-        # This address matches site-50000-2a with prefix fd00:a71a.
+        # This address matches site-2avaxbsw with prefix fd00:a71a.
         ipv6_address: fd00:a71a:5::2a
 
   vm-bad:

@@ -24,6 +24,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/firecracker"
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
+	"github.com/frappe/atlas/metal/internal/network/activity"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
@@ -128,8 +129,25 @@ func makeDirs(o opts) error {
 	return nil
 }
 
-// connectMesh prepares the Atlas WG Mesh integration. It configures the host on
-// every start, so a reinstalled or reset host recovers without an operator.
+// meshProvider is the mesh behavior used by metald.
+type meshProvider interface {
+	Add(ctx context.Context, address, interfaceName string) error
+	Remove(ctx context.Context, address, interfaceName string) error
+	ApplyPrivilegedAddresses(ctx context.Context, desired []string) error
+}
+
+// setUpMesh prepares Atlas WG Mesh or a disabled no-op for hosts without mesh
+// connectivity.
+func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
+	if !o.mesh.enabled {
+		logger.Warn("Atlas WG Mesh is disabled; VMs have no mesh connectivity", "wg_mesh.enabled", false)
+		return network.DisabledMesh{}, nil
+	}
+
+	return connectMesh(o)
+}
+
+// connectMesh prepares Atlas WG Mesh and configures the host on every start.
 func connectMesh(o opts) (*network.Mesh, error) {
 	mesh, err := network.NewMesh(network.MeshConfig{
 		CommandPath:   o.mesh.binaryPath,
@@ -197,8 +215,8 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	}
 
 	// Connect required host services.
-	// Atlas WG Mesh is required, so fail before metald builds anything.
-	mesh, err := connectMesh(o)
+	// Set up Atlas WG Mesh first, so a host configuration error fails early.
+	mesh, err := setUpMesh(o, logger)
 	if err != nil {
 		return err
 	}
@@ -235,7 +253,12 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	networkManager := network.NewLinuxAllocator(mesh)
+	activityMonitor, err := activity.NewMonitor(activity.MonitorConfig{UserIDRange: vm.DefaultUserIDRange})
+	if err != nil {
+		return fmt.Errorf("configure activity monitor: %w", err)
+	}
+	daemon.OwnActivityMonitor(activityMonitor)
+	networkManager := network.NewLinuxAllocator(mesh, activityMonitor)
 	virtualMachineRuntime := firecracker.NewRuntime(
 		o.cfg,
 		units,
@@ -245,13 +268,17 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		logger,
 	)
 	virtualMachineManager, err := vm.NewManager(
-		vm.ManagerConfig{MachinesDirectory: o.cfg.MachinesDir},
+		vm.ManagerConfig{
+			MachinesDirectory: o.cfg.MachinesDir,
+		},
 		vm.ManagerDependencies{
-			Runtime:   virtualMachineRuntime,
-			Network:   networkManager,
-			Storage:   stores.VirtualMachines,
-			Snapshots: stores.Snapshots,
-			Logger:    logger,
+			Runtime:                virtualMachineRuntime,
+			Network:                networkManager,
+			Storage:                stores.VirtualMachines,
+			Snapshots:              stores.Snapshots,
+			NetworkActivityMonitor: activityMonitor,
+			NetworkWakeMonitor:     activityMonitor,
+			Logger:                 logger,
 		},
 	)
 	if err != nil {
@@ -274,6 +301,13 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		memorySnapshotBuilder,
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
+	)
+	// The activity monitor emits wake events, and each reconcile pass rearms
+	// sleeping VMs after a restart. Start the worker after the monitor is ready.
+	networkWakeReconciler := reconciler.NewNetworkWakeReconciler(
+		virtualMachineManager,
+		activityMonitor.NetworkWakeEvents(),
+		reconciler.NetworkWakeConfig{Logger: logger},
 	)
 	wakeReconcilers := func() {
 		virtualMachineReconciler.Wake()
@@ -306,5 +340,6 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	server.Listener = listener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
+	daemon.StartWorker(networkWakeReconciler.Run)
 	return daemon.Serve(server)
 }

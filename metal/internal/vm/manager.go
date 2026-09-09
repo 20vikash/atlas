@@ -18,8 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// defaultFastApplyTimeout bounds an immediate guest update made during an API
-// request. The reconciler retries anything that does not finish in time.
+// defaultFastApplyTimeout bounds an immediate guest update.
 const defaultFastApplyTimeout = 2 * time.Second
 
 // ManagerConfig contains persistent VM manager settings.
@@ -31,26 +30,31 @@ type ManagerConfig struct {
 
 // ManagerDependencies contains the host services used by Manager.
 type ManagerDependencies struct {
-	Runtime   Runtime
-	Network   Network
-	Storage   Storage
-	Snapshots Snapshots
-	Logger    *slog.Logger
+	Runtime                Runtime
+	Network                Network
+	Storage                Storage
+	Snapshots              Snapshots
+	NetworkActivityMonitor NetworkActivityMonitor
+	// NetworkWakeMonitor handles packet-triggered wake.
+	NetworkWakeMonitor NetworkWakeMonitor
+	Logger             *slog.Logger
 }
 
 // Manager owns virtual machine desired state and reconciliation.
 type Manager struct {
-	configuration        ManagerConfig
-	store                *recordStore
-	runtime              Runtime
-	network              Network
-	storage              Storage
-	snapshots            Snapshots
-	logger               *slog.Logger
-	operationLocks       keyedLocks
-	allocationMutex      sync.Mutex
-	temporaryUserIDs     map[uint32]bool
-	temporaryIdentifiers map[string]bool
+	configuration          ManagerConfig
+	store                  *recordStore
+	runtime                Runtime
+	network                Network
+	storage                Storage
+	snapshots              Snapshots
+	networkActivityMonitor NetworkActivityMonitor
+	networkWakeMonitor     NetworkWakeMonitor
+	logger                 *slog.Logger
+	operationLocks         keyedLocks
+	allocationMutex        sync.Mutex
+	temporaryUserIDs       map[uint32]bool
+	temporaryIdentifiers   map[string]bool
 }
 
 // NewManager validates all records and returns one host VM manager.
@@ -67,19 +71,27 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
 	}
+	if dependencies.NetworkActivityMonitor == nil {
+		return nil, fmt.Errorf("a network activity monitor is required")
+	}
+	if dependencies.NetworkWakeMonitor == nil {
+		return nil, fmt.Errorf("a network wake monitor is required")
+	}
 	if dependencies.Logger == nil {
 		dependencies.Logger = slog.Default()
 	}
 	manager := &Manager{
-		configuration:        configuration,
-		store:                newRecordStore(configuration.MachinesDirectory),
-		runtime:              dependencies.Runtime,
-		network:              dependencies.Network,
-		storage:              dependencies.Storage,
-		snapshots:            dependencies.Snapshots,
-		logger:               dependencies.Logger,
-		temporaryUserIDs:     make(map[uint32]bool),
-		temporaryIdentifiers: make(map[string]bool),
+		configuration:          configuration,
+		store:                  newRecordStore(configuration.MachinesDirectory),
+		runtime:                dependencies.Runtime,
+		network:                dependencies.Network,
+		storage:                dependencies.Storage,
+		snapshots:              dependencies.Snapshots,
+		networkActivityMonitor: dependencies.NetworkActivityMonitor,
+		networkWakeMonitor:     dependencies.NetworkWakeMonitor,
+		logger:                 dependencies.Logger,
+		temporaryUserIDs:       make(map[uint32]bool),
+		temporaryIdentifiers:   make(map[string]bool),
 	}
 	if err := manager.store.validateAll(); err != nil {
 		return nil, fmt.Errorf("validate VM records: %w", err)
@@ -87,10 +99,9 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	return manager, nil
 }
 
-// Create reserves a VM or accepts a retry of the first request. A retry is
-// recognized by its fingerprint, so a repeated call refreshes image URLs instead
-// of reserving a second VM.
-func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification) (Information, error) {
+// Create reserves a VM or refreshes a matching retry. The fingerprint excludes
+// rotating signed image URLs, so a retry does not reserve a second VM.
+func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification, sleep SleepPolicy) (Information, error) {
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
 	}
@@ -135,13 +146,15 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, err
 	}
 	desired := DesiredRecord{
-		ID:                identifier,
-		UserID:            userID,
-		GroupID:           userID,
-		CreateFingerprint: fingerprint,
-		Generation:        1,
-		State:             StateRunning,
-		Specification:     cloneSpecification(specification),
+		ID:                      identifier,
+		UserID:                  userID,
+		GroupID:                 userID,
+		CreateFingerprint:       fingerprint,
+		Generation:              1,
+		SpecificationGeneration: 1,
+		State:                   StateRunning,
+		Sleep:                   sleep,
+		Specification:           cloneSpecification(specification),
 	}
 	observed := ObservedRecord{State: StateUnknown, UpdatedAt: time.Now().UTC()}
 	if err := manager.store.writeDesired(desired); err != nil {
@@ -186,8 +199,7 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 	return manager.store.listIDs()
 }
 
-// information reads both records without taking the VM lock. Callers that are
-// not already holding the lock use Information instead.
+// information reads both records without taking the VM lock.
 func (manager *Manager) information(identifier string) (Information, error) {
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
@@ -249,8 +261,7 @@ func validIdentifier(identifier string) bool {
 	return identifier != "" && identifier != "." && filepath.Base(identifier) == identifier
 }
 
-// createFingerprint identifies the reservation a create request asks for. Image
-// transport URLs are excluded, because they are signed and rotate on their own.
+// createFingerprint identifies the reservation requested by a create call.
 func createFingerprint(specification Specification) (string, error) {
 	normalized := cloneSpecification(specification)
 	normalized.Image.RootfsURL = ""
@@ -263,8 +274,7 @@ func createFingerprint(specification Specification) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// cloneSpecification deep copies the reference fields, so a stored record and a
-// runtime input cannot share mutable state.
+// cloneSpecification copies reference fields before runtime use.
 func cloneSpecification(specification Specification) Specification {
 	specification.SSHKeys = slices.Clone(specification.SSHKeys)
 	specification.Metadata = maps.Clone(specification.Metadata)
@@ -275,8 +285,8 @@ func cloneSpecification(specification Specification) Specification {
 	return specification
 }
 
-// informationFromRecords combines both records into the view consumers receive.
-// Local error detail is dropped here, so only safe data leaves the package.
+// informationFromRecords combines records into the public VM view and drops
+// local error detail.
 func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usage DiskUsage) Information {
 	var errorDetail *PublicOperationError
 	if observed.Error != nil {
@@ -289,6 +299,11 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	// A VM with no disk usage yet reports its requested size.
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB
+	}
+	var lastNetworkActivityAt, sleepingSince time.Time
+	if observed.Sleep != nil {
+		lastNetworkActivityAt = observed.Sleep.LastNetworkActivityAt
+		sleepingSince = observed.Sleep.MemorySnapshotCreatedAt
 	}
 	return Information{
 		ID:                            desired.ID,
@@ -305,6 +320,8 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		SSHKeys:                       slices.Clone(desired.Specification.SSHKeys),
 		Hostname:                      desired.Specification.Hostname,
 		Metadata:                      maps.Clone(desired.Specification.Metadata),
+		IsSleepy:                      desired.Sleep.IsSleepy,
+		IdleTimeoutSeconds:            desired.Sleep.IdleTimeoutSeconds,
 		MAC:                           observed.NetworkInterface.MACAddress,
 		PublicIPv4:                    desired.Specification.Network.PublicIPv4,
 		WireGuardMeshIPv6:             desired.Specification.Network.WireGuardMeshIPv6,
@@ -319,6 +336,8 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		OperationID:                   observed.OperationID,
 		OperationStartedAt:            observed.OperationStartedAt,
 		UpdatedAt:                     observed.UpdatedAt,
+		LastNetworkActivityAt:         lastNetworkActivityAt,
+		SleepingSince:                 sleepingSince,
 	}
 }
 

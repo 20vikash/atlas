@@ -57,7 +57,7 @@ curl -X PATCH \
   "$ATLAS_PROXY_CONTROL_URL/v1/sites/erp"
 ```
 
-Use `"-"` as a site address to return `503` for that site. Do not use an empty address. The names `proxy` and `proxy-*` return `409` for all site mutation routes.
+Use `"-"` as a site address to return `503` for that site. Do not use an empty address. The names `proxy`, `proxy-*`, and all configured auto-proxy prefixes return `409` for site mutations.
 
 ## Domains
 

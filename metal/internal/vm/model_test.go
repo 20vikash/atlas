@@ -2,6 +2,15 @@ package vm
 
 import "testing"
 
+func TestSleepingIsAnObservedStateOnly(t *testing.T) {
+	if !isObservedState(StateSleeping) {
+		t.Error("sleeping must be a valid observed state")
+	}
+	if IsDesiredState(StateSleeping) {
+		t.Error("sleeping must not be a valid desired state")
+	}
+}
+
 func TestEgressCapabilities(t *testing.T) {
 	for _, testCase := range []struct {
 		egress          Egress

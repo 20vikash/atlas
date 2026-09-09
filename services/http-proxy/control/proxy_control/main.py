@@ -65,7 +65,12 @@ except ConfigError as error:
 
 auth = Authentication()
 proxy = ProxyClient(_config.admin_socket)
-maps = MappingStore(proxy, _config.reserved_subdomains, _config.tls.wildcard_domain)
+maps = MappingStore(
+	proxy,
+	_config.reserved_subdomains,
+	_config.tls.wildcard_domain,
+	_config.auto_proxy_host_prefixes,
+)
 cluster = ClusterManager(_config.cluster, maps)
 
 

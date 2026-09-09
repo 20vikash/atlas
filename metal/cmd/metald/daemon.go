@@ -32,6 +32,11 @@ type systemdConnection interface {
 	Close()
 }
 
+// activityMonitorResource owns the eBPF activity links, programs, and maps.
+type activityMonitorResource interface {
+	Close() error
+}
+
 type daemon struct {
 	context          context.Context
 	cancel           context.CancelFunc
@@ -39,6 +44,7 @@ type daemon struct {
 	snapshotUploads  snapshotUploadOwner
 	serialBroker     serialBroker
 	systemd          systemdConnection
+	activityMonitor  activityMonitorResource
 	workers          sync.WaitGroup
 	httpServer       daemonHTTPServer
 	httpServerErrors chan error
@@ -60,6 +66,12 @@ func newDaemon(
 		serialBroker:    serialBroker,
 		systemd:         systemd,
 	}
+}
+
+// OwnActivityMonitor makes the daemon the owner that closes the activity
+// monitor after every worker stops.
+func (daemon *daemon) OwnActivityMonitor(monitor activityMonitorResource) {
+	daemon.activityMonitor = monitor
 }
 
 // StartWorker starts one daemon-owned background worker.
@@ -104,6 +116,12 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 	daemon.cancel()
 	if err := waitForGroup(shutdownContext, &daemon.workers); err != nil {
 		shutdownErrors = append(shutdownErrors, fmt.Errorf("wait for reconcilers: %w", err))
+	}
+	// Close eBPF resources only after workers stop, so no worker reads a closed map.
+	if daemon.activityMonitor != nil {
+		if err := daemon.activityMonitor.Close(); err != nil {
+			shutdownErrors = append(shutdownErrors, fmt.Errorf("close activity monitor: %w", err))
+		}
 	}
 	if err := daemon.snapshotUploads.Shutdown(shutdownContext); err != nil {
 		shutdownErrors = append(shutdownErrors, err)

@@ -39,7 +39,7 @@ func TestWarmImageBuilderUsesManagerOwnedTemporaryMachine(t *testing.T) {
 	runtime := &testWarmRuntime{fakeRuntime: baseRuntime}
 	manager, err := NewManager(
 		ManagerConfig{MachinesDirectory: t.TempDir()},
-		ManagerDependencies{Runtime: runtime, Network: &fakeNetwork{}, Storage: &fakeStorage{}, Snapshots: fakeSnapshots{}},
+		ManagerDependencies{Runtime: runtime, Network: &fakeNetwork{}, Storage: &fakeStorage{}, Snapshots: fakeSnapshots{}, NetworkActivityMonitor: &fakeNetworkActivityMonitor{}, NetworkWakeMonitor: &fakeNetworkWakeMonitor{}},
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -107,3 +107,43 @@ def test_a_custom_domain_wildcard_is_refused():
 
 	assert raised.value.status_code == 422
 	assert client.requests == []
+
+
+@pytest.mark.parametrize("key", ["site-2avaxbsw", "site-admin", "bench-vm-2avaxbsw", "bench-vm-admin"])
+def test_an_auto_proxy_prefix_is_refused(key: str):
+	client = _RecordingClient()
+	store = MappingStore(client, auto_proxy_host_prefixes=("site-", "*-vm-"))
+
+	with pytest.raises(HTTPException) as raised:
+		asyncio.run(store.update("sites", key, "2001:db8::1"))
+
+	assert raised.value.status_code == 409
+	assert client.requests == []
+
+
+def test_a_full_replace_rejects_an_auto_proxy_prefix():
+	client = _RecordingClient()
+	store = MappingStore(client, auto_proxy_host_prefixes=("site-", "*-vm-"))
+
+	with pytest.raises(HTTPException):
+		asyncio.run(store.replace("sites", {"erp": "2001:db8::1", "bench-vm-admin": "2001:db8::2"}))
+
+	assert client.requests == []
+
+
+def test_an_auto_proxy_name_is_allowed_as_a_custom_domain():
+	client = _RecordingClient()
+	store = MappingStore(client, auto_proxy_host_prefixes=("site-", "*-vm-"))
+
+	asyncio.run(store.update("domains", "site-2avaxbsw", "2001:db8::1"))
+
+	assert client.requests[0][1] == "/v1/domains/site-2avaxbsw"
+
+
+def test_no_configured_prefix_leaves_every_site_key_usable():
+	client = _RecordingClient()
+	store = MappingStore(client)
+
+	asyncio.run(store.update("sites", "site-2avaxbsw", "2001:db8::1"))
+
+	assert client.requests[0][1] == "/v1/sites/site-2avaxbsw"

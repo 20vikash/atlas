@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	// recordSchemaVersion is the on-disk format both records use. A record with
-	// any other version is rejected, never migrated in place.
+	// recordSchemaVersion is the on-disk format. Other versions are rejected and
+	// never migrated in place.
 	recordSchemaVersion = 1
 
 	desiredFileName  = "config.json"
@@ -28,15 +28,23 @@ const (
 
 // DesiredRecord stores the complete desired state of one virtual machine.
 type DesiredRecord struct {
-	SchemaVersion     int           `json:"schema_version"`
-	ID                string        `json:"id"`
-	UserID            uint32        `json:"user_id"`
-	GroupID           uint32        `json:"group_id"`
-	CreateFingerprint string        `json:"create_fingerprint"`
-	Generation        uint64        `json:"generation"`
-	RestartGeneration uint64        `json:"restart_generation"`
-	State             State         `json:"state"`
-	Specification     Specification `json:"specification"`
+	SchemaVersion     int    `json:"schema_version"`
+	ID                string `json:"id"`
+	UserID            uint32 `json:"user_id"`
+	GroupID           uint32 `json:"group_id"`
+	CreateFingerprint string `json:"create_fingerprint"`
+	Generation        uint64 `json:"generation"`
+	RestartGeneration uint64 `json:"restart_generation"`
+	// SpecificationGeneration identifies the compute, disk, and network shape. It
+	// stays stable across power and warm-stop changes so snapshots remain valid.
+	SpecificationGeneration uint64 `json:"specification_generation,omitempty"`
+	State                   State  `json:"state"`
+	// WarmStop asks a stopped VM to save a memory snapshot. A later start resumes
+	// it, while false keeps the old cold-stop behavior.
+	WarmStop bool `json:"warm_stop,omitempty"`
+	// Sleep is the automatic sleep policy of this VM.
+	Sleep         SleepPolicy   `json:"sleep,omitempty"`
+	Specification Specification `json:"specification"`
 }
 
 // ObservedRecord stores reconciliation progress and observed state.
@@ -55,10 +63,42 @@ type ObservedRecord struct {
 	StorageCleanupComplete bool             `json:"storage_cleanup_complete,omitempty"`
 	NetworkInterface       NetworkInterface `json:"network_interface,omitempty"`
 	Disk                   DiskUsage        `json:"disk,omitempty"`
+	Sleep                  *SleepProgress   `json:"sleep,omitempty"`
 }
 
-// OperationError stores safe and local reconciliation error details. Message is
-// returned to the controller. LocalDetail stays on the host.
+// SleepProgress records one VM's automatic sleep operation.
+type SleepProgress struct {
+	EligibleAt               time.Time `json:"eligible_at,omitempty"`
+	RequestedAt              time.Time `json:"requested_at,omitempty"`
+	MemorySnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
+	MemorySnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
+	// SpecificationGeneration identifies the snapshot's VM shape. A later shape
+	// change makes the snapshot incompatible.
+	SpecificationGeneration uint64    `json:"specification_generation,omitempty"`
+	LastNetworkActivityAt   time.Time `json:"last_network_activity_at,omitempty"`
+}
+
+// validate rejects an incomplete sleep object or a sleeping record without a
+// published snapshot.
+func (record ObservedRecord) validateSleep() error {
+	if record.State == StateSleeping && record.Sleep == nil {
+		return errors.New("sleeping record has no sleep progress")
+	}
+	sleep := record.Sleep
+	if sleep == nil {
+		return nil
+	}
+	if (sleep.MemorySnapshotGeneration == 0) != sleep.MemorySnapshotCreatedAt.IsZero() {
+		return errors.New("sleep progress has a partial snapshot")
+	}
+	if record.State == StateSleeping && sleep.MemorySnapshotGeneration == 0 {
+		return errors.New("sleeping record has no published snapshot")
+	}
+	return nil
+}
+
+// OperationError stores public and local reconciliation error details. Local
+// detail stays on the host.
 type OperationError struct {
 	Code        string    `json:"code"`
 	Message     string    `json:"message"`
@@ -66,8 +106,7 @@ type OperationError struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// completeOperation clears in-flight fields after the caller finishes an
-// operation sequence. The caller sets State first when the sequence observed one.
+// completeOperation clears in-flight fields after an operation.
 func (record *ObservedRecord) completeOperation() {
 	record.Phase = ""
 	record.OperationID = ""
@@ -86,9 +125,7 @@ func newRecordStore(directory string) *recordStore {
 	return &recordStore{directory: directory}
 }
 
-// validateAll rejects a machines directory that no longer makes sense, so the
-// daemon fails at startup instead of reconciling from corrupt state. It reports
-// but never repairs, because losing desired state is worse than refusing to run.
+// validateAll rejects corrupt machine records at startup.
 func (store *recordStore) validateAll() error {
 	identifiers, err := store.listIDs()
 	if err != nil {
@@ -160,6 +197,9 @@ func (store *recordStore) readObserved(identifier string) (ObservedRecord, error
 	if !isObservedState(record.State) || record.UpdatedAt.IsZero() {
 		return ObservedRecord{}, fmt.Errorf("read %s: invalid observed record", store.observedPath(identifier))
 	}
+	if err := record.validateSleep(); err != nil {
+		return ObservedRecord{}, fmt.Errorf("read %s: %w", store.observedPath(identifier), err)
+	}
 	return record, nil
 }
 
@@ -195,8 +235,7 @@ func (store *recordStore) observedPath(identifier string) string {
 	return filepath.Join(store.virtualMachineDirectory(identifier), observedFileName)
 }
 
-// readRecord decodes one record file. Unknown fields and trailing values are
-// rejected, so a record written by a newer or broken build never loads silently.
+// readRecord decodes one record and rejects unknown or trailing data.
 func readRecord(path string, value any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

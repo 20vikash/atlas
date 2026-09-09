@@ -1,0 +1,122 @@
+package vm
+
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
+// phaseWakeRestore names a network wake restore.
+const phaseWakeRestore = "wake-restore"
+
+// WakeFromNetwork restores a sleeping VM after a host-to-guest packet. A stale
+// or duplicate event is a safe no-op.
+func (manager *Manager) WakeFromNetwork(ctx context.Context, event NetworkWakeEvent) error {
+	virtualMachine := manager.newVirtualMachine(event.VirtualMachineID)
+	unlock, err := virtualMachine.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	desired, observed, err := virtualMachine.records()
+	if errors.Is(err, ErrNotFound) {
+		// The VM was removed. A late event has nothing to wake.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	if !networkWakeIsValid(event, desired, observed) {
+		return nil
+	}
+
+	operationID := newOperationID()
+
+	var networkInterface NetworkInterface
+	if err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseNetwork, func() error {
+		var ensureError error
+		networkInterface, ensureError = manager.network.Ensure(ctx, networkRequest(desired))
+		return ensureError
+	}); err != nil {
+		return err
+	}
+	observed.NetworkInterface = networkInterface
+	machine := runtimeMachine(desired, networkInterface)
+
+	return manager.restoreFromNetworkWake(ctx, desired, machine, &observed, operationID)
+}
+
+// networkWakeIsValid reports whether an event matches the current user ID,
+// desired state, observed sleeping state, and snapshot.
+func networkWakeIsValid(event NetworkWakeEvent, desired DesiredRecord, observed ObservedRecord) bool {
+	return event.UserID == desired.UserID &&
+		desired.State == StateRunning &&
+		desired.Sleep.IsSleepy &&
+		observed.State == StateSleeping &&
+		observed.Sleep != nil &&
+		observed.Sleep.MemorySnapshotGeneration != 0
+}
+
+// restoreFromNetworkWake restores the snapshot and publishes running state. A
+// failure keeps the VM sleeping, and the wake is disarmed after persistence.
+func (manager *Manager) restoreFromNetworkWake(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseWakeRestore, func() error {
+		return manager.runtime.Start(ctx, machine, StartFromSleepSnapshot)
+	}); err != nil {
+		return err
+	}
+
+	status, err := manager.inspect(ctx, desired.ID, machine, observed, operationID)
+	if err != nil {
+		return err
+	}
+	if status.State != StateRunning {
+		return fmt.Errorf("VM %s did not reach running after a network wake restore", desired.ID)
+	}
+
+	observed.Sleep = nil
+	observed.State = StateRunning
+	observed.Generation = desired.Generation
+	observed.RestartGeneration = desired.RestartGeneration
+	observed.completeOperation()
+	if err := manager.store.writeObserved(desired.ID, *observed); err != nil {
+		return err
+	}
+
+	manager.disarmNetworkWake(desired)
+	return nil
+}
+
+// armNetworkWake arms the next host-to-guest packet wake event. Failure prevents
+// a VM from entering automatic sleep.
+func (manager *Manager) armNetworkWake(desired DesiredRecord) error {
+	if manager.networkWakeMonitor == nil {
+		return nil
+	}
+	request := NetworkActivityRequest{VirtualMachineID: desired.ID, UserID: desired.UserID}
+	if err := manager.networkWakeMonitor.ArmNetworkWake(request); err != nil {
+		return fmt.Errorf("arm network wake for VM %s: %w", desired.ID, err)
+	}
+	return nil
+}
+
+// disarmNetworkWake stops wake events for a running VM. A failure is logged
+// because the VM is already running and the monitor emits one event per arm.
+func (manager *Manager) disarmNetworkWake(desired DesiredRecord) {
+	if manager.networkWakeMonitor == nil {
+		return
+	}
+	request := NetworkActivityRequest{VirtualMachineID: desired.ID, UserID: desired.UserID}
+	if err := manager.networkWakeMonitor.DisarmNetworkWake(request); err != nil {
+		manager.logger.Warn("disarm network wake failed",
+			"component", "vm", "vm_id", desired.ID, "error", err)
+	}
+}

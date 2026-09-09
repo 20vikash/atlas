@@ -2,8 +2,7 @@ package vm
 
 import "context"
 
-// virtualMachine binds a manager to one identifier for the length of an
-// operation. It holds no VM state of its own.
+// virtualMachine binds a manager to one identifier for one operation.
 type virtualMachine struct {
 	manager    *Manager
 	identifier string
@@ -44,14 +43,15 @@ func networkRequest(record DesiredRecord) NetworkRequest {
 	}
 }
 
-// runtimeMachine builds the complete input for one runtime operation. The
-// specification is cloned, so a runtime cannot reach back into stored state.
+// runtimeMachine builds runtime input with a copied specification.
 func runtimeMachine(record DesiredRecord, networkInterface NetworkInterface) RuntimeMachine {
 	return RuntimeMachine{
-		ID:               record.ID,
-		UserID:           record.UserID,
-		GroupID:          record.GroupID,
-		Specification:    cloneSpecification(record.Specification),
-		NetworkInterface: networkInterface,
+		ID:                      record.ID,
+		UserID:                  record.UserID,
+		GroupID:                 record.GroupID,
+		Specification:           cloneSpecification(record.Specification),
+		NetworkInterface:        networkInterface,
+		SpecificationGeneration: record.SpecificationGeneration,
+		RestartGeneration:       record.RestartGeneration,
 	}
 }

@@ -3,6 +3,9 @@
 # Uses an Ubuntu cloud image and the Firecracker metadata service.
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+IMAGE_BUILDER=$SCRIPT_DIR/../../atlas/vm/scripts/build_ubuntu_server_image.sh
+
 # Keep external settings in the environment.
 WORKDIR=${METALD_WORKDIR:-/tmp/metald}
 BULK=${METALD_BULK_DIR:-$WORKDIR}
@@ -10,13 +13,13 @@ POOL=${METALD_POOL:-metal}
 FC_VER=${METALD_FC_VERSION:-v1.16.1}
 LISTEN=${METALD_LISTEN:-127.0.0.1:8080}
 AUTH_TOKEN=${METALD_AUTH_TOKEN:-metal-development-token}
+WG_MESH_ENABLED=${METALD_WG_MESH_ENABLED:-false}
 IMAGE_DIR=$WORKDIR/images
 VAR_DIR=$WORKDIR/machines
 BIN=$WORKDIR/bin
 KEYDIR=$WORKDIR/keys
 CONFIG=$WORKDIR/metald.toml
 ARCH=$(uname -m)
-CI=https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$ARCH
 
 case $ARCH in
 	x86_64) IMAGE_ARCHITECTURE=amd64 ;;
@@ -29,12 +32,6 @@ esac
 [[ $EUID -eq 0 ]] || { echo "metald dev script: must run as root" >&2; exit 1; }
 
 step() { echo "==> $*"; }
-
-fetch() {
-	[[ -f $2 ]] && return 0
-	echo "    downloading $(basename "$2")"
-	curl -fL --progress-bar -o "$2.part" "$1" && mv "$2.part" "$2"
-}
 
 mkdir -p "$WORKDIR" "$BIN" "$IMAGE_DIR/ubuntu" "$BULK/downloads" "$KEYDIR" \
 	"$VAR_DIR" "$(dirname "$CONFIG")"
@@ -57,16 +54,29 @@ if [[ ! -x $BIN/firecracker || ! -x $BIN/jailer ]]; then
 	chmod +x "$BIN/firecracker" "$BIN/jailer"
 fi
 
-step "guest kernel"
-fetch "$CI/vmlinux-5.10.223" "$IMAGE_DIR/ubuntu/vmlinux"
+step "Atlas guest image (ssh key command, cloud-init datasource, metadata service)"
+rootfs=$BULK/downloads/ubuntu.ext4
+IMAGE_VERSION=${METALD_IMAGE_VERSION:-22.04}
+# The builder creates the guest image when it is absent.
+if [[ ! -f $rootfs ]]; then
+	"$IMAGE_BUILDER" --output "$rootfs" --kernel-output "$BULK/downloads/ubuntu-vmlinux" \
+		--platform "$IMAGE_ARCHITECTURE" --version "$IMAGE_VERSION"
+fi
+
+step "guest kernel (firecracker CI build)"
+# Boot the Firecracker CI kernel. The Ubuntu kernel does not support the
+# Firecracker device model; this kernel includes virtio and ext4 without an initramfs.
+kernel=$IMAGE_DIR/ubuntu/vmlinux
+if [[ ! -f $kernel ]]; then
+	echo "    downloading vmlinux-5.10.223"
+	curl -fL --progress-bar -o "$kernel.part" \
+		"https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/$ARCH/vmlinux-5.10.223"
+	mv "$kernel.part" "$kernel"
+fi
 # The image is a partitionless ext4 file system on /dev/vda.
 echo "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw" > "$IMAGE_DIR/ubuntu/boot-args"
-
-step "Ubuntu file system"
-rootfs=$BULK/downloads/ubuntu.ext4
-fetch "$CI/ubuntu-22.04.ext4" "$rootfs"
 rootfs_sha256=$(sha256sum "$rootfs" | cut -d " " -f 1)
-kernel_sha256=$(sha256sum "$IMAGE_DIR/ubuntu/vmlinux" | cut -d " " -f 1)
+kernel_sha256=$(sha256sum "$kernel" | cut -d " " -f 1)
 
 step "Secure Shell key pair"
 [[ -f $KEYDIR/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N "" -f "$KEYDIR/id_ed25519"
@@ -105,7 +115,7 @@ ExecStart=$BIN/jailer \$JAILER_ARGS
 StandardInput=tty-force
 StandardOutput=tty
 StandardError=journal
-TTYPath=/run/metal/consoles/%i
+TTYPath=$WORKDIR/run/consoles/%i
 TTYReset=yes
 TTYVHangup=yes
 Restart=no
@@ -136,6 +146,11 @@ binary_path = "$BIN/jailer"
 
 [zfs]
 pool = "$POOL"
+
+[wg_mesh]
+enabled = $WG_MESH_ENABLED
+uplink  = "$uplink"
+
 EOF
 
 step "ready: run metald serve --config $CONFIG"
