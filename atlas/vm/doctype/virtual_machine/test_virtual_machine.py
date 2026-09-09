@@ -746,6 +746,30 @@ class TestVirtualMachineNetwork(UnitTestCase):
 
 		client.set_virtual_machine_network.assert_not_called()
 
+	def test_update_disk_limits_names_the_failing_limit(self) -> None:
+		"""The IOPS limit must not report a throughput unit."""
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		metal_client, get_doc, only_for, database = self.patches(client, None)
+
+		with (
+			metal_client,
+			get_doc,
+			only_for,
+			database,
+			self.assertRaisesRegex(frappe.ValidationError, "Disk IOPS"),
+		):
+			virtual_machine.update_disk_limits(0, "abc")
+
+	def test_update_disk_rejects_a_draft(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.is_draft = 1
+		metal_client, get_doc, only_for, database = self.patches(client, None)
+
+		with metal_client, get_doc, only_for, database, self.assertRaises(frappe.ValidationError):
+			virtual_machine.update_disk({"size_mib": 40960})
+
+		client.set_virtual_machine_disk.assert_not_called()
+
 	def test_update_egress_keeps_a_stored_public_limit(self) -> None:
 		"""Atlas resends every setting, so a stored public limit must not block a mode change."""
 		virtual_machine, client = self.build_virtual_machine(

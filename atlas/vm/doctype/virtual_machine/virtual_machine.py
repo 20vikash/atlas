@@ -273,56 +273,44 @@ class VirtualMachine(Document):
 	@frappe.whitelist(methods=["POST"])
 	def update_egress(self, egress: str) -> dict[str, Any]:
 		"""Change internet reachability without a VM restart. Mesh reachability does not change."""
-		frappe.only_for("System Manager")
-		if egress not in EGRESS_MODES:
-			frappe.throw(_("Egress must be uplink, mesh, or none."))
-		if egress != "uplink" and frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
-			frappe.throw(_("Detach the public IPv4 address before you remove the internet path."))
-
-		return self.update_network(egress=egress)
+		return self.update_network({"egress": egress})
 
 	@frappe.whitelist(methods=["POST"])
 	def update_network_throughput(
 		self, private_network_throughput_mibps: int, public_network_throughput_mibps: int
 	) -> dict[str, Any]:
 		"""Change the throughput limits in MiB/s without a VM restart. A value of 0 removes the limit."""
-		frappe.only_for("System Manager")
 		return self.update_network(
-			private_network_throughput_mibps=self.parse_throughput(private_network_throughput_mibps),
-			public_network_throughput_mibps=self.parse_throughput(public_network_throughput_mibps),
+			{
+				"private_network_throughput_mibps": self.parse_limit(
+					private_network_throughput_mibps, _("Network throughput")
+				),
+				"public_network_throughput_mibps": self.parse_limit(
+					public_network_throughput_mibps, _("Network throughput")
+				),
+			}
 		)
 
 	@frappe.whitelist(methods=["POST"])
 	def update_disk_limits(self, disk_throughput_mibps: int, disk_iops: int) -> dict[str, Any]:
 		"""Change the disk limits in MiB/s and IOPS without a VM restart. 0 removes a limit."""
-		frappe.only_for("System Manager")
-		if self.is_draft:
-			frappe.throw(_("Wait for Virtual Machine creation before a disk change."))
-
-		return VirtualMachineService(self).update_disk_limits(
-			self.parse_throughput(disk_throughput_mibps),
-			self.parse_throughput(disk_iops),
+		return self.update_disk(
+			{
+				"throughput_mibps": self.parse_limit(disk_throughput_mibps, _("Disk throughput")),
+				"iops": self.parse_limit(disk_iops, _("Disk IOPS")),
+			}
 		)
 
-	def parse_throughput(self, value: object) -> int:
-		"""Return one throughput limit in MiB/s. A malformed value is an error, not 0."""
+	def parse_limit(self, value: object, label: str) -> int:
+		"""Return one rate limit. A malformed value is an error, not 0."""
 		try:
-			throughput = int(str(value).strip())
+			limit = int(str(value).strip())
 		except TypeError, ValueError:
-			frappe.throw(_("Network throughput must be a whole number of MiB/s."))
+			frappe.throw(_("{0} must be a whole number.").format(label))
 			raise AssertionError from None
-		if throughput < 0:
-			frappe.throw(_("Network throughput must not be negative."))
-		return throughput
-
-	def update_network(self, **changes: Any) -> dict[str, Any]:
-		"""Send the complete desired network settings to Metal.
-
-		Metal replaces every mutable setting, so unchanged values come from the
-		live Metal state instead of a local default.
-		"""
-		self.validate_network_change()
-		return VirtualMachineService(self).update_network(changes)
+		if limit < 0:
+			frappe.throw(_("{0} must not be negative.").format(label))
+		return limit
 
 	def validate_network_change(self) -> None:
 		"""Reject a network change while the request is not ready."""
@@ -332,16 +320,40 @@ class VirtualMachine(Document):
 			frappe.throw(_("Virtual Machine {0} is terminating.").format(self.name))
 
 	@frappe.whitelist(methods=["POST"])
-	def resize_disk(self, disk_mib: int) -> None:
+	def resize_disk(self, disk_mib: int) -> dict[str, Any]:
 		"""Ask Metal to increase this VM disk size."""
-		frappe.only_for("System Manager")
-		VirtualMachineService(self).resize_disk(int(disk_mib))
+		return self.update_disk({"size_mib": int(disk_mib)})
 
 	@frappe.whitelist(methods=["POST"])
 	def resize_compute(self, vcpus: int, memory_mib: int) -> None:
 		"""Ask Metal to change this VM CPU and memory. The VM must be stopped."""
+		self.update_compute(int(vcpus), int(memory_mib))
+
+	def update_compute(self, vcpus: int | None, memory_mib: int | None) -> None:
+		"""Change the VM CPU and memory when the VM is stopped."""
 		frappe.only_for("System Manager")
-		VirtualMachineService(self).set_compute(int(vcpus), int(memory_mib))
+		service = VirtualMachineService(self)
+		information = service.require_information()
+		if information.observed.state != "stopped":
+			frappe.throw(_("Stop the Virtual Machine before you change its compute values."))
+
+		service.set_compute(
+			vcpus if vcpus is not None else information.desired.compute.virtual_cpu_count,
+			memory_mib if memory_mib is not None else information.desired.compute.memory_mib,
+		)
+
+	def update_disk(self, changes: dict[str, int]) -> dict[str, Any]:
+		"""Apply selected disk size and limit changes."""
+		frappe.only_for("System Manager")
+		if self.is_draft:
+			frappe.throw(_("Wait for Virtual Machine creation before a disk change."))
+
+		return VirtualMachineService(self).update_disk(changes)
+
+	def update_network(self, changes: dict[str, Any]) -> dict[str, Any]:
+		"""Apply selected egress and throughput changes."""
+		frappe.only_for("System Manager")
+		return VirtualMachineService(self).apply_network_changes(changes)
 
 	def set_power_state(self, state: str) -> None:
 		"""Ask Metal to store one desired power state."""
