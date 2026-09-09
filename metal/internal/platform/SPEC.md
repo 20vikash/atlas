@@ -19,7 +19,7 @@ Metal talks to systemd through D-Bus. It does not call the `systemctl` command.
 
 ## Host commands
 
-`Run` is for commands where the caller only needs success or failure. `Output` is for commands where the caller needs stdout. Both preserve command diagnostics in errors and accept a context that can stop a running command.
+`Run` is for commands where the caller only needs success or failure. `Output` is for commands where the caller needs stdout. `RunInNetworkNamespace` runs one command through `ip netns exec` and returns stdout. Each function preserves command diagnostics in errors and accepts a context that can stop a running command.
 
 ## Systemd units
 
