@@ -78,16 +78,15 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
-    stopped VM.
+     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
+    a stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
-    wakes it on the next packet. 0 disables sleep.
+    A value of `0` disables automatic idle shutdown.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
+        body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -121,16 +120,15 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
-    stopped VM.
+     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
+    a stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
-    wakes it on the next packet. 0 disables sleep.
+    A value of `0` disables automatic idle shutdown.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
+        body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -159,16 +157,15 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
-    stopped VM.
+     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
+    a stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
-    wakes it on the next packet. 0 disables sleep.
+    A value of `0` disables automatic idle shutdown.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
+        body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -202,16 +199,15 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a
-    stopped VM.
+     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
+    a stopped VM.
 
-    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and
-    wakes it on the next packet. 0 disables sleep.
+    A value of `0` disables automatic idle shutdown.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
+        body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

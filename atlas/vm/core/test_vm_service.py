@@ -181,7 +181,7 @@ class TestVirtualMachineInformation(UnitTestCase):
 class TestVirtualMachineDisk(UnitTestCase):
 	def build_service(self, size_mib: int = 20480) -> tuple[VirtualMachineService, Mock]:
 		"""Return a service whose host reports one desired disk."""
-		virtual_machine = SimpleNamespace(name="VM-00001", db_set=Mock())
+		virtual_machine = SimpleNamespace(name="VM-00001", sleep_after_idle_seconds=0, db_set=Mock())
 		service = VirtualMachineService(virtual_machine)
 		information = SimpleNamespace(
 			desired=SimpleNamespace(disk=SimpleNamespace(size_mib=size_mib, throughput_mibps=50, iops=2000))
@@ -228,44 +228,42 @@ class TestVirtualMachineDisk(UnitTestCase):
 class TestVirtualMachineCompute(UnitTestCase):
 	def build_service(self, observed_state: str = "running") -> tuple[VirtualMachineService, SimpleNamespace]:
 		"""Return a service whose host reports one desired compute object."""
-		virtual_machine = SimpleNamespace(name="VM-00001", db_set=Mock())
+		virtual_machine = SimpleNamespace(name="VM-00001", sleep_after_idle_seconds=0, db_set=Mock())
 		information = SimpleNamespace(
 			desired=SimpleNamespace(
 				compute=SimpleNamespace(
 					virtual_cpu_count=2,
 					memory_mib=2048,
-					is_sleepy=False,
-					idle_timeout_seconds=0,
+					sleep_after_idle_seconds=0,
 				)
 			),
 			observed=SimpleNamespace(state=observed_state),
 		)
 		return VirtualMachineService(virtual_machine), information
 
-	def test_a_sleep_policy_change_does_not_need_a_stopped_virtual_machine(self) -> None:
+	def test_an_idle_timeout_change_does_not_need_a_stopped_virtual_machine(self) -> None:
 		service, information = self.build_service("running")
 
 		with (
 			patch.object(service, "require_information", return_value=information),
 			patch.object(service, "set_compute", return_value={}) as set_compute,
 		):
-			service.update_compute({"is_sleepy": True, "idle_timeout_seconds": 1800})
+			service.update_compute({"sleep_after_idle_seconds": 1800})
 
 		set_compute.assert_called_once_with(
 			{
 				"virtual_cpu_count": 2,
 				"memory_mib": 2048,
-				"is_sleepy": True,
-				"idle_timeout_seconds": 1800,
+				"sleep_after_idle_seconds": 1800,
 			}
 		)
-		service.virtual_machine.db_set.assert_not_called()
+		service.virtual_machine.db_set.assert_called_once_with("sleep_after_idle_seconds", 1800)
 
-	def test_a_shape_change_keeps_the_stored_sleep_policy(self) -> None:
-		"""Metal replaces the complete compute object, so a resize must resend the policy."""
+	def test_a_shape_change_keeps_the_stored_idle_timeout(self) -> None:
+		"""Metal replaces the complete compute object, so a resize must resend the timeout."""
 		service, information = self.build_service("stopped")
-		information.desired.compute.is_sleepy = True
-		information.desired.compute.idle_timeout_seconds = 1800
+		information.desired.compute.sleep_after_idle_seconds = 1800
+		service.virtual_machine.sleep_after_idle_seconds = 1800
 
 		with (
 			patch.object(service, "require_information", return_value=information),
@@ -277,8 +275,7 @@ class TestVirtualMachineCompute(UnitTestCase):
 			{
 				"virtual_cpu_count": 4,
 				"memory_mib": 2048,
-				"is_sleepy": True,
-				"idle_timeout_seconds": 1800,
+				"sleep_after_idle_seconds": 1800,
 			}
 		)
 		service.virtual_machine.db_set.assert_called_once_with({"vcpus": 4, "memory_mib": 2048})

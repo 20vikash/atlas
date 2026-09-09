@@ -67,8 +67,8 @@ frappe.ui.form.on("Virtual Machine", {
 			);
 		}
 		frm.add_custom_button(
-			__("Edit Sleep Policy"),
-			() => showEditSleepPolicyDialog(frm),
+			__("Edit Idle Sleep"),
+			() => showEditIdleShutdownDialog(frm),
 			__("Actions")
 		);
 		frm.add_custom_button(
@@ -346,35 +346,28 @@ function showResizeComputeDialog(frm) {
 	);
 }
 
-function showEditSleepPolicyDialog(frm) {
+function showEditIdleShutdownDialog(frm) {
 	frappe.prompt(
 		[
 			{
-				fieldname: "is_sleepy",
-				fieldtype: "Check",
-				label: __("Is Sleepy"),
-				default: frm.doc.is_sleepy,
-			},
-			{
-				fieldname: "idle_timeout_seconds",
+				fieldname: "sleep_after_idle_seconds",
 				fieldtype: "Int",
-				label: __("Idle Timeout (Seconds)"),
-				default: frm.doc.idle_timeout_seconds,
-				depends_on: "eval: doc.is_sleepy",
-				description: __("0 disables sleep."),
+				label: __("Sleep After Idle (Seconds)"),
+				default: frm.doc.sleep_after_idle_seconds,
+				description: __("0 disables automatic idle sleep."),
 			},
 		],
 		(values) =>
 			frm
 				.call({
-					method: "update_sleep_policy",
+					method: "update_idle_shutdown",
 					doc: frm.doc,
 					args: values,
 					freeze: true,
-					freeze_message: __("Updating sleep policy..."),
+					freeze_message: __("Updating idle sleep..."),
 				})
 				.then(() => frm.reload_doc()),
-		__("Edit Sleep Policy"),
+		__("Edit Idle Sleep"),
 		__("Save")
 	);
 }

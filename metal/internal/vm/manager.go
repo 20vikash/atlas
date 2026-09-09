@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/frappe/atlas/metal/internal/network/traffic"
 	"github.com/google/uuid"
 )
 
@@ -30,31 +31,28 @@ type ManagerConfig struct {
 
 // ManagerDependencies contains the host services used by Manager.
 type ManagerDependencies struct {
-	Runtime                Runtime
-	Network                Network
-	Storage                Storage
-	Snapshots              Snapshots
-	NetworkActivityMonitor NetworkActivityMonitor
-	// NetworkWakeMonitor handles packet-triggered wake.
-	NetworkWakeMonitor NetworkWakeMonitor
-	Logger             *slog.Logger
+	Runtime   Runtime
+	Network   Network
+	Storage   Storage
+	Snapshots Snapshots
+	Traffic   *traffic.Monitor
+	Logger    *slog.Logger
 }
 
 // Manager owns virtual machine desired state and reconciliation.
 type Manager struct {
-	configuration          ManagerConfig
-	store                  *recordStore
-	runtime                Runtime
-	network                Network
-	storage                Storage
-	snapshots              Snapshots
-	networkActivityMonitor NetworkActivityMonitor
-	networkWakeMonitor     NetworkWakeMonitor
-	logger                 *slog.Logger
-	operationLocks         keyedLocks
-	allocationMutex        sync.Mutex
-	temporaryUserIDs       map[uint32]bool
-	temporaryIdentifiers   map[string]bool
+	configuration        ManagerConfig
+	store                *recordStore
+	runtime              Runtime
+	network              Network
+	storage              Storage
+	snapshots            Snapshots
+	traffic              *traffic.Monitor
+	logger               *slog.Logger
+	operationLocks       keyedLocks
+	allocationMutex      sync.Mutex
+	temporaryUserIDs     map[uint32]bool
+	temporaryIdentifiers map[string]bool
 }
 
 // NewManager validates all records and returns one host VM manager.
@@ -71,27 +69,20 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 	if dependencies.Runtime == nil || dependencies.Network == nil || dependencies.Storage == nil || dependencies.Snapshots == nil {
 		return nil, fmt.Errorf("VM manager dependencies are required")
 	}
-	if dependencies.NetworkActivityMonitor == nil {
-		return nil, fmt.Errorf("a network activity monitor is required")
-	}
-	if dependencies.NetworkWakeMonitor == nil {
-		return nil, fmt.Errorf("a network wake monitor is required")
-	}
 	if dependencies.Logger == nil {
 		dependencies.Logger = slog.Default()
 	}
 	manager := &Manager{
-		configuration:          configuration,
-		store:                  newRecordStore(configuration.MachinesDirectory),
-		runtime:                dependencies.Runtime,
-		network:                dependencies.Network,
-		storage:                dependencies.Storage,
-		snapshots:              dependencies.Snapshots,
-		networkActivityMonitor: dependencies.NetworkActivityMonitor,
-		networkWakeMonitor:     dependencies.NetworkWakeMonitor,
-		logger:                 dependencies.Logger,
-		temporaryUserIDs:       make(map[uint32]bool),
-		temporaryIdentifiers:   make(map[string]bool),
+		configuration:        configuration,
+		store:                newRecordStore(configuration.MachinesDirectory),
+		runtime:              dependencies.Runtime,
+		network:              dependencies.Network,
+		storage:              dependencies.Storage,
+		snapshots:            dependencies.Snapshots,
+		traffic:              dependencies.Traffic,
+		logger:               dependencies.Logger,
+		temporaryUserIDs:     make(map[uint32]bool),
+		temporaryIdentifiers: make(map[string]bool),
 	}
 	if err := manager.store.validateAll(); err != nil {
 		return nil, fmt.Errorf("validate VM records: %w", err)
@@ -101,7 +92,7 @@ func NewManager(configuration ManagerConfig, dependencies ManagerDependencies) (
 
 // Create reserves a VM or refreshes a matching retry. The fingerprint excludes
 // rotating signed image URLs, so a retry does not reserve a second VM.
-func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification, sleep SleepPolicy) (Information, error) {
+func (manager *Manager) Create(ctx context.Context, identifier string, specification Specification) (Information, error) {
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
 	}
@@ -153,7 +144,6 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		Generation:              1,
 		SpecificationGeneration: 1,
 		State:                   StateRunning,
-		Sleep:                   sleep,
 		Specification:           cloneSpecification(specification),
 	}
 	observed := ObservedRecord{State: StateUnknown, UpdatedAt: time.Now().UTC()}
@@ -307,11 +297,6 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 	if usage.SizeMiB == 0 {
 		usage.SizeMiB = desired.Specification.DiskMiB
 	}
-	var lastNetworkActivityAt, sleepingSince time.Time
-	if observed.Sleep != nil {
-		lastNetworkActivityAt = observed.Sleep.LastNetworkActivityAt
-		sleepingSince = observed.Sleep.MemorySnapshotCreatedAt
-	}
 	return Information{
 		ID:                            desired.ID,
 		State:                         observed.State,
@@ -327,8 +312,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		SSHKeys:                       slices.Clone(desired.Specification.SSHKeys),
 		Hostname:                      desired.Specification.Hostname,
 		Metadata:                      maps.Clone(desired.Specification.Metadata),
-		IsSleepy:                      desired.Sleep.IsSleepy,
-		IdleTimeoutSeconds:            desired.Sleep.IdleTimeoutSeconds,
+		SleepAfterIdleSeconds:         desired.Specification.SleepAfterIdleSeconds,
 		MAC:                           observed.NetworkInterface.MACAddress,
 		PublicIPv4:                    desired.Specification.Network.PublicIPv4,
 		WireGuardMeshIPv6:             desired.Specification.Network.WireGuardMeshIPv6,
@@ -343,8 +327,6 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		OperationID:                   observed.OperationID,
 		OperationStartedAt:            observed.OperationStartedAt,
 		UpdatedAt:                     observed.UpdatedAt,
-		LastNetworkActivityAt:         lastNetworkActivityAt,
-		SleepingSince:                 sleepingSince,
 	}
 }
 

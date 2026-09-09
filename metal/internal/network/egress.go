@@ -10,18 +10,11 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
-// internetPathSteps builds the route out of the namespace. Only EgressUplink has it.
-func internetPathSteps(namespace, guestVirtualEthernet, hostIPAddress string) [][]string {
-	return append(defaultRouteSteps(namespace, hostIPAddress),
-		[]string{"ip", "netns", "exec", namespace, "iptables", "-t", "nat", "-A", "POSTROUTING", "-o", guestVirtualEthernet, "-j", "MASQUERADE"},
-	)
-}
-
 // defaultRouteSteps builds the namespace route and forwarding.
-func defaultRouteSteps(namespace, hostIPAddress string) [][]string {
+func defaultRouteSteps(hostIPAddress string) [][]string {
 	return [][]string{
-		{"ip", "-n", namespace, "route", "replace", "default", "via", hostIPAddress},
-		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv4.ip_forward=1"},
+		{"ip", "route", "replace", "default", "via", hostIPAddress},
+		{"sysctl", "-q", "-w", "net.ipv4.ip_forward=1"},
 	}
 }
 
@@ -30,7 +23,7 @@ func addInternetPath(ctx context.Context, virtualMachineID string, userID uint32
 	namespace := namespaceName(virtualMachineID)
 	_, guestVirtualEthernet := virtualEthernetNames(userID)
 	hostIPAddress, _ := transitAddresses(userID)
-	if err := runSteps(ctx, defaultRouteSteps(namespace, hostIPAddress)); err != nil {
+	if err := runNetworkNamespaceSteps(ctx, namespace, defaultRouteSteps(hostIPAddress)); err != nil {
 		return err
 	}
 	return setMasquerade(ctx, namespace, guestVirtualEthernet, true)
@@ -83,14 +76,15 @@ func ruleExists(ctx context.Context, check []string) (bool, error) {
 
 // removeDefaultRoute removes the namespace default route when it is present.
 func removeDefaultRoute(ctx context.Context, namespace string) error {
-	output, err := platform.Output(ctx, "ip", "-n", namespace, "route", "show", "default")
+	output, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "route", "show", "default")
 	if err != nil {
 		return fmt.Errorf("show default route: %w", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		return nil
 	}
-	return platform.Run(ctx, "ip", "-n", namespace, "route", "del", "default")
+	_, err = platform.RunInNetworkNamespace(ctx, namespace, "ip", "route", "del", "default")
+	return err
 }
 
 // ensurePublicIPv4 makes the public address rules present. The rules are one

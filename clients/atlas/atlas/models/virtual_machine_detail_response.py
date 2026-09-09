@@ -31,6 +31,7 @@ class VirtualMachineDetailResponse:
             id (str):
             image_id (str):
             memory_mib (int):
+            sleep_after_idle_seconds (int):
             tenant_id (int):
             vcpus (int):
      """
@@ -42,6 +43,7 @@ class VirtualMachineDetailResponse:
     id: str
     image_id: str
     memory_mib: int
+    sleep_after_idle_seconds: int
     tenant_id: int
     vcpus: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -66,6 +68,8 @@ class VirtualMachineDetailResponse:
 
         memory_mib = self.memory_mib
 
+        sleep_after_idle_seconds = self.sleep_after_idle_seconds
+
         tenant_id = self.tenant_id
 
         vcpus = self.vcpus
@@ -81,6 +85,7 @@ class VirtualMachineDetailResponse:
             "id": id,
             "image_id": image_id,
             "memory_mib": memory_mib,
+            "sleep_after_idle_seconds": sleep_after_idle_seconds,
             "tenant_id": tenant_id,
             "vcpus": vcpus,
         })
@@ -112,6 +117,8 @@ class VirtualMachineDetailResponse:
 
         memory_mib = d.pop("memory_mib")
 
+        sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
+
         tenant_id = d.pop("tenant_id")
 
         vcpus = d.pop("vcpus")
@@ -124,6 +131,7 @@ class VirtualMachineDetailResponse:
             id=id,
             image_id=image_id,
             memory_mib=memory_mib,
+            sleep_after_idle_seconds=sleep_after_idle_seconds,
             tenant_id=tenant_id,
             vcpus=vcpus,
         )

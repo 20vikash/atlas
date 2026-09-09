@@ -24,7 +24,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/firecracker"
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
-	"github.com/frappe/atlas/metal/internal/network/activity"
+	traffic "github.com/frappe/atlas/metal/internal/network/traffic"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
@@ -78,9 +78,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "usage: metald [serve] [--config path] | metald version\n")
 		os.Exit(2)
 	}
-	o, err := load(configPath)
+	options, err := load(configPath)
 	if err == nil {
-		err = serve(o, logger)
+		err = serve(options, logger)
 	}
 	if err != nil {
 		logger.Error("metald stopped", "error", err)
@@ -112,14 +112,14 @@ func listen(addr string) (net.Listener, error) {
 	return net.Listen("tcp", addr)
 }
 
-func makeDirs(o opts) error {
+func makeDirs(options options) error {
 	dirs := []struct {
 		path string
 		mode os.FileMode
 	}{
-		{o.cfg.MachinesDir, 0o750},
-		{o.cfg.SocketsDir, 0o700},
-		{o.imagesDir, 0o755},
+		{options.cfg.MachinesDir, 0o750},
+		{options.cfg.SocketsDir, 0o700},
+		{options.imagesDir, 0o755},
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d.path, d.mode); err != nil {
@@ -129,30 +129,12 @@ func makeDirs(o opts) error {
 	return nil
 }
 
-// meshProvider is the mesh behavior used by metald.
-type meshProvider interface {
-	Add(ctx context.Context, address, interfaceName string) error
-	Remove(ctx context.Context, address, interfaceName string) error
-	ApplyPrivilegedAddresses(ctx context.Context, desired []string) error
-}
-
-// setUpMesh prepares Atlas WG Mesh or a disabled no-op for hosts without mesh
-// connectivity.
-func setUpMesh(o opts, logger *slog.Logger) (meshProvider, error) {
-	if !o.mesh.enabled {
-		logger.Warn("Atlas WG Mesh is disabled; VMs have no mesh connectivity", "wg_mesh.enabled", false)
-		return network.DisabledMesh{}, nil
-	}
-
-	return connectMesh(o)
-}
-
 // connectMesh prepares Atlas WG Mesh and configures the host on every start.
-func connectMesh(o opts) (*network.Mesh, error) {
+func connectMesh(options options) (*network.Mesh, error) {
 	mesh, err := network.NewMesh(network.MeshConfig{
-		CommandPath:   o.mesh.binaryPath,
-		UplinkName:    o.mesh.uplinkName,
-		WireGuardName: o.wireGuardName,
+		CommandPath:   options.mesh.binaryPath,
+		UplinkName:    options.mesh.uplinkName,
+		WireGuardName: options.wireGuardName,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure Atlas WG Mesh: %w", err)
@@ -209,18 +191,21 @@ func adoptConsoles(
 	return nil
 }
 
-func serve(o opts, logger *slog.Logger) (serveError error) {
-	if o.authTokenHash == "" {
+func serve(options options, logger *slog.Logger) (serveError error) {
+	if options.authTokenHash == "" {
 		return fmt.Errorf("metald.auth_token_hash is required")
 	}
 
 	// Connect required host services.
-	// Set up Atlas WG Mesh first, so a host configuration error fails early.
-	mesh, err := setUpMesh(o, logger)
-	if err != nil {
-		return err
+	var err error
+	var mesh *network.Mesh
+	if options.mesh.enabled {
+		mesh, err = connectMesh(options)
+		if err != nil {
+			return err
+		}
 	}
-	if err := makeDirs(o); err != nil {
+	if err := makeDirs(options); err != nil {
 		return err
 	}
 	units, err := platform.Connect(context.Background())
@@ -230,9 +215,9 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 
 	// Create resources that metald owns.
 	daemonContext, cancelDaemon := context.WithCancel(context.Background())
-	stores := storage.NewStores(daemonContext, o.pool, o.imagesDir, logger)
+	stores := storage.NewStores(daemonContext, options.pool, options.imagesDir, logger)
 	descriptorStore := platform.NewFileDescriptorStore()
-	serialBroker := console.NewSerialBroker(filepath.Join(o.cfg.SocketsDir, "consoles"), descriptorStore)
+	serialBroker := console.NewSerialBroker(filepath.Join(options.cfg.SocketsDir, "consoles"), descriptorStore)
 	daemon := newDaemon(daemonContext, cancelDaemon, logger, stores.Snapshots, serialBroker, units)
 	defer func() {
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
@@ -247,20 +232,27 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 
 	// Create virtual machine and API services.
 	wireGuardManager, err := network.NewWireGuardManager(network.WireGuardConfig{
-		InterfaceName: o.wireGuardName,
-		StatePath:     filepath.Join(o.baseDir, "wireguard-peers.json"),
+		InterfaceName: options.wireGuardName,
+		StatePath:     filepath.Join(options.baseDir, "wireguard-peers.json"),
 	})
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	activityMonitor, err := activity.NewMonitor(activity.MonitorConfig{UserIDRange: vm.DefaultUserIDRange})
-	if err != nil {
-		return fmt.Errorf("configure activity monitor: %w", err)
+	var trafficMonitor *traffic.Monitor
+	if options.trafficMonitor.enabled {
+		trafficMonitor, err = traffic.NewMonitor(traffic.Config{
+			MinimumUserID: vm.DefaultUserIDRange.Min,
+			MaximumUserID: vm.DefaultUserIDRange.Max,
+			Logger:        logger,
+		})
+		if err != nil {
+			return fmt.Errorf("configure traffic monitor: %w", err)
+		}
+		daemon.OwnTrafficMonitor(trafficMonitor)
 	}
-	daemon.OwnActivityMonitor(activityMonitor)
-	networkManager := network.NewLinuxAllocator(mesh, activityMonitor)
+	networkManager := network.NewLinuxAllocator(mesh, trafficMonitor)
 	virtualMachineRuntime := firecracker.NewRuntime(
-		o.cfg,
+		options.cfg,
 		units,
 		stores.VirtualMachines,
 		stores.Images,
@@ -269,16 +261,15 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	)
 	virtualMachineManager, err := vm.NewManager(
 		vm.ManagerConfig{
-			MachinesDirectory: o.cfg.MachinesDir,
+			MachinesDirectory: options.cfg.MachinesDir,
 		},
 		vm.ManagerDependencies{
-			Runtime:                virtualMachineRuntime,
-			Network:                networkManager,
-			Storage:                stores.VirtualMachines,
-			Snapshots:              stores.Snapshots,
-			NetworkActivityMonitor: activityMonitor,
-			NetworkWakeMonitor:     activityMonitor,
-			Logger:                 logger,
+			Runtime:   virtualMachineRuntime,
+			Network:   networkManager,
+			Storage:   stores.VirtualMachines,
+			Snapshots: stores.Snapshots,
+			Traffic:   trafficMonitor,
+			Logger:    logger,
 		},
 	)
 	if err != nil {
@@ -302,28 +293,21 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
 	)
-	// The activity monitor emits wake events, and each reconcile pass rearms
-	// sleeping VMs after a restart. Start the worker after the monitor is ready.
-	networkWakeReconciler := reconciler.NewNetworkWakeReconciler(
-		virtualMachineManager,
-		activityMonitor.NetworkWakeEvents(),
-		reconciler.NetworkWakeConfig{Logger: logger},
-	)
-	wakeReconcilers := func() {
+	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
 	}
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
-		VirtualMachines: virtualMachineManager, Storage: stores.Pool, Wake: wakeReconcilers,
+		VirtualMachines: virtualMachineManager, Storage: stores.Pool, Wake: notifyReconcilers,
 	})
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
-	server, err := api.New(api.Config{AuthTokenHash: o.authTokenHash, Logger: logger}, api.Dependencies{
+	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		SnapshotStore:         stores.Snapshots,
-		WakeReconciler:        wakeReconcilers,
+		WakeReconciler:        notifyReconcilers,
 		HostService:           hostService,
 		SerialBroker:          serialBroker,
 	})
@@ -332,14 +316,16 @@ func serve(o opts, logger *slog.Logger) (serveError error) {
 	}
 
 	// Start workers and serve the API.
-	listener, err := listen(o.listen)
+	listener, err := listen(options.listen)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", o.listen, err)
+		return fmt.Errorf("listen %s: %w", options.listen, err)
 	}
-	logger.Info("metald listening", "version", version, "address", o.listen)
+	logger.Info("metald listening", "version", version, "address", options.listen)
 	server.Listener = listener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
-	daemon.StartWorker(networkWakeReconciler.Run)
+	if trafficMonitor != nil {
+		daemon.StartTrafficListener(trafficMonitor.Events(), virtualMachineManager.RestoreAfterTraffic)
+	}
 	return daemon.Serve(server)
 }

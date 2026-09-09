@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -42,7 +41,7 @@ func TestNewMeshNeedsACommandAndBothInterfaces(t *testing.T) {
 }
 
 func TestMeshNamespaceStepsRouteTheGuestAddress(t *testing.T) {
-	steps := meshNamespaceSteps("metal-vm-1", "vg-100", "fdaa:1:0:7::1")
+	steps := meshNamespaceSteps("vg-100", "fdaa:1:0:7::1")
 
 	lines := make([]string, len(steps))
 	for index, step := range steps {
@@ -62,14 +61,6 @@ func TestMeshNamespaceStepsRouteTheGuestAddress(t *testing.T) {
 	} {
 		if !strings.Contains(joined, wanted) {
 			t.Errorf("missing step %q in:\n%s", wanted, joined)
-		}
-	}
-}
-
-func TestMeshNamespaceStepsRunInsideTheNamespace(t *testing.T) {
-	for _, step := range meshNamespaceSteps("metal-vm-1", "vg-100", "fdaa:1:0:7::1") {
-		if !slices.Contains(step, "metal-vm-1") {
-			t.Errorf("step leaves the namespace: %v", step)
 		}
 	}
 }

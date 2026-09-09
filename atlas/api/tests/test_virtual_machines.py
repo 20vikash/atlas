@@ -36,9 +36,10 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"vcpus": 2,
 		"memory_mib": 2048,
 		"disk_mib": 20480,
+		"sleep_after_idle_seconds": 0,
 		"is_draft": 0,
 		"is_terminating": 0,
-		"creation": "2026-09-08 10:00:00",
+		"creation": "2026-09-08T10:00:00+05:30",
 		"set_power_state": Mock(),
 		"reboot": Mock(),
 		"terminate": Mock(),
@@ -132,17 +133,23 @@ class TestCreateVirtualMachine(UnitTestCase):
 		self.assertEqual(body["error"]["code"], "invalid_request")
 
 	def test_create_rejects_a_field_the_caller_cannot_set(self) -> None:
-		for field in ("tenant_id", "server", "is_privileged"):
+		for field in ("tenant_id", "server", "is_privileged", "is_sleepy", "idle_timeout_seconds"):
 			status, body, _ = self.create({**CREATE_BODY, field: 1})
 
 			self.assertEqual(status, 400)
 			self.assertIn(field, [item["name"] for item in body["error"]["fields"]])
 
 	def test_create_rejects_values_that_are_not_positive(self) -> None:
-		status, body, _ = self.create({**CREATE_BODY, "vcpus": 0})
+		status, _, _ = self.create({**CREATE_BODY, "vcpus": 0})
 
 		self.assertEqual(status, 400)
-		self.assertEqual([item["name"] for item in body["error"]["fields"]], ["vcpus"])
+
+	def test_create_rejects_an_invalid_idle_timeout(self) -> None:
+		for value in (-1, 9_223_372_037):
+			status, body, _ = self.create({**CREATE_BODY, "sleep_after_idle_seconds": value})
+
+			self.assertEqual(status, 400)
+			self.assertEqual([item["name"] for item in body["error"]["fields"]], ["sleep_after_idle_seconds"])
 
 
 class TestReadVirtualMachines(UnitTestCase):
@@ -295,22 +302,20 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 		self.assertEqual(status, 202)
 		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
 
-	def test_a_sleep_policy_change_reaches_the_virtual_machine_method(self) -> None:
+	def test_an_idle_timeout_change_reaches_the_virtual_machine_method(self) -> None:
 		with (
 			api_request(
 				"PATCH",
 				"/api/atlas/virtual-machines/vm-00001/compute",
 				tenant_id=TENANT_ID,
-				json={"is_sleepy": True, "idle_timeout_seconds": 1800},
+				json={"sleep_after_idle_seconds": 1800},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
 		):
 			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
 
 		self.assertEqual(status, 202)
-		virtual_machine.update_compute.assert_called_once_with(
-			{"is_sleepy": True, "idle_timeout_seconds": 1800}
-		)
+		virtual_machine.update_compute.assert_called_once_with({"sleep_after_idle_seconds": 1800})
 
 	def test_a_patch_without_a_supported_field_is_rejected(self) -> None:
 		with (
@@ -326,6 +331,22 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 400)
 		self.assertEqual(body["error"]["code"], "invalid_request")
+
+	def test_compute_change_rejects_old_idle_fields(self) -> None:
+		for field in ("is_sleepy", "idle_timeout_seconds"):
+			with (
+				api_request(
+					"PATCH",
+					"/api/atlas/virtual-machines/vm-00001/compute",
+					tenant_id=TENANT_ID,
+					json={field: 1},
+				),
+				owned_document(build_virtual_machine()),
+			):
+				status, body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+
+			self.assertEqual(status, 400)
+			self.assertIn(field, [item["name"] for item in body["error"]["fields"]])
 
 	def attach(self, attached: str | None, requested: str):
 		"""Run the attach route with one currently attached address."""

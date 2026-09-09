@@ -60,23 +60,8 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	}, nil
 }
 
-// DisabledMesh disables mesh registration on development and test hosts.
-type DisabledMesh struct{}
-
 // Check the mesh registrar interface at compile time.
-var (
-	_ meshRegistrar = (*Mesh)(nil)
-	_ meshRegistrar = DisabledMesh{}
-)
-
-// Add does nothing.
-func (DisabledMesh) Add(context.Context, string, string) error { return nil }
-
-// Remove does nothing.
-func (DisabledMesh) Remove(context.Context, string, string) error { return nil }
-
-// ApplyPrivilegedAddresses does nothing.
-func (DisabledMesh) ApplyPrivilegedAddresses(context.Context, []string) error { return nil }
+var _ meshRegistrar = (*Mesh)(nil)
 
 // EnsureHost configures an unconfigured host and verifies its discovery
 // interface.
@@ -240,16 +225,16 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 }
 
 // meshNamespaceSteps routes mesh traffic through the namespace. Proxy NDP
-// handles the veth, and a permanent tap0 neighbour reaches a sleeping guest.
-func meshNamespaceSteps(namespace, guestVirtualEthernet, address string) [][]string {
+// handles the veth, and a permanent tap0 neighbour reaches a stopped guest.
+func meshNamespaceSteps(guestVirtualEthernet, address string) [][]string {
 	return [][]string{
-		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
-		{"ip", "netns", "exec", namespace, "sysctl", "-q", "-w", "net.ipv6.conf." + guestVirtualEthernet + ".proxy_ndp=1"},
-		{"ip", "-n", namespace, "link", "set", guestVirtualEthernet, "mtu", strconv.Itoa(meshMTU)},
-		{"ip", "-n", namespace, "-6", "addr", "replace", meshGatewayAddress + "/64", "dev", tapName, "nodad"},
-		{"ip", "-n", namespace, "-6", "route", "replace", address + "/128", "dev", tapName},
-		{"ip", "-n", namespace, "-6", "neigh", "replace", address, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent"},
-		{"ip", "-n", namespace, "-6", "route", "replace", meshPrefix, "via", meshGatewayAddress, "dev", guestVirtualEthernet},
-		{"ip", "-n", namespace, "-6", "neigh", "replace", "proxy", address, "dev", guestVirtualEthernet},
+		{"sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
+		{"sysctl", "-q", "-w", "net.ipv6.conf." + guestVirtualEthernet + ".proxy_ndp=1"},
+		{"ip", "link", "set", guestVirtualEthernet, "mtu", strconv.Itoa(meshMTU)},
+		{"ip", "-6", "addr", "replace", meshGatewayAddress + "/64", "dev", tapName, "nodad"},
+		{"ip", "-6", "route", "replace", address + "/128", "dev", tapName},
+		{"ip", "-6", "neigh", "replace", address, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent"},
+		{"ip", "-6", "route", "replace", meshPrefix, "via", meshGatewayAddress, "dev", guestVirtualEthernet},
+		{"ip", "-6", "neigh", "replace", "proxy", address, "dev", guestVirtualEthernet},
 	}
 }

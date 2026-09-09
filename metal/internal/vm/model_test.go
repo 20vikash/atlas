@@ -2,12 +2,9 @@ package vm
 
 import "testing"
 
-func TestSleepingIsAnObservedStateOnly(t *testing.T) {
-	if !isObservedState(StateSleeping) {
-		t.Error("sleeping must be a valid observed state")
-	}
-	if IsDesiredState(StateSleeping) {
-		t.Error("sleeping must not be a valid desired state")
+func TestSleepingIsNotAVirtualMachineState(t *testing.T) {
+	if isObservedState(State("sleeping")) || IsDesiredState(State("sleeping")) {
+		t.Error("sleeping must not be a virtual machine state")
 	}
 }
 

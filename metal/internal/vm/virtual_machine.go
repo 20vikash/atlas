@@ -40,6 +40,7 @@ func networkRequest(record DesiredRecord) NetworkRequest {
 		UserID:           record.UserID,
 		GroupID:          record.GroupID,
 		Configuration:    record.Specification.Network,
+		TrackTraffic:     record.State == StateRunning && record.Specification.SleepAfterIdleSeconds > 0,
 	}
 }
 

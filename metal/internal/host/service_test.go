@@ -78,3 +78,17 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 		t.Fatalf("virtual machine states = %+v", result.VirtualMachineStates)
 	}
 }
+
+func TestSynchronizeAllowsMeshToBeDisabled(t *testing.T) {
+	dependencies := &testHostDependencies{}
+	service, err := NewService(Dependencies{
+		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
+		Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Synchronize(t.Context(), DesiredState{}); err != nil {
+		t.Fatal(err)
+	}
+}

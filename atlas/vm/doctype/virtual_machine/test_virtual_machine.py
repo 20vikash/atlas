@@ -23,8 +23,7 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 		"compute": {
 			"virtual_cpu_count": 2,
 			"memory_mib": 2048,
-			"is_sleepy": True,
-			"idle_timeout_seconds": 1800,
+			"sleep_after_idle_seconds": 1800,
 		},
 		"disk": {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000},
 		"image": {
@@ -67,8 +66,7 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 COMPUTE_REQUEST = {
 	"virtual_cpu_count": 2,
 	"memory_mib": 2048,
-	"is_sleepy": True,
-	"idle_timeout_seconds": 1800,
+	"sleep_after_idle_seconds": 1800,
 }
 
 
@@ -233,7 +231,6 @@ class TestVirtualMachineDocument(UnitTestCase):
 		self.assertIsNone(virtual_machine.get_metal_vm_info())
 		self.assertEqual(virtual_machine.current_state, "unknown")
 		self.assertIsNone(virtual_machine.desired_state)
-		self.assertFalse(virtual_machine.is_sleepy)
 
 
 class TestVirtualMachineService(UnitTestCase):
@@ -279,8 +276,7 @@ class TestVirtualMachineService(UnitTestCase):
 			{
 				"virtual_cpu_count": 2,
 				"memory_mib": 2048,
-				"is_sleepy": False,
-				"idle_timeout_seconds": 0,
+				"sleep_after_idle_seconds": 0,
 			},
 		)
 		self.assertEqual(metal_request["disk"]["size_mib"], 10240)
@@ -577,8 +573,6 @@ class TestMetalVirtualMachineModel(UnitTestCase):
 		self.assertEqual(virtual_machine.egress, "uplink")
 		self.assertEqual(virtual_machine.wireguard_mesh_ipv6, "fdaa:1::1")
 		self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
-		self.assertTrue(virtual_machine.is_sleepy)
-		self.assertEqual(virtual_machine.idle_timeout_seconds, 1800)
 		self.assertEqual(virtual_machine.disk_throughput_mibps, 50)
 		self.assertEqual(virtual_machine.disk_iops, 2000)
 		self.assertEqual(virtual_machine.private_network_throughput_mibps, 100)

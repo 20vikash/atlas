@@ -3,6 +3,8 @@ package vm
 import (
 	"context"
 	"testing"
+
+	"github.com/frappe/atlas/metal/internal/network/traffic"
 )
 
 type testWarmImageStore struct {
@@ -39,7 +41,7 @@ func TestWarmImageBuilderUsesManagerOwnedTemporaryMachine(t *testing.T) {
 	runtime := &testWarmRuntime{fakeRuntime: baseRuntime}
 	manager, err := NewManager(
 		ManagerConfig{MachinesDirectory: t.TempDir()},
-		ManagerDependencies{Runtime: runtime, Network: &fakeNetwork{}, Storage: &fakeStorage{}, Snapshots: fakeSnapshots{}, NetworkActivityMonitor: &fakeNetworkActivityMonitor{}, NetworkWakeMonitor: &fakeNetworkWakeMonitor{}},
+		ManagerDependencies{Runtime: runtime, Network: &fakeNetwork{}, Storage: &fakeStorage{}, Snapshots: fakeSnapshots{}, Traffic: &traffic.Monitor{}},
 	)
 	if err != nil {
 		t.Fatal(err)

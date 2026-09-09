@@ -27,8 +27,13 @@ pool = "metal"
 interface = "wg0"
 
 [wg_mesh]
-# Atlas WG Mesh is required. metald refuses to start without this CLI.
+# Set false to disable Atlas WG Mesh on this host.
+enabled = true
 binary_path = "/usr/local/bin/atlas-wg-mesh"
 # Interface that carries discovery. Atlas WG Mesh attaches its uplink hook here,
 # so use the VLAN itself, not its parent. Required.
 uplink = "eno1.1878"
+
+[traffic_monitor]
+# Set false to disable VM traffic monitoring on this host.
+enabled = true

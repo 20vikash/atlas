@@ -191,7 +191,7 @@ func (manager *Manager) RunTemporary(
 			manager.store.remove(identifier),
 		)
 	}()
-	if err := manager.runtime.Start(ctx, machine, StartNormal); err != nil {
+	if err := manager.runtime.Start(ctx, machine); err != nil {
 		return fmt.Errorf("start temporary VM: %w", err)
 	}
 	return operation(machine)

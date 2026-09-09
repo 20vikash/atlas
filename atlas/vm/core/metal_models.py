@@ -6,12 +6,11 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class MetalCompute:
-	"""Store the desired CPU, memory, and sleep policy values."""
+	"""Store the desired compute configuration."""
 
 	virtual_cpu_count: int
 	memory_mib: int
-	is_sleepy: bool
-	idle_timeout_seconds: int
+	sleep_after_idle_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +153,7 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 		compute=MetalCompute(
 			virtual_cpu_count=integer_field(compute, "virtual_cpu_count"),
 			memory_mib=integer_field(compute, "memory_mib"),
-			is_sleepy=boolean_field(compute, "is_sleepy"),
-			idle_timeout_seconds=integer_field(compute, "idle_timeout_seconds"),
+			sleep_after_idle_seconds=integer_field(compute, "sleep_after_idle_seconds"),
 		),
 		disk=MetalDisk(
 			size_mib=integer_field(disk, "size_mib"),

@@ -4,8 +4,6 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
-
-	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // @Summary	Set the virtual machine power state
@@ -37,14 +35,7 @@ func (s *Server) setVirtualMachinePowerState(c echo.Context) error {
 	if err != nil {
 		return badRequest(err.Error())
 	}
-	if request.Warm {
-		if state != vm.StateStopped {
-			return badRequest("warm is valid only with a stopped state")
-		}
-		if err := s.virtualMachineManager.StopWarm(c.Request().Context(), identifier); err != nil {
-			return err
-		}
-	} else if err := s.virtualMachineManager.SetPowerState(c.Request().Context(), identifier, state); err != nil {
+	if err := s.virtualMachineManager.SetPowerState(c.Request().Context(), identifier, state); err != nil {
 		return err
 	}
 

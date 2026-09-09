@@ -16,12 +16,11 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// TestWarmStopRejectsANonRunningVM checks the state guard before snapshotting.
-func TestWarmStopRejectsANonRunningVM(t *testing.T) {
+func TestSaveAndStopRejectsAStoppedVMWithoutSavedState(t *testing.T) {
 	units := &stubUnits{active: false} // inactive reports stopped
 	m := testMachine(units, fcSocket(t, nil), time.Minute)
 
-	if _, err := m.warmStop(context.Background()); !errors.Is(err, vm.ErrConflict) {
+	if err := m.saveAndStop(context.Background()); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
 }

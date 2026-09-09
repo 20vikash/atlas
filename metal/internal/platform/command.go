@@ -19,6 +19,12 @@ func Run(ctx context.Context, name string, args ...string) error {
 	return nil
 }
 
+// RunInNetworkNamespace executes a command in a named network namespace.
+func RunInNetworkNamespace(ctx context.Context, namespace, name string, args ...string) (string, error) {
+	arguments := append([]string{"netns", "exec", namespace, name}, args...)
+	return Output(ctx, "ip", arguments...)
+}
+
 // Output runs a host command and returns stdout. A failure includes stderr.
 func Output(ctx context.Context, name string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer

@@ -16,66 +16,54 @@ func writeConfig(t *testing.T, body string) string {
 }
 
 func TestLoadDefaults(t *testing.T) {
-	o, err := load(writeConfig(t, ""))
+	options, err := load(writeConfig(t, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o != defaultOpts() {
-		t.Fatalf("got %+v, want defaults %+v", o, defaultOpts())
+	if options != defaultOptions() {
+		t.Fatalf("got %+v, want defaults %+v", options, defaultOptions())
 	}
 }
 
 func TestLoadFileOverridesDefault(t *testing.T) {
 	path := writeConfig(t, "[metald]\nlisten = \"0.0.0.0:9000\"\n[zfs]\npool = \"tank\"\n")
-	o, err := load(path)
+	options, err := load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.listen != "0.0.0.0:9000" {
-		t.Errorf("listen = %q, want the file value", o.listen)
+	if options.listen != "0.0.0.0:9000" {
+		t.Errorf("listen = %q, want the file value", options.listen)
 	}
-	if o.pool != "tank" {
-		t.Errorf("pool = %q, want the file value", o.pool)
+	if options.pool != "tank" {
+		t.Errorf("pool = %q, want the file value", options.pool)
 	}
-	if o.imagesDir != defaultOpts().imagesDir {
-		t.Errorf("imagesDir = %q, want the default for an unset key", o.imagesDir)
+	if options.imagesDir != defaultOptions().imagesDir {
+		t.Errorf("imagesDir = %q, want the default for an unset key", options.imagesDir)
 	}
 }
 
-func TestMeshEnabledByDefaultAndDisabledByConfig(t *testing.T) {
-	if !defaultOpts().mesh.enabled {
-		t.Fatal("mesh must be enabled by default")
-	}
-
-	// An absent enabled key keeps the default; only an explicit false disables it.
-	present, err := load(writeConfig(t, "[wg_mesh]\nuplink = \"eth0\"\n"))
+func TestLoadFeatureSwitches(t *testing.T) {
+	path := writeConfig(t, "[wg_mesh]\nenabled = false\n[traffic_monitor]\nenabled = false\n")
+	options, err := load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !present.mesh.enabled {
-		t.Error("mesh became disabled without an explicit enabled=false")
-	}
-
-	off, err := load(writeConfig(t, "[wg_mesh]\nenabled = false\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if off.mesh.enabled {
-		t.Error("enabled=false did not disable the mesh")
+	if options.mesh.enabled || options.trafficMonitor.enabled {
+		t.Fatalf("feature switches = mesh %t, traffic monitor %t, want both disabled", options.mesh.enabled, options.trafficMonitor.enabled)
 	}
 }
 
 func TestLoadBaseDirMovesDerivedDirs(t *testing.T) {
 	path := writeConfig(t, "[metald]\nbase_dir = \"/srv/metal\"\n")
-	o, err := load(path)
+	options, err := load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.cfg.MachinesDir != "/srv/metal/machines" {
-		t.Errorf("machinesDir = %q", o.cfg.MachinesDir)
+	if options.cfg.MachinesDir != "/srv/metal/machines" {
+		t.Errorf("machinesDir = %q", options.cfg.MachinesDir)
 	}
-	if o.imagesDir != "/srv/metal/images" {
-		t.Errorf("imagesDir = %q", o.imagesDir)
+	if options.imagesDir != "/srv/metal/images" {
+		t.Errorf("imagesDir = %q", options.imagesDir)
 	}
 }
 
@@ -99,21 +87,21 @@ func TestLoadMissingFile(t *testing.T) {
 
 func TestMakeDirs(t *testing.T) {
 	dir := t.TempDir()
-	o := defaultOpts()
-	o.baseDir = dir
-	o.deriveDirs()
-	o.cfg.SocketsDir = filepath.Join(dir, "run")
+	options := defaultOptions()
+	options.baseDir = dir
+	options.deriveDirs()
+	options.cfg.SocketsDir = filepath.Join(dir, "run")
 
-	if err := makeDirs(o); err != nil {
+	if err := makeDirs(options); err != nil {
 		t.Fatal(err)
 	}
-	if err := makeDirs(o); err != nil {
+	if err := makeDirs(options); err != nil {
 		t.Fatalf("makeDirs is not repeatable: %v", err)
 	}
 	for path, want := range map[string]os.FileMode{
-		o.cfg.MachinesDir: 0o750,
-		o.cfg.SocketsDir:  0o700,
-		o.imagesDir:       0o755,
+		options.cfg.MachinesDir: 0o750,
+		options.cfg.SocketsDir:  0o700,
+		options.imagesDir:       0o755,
 	} {
 		info, err := os.Stat(path)
 		if err != nil {

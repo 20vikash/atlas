@@ -29,26 +29,23 @@ type desiredVirtualMachineResponse struct {
 // observedVirtualMachineResponse is the state reached by the host and any
 // operation currently in progress.
 type observedVirtualMachineResponse struct {
-	Generation            uint64                  `json:"generation"`
-	RestartGeneration     uint64                  `json:"restart_generation"`
-	State                 string                  `json:"state"`
-	Phase                 string                  `json:"phase,omitempty"`
-	OperationID           string                  `json:"operation_id,omitempty"`
-	OperationStarted      string                  `json:"operation_started_at,omitempty"`
-	UpdatedAt             string                  `json:"updated_at"`
-	LastNetworkActivityAt string                  `json:"last_network_activity_at,omitempty"`
-	SleepingSince         string                  `json:"sleeping_since,omitempty"`
-	Disk                  observedDiskResponse    `json:"disk"`
-	Network               observedNetworkResponse `json:"network"`
-	Error                 *operationErrorResponse `json:"error"`
+	Generation        uint64                  `json:"generation"`
+	RestartGeneration uint64                  `json:"restart_generation"`
+	State             string                  `json:"state"`
+	Phase             string                  `json:"phase,omitempty"`
+	OperationID       string                  `json:"operation_id,omitempty"`
+	OperationStarted  string                  `json:"operation_started_at,omitempty"`
+	UpdatedAt         string                  `json:"updated_at"`
+	Disk              observedDiskResponse    `json:"disk"`
+	Network           observedNetworkResponse `json:"network"`
+	Error             *operationErrorResponse `json:"error"`
 }
 
-// computeResponse is the CPU shape, memory shape, and sleep policy.
+// computeResponse is the requested compute configuration.
 type computeResponse struct {
-	VirtualCPUCount    int  `json:"virtual_cpu_count"`
-	MemoryMiB          int  `json:"memory_mib"`
-	IsSleepy           bool `json:"is_sleepy"`
-	IdleTimeoutSeconds int  `json:"idle_timeout_seconds"`
+	VirtualCPUCount       int `json:"virtual_cpu_count"`
+	MemoryMiB             int `json:"memory_mib"`
+	SleepAfterIdleSeconds int `json:"sleep_after_idle_seconds"`
 }
 
 // guestResponse is the guest-facing configuration. User data is not returned.
@@ -125,10 +122,9 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			RestartGeneration: information.DesiredRestartGeneration,
 			State:             string(information.DesiredState),
 			Compute: computeResponse{
-				VirtualCPUCount:    information.VirtualCPUCount,
-				MemoryMiB:          information.MemoryMiB,
-				IsSleepy:           information.IsSleepy,
-				IdleTimeoutSeconds: information.IdleTimeoutSeconds,
+				VirtualCPUCount:       information.VirtualCPUCount,
+				MemoryMiB:             information.MemoryMiB,
+				SleepAfterIdleSeconds: information.SleepAfterIdleSeconds,
 			},
 			Disk: diskResponse{
 				ThroughputMiBps: information.DiskThroughputMiBps,
@@ -150,18 +146,16 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			},
 		},
 		Observed: observedVirtualMachineResponse{
-			Generation:            information.ObservedGeneration,
-			RestartGeneration:     information.ObservedRestartGeneration,
-			State:                 string(information.State),
-			Phase:                 information.Phase,
-			OperationID:           information.OperationID,
-			OperationStarted:      formatRFC3339(information.OperationStartedAt),
-			UpdatedAt:             formatRFC3339(information.UpdatedAt),
-			LastNetworkActivityAt: formatRFC3339(information.LastNetworkActivityAt),
-			SleepingSince:         formatRFC3339(information.SleepingSince),
-			Disk:                  observedDiskResponse{UsedMiB: information.DiskUsedMiB},
-			Network:               observedNetworkResponse{MAC: information.MAC},
-			Error:                 toOperationError(information.Error),
+			Generation:        information.ObservedGeneration,
+			RestartGeneration: information.ObservedRestartGeneration,
+			State:             string(information.State),
+			Phase:             information.Phase,
+			OperationID:       information.OperationID,
+			OperationStarted:  formatRFC3339(information.OperationStartedAt),
+			UpdatedAt:         formatRFC3339(information.UpdatedAt),
+			Disk:              observedDiskResponse{UsedMiB: information.DiskUsedMiB},
+			Network:           observedNetworkResponse{MAC: information.MAC},
+			Error:             toOperationError(information.Error),
 		},
 	}
 }

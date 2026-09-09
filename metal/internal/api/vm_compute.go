@@ -8,7 +8,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// @Summary	Set virtual machine compute resources and sleep policy
+// @Summary	Set virtual machine compute resources and idle shutdown
 // @Description	Store the complete CPU and memory shape. The virtual machine must be stopped.
 // @ID			setVirtualMachineCompute
 // @Tags		Virtual machines
@@ -41,9 +41,9 @@ func (s *Server) setVirtualMachineCompute(c echo.Context) error {
 		return err
 	}
 	if err := s.virtualMachineManager.SetCompute(c.Request().Context(), virtualMachine.ID, vm.Compute{
-		VirtualCPUCount: request.VirtualCPUCount,
-		MemoryMiB:       request.MemoryMiB,
-		Sleep:           request.sleepPolicy(),
+		VirtualCPUCount:       request.VirtualCPUCount,
+		MemoryMiB:             request.MemoryMiB,
+		SleepAfterIdleSeconds: request.SleepAfterIdleSeconds,
 	}); err != nil {
 		return err
 	}

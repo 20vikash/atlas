@@ -11,7 +11,7 @@ import (
 // ensureNamespaceBase creates the namespace loopback and guest tap.
 func ensureNamespaceBase(ctx context.Context, request request) error {
 	namespace := namespaceName(request.VirtualMachineID)
-	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", "lo", "up"); err != nil {
+	if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "link", "set", "lo", "up"); err != nil {
 		return err
 	}
 	tapExists, err := namespaceLinkExists(ctx, namespace, tapName)
@@ -20,25 +20,26 @@ func ensureNamespaceBase(ctx context.Context, request request) error {
 	}
 	if !tapExists {
 		userID, groupID := fmt.Sprint(request.UserID), fmt.Sprint(request.GroupID)
-		if err := platform.Run(ctx, "ip", "-n", namespace, "tuntap", "add", tapName, "mode", "tap", "user", userID, "group", groupID); err != nil {
+		if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "tuntap", "add", tapName, "mode", "tap", "user", userID, "group", groupID); err != nil {
 			return err
 		}
 	}
 	gatewayCIDR := fmt.Sprintf("%s/%d", gatewayIPAddress, networkPrefixLength)
-	if err := platform.Run(ctx, "ip", "-n", namespace, "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
+	if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "addr", "replace", gatewayCIDR, "dev", tapName); err != nil {
 		return err
 	}
-	if err := platform.Run(ctx, "ip", "-n", namespace, "link", "set", tapName, "up"); err != nil {
+	if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "link", "set", tapName, "up"); err != nil {
 		return err
 	}
 	// Keep wake packets routable while the guest cannot answer ARP.
-	return platform.Run(ctx, "ip", "-n", namespace, "neigh", "replace",
+	_, err = platform.RunInNetworkNamespace(ctx, namespace, "ip", "neigh", "replace",
 		guestIPAddress, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent")
+	return err
 }
 
 // namespaceLinkExists reports whether one interface is inside the namespace.
 func namespaceLinkExists(ctx context.Context, namespace, name string) (bool, error) {
-	output, err := platform.Output(ctx, "ip", "-n", namespace, "-o", "link", "show")
+	output, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-o", "link", "show")
 	if err != nil {
 		return false, err
 	}
@@ -59,15 +60,13 @@ func virtualEthernetNames(userID uint32) (host, guest string) {
 	return fmt.Sprintf("vh-%d", userID), fmt.Sprintf("vg-%d", userID)
 }
 
-// virtualEthernetSteps builds the private network attachment. Only EgressNone drops it.
-func virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, hostIPAddress, namespaceIPAddress string) [][]string {
+// virtualEthernetSteps builds the host side of the private network attachment.
+func virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, hostIPAddress string) [][]string {
 	return [][]string{
 		{"ip", "link", "add", hostVirtualEthernet, "type", "veth", "peer", "name", guestVirtualEthernet},
 		{"ip", "link", "set", guestVirtualEthernet, "netns", namespace},
 		{"ip", "addr", "add", hostIPAddress + "/30", "dev", hostVirtualEthernet},
 		{"ip", "link", "set", hostVirtualEthernet, "up"},
-		{"ip", "-n", namespace, "addr", "add", namespaceIPAddress + "/30", "dev", guestVirtualEthernet},
-		{"ip", "-n", namespace, "link", "set", guestVirtualEthernet, "up"},
 	}
 }
 
@@ -105,7 +104,13 @@ func setVirtualEthernet(ctx context.Context, virtualMachineID string, userID uin
 	}
 
 	hostIPAddress, namespaceIPAddress := transitAddresses(userID)
-	return runSteps(ctx, virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, hostIPAddress, namespaceIPAddress))
+	if err := runSteps(ctx, virtualEthernetSteps(namespace, hostVirtualEthernet, guestVirtualEthernet, hostIPAddress)); err != nil {
+		return err
+	}
+	return runNetworkNamespaceSteps(ctx, namespace, [][]string{
+		{"ip", "addr", "add", namespaceIPAddress + "/30", "dev", guestVirtualEthernet},
+		{"ip", "link", "set", guestVirtualEthernet, "up"},
+	})
 }
 
 // networkLinkExists reports whether one host network interface is present.
@@ -136,6 +141,16 @@ func linkListContains(output, name string) bool {
 func runSteps(ctx context.Context, steps [][]string) error {
 	for _, step := range steps {
 		if err := platform.Run(ctx, step[0], step[1:]...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runNetworkNamespaceSteps runs commands in one network namespace in order.
+func runNetworkNamespaceSteps(ctx context.Context, namespace string, steps [][]string) error {
+	for _, step := range steps {
+		if _, err := platform.RunInNetworkNamespace(ctx, namespace, step[0], step[1:]...); err != nil {
 			return err
 		}
 	}

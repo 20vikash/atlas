@@ -4,121 +4,64 @@
 
 ## Purpose
 
-A host operation is slow and can fail. Most VM lifecycle requests must not wait for one. So this package splits a VM in two: a desired record the controller writes, and an observed record the host writes. A lifecycle request stores intent and returns. Reconciliation makes the host agree with it, and retries until it does.
-
-Nothing outside this package writes either record.
+This package owns VM records, state transitions, and reconciliation. Host packages implement runtime, network, storage, and snapshot operations through small interfaces declared here. The manager uses `traffic.Monitor` directly.
 
 ## Request flow
 
 ```text
-API request ---> desired record ---> response returned
-                      |
-                 Wake  |                 the reconciler runs a pass
-                      v
-                 reconcile pass ---> Runtime, Network, Storage
-                      |
-                      v
-                 observed record ---> polled by the controller
+API request -> desired record -> response
+                    |
+                    v
+             reconcile pass -> Runtime, Network, Storage, traffic.Monitor
+                    |
+                    v
+              observed record
 ```
 
-The controller polls until the observed generations match the desired generations. Those generations are the completion signal for asynchronous changes, so every desired change must raise a generation.
-
-## Types
-
-| Type | Owns |
-|---|---|
-| `Manager` | Both records, the per-VM locks, and every operation. One per daemon. |
-| `DesiredRecord` | What the controller asked for. |
-| `ObservedRecord` | What the host reached, plus cleanup progress and the last failure. |
-| `Information` | The safe view for consumers. Local error detail never reaches it. |
-| `WarmImageBuilder` | Warm artifact creation, through narrow capability interfaces. |
-| `Runtime`, `Network`, `Storage`, `Snapshots` | Host services, defined here and implemented elsewhere. |
-| `NetworkActivityMonitor` | Last host-to-guest packet activity for a VM. |
-| `NetworkWakeMonitor` | Packet-triggered wake state and event delivery. |
-
-An operation binds the manager to one identifier for its duration. That handle keeps no VM state.
+The controller polls until observed generations match desired generations. The desired generation rises only for a real desired change. The restart generation rises for each accepted restart.
 
 ## Records
 
 ```text
-machines/<id>/config.json   desired
-machines/<id>/status.json   observed
+machines/<id>/config.json   desired state and specification
+machines/<id>/status.json   observed state and operation progress
 ```
 
-Generations carry the meaning:
+The create fingerprint identifies one reservation request. It includes `sleep_after_idle_seconds` and excludes signed image URLs.
 
-- The desired generation rises only on a real change, so a repeated request does not make the reconciler redo work.
-- The restart generation rises per accepted restart, because a restart must happen again even when nothing else changed.
-- A pass copies desired generations into the observed record only after the matching work succeeds.
+`sleep_after_idle_seconds` is compute configuration. `0` disables automatic idle shutdown. A timeout-only update does not change `SpecificationGeneration` because it does not change the Firecracker machine shape.
 
-The create fingerprint identifies the reservation a create request asked for. It excludes signed image URLs, so a retry with fresh URLs is recognized as the same request rather than a conflict.
-
-The daemon validates every record at startup and refuses to run on one it cannot read. It never repairs or removes a record: losing desired state is worse than failing to start.
-
-A directory under `machines/` is a reserved VM only when it holds `config.json`. A temporary VM keeps no records, and the runtime makes its directory, so a build that stops leaves a directory with no record. That directory is not a VM and the daemon ignores it. A capacity read also skips a VM whose records are removed while the read runs.
-
-The desired record holds the sleep policy of one VM: `is_sleepy` and `idle_timeout_seconds`. The policy is intent, not machine shape, so a change to it does not raise the specification generation and leaves a published memory snapshot valid. The API carries it with the compute settings.
-
-`sleeping` is an observed state only. It means that Firecracker is stopped and a valid VM memory snapshot exists. The `sleep` object stores activity, request, snapshot, and generation values. It stores no paths. Old records without this object remain valid. A partial object or a sleeping record without a published snapshot is invalid.
+The daemon validates every record at startup. It does not repair or remove an invalid record.
 
 ## Reconciliation
 
 ```text
-desired running   -> Start or Resume
-desired paused    -> Start when necessary, then Pause
-desired stopped   -> Stop, or warm Stop to sleeping
-desired destroyed -> Remove runtime -> Release network -> Release storage
+desired running   -> start, resume, restore saved state, or stop after idle
+desired paused    -> start or restore when necessary, then pause
+desired stopped   -> hard stop and delete saved state
+desired destroyed -> remove runtime, network, storage, and records
 ```
 
-A warm stop changes a live guest to `sleeping`. A manual warm stop has desired state `stopped` with the `warm` flag. Automatic sleep keeps desired state `running`. It checks packet activity before and after the warm stop. New traffic cancels the sleep.
+The manager checks traffic only after normal running reconciliation completes. It starts event observation before the final sample. A sample error before state creation keeps the VM running. New traffic or a sample error after state creation restores the VM.
 
-A sleeping VM follows these rules:
+An automatically stopped VM keeps desired state `running` and reports observed state `stopped`. New traffic enters the same per-VM lock, validates the target and runtime, and restores the saved state. A stale or duplicate event has no effect.
 
-| Desired change | Action |
-|---|---|
-| Running, sleepy, and current | Stay sleeping and arm wake. |
-| Running | Restore the snapshot. |
-| Paused | Load the snapshot with paused vCPUs. |
-| Plain stopped | Discard the snapshot. |
-| Warm stopped | Stay sleeping. |
-| Restart | Discard the snapshot and cold boot. |
-| Incompatible specification | Discard the snapshot and cold boot. |
+A positive timeout can change while the VM stays stopped. A change to `0` restores it. A restart or machine shape change deletes the saved state and uses a normal start.
 
-A restore failure keeps the VM sleeping. An interrupted warm stop recovers from a valid snapshot. An invalid snapshot is an operation failure.
+A valid saved state is authoritative when Firecracker is stopped. Restore failure keeps the saved state. Invalid state is an operation failure. A saved state beside a running Firecracker process is stale and is deleted.
 
-## Packet wake
-
-A sleeping VM wakes on a host-to-guest TCP packet. Automatic sleep arms wake before its final activity check.
-
-```text
-TCP packet -> eBPF event -> wake reconciler -> VM lock -> validate
-                                                     |
-                                                     v
-                             restore -> record running -> disarm
-```
-
-`WakeFromNetwork` requires the current user ID, desired `running`, `is_sleepy`, observed `sleeping`, and a snapshot generation. A stale or duplicate event has no effect.
-
-A restore failure keeps the VM sleeping and keeps its snapshot. A later pass rearms wake. If restore succeeds but the status write fails, the next pass reads the running runtime and completes the record.
-
-The trigger packet can be lost. Clients must retry. Existing TCP and vsock connections might not survive the restore.
-
-Each pass and desired-state change holds the same VM lock. A wake event waits for an active warm stop before it restores the VM.
-
-The phase and operation ID are written before each host call, so an interrupted pass leaves evidence of what was in flight. A failure stores a safe message for the controller and local detail that stays on the host.
-
-Destroy records progress per resource, so an interrupted destroy resumes instead of repeating released work. Records are removed only after every step succeeds.
+The phase and operation ID are written before each host call. A failure stores a safe public message and local detail. Destroy records progress per resource so an interrupted destroy resumes safely.
 
 ## Boundaries
 
-`Runtime`, `Network`, `Storage`, and `Snapshots` are declared here and implemented in other packages. The manager uses those interfaces for host operations and owns the records and reconciliation, not the host details. A runtime starts and inspects a guest. It owns no record, no network identity, no reconciliation, and no cleanup progress.
+`Runtime`, `Network`, `Storage`, and `Snapshots` are consumed here and implemented by host packages. The manager uses `traffic.Monitor` for samples and watch operations. The daemon traffic listener passes each `traffic.Event` to `Manager.RestoreAfterTraffic`.
 
-`WarmImageBuilder` orchestrates: it asks `Manager` for a temporary VM, `WarmRuntime` for the memory snapshot, and `WarmImageStore` to keep the result. A temporary VM has no records on disk and always attempts to release what it created.
+`WarmImageBuilder` creates shared start artifacts. It does not use the saved state of an idle VM.
 
 ## Related
 
-- [docs/vm.md](../../docs/vm.md) gives the lifecycle and the reasons behind this design.
 - [internal/firecracker/SPEC.md](../firecracker/SPEC.md) implements `Runtime`.
 - [internal/storage/SPEC.md](../storage/SPEC.md) implements `Storage` and `Snapshots`.
 - [internal/network/SPEC.md](../network/SPEC.md) implements `Network`.
-- [internal/reconciler/SPEC.md](../reconciler/SPEC.md) drives the passes.
+- [internal/network/traffic/SPEC.md](../network/traffic/SPEC.md) owns packet tracking.
+- [internal/reconciler/SPEC.md](../reconciler/SPEC.md) drives reconciliation and traffic events.

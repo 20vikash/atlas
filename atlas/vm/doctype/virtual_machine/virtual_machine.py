@@ -40,6 +40,7 @@ class VirtualMachine(Document):
 		memory_mib: DF.Int
 		metadata: DF.Code | None
 		server: DF.Link
+		sleep_after_idle_seconds: DF.Int
 		tenant_id: DF.Int
 		vcpus: DF.Int
 		virtual_machine_image: DF.Link
@@ -141,18 +142,6 @@ class VirtualMachine(Document):
 			)
 
 		return self.public_ipv4
-
-	@property
-	def is_sleepy(self) -> bool:
-		"""Report whether the host sleeps this VM when it is idle."""
-		information = self.get_metal_vm_info()
-		return information.desired.compute.is_sleepy if information else False
-
-	@property
-	def idle_timeout_seconds(self) -> int:
-		"""Return the idle time before sleep. Zero disables sleep."""
-		information = self.get_metal_vm_info()
-		return information.desired.compute.idle_timeout_seconds if information else 0
 
 	@property
 	def disk_throughput_mibps(self) -> int:
@@ -351,18 +340,13 @@ class VirtualMachine(Document):
 		return self.update_compute({"virtual_cpu_count": int(vcpus), "memory_mib": int(memory_mib)})
 
 	@frappe.whitelist(methods=["POST"])
-	def update_sleep_policy(self, is_sleepy: bool | int | str, idle_timeout_seconds: int) -> dict[str, Any]:
-		"""Change automatic sleep. An idle timeout of 0 disables it."""
-		try:
-			sleepy = strict_bool(is_sleepy, "is_sleepy")
-		except ValueError as error:
-			frappe.throw(_(str(error)), exc=AtlasUserError)
-			raise AssertionError from error
-
+	def update_idle_shutdown(self, sleep_after_idle_seconds: int) -> dict[str, Any]:
+		"""Change the idle shutdown delay. A value of 0 disables it."""
 		return self.update_compute(
 			{
-				"is_sleepy": sleepy,
-				"idle_timeout_seconds": self.parse_limit(idle_timeout_seconds, _("Idle timeout")),
+				"sleep_after_idle_seconds": self.parse_limit(
+					sleep_after_idle_seconds, _("Idle shutdown delay")
+				),
 			}
 		)
 

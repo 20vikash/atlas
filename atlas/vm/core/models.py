@@ -8,6 +8,7 @@ import frappe
 from atlas.atlas.core.parsing import strict_bool
 
 EGRESS_MODES = ("uplink", "mesh", "none")
+MAXIMUM_SLEEP_AFTER_IDLE_SECONDS = 9_223_372_036
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,8 +25,7 @@ class VirtualMachineCreateRequest:
 	ssh_keys: tuple[str, ...] = ()
 	user_data: str = ""
 	egress: str = "uplink"
-	is_sleepy: bool = False
-	idle_timeout_seconds: int = 0
+	sleep_after_idle_seconds: int = 0
 	disk_throughput_mibps: int = 0
 	disk_iops: int = 0
 	private_network_throughput_mibps: int = 0
@@ -60,6 +60,10 @@ class VirtualMachineCreateRequest:
 		if egress != "uplink" and server_ip_address:
 			raise ValueError("A public IPv4 address requires uplink egress.")
 
+		sleep_after_idle_seconds = cls.non_negative_integer(payload, "sleep_after_idle_seconds")
+		if sleep_after_idle_seconds > MAXIMUM_SLEEP_AFTER_IDLE_SECONDS:
+			raise ValueError("sleep_after_idle_seconds is too large.")
+
 		return cls(
 			virtual_machine_image=image,
 			virtual_cpu_count=virtual_cpu_count,
@@ -71,8 +75,7 @@ class VirtualMachineCreateRequest:
 			ssh_keys=cls.ssh_keys_tuple(payload),
 			user_data=str(payload.get("user_data") or ""),
 			egress=egress,
-			is_sleepy=strict_bool(payload.get("is_sleepy"), "is_sleepy"),
-			idle_timeout_seconds=cls.non_negative_integer(payload, "idle_timeout_seconds"),
+			sleep_after_idle_seconds=sleep_after_idle_seconds,
 			disk_throughput_mibps=cls.non_negative_integer(payload, "disk_throughput_mibps"),
 			disk_iops=cls.non_negative_integer(payload, "disk_iops"),
 			private_network_throughput_mibps=cls.non_negative_integer(

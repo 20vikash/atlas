@@ -89,54 +89,42 @@ func (runtime *Runtime) Inspect(ctx context.Context, input vm.RuntimeMachine) (v
 		return vm.RuntimeStatus{}, fmt.Errorf("inspect Firecracker VM: %w", err)
 	}
 
-	return vm.RuntimeStatus{State: state}, nil
+	_, savedStateError := runtime.configuration.loadSavedState(runtime.newMachine(input).savedStateRequirement())
+	hasSavedState := savedStateError == nil
+	if savedStateError != nil && !errors.Is(savedStateError, errSavedStateNotFound) {
+		return vm.RuntimeStatus{}, fmt.Errorf("validate saved VM state: %w", savedStateError)
+	}
+	return vm.RuntimeStatus{State: state, HasSavedState: hasSavedState}, nil
 }
 
-// Start launches a VM using the selected start mode.
-func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine, mode vm.StartMode) error {
-	switch mode {
-	case vm.StartNormal:
-		return runtime.newMachine(input).Start(ctx)
-	case vm.StartFromSleepSnapshot:
-		return runtime.newMachine(input).startFromMemorySnapshot(ctx, true)
-	case vm.StartFromSleepSnapshotPaused:
-		return runtime.newMachine(input).startFromMemorySnapshot(ctx, false)
-	default:
-		return fmt.Errorf("unknown start mode %d", mode)
-	}
+// Start launches a VM from a warm image or a cold boot.
+func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).Start(ctx)
 }
 
-// Stop stops a VM using the selected stop mode.
-func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine, mode vm.StopMode) (vm.StopOutcome, error) {
-	switch mode {
-	case vm.StopShutdown:
-		return vm.StopOutcome{}, runtime.newMachine(input).Stop(ctx)
-	case vm.StopWithSleepSnapshot:
-		return runtime.newMachine(input).warmStop(ctx)
-	default:
-		return vm.StopOutcome{}, fmt.Errorf("unknown stop mode %d", mode)
-	}
+// Stop shuts down a VM and deletes its saved state.
+func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).Stop(ctx)
 }
 
-// InspectSleepSnapshot returns the newest valid sleep snapshot or an error.
-func (runtime *Runtime) InspectSleepSnapshot(_ context.Context, input vm.RuntimeMachine) (vm.SleepSnapshot, error) {
-	machine := runtime.newMachine(input)
-	snapshot, err := runtime.configuration.latestValidMemorySnapshot(machine.memorySnapshotRequirement())
-	if errors.Is(err, errMemorySnapshotNotFound) {
-		return vm.SleepSnapshot{}, vm.ErrNotFound
-	}
-	if err != nil {
-		return vm.SleepSnapshot{}, err
-	}
-	return vm.SleepSnapshot{Generation: snapshot.Generation, CreatedAt: snapshot.Manifest.CreatedAt}, nil
+// SaveAndStop saves guest memory and stops Firecracker.
+func (runtime *Runtime) SaveAndStop(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).saveAndStop(ctx)
 }
 
-// DiscardSleepSnapshot removes a VM's sleep snapshots and runtime unit.
-func (runtime *Runtime) DiscardSleepSnapshot(ctx context.Context, input vm.RuntimeMachine) error {
-	if err := runtime.newMachine(input).cleanupSystemd(ctx); err != nil {
-		return fmt.Errorf("discard sleep snapshot: %w", err)
-	}
-	return runtime.purgeMemorySnapshots(input.ID)
+// Restore starts a VM from its saved state.
+func (runtime *Runtime) Restore(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).startFromSavedState(ctx, true)
+}
+
+// RestorePaused loads saved state without starting the virtual CPUs.
+func (runtime *Runtime) RestorePaused(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).startFromSavedState(ctx, false)
+}
+
+// DeleteSavedState removes the saved state of one VM.
+func (runtime *Runtime) DeleteSavedState(_ context.Context, input vm.RuntimeMachine) error {
+	return runtime.removeSavedState(input.ID)
 }
 
 // Pause pauses a running Firecracker virtual machine.
@@ -164,7 +152,7 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	if err := os.RemoveAll(filepath.Dir(runtime.configuration.chrootRoot(input.ID))); err != nil {
 		return fmt.Errorf("remove Firecracker jail: %w", err)
 	}
-	if err := runtime.purgeMemorySnapshots(input.ID); err != nil {
+	if err := runtime.removeSavedState(input.ID); err != nil {
 		return err
 	}
 

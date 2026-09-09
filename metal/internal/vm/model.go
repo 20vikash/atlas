@@ -9,43 +9,24 @@ import (
 
 // Specification contains the persistent configuration for one VM.
 type Specification struct {
-	VirtualCPUCount int                  `json:"virtual_cpu_count"`
-	MemoryMiB       int                  `json:"memory_mib"`
-	DiskMiB         int                  `json:"disk_mib"`
-	Disk            Disk                 `json:"disk"`
-	Image           Image                `json:"image"`
-	Network         NetworkConfiguration `json:"network"`
-	SSHKeys         []string             `json:"ssh_keys"`
-	Hostname        string               `json:"hostname"`
-	UserData        string               `json:"user_data"`
-	Metadata        map[string]string    `json:"metadata"`
+	VirtualCPUCount       int                  `json:"virtual_cpu_count"`
+	MemoryMiB             int                  `json:"memory_mib"`
+	SleepAfterIdleSeconds int                  `json:"sleep_after_idle_seconds,omitempty"`
+	DiskMiB               int                  `json:"disk_mib"`
+	Disk                  Disk                 `json:"disk"`
+	Image                 Image                `json:"image"`
+	Network               NetworkConfiguration `json:"network"`
+	SSHKeys               []string             `json:"ssh_keys"`
+	Hostname              string               `json:"hostname"`
+	UserData              string               `json:"user_data"`
+	Metadata              map[string]string    `json:"metadata"`
 }
 
-// SleepPolicy is the automatic sleep policy of one virtual machine. It is intent,
-// not machine shape, so a change to it does not raise the specification
-// generation and does not make a published memory snapshot stale.
-type SleepPolicy struct {
-	// IsSleepy allows automatic sleep for an idle VM.
-	IsSleepy bool `json:"is_sleepy,omitempty"`
-	// IdleTimeoutSeconds is the idle time before sleep. Zero disables sleep.
-	IdleTimeoutSeconds int `json:"idle_timeout_seconds,omitempty"`
-}
-
-// IsEnabled reports whether this policy can sleep a VM.
-func (policy SleepPolicy) IsEnabled() bool {
-	return policy.IsSleepy && policy.IdleTimeoutSeconds > 0
-}
-
-// IdleTimeout returns the idle time before sleep.
-func (policy SleepPolicy) IdleTimeout() time.Duration {
-	return time.Duration(policy.IdleTimeoutSeconds) * time.Second
-}
-
-// Compute is the requested CPU shape, memory shape, and sleep policy of one VM.
+// Compute is the requested compute configuration of one VM.
 type Compute struct {
-	VirtualCPUCount int
-	MemoryMiB       int
-	Sleep           SleepPolicy
+	VirtualCPUCount       int
+	MemoryMiB             int
+	SleepAfterIdleSeconds int
 }
 
 // Image identifies immutable boot files and their transport URLs.
@@ -88,6 +69,7 @@ type NetworkConfiguration struct {
 func (specification Specification) SameReservation(other Specification) bool {
 	return specification.VirtualCPUCount == other.VirtualCPUCount &&
 		specification.MemoryMiB == other.MemoryMiB &&
+		specification.SleepAfterIdleSeconds == other.SleepAfterIdleSeconds &&
 		specification.DiskMiB == other.DiskMiB &&
 		specification.Disk == other.Disk &&
 		specification.Image.Name == other.Image.Name &&
@@ -160,9 +142,6 @@ const (
 	StateStopped State = "stopped"
 	// StateFailed means the runtime stopped the guest unexpectedly.
 	StateFailed State = "failed"
-	// StateSleeping is observed only. The guest memory is in a snapshot and no
-	// Firecracker process runs.
-	StateSleeping State = "sleeping"
 	// StateDestroyed means every host resource is released.
 	StateDestroyed State = "destroyed"
 )
@@ -180,7 +159,7 @@ func IsDesiredState(state State) bool {
 // isObservedState reports whether state is one a runtime can report.
 func isObservedState(state State) bool {
 	switch state {
-	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateSleeping, StateDestroyed:
+	case StateUnknown, StateCreated, StateRunning, StatePaused, StateStopped, StateFailed, StateDestroyed:
 		return true
 	default:
 		return false
@@ -203,8 +182,7 @@ type Information struct {
 	SSHKeys                       []string
 	Hostname                      string
 	Metadata                      map[string]string
-	IsSleepy                      bool
-	IdleTimeoutSeconds            int
+	SleepAfterIdleSeconds         int
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
@@ -219,8 +197,6 @@ type Information struct {
 	OperationID                   string
 	OperationStartedAt            time.Time
 	UpdatedAt                     time.Time
-	LastNetworkActivityAt         time.Time
-	SleepingSince                 time.Time
 }
 
 // PublicOperationError contains safe reconciliation error data.

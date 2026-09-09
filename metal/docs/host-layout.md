@@ -28,17 +28,19 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 └── machines/                       derived from metald.base_dir
     └── <id>/                       one directory for each VM ID
         ├── config.json             versioned reservation and desired state
-        ├── status.json             versioned observed state, cleanup, and sleep progress
+        ├── status.json             versioned observed state and cleanup progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
-        ├── memory-snapshots/       published memory snapshots for this VM
-        │   └── <n>/                state, memory, and manifest.json
+        ├── saved-state/            one resumable state for automatic idle shutdown
+        │   ├── state
+        │   ├── memory
+        │   └── metadata.json
         └── firecracker/            the executable name that jailer appends
             └── <id>/
                 └── root/           the VM sees this as /
                     ├── firecracker jailer copies the exec file in
                     ├── vmlinux     hard link to the kernel
                     ├── rootfs.img  block node for the VM zvol
-                    ├── memory-snapshot-pending/  a snapshot before publish
+                    ├── saved-state-pending/  state before atomic publication
                     └── run/
                         └── firecracker.socket
 
@@ -51,17 +53,17 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 
 The host veth is `vh-<user-id>`. The namespace veth is `vg-<user-id>`. The TAP name is `tap0`.
 
-A sleepy VM uses this local cycle:
+Automatic idle shutdown uses this local cycle:
 
 ```text
-idle timeout                         packet or controller change
-running -- warm stop --> sleeping -- snapshot restore --> running
-                              |
-                              +-> Firecracker: stopped, MainPID 0
-                              +-> snapshot and vms/<id>: kept
+idle timeout                     IP packet or configuration change
+running -- save state --> stopped -- restore state --> running
+                            |
+                            +-> Firecracker: stopped, MainPID 0
+                            +-> saved state and vms/<id>: kept
 ```
 
-The snapshot is under `machines/<id>/memory-snapshots/<n>/`. `status.json` records the sleep progress.
+The saved state is under `machines/<id>/saved-state/`. Metal writes it under `saved-state-pending` and publishes it with one atomic rename.
 
 The jail is inside the VM directory. Removing `machines/<id>` removes the VM and its chroot. Jailer adds `<exec>/<id>/root` below the VM directory, so the jail stays separate from the VM's other files. The jail base is not configurable: the kernel is hard-linked into the jail, and a hard link cannot cross a filesystem.
 

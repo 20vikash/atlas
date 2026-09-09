@@ -84,7 +84,7 @@ type Service struct {
 
 // NewService returns a host service with explicit dependencies.
 func NewService(dependencies Dependencies) (*Service, error) {
-	if dependencies.Mesh == nil || dependencies.WireGuard == nil || dependencies.Images == nil ||
+	if dependencies.WireGuard == nil || dependencies.Images == nil ||
 		dependencies.VirtualMachines == nil || dependencies.Storage == nil || dependencies.Wake == nil {
 		return nil, fmt.Errorf("host service dependencies are required")
 	}
@@ -103,8 +103,10 @@ func NewService(dependencies Dependencies) (*Service, error) {
 // set is replaced in full, so the controller never sends incremental changes.
 func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (SyncResult, error) {
 	addresses := desired.PrivilegedVirtualMachineAddresses
-	if err := service.mesh.ApplyPrivilegedAddresses(ctx, addresses); err != nil {
-		return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
+	if service.mesh != nil {
+		if err := service.mesh.ApplyPrivilegedAddresses(ctx, addresses); err != nil {
+			return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
+		}
 	}
 	if err := service.wireGuard.Apply(ctx, desired.WireGuardPeers); err != nil {
 		return SyncResult{}, fmt.Errorf("apply WireGuard peers: %w", err)

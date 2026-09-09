@@ -18,7 +18,7 @@ Each set arrives complete and replaces the previous one. The controller sends no
 | `Capacity` | What the controller needs to place the next VM. |
 | `PrivilegedMesh`, `WireGuardManager`, `ImagePolicyStore`, `VirtualMachineSource`, `StorageCapacitySource` | The services a sync calls out to. |
 
-`Service` holds no state of its own. Each named service owns the state it applies, and `metald` supplies them all at startup.
+`Service` holds no state of its own. Each named service owns the state it applies, and `metald` supplies them at startup. The mesh service is absent when Atlas WG Mesh is disabled.
 
 ## Synchronize
 

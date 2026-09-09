@@ -76,7 +76,7 @@ func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, 
 }
 
 // Start uses a matching shared warm image when available, then falls back to a
-// cold boot. It never restores a VM-local sleep snapshot.
+// cold boot. It never restores VM saved state.
 func (m *machine) Start(ctx context.Context) error {
 	if m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
 		err := m.runtime.launchWarmImage(ctx, m.input, m.input.Specification.Image.Name)
@@ -110,10 +110,8 @@ func (m *machine) coldBoot(ctx context.Context) error {
 	return nil
 }
 
-// memorySnapshotRequirement describes the generations and build a snapshot must
-// match before this VM restores it.
-func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
-	return memorySnapshotRequirement{
+func (m *machine) savedStateRequirement() savedStateRequirement {
+	return savedStateRequirement{
 		VirtualMachineID:         m.input.ID,
 		UserID:                   m.input.UserID,
 		SpecificationGeneration:  m.input.SpecificationGeneration,
@@ -122,11 +120,10 @@ func (m *machine) memorySnapshotRequirement() memorySnapshotRequirement {
 	}
 }
 
-// restoreMemorySnapshot restores the newest valid VM-local snapshot. The new jail
-// receives its own copy before the external generation is purged.
-func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool, error) {
-	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
-	if errors.Is(err, errMemorySnapshotNotFound) {
+// restoreSavedState loads valid VM-local state into a new jail.
+func (m *machine) restoreSavedState(ctx context.Context, resume bool) (bool, error) {
+	snapshot, err := m.runtime.configuration.loadSavedState(m.savedStateRequirement())
+	if errors.Is(err, errSavedStateNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -139,41 +136,47 @@ func (m *machine) restoreMemorySnapshot(ctx context.Context, resume bool) (bool,
 	if err := m.runtime.launchMemorySnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata, resume); err != nil {
 		return false, err
 	}
-	if err := m.runtime.purgeMemorySnapshots(m.input.ID); err != nil {
-		m.runtime.logger.Warn("remove restored snapshots failed", "virtual_machine_id", m.input.ID, "error", err)
+	if err := m.runtime.removeSavedState(m.input.ID); err != nil {
+		return false, fmt.Errorf("remove restored saved state: %w", err)
 	}
 
 	return true, nil
 }
 
-// latestMemorySnapshot returns the newest valid snapshot, or false when none
-// validates.
-func (m *machine) latestMemorySnapshot() (validatedMemorySnapshot, bool) {
-	snapshot, err := m.runtime.configuration.latestValidMemorySnapshot(m.memorySnapshotRequirement())
+func (m *machine) savedState() (savedState, bool) {
+	snapshot, err := m.runtime.configuration.loadSavedState(m.savedStateRequirement())
 	if err != nil {
-		return validatedMemorySnapshot{}, false
+		return savedState{}, false
 	}
 	return snapshot, true
 }
 
-// startFromMemorySnapshot restores a required VM-local snapshot without cold
-// booting. A missing or invalid snapshot is an error.
-func (m *machine) startFromMemorySnapshot(ctx context.Context, resume bool) error {
-	restored, err := m.restoreMemorySnapshot(ctx, resume)
+// startFromSavedState restores required VM-local state without a cold boot.
+func (m *machine) startFromSavedState(ctx context.Context, resume bool) error {
+	restored, err := m.restoreSavedState(ctx, resume)
 	if err != nil {
 		return err
 	}
 	if !restored {
-		return fmt.Errorf("start from sleep snapshot: %w", errMemorySnapshotNotFound)
+		return fmt.Errorf("restore saved VM state: %w", errSavedStateNotFound)
 	}
 	m.recordImageUse()
 
 	return nil
 }
 
-// Stop shuts down the guest and discards its memory snapshot, so a later start
-// cold boots.
+// Stop shuts down the guest and deletes saved state.
 func (m *machine) Stop(ctx context.Context) error {
+	unitStatus, err := m.runtime.units.Status(ctx, m.input.ID)
+	if err != nil {
+		return err
+	}
+	if unitStatus.ActiveState != "active" {
+		if err := m.runtime.removeSavedState(m.input.ID); err != nil {
+			return err
+		}
+		return m.runtime.units.ResetFailed(ctx, m.input.ID)
+	}
 	if err := m.shutdownGuest(ctx); err != nil {
 		return err
 	}
@@ -182,7 +185,7 @@ func (m *machine) Stop(ctx context.Context) error {
 	}
 	_ = m.runtime.serialBroker.Close(m.input.ID)
 
-	if err := m.runtime.purgeMemorySnapshots(m.input.ID); err != nil {
+	if err := m.runtime.removeSavedState(m.input.ID); err != nil {
 		return err
 	}
 
@@ -190,27 +193,25 @@ func (m *machine) Stop(ctx context.Context) error {
 	return m.runtime.units.ResetFailed(ctx, m.input.ID)
 }
 
-// warmStop pauses the guest, publishes a full snapshot, then terminates
-// Firecracker. Publication first makes an interrupted stop recoverable.
-func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
+// saveAndStop publishes guest memory and then stops Firecracker.
+func (m *machine) saveAndStop(ctx context.Context) error {
 	state, err := m.status(ctx)
 	if err != nil {
-		return vm.StopOutcome{}, err
+		return err
 	}
 
 	// Recover a snapshot published before a daemon crash.
-	if snapshot, ok := m.latestMemorySnapshot(); ok {
+	if _, ok := m.savedState(); ok {
 		switch state {
 		case vm.StateStopped:
-			return stopOutcome(snapshot), nil
+			return nil
 		case vm.StatePaused:
 			if err := m.kill(ctx); err != nil {
-				return vm.StopOutcome{}, err
+				return err
 			}
-			return stopOutcome(snapshot), nil
+			return nil
 		default:
-			// A complete snapshot and a running VM are inconsistent.
-			return vm.StopOutcome{}, vm.ErrConflict
+			return vm.ErrConflict
 		}
 	}
 
@@ -218,45 +219,37 @@ func (m *machine) warmStop(ctx context.Context) (vm.StopOutcome, error) {
 	switch state {
 	case vm.StateRunning:
 		if err := m.api.Pause(ctx); err != nil {
-			return vm.StopOutcome{}, fmt.Errorf("pause for warm stop: %w", err)
+			return fmt.Errorf("pause before save: %w", err)
 		}
 		pausedByThisCall = true
 	case vm.StatePaused:
 		// An already paused guest needs no second pause.
 	default:
-		return vm.StopOutcome{}, vm.ErrConflict
+		return vm.ErrConflict
 	}
 
-	published, err := m.runtime.createAndPublishMemorySnapshot(ctx, m.input)
+	_, err = m.runtime.createSavedState(ctx, m.input)
 	if err != nil {
-		return vm.StopOutcome{}, m.recoverFailedWarmStop(ctx, pausedByThisCall, err)
+		return m.recoverFailedSave(ctx, pausedByThisCall, err)
 	}
 
 	if err := m.kill(ctx); err != nil {
-		return vm.StopOutcome{}, err
+		return err
 	}
 
-	return stopOutcome(published), nil
+	return nil
 }
 
-// stopOutcome reports the published generation and creation time of a snapshot.
-func stopOutcome(snapshot validatedMemorySnapshot) vm.StopOutcome {
-	return vm.StopOutcome{
-		MemorySnapshotGeneration: snapshot.Generation,
-		MemorySnapshotCreatedAt:  snapshot.Manifest.CreatedAt,
-	}
-}
-
-// recoverFailedWarmStop removes the pending snapshot and resumes only a guest
+// recoverFailedSave removes the pending snapshot and resumes only a guest
 // paused by this call.
-func (m *machine) recoverFailedWarmStop(ctx context.Context, pausedByThisCall bool, cause error) error {
+func (m *machine) recoverFailedSave(ctx context.Context, pausedByThisCall bool, cause error) error {
 	recovery := []error{cause}
-	if err := os.RemoveAll(m.runtime.configuration.pendingMemorySnapshotDirectory(m.input.ID)); err != nil {
+	if err := os.RemoveAll(m.runtime.configuration.pendingSavedStateDirectory(m.input.ID)); err != nil {
 		recovery = append(recovery, fmt.Errorf("remove pending snapshot: %w", err))
 	}
 	if pausedByThisCall {
 		if err := m.api.Resume(ctx); err != nil {
-			recovery = append(recovery, fmt.Errorf("resume after failed warm stop: %w", err))
+			recovery = append(recovery, fmt.Errorf("resume after failed save: %w", err))
 		}
 	}
 	return errors.Join(recovery...)

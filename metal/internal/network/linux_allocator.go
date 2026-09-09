@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/frappe/atlas/metal/internal/network/activity"
+	traffic "github.com/frappe/atlas/metal/internal/network/traffic"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // VMs reuse private addresses across isolated namespaces. The fixed guest MAC
-// encodes 172.16.0.2 and keeps a sleeping guest reachable.
+// encodes 172.16.0.2 and keeps a stopped guest reachable.
 const (
 	tapName             = "tap0"
 	gatewayIPAddress    = "172.16.0.1"
@@ -26,22 +26,34 @@ type meshRegistrar interface {
 	Remove(ctx context.Context, address, interfaceName string) error
 }
 
-// activityMonitor attaches and releases VM packet activity tracking. The VM
-// manager reads activity from the monitor itself, not through this allocator.
-type activityMonitor interface {
-	EnsureAttachment(request activity.AttachmentRequest) error
-	ReleaseAttachment(virtualMachineID string) error
+// trafficMonitor attaches packet monitoring to VM TAP devices.
+type trafficMonitor interface {
+	Attach(traffic.AttachmentRequest) error
+	Detach(string) error
 }
 
 // LinuxAllocator creates Linux network resources for virtual machines.
 type LinuxAllocator struct {
-	mesh            meshRegistrar
-	activityMonitor activityMonitor
+	mesh           meshRegistrar
+	trafficMonitor trafficMonitor
 }
 
 // NewLinuxAllocator returns a Linux network allocator.
-func NewLinuxAllocator(mesh meshRegistrar, activityMonitor activityMonitor) *LinuxAllocator {
-	return &LinuxAllocator{mesh: mesh, activityMonitor: activityMonitor}
+func NewLinuxAllocator(mesh *Mesh, monitor *traffic.Monitor) *LinuxAllocator {
+	var registrar meshRegistrar
+	if mesh != nil {
+		registrar = mesh
+	}
+	var trafficMonitor trafficMonitor
+	if monitor != nil {
+		trafficMonitor = monitor
+	}
+	return newLinuxAllocator(registrar, trafficMonitor)
+}
+
+// newLinuxAllocator returns an allocator with test dependencies.
+func newLinuxAllocator(mesh meshRegistrar, trafficMonitor trafficMonitor) *LinuxAllocator {
+	return &LinuxAllocator{mesh: mesh, trafficMonitor: trafficMonitor}
 }
 
 // Ensure converges all host network resources to the requested state.
@@ -62,16 +74,59 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 	if err := allocator.converge(ctx, request); err != nil {
 		return vm.NetworkInterface{}, err
 	}
-	if err := allocator.activityMonitor.EnsureAttachment(activity.AttachmentRequest{
-		VirtualMachineID: request.VirtualMachineID,
-		UserID:           request.UserID,
-		NamespacePath:    namespacePath(request.VirtualMachineID),
-		TapName:          tapName,
-	}); err != nil {
-		return vm.NetworkInterface{}, fmt.Errorf("attach activity tracking: %w", err)
+	if err := allocator.convergeTrafficMonitoring(desired.TrackTraffic, request); err != nil {
+		return vm.NetworkInterface{}, err
 	}
 
 	return allocator.interfaceFor(request.VirtualMachineID), nil
+}
+
+// Release removes a VM network and its mesh registration. It unregisters mesh
+// before deleting the namespace, which also deletes its veth pair.
+func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
+	virtualMachineID := request.VirtualMachineID
+	// Release TCX links before tap0 is removed.
+	var trafficError error
+	if allocator.trafficMonitor != nil {
+		trafficError = allocator.trafficMonitor.Detach(virtualMachineID)
+	}
+	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
+	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
+
+	exists, err := networkNamespaceExists(ctx, virtualMachineID)
+	if err != nil {
+		return errors.Join(trafficError, meshError, rulesError, err)
+	}
+	if !exists {
+		return errors.Join(trafficError, meshError, rulesError)
+	}
+	namespaceRulesError := removePublicIPv4NamespaceRules(ctx, virtualMachineID)
+
+	namespaceError := platform.Run(ctx, "ip", "netns", "del", namespaceName(virtualMachineID))
+	return errors.Join(trafficError, meshError, rulesError, namespaceRulesError, namespaceError)
+}
+
+// convergeTrafficMonitoring attaches or detaches packet monitoring as requested.
+func (allocator *LinuxAllocator) convergeTrafficMonitoring(enabled bool, request request) error {
+	if allocator.trafficMonitor == nil {
+		return nil
+	}
+	if enabled {
+		err := allocator.trafficMonitor.Attach(traffic.AttachmentRequest{
+			Target: traffic.Target{
+				VirtualMachineID: request.VirtualMachineID,
+				UserID:           request.UserID,
+			},
+			NamespacePath: namespacePath(request.VirtualMachineID),
+			InterfaceName: tapName,
+		})
+		if err != nil {
+			return fmt.Errorf("attach traffic monitor: %w", err)
+		}
+	} else if err := allocator.trafficMonitor.Detach(request.VirtualMachineID); err != nil {
+		return fmt.Errorf("detach traffic monitor: %w", err)
+	}
+	return nil
 }
 
 // ensureNamespace creates the VM network namespace when it is absent.
@@ -164,37 +219,15 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 	}
 }
 
-// Release removes a VM network and its mesh registration. It unregisters mesh
-// before deleting the namespace, which also deletes its veth pair.
-func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
-	virtualMachineID := request.VirtualMachineID
-	// Release TCX links before tap0 is removed.
-	activityError := allocator.activityMonitor.ReleaseAttachment(virtualMachineID)
-	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
-	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
-
-	exists, err := networkNamespaceExists(ctx, virtualMachineID)
-	if err != nil {
-		return errors.Join(activityError, meshError, rulesError, err)
-	}
-	if !exists {
-		return errors.Join(activityError, meshError, rulesError)
-	}
-	namespaceRulesError := removePublicIPv4NamespaceRules(ctx, virtualMachineID)
-
-	namespaceError := platform.Run(ctx, "ip", "netns", "del", namespaceName(virtualMachineID))
-	return errors.Join(activityError, meshError, rulesError, namespaceRulesError, namespaceError)
-}
-
 // addMeshRegistration routes the guest mesh address through the namespace and
 // registers it with Atlas WG Mesh.
 func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, virtualMachineID string, userID uint32, address string) error {
-	if address == "" {
+	if allocator.mesh == nil || address == "" {
 		return nil
 	}
 
 	hostVirtualEthernet, guestVirtualEthernet := virtualEthernetNames(userID)
-	if err := runSteps(ctx, meshNamespaceSteps(namespaceName(virtualMachineID), guestVirtualEthernet, address)); err != nil {
+	if err := runNetworkNamespaceSteps(ctx, namespaceName(virtualMachineID), meshNamespaceSteps(guestVirtualEthernet, address)); err != nil {
 		return fmt.Errorf("route mesh address %s: %w", address, err)
 	}
 	if err := allocator.mesh.Add(ctx, address, hostVirtualEthernet); err != nil {
@@ -205,7 +238,7 @@ func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, virtua
 
 // removeMeshRegistration unregisters the guest mesh address.
 func (allocator *LinuxAllocator) removeMeshRegistration(ctx context.Context, userID uint32, address string) error {
-	if address == "" {
+	if allocator.mesh == nil || address == "" {
 		return nil
 	}
 

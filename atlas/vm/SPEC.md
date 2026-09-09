@@ -161,11 +161,11 @@ A public IPv4 address needs `uplink`. Atlas refuses `mesh` and `none` while an a
 
 Active connections can stop when the public IPv4 address or the egress mode changes.
 
-## Sleep policy
+## Automatic idle shutdown
 
-`is_sleepy` lets the host sleep an idle VM after `idle_timeout_seconds`. `0` disables sleep. Set both during creation or with the Edit Sleep Policy action.
+`sleep_after_idle_seconds` lets Metal preserve and stop an idle VM after the configured duration. `0` disables automatic idle shutdown. Set it during creation or with the Edit Idle Shutdown action.
 
-`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas merges each change into the desired compute object. Only a vCPU or memory change needs a stopped VM.
+`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas merges each change into the desired compute object. Only a vCPU or memory change needs a stopped VM. Atlas stores the timeout and does not implement idle or traffic behavior.
 
 ## Disk limits
 

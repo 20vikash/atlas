@@ -19,8 +19,7 @@
   "section_break_compute_and_storage",
   "vcpus",
   "memory_mib",
-  "is_sleepy",
-  "idle_timeout_seconds",
+  "sleep_after_idle_seconds",
   "column_break_compute",
   "disk_mib",
   "disk_throughput_mibps",
@@ -120,21 +119,11 @@
    "set_only_once": 1
   },
   {
-   "description": "The host sleeps an idle VM and wakes it on a packet.",
-   "fieldname": "is_sleepy",
-   "fieldtype": "Check",
-   "is_virtual": 1,
-   "label": "Is Sleepy",
-   "read_only": 1,
-   "show_description_on_click": 1
-  },
-  {
-   "depends_on": "eval: doc.is_sleepy",
-   "description": "Idle time before sleep. 0 disables sleep.",
-   "fieldname": "idle_timeout_seconds",
+   "default": "0",
+   "description": "Metal puts the VM to sleep after this idle time. 0 disables automatic idle sleep.",
+   "fieldname": "sleep_after_idle_seconds",
    "fieldtype": "Int",
-   "is_virtual": 1,
-   "label": "Idle Timeout (Seconds)",
+   "label": "Sleep After Idle (Seconds)",
    "read_only": 1,
    "show_description_on_click": 1
   },
