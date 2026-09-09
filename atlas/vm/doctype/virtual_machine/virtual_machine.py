@@ -47,7 +47,13 @@ class VirtualMachine(Document):
 
 	@request_cache
 	def get_metal_vm_info(self) -> MetalVirtualMachine | None:
-		"""Return the Metal record for this VM, cached for one request."""
+		"""Return the Metal record for this VM, cached for one request.
+
+		A record with no Server holds no Metal state. Frappe reads every virtual
+		field to build the new document template, so this runs before placement.
+		"""
+		if not self.server:
+			return None
 		return VirtualMachineService(self).get_information()
 
 	def before_insert(self) -> None:

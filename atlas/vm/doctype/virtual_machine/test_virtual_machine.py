@@ -224,6 +224,18 @@ class TestVirtualMachineRequest(UnitTestCase):
 			)
 
 
+class TestVirtualMachineDocument(UnitTestCase):
+	# Frappe reads every virtual field to build the new document template. A new
+	# record has no Server, so the Metal lookup must not run.
+	def test_new_document_reads_virtual_fields_without_a_server(self) -> None:
+		virtual_machine = frappe.new_doc("Virtual Machine")
+
+		self.assertIsNone(virtual_machine.get_metal_vm_info())
+		self.assertEqual(virtual_machine.current_state, "unknown")
+		self.assertIsNone(virtual_machine.desired_state)
+		self.assertFalse(virtual_machine.is_sleepy)
+
+
 class TestVirtualMachineService(UnitTestCase):
 	def test_machine_image_uses_its_own_artifacts(self) -> None:
 		request = VirtualMachineCreateRequest("machine-image", 2, 2048, 10240, 7)
