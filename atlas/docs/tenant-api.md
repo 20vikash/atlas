@@ -10,7 +10,7 @@ Each request needs Frappe authentication from a user with the `Atlas Admin` role
 
 Use either Frappe API-key authentication with `Authorization: token <api_key>:<api_secret>`, or send `X-Atlas-Central-Token: <token>` with a token from the central issuer. Atlas reads the key set from `central_jwks_url` in Atlas Settings and accepts a central token that is unexpired and carries the audience `atlas-<region ID>-admin`. A valid central token signs the request in as `central-admin@atlas.local`, which holds the `Atlas Admin` role alone. Atlas creates this user after install and after migrate.
 
-An `/api/atlas` route requires `Atlas Admin` or `System Manager`. The route handler performs the resource and tenant permission checks. A guest may reach only `/login`, `/api/method/login`, `/api/method/logout`, `/assets/`, and the API reference. Frappe handles access for every other user and route.
+An `/api/atlas` route requires `Atlas Admin` or `System Manager`. The route handler performs the resource and tenant permission checks. A guest may reach only `/login`, `/api/method/login`, `/api/method/logout`, `/assets/`, and the API reference. The realtime console paths stay open to every user. Frappe handles access for every other user and route.
 
 ## Tenant
 

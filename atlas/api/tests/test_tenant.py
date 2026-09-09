@@ -150,6 +150,11 @@ class TestGuestPaths(UnitTestCase):
 			with api_request(path=path):
 				validate_auth()
 
+	def test_a_guest_may_open_the_realtime_connection(self) -> None:
+		for path in ("/socket.io/", "/api/method/frappe.realtime.get_user_info"):
+			with api_request(path=path):
+				validate_auth()
+
 	def test_a_guest_cannot_use_another_route(self) -> None:
 		for path in (
 			"/",
@@ -191,6 +196,35 @@ class TestAuthValidator(UnitTestCase):
 			self.assertRaises(frappe.PermissionError),
 		):
 			validate_auth()
+
+	def test_realtime_is_open_to_an_atlas_admin(self) -> None:
+		"""The console opens one Socket.IO connection, which asks the web process who the user is."""
+
+		def has_atlas_role(role: str, user: str | None = None) -> bool:
+			return role == "Atlas Admin"
+
+		for path in (
+			"/socket.io/",
+			"/api/method/frappe.realtime.get_user_info",
+			"/api/method/frappe.realtime.has_permission",
+		):
+			with (
+				api_request(path=path),
+				patch("atlas.auth.request.has_role", side_effect=has_atlas_role),
+			):
+				validate_auth()
+
+	def test_realtime_is_open_to_a_user_without_atlas_role(self) -> None:
+		previous_user = frappe.session.user
+		frappe.set_user("user@example.com")
+		try:
+			with (
+				api_request(path="/socket.io/"),
+				patch("atlas.auth.request.has_role", return_value=False),
+			):
+				validate_auth()
+		finally:
+			frappe.set_user(previous_user)
 
 	def test_system_manager_can_use_any_route(self) -> None:
 		def has_system_manager_role(role: str, user: str | None = None) -> bool:

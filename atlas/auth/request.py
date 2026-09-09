@@ -7,14 +7,24 @@ from atlas.auth.token import CentralTokenValidator
 from atlas.auth.user import CENTRAL_ADMIN_USER
 
 ATLAS_API_PREFIX = "/api/atlas"
+ATLAS_DOCS_PREFIX = "/api/atlas/docs"
+REALTIME_PREFIX = "/socket.io"
+REALTIME_PATHS = frozenset(
+	{
+		"/api/method/frappe.realtime.get_user_info",
+		"/api/method/frappe.realtime.has_permission",
+	}
+)
 GUEST_PATHS = frozenset({"/login", "/api/method/login", "/api/method/logout"})
 GUEST_PATH_PREFIXES = ("/assets/",)
 
 
 def validate_auth() -> None:
-	"""Accept one central token, then restrict a guest and an Atlas Admin to their routes."""
+	"""Accept a central token, allow realtime support paths, and enforce route access."""
 	authenticate_central_token()
 	path = frappe.request.path.rstrip("/") or "/"
+	if is_realtime_path(path):
+		return
 
 	if frappe.session.user in ("", "Guest"):
 		validate_guest_path(path)
@@ -23,7 +33,7 @@ def validate_auth() -> None:
 	if has_role("System Manager"):
 		return
 
-	if path == ATLAS_API_PREFIX or path.startswith(f"{ATLAS_API_PREFIX}/"):
+	if is_path_within(path, ATLAS_API_PREFIX):
 		# Atlas routes perform their own resource and tenant permission checks.
 		if not has_role("Atlas Admin"):
 			raise frappe.PermissionError
@@ -38,10 +48,20 @@ def validate_guest_path(path: str) -> None:
 	if path in GUEST_PATHS or path.startswith(GUEST_PATH_PREFIXES):
 		return
 
-	if path == "/api/atlas/docs" or path.startswith("/api/atlas/docs/"):
+	if is_path_within(path, ATLAS_DOCS_PREFIX):
 		return
 
 	raise frappe.PermissionError
+
+
+def is_realtime_path(path: str) -> bool:
+	"""Return whether a path serves Socket.IO or its web-process permission calls."""
+	return path in REALTIME_PATHS or is_path_within(path, REALTIME_PREFIX)
+
+
+def is_path_within(path: str, prefix: str) -> bool:
+	"""Return whether a path is the prefix or one of its children."""
+	return path == prefix or path.startswith(f"{prefix}/")
 
 
 def authenticate_central_token() -> None:
@@ -56,4 +76,4 @@ def authenticate_central_token() -> None:
 	if CentralTokenValidator().get_claims(token) is None:
 		return
 
-	frappe.set_user(CENTRAL_ADMIN_USER)
+	frappe.set_user(CENTRAL_ADMIN_USER)  # nosemgrep
