@@ -102,10 +102,10 @@ jobs:
           python -m venv "$RUNNER_TEMP/openapi-generator"
           "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
           export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
-          PYTHONPATH="$GITHUB_WORKSPACE" ./env/bin/python "$GITHUB_WORKSPACE/scripts/generate-api-client.py" atlas
+          PYTHONPATH="$GITHUB_WORKSPACE" ./env/bin/python "$GITHUB_WORKSPACE/scripts/generate-api-client.py" atlas-client
           git -C "$GITHUB_WORKSPACE" add --all --intent-to-add clients
           git -C "$GITHUB_WORKSPACE" diff --exit-code -- clients \
-            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas and commit clients/."; exit 1; }
+            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-client and commit clients/."; exit 1; }
 
       - name: Run Tests
         working-directory: /home/runner/frappe-bench

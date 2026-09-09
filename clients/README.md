@@ -1,6 +1,6 @@
 # Atlas API clients
 
-`clients/atlas` and `clients/atlas-http-proxy` are generated. `scripts/generate-api-clients.sh` writes them. Read `docs/api-clients.md` for the generation steps.
+`clients/atlas-client` and `clients/atlas-proxy-client` are generated. `scripts/generate-api-clients.sh` writes them. Read `docs/api-clients.md` for the generation steps.
 
 ## Authentication
 
@@ -13,9 +13,9 @@ The Atlas API reads two headers on each request. `X-Atlas-Central-Token` holds t
 The console token is single use and expires after 60 seconds. The console page reads it from the URL fragment, so the token stays out of the server logs and out of the `Referer` header.
 
 ```python
-from atlas import Client
-from atlas.api.vm_actions import create_virtual_machine_console_token
-from atlas.models import ConsoleTokenPayload, ConsoleTokenPayloadMode
+from atlas_client import Client
+from atlas_client.api.vm_actions import create_virtual_machine_console_token
+from atlas_client.models import ConsoleTokenPayload, ConsoleTokenPayloadMode
 
 BASE_URL = "https://atlas.localhost"
 client = Client(base_url=BASE_URL, headers={"X-Atlas-Central-Token": CENTRAL_TOKEN})

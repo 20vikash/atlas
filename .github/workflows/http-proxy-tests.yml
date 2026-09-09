@@ -5,16 +5,16 @@ on:
     paths:
       - "services/http-proxy/**"
       - "scripts/generate-api-client.py"
-      - "clients/atlas-http-proxy/**"
-      - "clients/openapi/atlas-http-proxy.json"
+      - "clients/atlas-proxy-client/**"
+      - "clients/openapi/atlas-proxy-client.json"
   push:
     branches:
       - develop
     paths:
       - "services/http-proxy/**"
       - "scripts/generate-api-client.py"
-      - "clients/atlas-http-proxy/**"
-      - "clients/openapi/atlas-http-proxy.json"
+      - "clients/atlas-proxy-client/**"
+      - "clients/openapi/atlas-proxy-client.json"
 
 permissions:
   contents: read
@@ -50,10 +50,10 @@ jobs:
           python -m venv "$RUNNER_TEMP/openapi-generator"
           "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
           export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
-          "$control_python" scripts/generate-api-client.py atlas-http-proxy
+          "$control_python" scripts/generate-api-client.py atlas-proxy-client
           git add --all --intent-to-add clients
           git diff --exit-code -- clients \
-            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-http-proxy and commit clients/."; exit 1; }
+            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-proxy-client and commit clients/."; exit 1; }
 
       - name: Start test stack
         run: docker compose -f tests/docker/docker-compose.yml up --build -d
