@@ -8,6 +8,7 @@ from frappe import _, request_cache
 from frappe.model.document import Document
 from frappe.utils import add_to_date, cint, now_datetime
 
+from atlas.atlas.core.background_jobs import as_administrator
 from atlas.atlas.core.parsing import strict_bool
 from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
@@ -385,6 +386,7 @@ def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
 	return VirtualMachineService.create(request)
 
 
+@as_administrator
 def reconcile_stale_drafts() -> None:
 	"""Resolve old drafts without deletion when the result is uncertain."""
 	cutoff = add_to_date(now_datetime(), minutes=-DRAFT_EXPIRY_MINUTES)
@@ -402,6 +404,7 @@ def reconcile_stale_draft(name: str) -> None:
 	reconciliation.reconcile_stale_draft(name)
 
 
+@as_administrator
 def reconcile_terminating_virtual_machines() -> None:
 	"""Delete terminated VMs that Metal reports as absent."""
 	names = frappe.get_all("Virtual Machine", filters={"is_terminating": 1}, pluck="name")

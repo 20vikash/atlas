@@ -12,7 +12,7 @@ The Atlas app uses Frappe to manage provider hosts, virtual machines, images, an
 
 ```text
 atlas/                         Site settings, provider behavior, TLS, and host binary builds
-  core/                        Provider clients, TLS issuance, and the host binary builder
+  core/                        Provider clients, TLS issuance, background jobs, and the host binary builder
   doctype/                     Atlas Settings and SSH Task
 metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
@@ -59,7 +59,7 @@ See [docs/development.md](docs/development.md) for the commands to run.
 
 ## Ownership
 
-Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
+Keep the Administrator job decorator in `atlas/core/background_jobs.py`. Every queued job entry point uses it. Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
 
 Keep certificate issuance in `atlas/core/tls/`.
 

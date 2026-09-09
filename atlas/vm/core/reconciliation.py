@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, cast
 
 import frappe
 
+from atlas.atlas.core.background_jobs import as_administrator
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.vm_service import VirtualMachineService
 
@@ -12,11 +13,13 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 
 
+@as_administrator
 def reconcile_stale_draft(name: str) -> None:
 	"""Finalize a draft that Metal holds, or delete one that Metal does not."""
 	settle(name, "draft reconciliation", on_present=lambda machine: machine.db_set("is_draft", 0))
 
 
+@as_administrator
 def reconcile_terminating(name: str) -> None:
 	"""Delete a terminating virtual machine after Metal confirms its absence."""
 	settle(name, "termination reconciliation", on_present=None)

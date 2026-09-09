@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, cast
 import frappe
 from frappe import _
 
+from atlas.atlas.core.background_jobs import as_administrator
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 
@@ -111,6 +112,7 @@ def enqueue_pending_virtual_machine_image_deletions() -> None:
 		service.enqueue(name)
 
 
+@as_administrator
 def delete_virtual_machine_image(image_name: str) -> None:
 	"""Run one queued Machine image cleanup and record a visible failure."""
 	try:

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import frappe
 
+from atlas.atlas.core.background_jobs import as_administrator
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.multipart_upload import MultipartUploadError, MultipartUploadService, bytes_to_mib
@@ -278,6 +279,7 @@ def enqueue_pending_machine_image_transfers() -> None:
 		service.enqueue(name)
 
 
+@as_administrator
 def transfer_machine_image(image_name: str) -> None:
 	"""Advance one queued Machine image transfer."""
 	VirtualMachineImageTransferService().transfer(image_name)
