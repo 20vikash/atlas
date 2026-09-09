@@ -7,6 +7,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+build/
 develop-eggs/
 dist/
 downloads/
@@ -57,6 +58,7 @@ jspm_packages/
 # Claude / tooling
 .claude
 .ruff_cache/
+.pdm-build/
 
 # Go build artifacts
 /metal/metald
