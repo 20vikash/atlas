@@ -81,25 +81,13 @@ Use the virtual machine ID and operation ID to connect API state, JSON logs, sys
 - Safe recovery: Allow the configured bound. Stop the daemon service again after the worker exits. Use process termination only after you preserve logs.
 - Do not: Do not stop `metal-vm@*.service` units as part of daemon shutdown. Do not remove upload state while a worker is active.
 
-## Sleepy VM does not sleep or wake
+## Automatic idle shutdown does not stop or restore a VM
 
-- Symptom: An idle sleepy VM does not reach `sleeping`, or a packet does not wake a sleeping VM.
-- Owner: `activity.Monitor` tracks activity and wake events. `vm.Manager` controls sleep and wake.
-- Safe checks:
-  - Read `GET /v1/vms/{id}`. Check `observed.state`, `observed.sleeping_since`, `observed.last_network_activity_at`, and `observed.error`.
-  - Confirm that the VM has `is_sleepy` and a positive `idle_timeout_seconds` under `desired.compute`.
-  - Run `systemctl show -p MainPID --value metal-vm@<id>.service`. A sleeping VM has a value of `0`.
-  - Run `ls <base_dir>/machines/<id>/memory-snapshots/*/manifest.json`.
-  - Run `bpftool map show`. Dump `activity_by_user_id` and `wake_state_by_user_id` with `bpftool map dump name <map>`. Use the VM user ID as the key.
-  - Run `ip netns exec metal-<id> bpftool link show`.
-  - Read `journalctl -u metald --since "15 minutes ago"` for sleep and wake failures.
-- Expected evidence:
-
-  ```text
-  host TCP -> update activity
-           -> armed (1) -> notified (2) -> wake
-  ```
-
-  Only host-to-guest TCP traffic updates activity or wakes a VM. The trigger packet can be lost while Firecracker starts.
-- Safe recovery: Retry the TCP connection. A metald restart rearms each sleeping VM during reconciliation. Correct a wrong `idle_timeout_seconds` or missing `is_sleepy` value.
-- Do not: Do not delete a sleep manifest or a snapshot generation of a sleeping VM. Do not start Firecracker directly to wake a VM.
+- Symptom: An idle VM does not reach `stopped`, or new IP traffic does not restore it.
+- Owner: `network/traffic.Monitor` tracks traffic and events. `vm.Manager` controls state changes.
+- Safe checks: Read `GET /v1/vms/{id}`. Check `desired.compute.sleep_after_idle_seconds`, `observed.state`, and `observed.error`.
+- Safe checks: Run `systemctl show -p MainPID --value metal-vm@<id>.service`. An automatically stopped VM has a value of `0`.
+- Safe checks: Check `<base_dir>/machines/<id>/saved-state/metadata.json`, `bpftool map show`, `ip netns exec metal-<id> bpftool link show`, and the metald journal.
+- Expected evidence: Host-to-guest IPv4 or IPv6 traffic updates `activity_by_user_id`. When observation is active, it also writes the VM user ID to `traffic_events`.
+- Safe recovery: Retry the connection because the first packet can be lost during restoration. Correct the timeout or the host eBPF fault and let reconciliation retry.
+- Do not: Do not delete a saved state that Metal must restore. Do not start Firecracker directly.

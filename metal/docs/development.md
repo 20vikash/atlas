@@ -6,8 +6,8 @@ Run all Go commands from `metal/`. The repository root is not a Go module.
 
 ```sh
 gofmt -w <changed-go-files>
-go test ./...
-go vet ./...
+make test
+make vet
 go test -race ./...
 make openapi
 make build
@@ -17,18 +17,17 @@ Run `gofmt` only on changed Go files. Regenerate OpenAPI after an API annotation
 
 ## eBPF generation
 
-The `activity` package embeds compiled eBPF objects. The committed objects and Go bindings match the C source under `internal/network/activity/bpf/`. A normal build does not run Clang, because the objects are committed.
+The `traffic` package embeds a local eBPF object built from `internal/network/traffic/bpf/track_traffic.c`.
 
-Regenerate after a change to the C source, then confirm the tree is clean:
+Build it before a direct Go command:
 
 ```sh
-make generate-network
-git diff --exit-code -- internal/network
+make bpf
 ```
 
-Generation needs Clang 12 or newer. The vendored headers under `internal/network/activity/bpf/headers/` remove the dependency on host kernel headers.
+Generation needs Clang 12 or newer, Linux UAPI headers, and libbpf development headers.
 
-The programs need Linux 6.6 or newer for TCX. The activity tests also need root. See [integration testing](testing.md).
+The program needs Linux 6.6 or newer for TCX. The traffic integration tests also need root. See [integration testing](testing.md).
 
 ## Package changes
 

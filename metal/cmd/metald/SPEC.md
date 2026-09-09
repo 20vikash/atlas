@@ -18,8 +18,8 @@ The default configuration path is `/var/lib/metal/metald.toml`. A missing defaul
 
 | Type | Role |
 |---|---|
-| `opts` | Resolved Firecracker, ZFS, WireGuard, Atlas WG Mesh, listener, authentication, and base-directory settings. |
-| `fileConfig` | TOML sections for metald, Firecracker, Jailer, ZFS, WireGuard, Atlas WG Mesh, and sleep. |
+| `options` | Resolved Firecracker, ZFS, WireGuard, Atlas WG Mesh, traffic monitor, listener, authentication, and base-directory settings. |
+| `fileConfig` | TOML sections for metald, Firecracker, Jailer, ZFS, WireGuard, Atlas WG Mesh, and traffic monitoring. |
 
 ## Startup wiring
 
@@ -29,23 +29,26 @@ load configuration
    -> connect to systemd
    -> create storage stores
    -> create the WireGuard manager
-   -> connect Atlas WG Mesh and configure the host
-   -> create the activity monitor
+   -> optionally connect Atlas WG Mesh and configure the host
+   -> optionally create the traffic monitor
    -> create the Firecracker runtime
    -> validate all VM records and create the VM manager
    -> create the host service
-   -> create the VM, image, and network-wake reconcilers
+   -> create the VM and image reconcilers
+   -> start the traffic listener when monitoring is enabled
    -> create the authenticated API
    -> listen and serve
 ```
 
 The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
 
-The network constructor is `network.NewLinuxAllocator(mesh, activityMonitor)`. The VM manager receives the runtime, network, disk, snapshot, activity, wake, and logger services.
+The network constructor receives optional mesh and traffic monitor services. The VM manager receives the runtime, network, storage, snapshot, optional traffic monitor, and logger services.
 
-The host service receives the mesh, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
+The host service receives an optional mesh service, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
 
-`connectMesh` runs on every start. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
+`connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
+
+`wg_mesh.enabled = false` does not disable managed WireGuard peers.
 
 `wg_mesh.uplink` has no default. The Atlas WG Mesh uplink hook consumes discovery traffic for every VLAN under the interface it attaches to, so a parent interface silently blackholes discovery for its own VLANs. Only the controller knows which interface carries discovery, so metald requires the name.
 
@@ -61,16 +64,18 @@ The host service receives the mesh, WireGuard, image, VM, storage, and reconcile
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
 | `zfs.pool` | `metal` | ZFS pool name. |
 | `wireguard.interface` | `wg0` | Underlay interface for managed peers and Atlas WG Mesh. |
+| `wg_mesh.enabled` | `true` | Enables Atlas WG Mesh host setup and VM mesh registration. |
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
-| `wg_mesh.uplink` | none | Discovery uplink. Required when the mesh is enabled. |
+| `wg_mesh.uplink` | none | Discovery uplink. Required. |
+| `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
 
 See `config.example.toml` for the complete file format.
 
 ## Runtime loops
 
-The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data. The network-wake reconciler restores a sleeping VM after a host-to-guest TCP packet.
+The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data. When traffic monitoring is enabled, one traffic listener dispatches each restoration in a separate daemon-owned goroutine.
 
-The daemon owns all reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for workers, closes the activity monitor, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
+The daemon owns all reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for workers, closes the enabled traffic monitor, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
 
 The daemon writes structured JSON logs. Log records include request and operation correlation fields when the operation comes from the API.
 

@@ -23,7 +23,7 @@ This package makes one virtual machine network agree with its desired state, and
 | `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network`. |
 | `Mesh` | Registration of VM addresses through the Atlas WG Mesh CLI. |
 | `WireGuardManager` | The managed peer set of one WireGuard interface. |
-| [`activity.Monitor`](activity/SPEC.md) | Tracking of packet activity for one VM. Three shared maps and one eBPF program for each VM. |
+| [`traffic.Monitor`](traffic/SPEC.md) | Traffic samples and packet events for monitored VMs. |
 
 ## Convergence
 
@@ -69,11 +69,11 @@ Private filters take a lower `tc` priority than the public filter, which matches
 
 Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, plus the IPv6 unique-local range `fc00::/7`, which contains every mesh prefix. Public traffic is every other IPv4 address.
 
-## Packet activity and wake
+## Traffic tracking
 
-The [activity SPEC](activity/SPEC.md) owns packet activity tracking and network wake. `LinuxAllocator` gives it the namespace path and the tap device name after the namespace converges, and releases the attachment before it deletes the namespace.
+When traffic monitoring is enabled, the [traffic SPEC](traffic/SPEC.md) owns traffic samples and packet events. `LinuxAllocator` gives it the namespace path and TAP name after the namespace converges, and releases the attachment before it deletes the namespace.
 
-A sleeping guest cannot answer ARP or neighbour discovery. Metal pins both guest addresses to the fixed guest MAC:
+A stopped guest cannot answer ARP or neighbour discovery. Metal pins both guest addresses to the fixed guest MAC:
 
 ```text
 fixed guest IPv4 ---+
@@ -81,11 +81,11 @@ fixed guest IPv4 ---+
 per-VM mesh IPv6 ---+
 ```
 
-`ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver a TCP wake packet.
+`ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver an IP packet while Firecracker is stopped.
 
 ## Atlas WG Mesh
 
-Atlas WG Mesh assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.
+When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.
 
 `EnsureHost` configures an unconfigured host and refuses a host that discovers on another interface, because the uplink hook consumes the discovery traffic of every VLAN beneath it.
 
@@ -96,4 +96,4 @@ Atlas WG Mesh assumes the VM sits directly behind the interface it hooks. A name
 - [docs/networking.md](../../docs/networking.md) gives the topology and the reasons behind this design.
 - [internal/vm/SPEC.md](../vm/SPEC.md) defines `Network`.
 - [internal/firecracker/SPEC.md](../firecracker/SPEC.md) attaches Firecracker to the TAP.
-- [activity/SPEC.md](activity/SPEC.md) tracks packet activity and raises network wake events.
+- [traffic/SPEC.md](traffic/SPEC.md) tracks traffic and emits packet events.

@@ -10,9 +10,9 @@ A mutation stores desired state and returns. It does not wait for the host. The 
 
 Each VM response nests `desired` and `observed`, so one read shows both what was asked for and what the host reached.
 
-`PUT /v1/vms/{id}/power` sets the power state with `{"state": "running"|"stopped"|"paused"}`. A stopped request can add `"warm": true` to save VM memory. `warm` is valid only for `stopped`. The next start resumes the VM. A plain stop, restart, or specification change removes the snapshot.
+`PUT /v1/vms/{id}/power` sets the power state with `{"state": "running"|"stopped"|"paused"}`. A `stopped` request is always a hard stop and removes saved VM state.
 
-`PUT /v1/vms/{id}/compute` sets `virtual_cpu_count`, `memory_mib`, `is_sleepy`, and `idle_timeout_seconds`. A shape change needs a stopped VM. A sleep policy change is accepted in any state. The response reports the policy in `desired.compute`. `observed.state` can be `sleeping`, with `last_network_activity_at` and `sleeping_since` when known. Responses omit snapshot paths and the timeout.
+`PUT /v1/vms/{id}/compute` sets `virtual_cpu_count`, `memory_mib`, and `sleep_after_idle_seconds`. A shape change needs a stopped VM. An idle timeout change is accepted in any state. `0` disables automatic idle shutdown. The response reports the value in `desired.compute`.
 
 Every `/v1` route needs a bearer token. Only liveness and the documentation are public.
 

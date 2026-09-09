@@ -4,19 +4,15 @@
 
 ## Purpose
 
-The controller records what a host should hold. It does not command the host step by step. The `reconciler` package closes that gap: it reads the desired state, compares it to the host, and repeats until they agree.
-
-Every pass is a full sweep, not a queue of events. A missed wake, a failed operation, or a restart costs time, not correctness.
+This package schedules convergence work. It owns no VM, image, snapshot, or traffic state.
 
 ## Types
 
 | Type | Responsibility |
 |---|---|
-| `VirtualMachineReconciler` | Drives every VM towards its desired record. |
-| `ImageReconciler` | Caches the images the controller selects and prunes the rest. |
-| `NetworkWakeReconciler` | Restores a sleeping VM after a packet wake event. |
-| `passScheduler` | Runs one pass on an interval and on demand. Both sweep reconcilers embed it. |
-| `VirtualMachineManager`, `ImageStore`, `SnapshotStore`, `MemorySnapshotBuilder`, `NetworkWakeManager` | The work each pass calls out to. |
+| `VirtualMachineReconciler` | Runs VM reconciliation passes. |
+| `ImageReconciler` | Caches selected images and prunes unused images and staged snapshots. |
+| `passScheduler` | Runs one pass at startup, on an interval, and after a nonblocking request. |
 
 ## Pass model
 
@@ -26,7 +22,7 @@ Run(ctx)
   +-> pass ---------------------------+
   |                                   |
   +-- wait: interval tick             |
-           wake request               |
+           request                    |
            ctx canceled -> return     |
                                       |
   VM pass:     ListIDs -> N workers -> Reconcile(id)
@@ -34,36 +30,16 @@ Run(ctx)
                              -> PruneImages -> PruneStagedSnapshots
 ```
 
-A pass runs first, then the loop waits. A new reconciler therefore converges at startup without waiting one interval.
+Each operation has its own timeout. The VM pass also limits concurrent operations. One slow VM cannot block all other VMs.
 
-`Wake` never blocks. The wake channel holds one request, so many wakes that arrive during a pass collapse into one pass after it. The API calls `Wake` after a mutation, so a change is applied at once instead of at the next tick.
-
-## Network wake
-
-`NetworkWakeReconciler` handles one event at a time:
-
-```text
-network monitor -> shared wake channel -> Manager.WakeFromNetwork -> restore
-                                          |
-                                          +-> one event at a time
-                                          +-> operation timeout
-                                          +-> failure: log and continue
-```
-
-It does not retry a failed event. A normal VM pass rearms a sleeping VM, so a later packet can send a new event. A canceled context or closed channel stops the reconciler.
-
-## Bounds
-
-Each operation runs under its own timeout, so one stuck VM or one slow download cannot stall the pass. The VM pass also bounds how many operations run at once.
-
-Errors are logged, never returned: the next pass retries. Errors are suppressed while the context is canceled, because shutdown fails every operation still in flight and those failures say nothing about the host.
+Errors are logged and a later pass retries safe operations. Errors are suppressed after context cancellation because they do not describe host health.
 
 ## Ownership
 
-A reconciler owns its loop and nothing else. It holds no VM, image, or snapshot state, and it makes no decisions about desired state. `metald` owns the goroutine that calls `Run` and the context that stops it.
+metald owns each reconciler goroutine and the context that stops it. The VM manager owns every state decision and per-VM lock. The daemon traffic listener handles packet events separately.
 
 ## Related
 
 - [docs/architecture.md](../../docs/architecture.md) places the loops in the daemon.
-- [internal/vm/SPEC.md](../vm/SPEC.md) owns VM reconciliation itself.
+- [internal/vm/SPEC.md](../vm/SPEC.md) owns VM reconciliation.
 - [internal/storage/SPEC.md](../storage/SPEC.md) owns image caching and pruning.
