@@ -129,6 +129,7 @@
    "show_description_on_click": 1
   },
   {
+   "depends_on": "eval: doc.is_sleepy",
    "description": "Idle time before sleep. 0 disables sleep.",
    "fieldname": "idle_timeout_seconds",
    "fieldtype": "Int",

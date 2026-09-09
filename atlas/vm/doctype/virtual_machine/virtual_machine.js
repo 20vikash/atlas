@@ -360,6 +360,7 @@ function showEditSleepPolicyDialog(frm) {
 				fieldtype: "Int",
 				label: __("Idle Timeout (Seconds)"),
 				default: frm.doc.idle_timeout_seconds,
+				depends_on: "eval: doc.is_sleepy",
 				description: __("0 disables sleep."),
 			},
 		],
