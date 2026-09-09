@@ -250,6 +250,23 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 		self.assertEqual(status, 202)
 		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
 
+	def test_a_sleep_policy_change_reaches_the_virtual_machine_method(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/compute",
+				tenant_id=TENANT_ID,
+				json={"is_sleepy": True, "idle_timeout_seconds": 1800},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 202)
+		virtual_machine.update_compute.assert_called_once_with(
+			{"is_sleepy": True, "idle_timeout_seconds": 1800}
+		)
+
 	def test_a_patch_without_a_supported_field_is_rejected(self) -> None:
 		with (
 			api_request(

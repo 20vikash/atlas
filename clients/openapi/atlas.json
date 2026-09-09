@@ -3,8 +3,33 @@
     "schemas": {
       "ComputeUpdatePayload": {
         "additionalProperties": false,
-        "description": "New CPU and memory values for a stopped virtual machine.",
+        "description": "New CPU shape, memory shape, and sleep policy.",
         "properties": {
+          "idle_timeout_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Idle Timeout Seconds"
+          },
+          "is_sleepy": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Is Sleepy"
+          },
           "memory_mib": {
             "anyOf": [
               {
@@ -123,6 +148,12 @@
             "title": "Hostname",
             "type": "string"
           },
+          "idle_timeout_seconds": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Idle Timeout Seconds",
+            "type": "integer"
+          },
           "image_id": {
             "minLength": 1,
             "title": "Image Id",
@@ -139,6 +170,11 @@
             ],
             "default": null,
             "title": "Ip Address Id"
+          },
+          "is_sleepy": {
+            "default": false,
+            "title": "Is Sleepy",
+            "type": "boolean"
           },
           "memory_mib": {
             "exclusiveMinimum": 0,
@@ -1803,7 +1839,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/compute": {
       "patch": {
-        "description": "Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the change.",
+        "description": "Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas changes the vCPU count or the memory size. A sleep policy change applies in any state.\n\nWith `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and wakes it on the next packet. An idle timeout of 0 disables sleep.",
         "operationId": "update_virtual_machine_compute",
         "parameters": [
           {
@@ -1830,6 +1866,8 @@
           "content": {
             "application/json": {
               "example": {
+                "idle_timeout_seconds": 1800,
+                "is_sleepy": true,
                 "vcpus": 4
               },
               "schema": {
@@ -1851,7 +1889,7 @@
             "description": "The change is accepted. Poll the virtual machine route."
           }
         },
-        "summary": "Resize compute",
+        "summary": "Update compute",
         "tags": [
           "VM Configuration"
         ]

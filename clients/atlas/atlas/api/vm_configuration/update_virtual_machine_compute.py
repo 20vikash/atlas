@@ -65,15 +65,18 @@ def sync_detailed(
     body: ComputeUpdatePayload,
     x_tenant_id: int,
 ) -> Response[VirtualMachineResponse]:
-    """Resize compute
+    """Update compute
 
-     Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the
-    change.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
+    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    wakes it on the next packet. An idle timeout of 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU and memory values for a stopped virtual machine.
+        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -103,15 +106,18 @@ def sync(
     body: ComputeUpdatePayload,
     x_tenant_id: int,
 ) -> VirtualMachineResponse | None:
-    """Resize compute
+    """Update compute
 
-     Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the
-    change.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
+    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    wakes it on the next packet. An idle timeout of 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU and memory values for a stopped virtual machine.
+        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -136,15 +142,18 @@ async def asyncio_detailed(
     body: ComputeUpdatePayload,
     x_tenant_id: int,
 ) -> Response[VirtualMachineResponse]:
-    """Resize compute
+    """Update compute
 
-     Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the
-    change.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
+    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    wakes it on the next packet. An idle timeout of 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU and memory values for a stopped virtual machine.
+        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -172,15 +181,18 @@ async def asyncio(
     body: ComputeUpdatePayload,
     x_tenant_id: int,
 ) -> VirtualMachineResponse | None:
-    """Resize compute
+    """Update compute
 
-     Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the
-    change.
+     Changes the vCPU count, the memory size, and the sleep policy. The VM must be stopped before Atlas
+    changes the vCPU count or the memory size. A sleep policy change applies in any state.
+
+    With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` without network activity and
+    wakes it on the next packet. An idle timeout of 0 disables sleep.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (ComputeUpdatePayload): New CPU and memory values for a stopped virtual machine.
+        body (ComputeUpdatePayload): New CPU shape, memory shape, and sleep policy.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
