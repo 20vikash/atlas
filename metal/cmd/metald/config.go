@@ -12,47 +12,53 @@ import (
 	"github.com/frappe/atlas/metal/internal/firecracker"
 )
 
-type opts struct {
+type options struct {
 	cfg             firecracker.Config
 	pool, imagesDir string
 	listen          string
 	authTokenHash   string
 	baseDir         string
 	wireGuardName   string
-	mesh            meshOpts
+	mesh            meshOptions
+	trafficMonitor  trafficMonitorOptions
 }
 
-// meshOpts configures Atlas WG Mesh, which is enabled by default and can be
-// disabled for development or test hosts without mesh connectivity.
-type meshOpts struct {
+// meshOptions configures Atlas WG Mesh.
+type meshOptions struct {
 	enabled    bool
 	binaryPath string
 	uplinkName string
+}
+
+// trafficMonitorOptions configures VM traffic monitoring.
+type trafficMonitorOptions struct {
+	enabled bool
 }
 
 const defaultConfigPath = "/var/lib/metal/metald.toml"
 
 const defaultBaseDir = "/var/lib/metal"
 
-func defaultOpts() opts {
-	o := opts{
-		cfg:           firecracker.DefaultConfig(),
-		pool:          "metal",
-		baseDir:       defaultBaseDir,
-		wireGuardName: "wg0",
-		mesh:          meshOpts{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
+func defaultOptions() options {
+	resolvedOptions := options{
+		cfg:            firecracker.DefaultConfig(),
+		pool:           "metal",
+		baseDir:        defaultBaseDir,
+		wireGuardName:  "wg0",
+		mesh:           meshOptions{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
+		trafficMonitor: trafficMonitorOptions{enabled: true},
 		// TCP host:port by default; "unix:/path" for a unix socket instead.
 		listen: "127.0.0.1:8080",
 	}
-	o.deriveDirs()
-	return o
+	resolvedOptions.deriveDirs()
+	return resolvedOptions
 }
 
 // deriveDirs places all metald directories under baseDir, so one base_dir moves
 // the complete metald state tree.
-func (o *opts) deriveDirs() {
-	o.cfg.MachinesDir = filepath.Join(o.baseDir, "machines")
-	o.imagesDir = filepath.Join(o.baseDir, "images")
+func (resolvedOptions *options) deriveDirs() {
+	resolvedOptions.cfg.MachinesDir = filepath.Join(resolvedOptions.baseDir, "machines")
+	resolvedOptions.imagesDir = filepath.Join(resolvedOptions.baseDir, "images")
 }
 
 type fileConfig struct {
@@ -62,6 +68,7 @@ type fileConfig struct {
 	ZFS         zfsFile         `toml:"zfs"`
 	WireGuard   wireGuardFile   `toml:"wireguard"`
 	WGMesh      wgMeshFile      `toml:"wg_mesh"`
+	Traffic     trafficFile     `toml:"traffic_monitor"`
 }
 
 // tomlDuration decodes a TOML string with time.ParseDuration.
@@ -108,18 +115,22 @@ type wgMeshFile struct {
 	Uplink     string `toml:"uplink"`
 }
 
-func load(path string) (opts, error) {
-	o := defaultOpts()
-	if err := applyFile(&o, path); err != nil {
-		return opts{}, err
-	}
-	o.deriveDirs()
-	return o, nil
+type trafficFile struct {
+	Enabled *bool `toml:"enabled"`
 }
 
-// applyFile overlays a configuration file onto o. A missing default file is
+func load(path string) (options, error) {
+	resolvedOptions := defaultOptions()
+	if err := applyFile(&resolvedOptions, path); err != nil {
+		return options{}, err
+	}
+	resolvedOptions.deriveDirs()
+	return resolvedOptions, nil
+}
+
+// applyFile overlays a configuration file onto resolvedOptions. A missing default file is
 // allowed; a missing explicit file is an error.
-func applyFile(o *opts, path string) error {
+func applyFile(resolvedOptions *options, path string) error {
 	explicit := path != ""
 	if path == "" {
 		path = defaultConfigPath
@@ -131,24 +142,29 @@ func applyFile(o *opts, path string) error {
 		}
 		return fmt.Errorf("config %s: %w", path, err)
 	}
-	overlay(&o.baseDir, fc.Metald.BaseDir)
-	overlay(&o.listen, fc.Metald.Listen)
-	overlay(&o.authTokenHash, fc.Metald.AuthTokenHash)
-	overlay(&o.cfg.FirecrackerBin, fc.Firecracker.BinaryPath)
-	overlay(&o.cfg.SocketsDir, fc.Firecracker.SocketsDir)
-	overlay(&o.cfg.JailerBin, fc.Jailer.BinaryPath)
-	overlay(&o.pool, fc.ZFS.Pool)
-	overlay(&o.wireGuardName, fc.WireGuard.Interface)
-	overlay(&o.mesh.binaryPath, fc.WGMesh.BinaryPath)
-	overlay(&o.mesh.uplinkName, fc.WGMesh.Uplink)
-	if fc.WGMesh.Enabled != nil {
-		o.mesh.enabled = *fc.WGMesh.Enabled
-	}
+	overlay(&resolvedOptions.baseDir, fc.Metald.BaseDir)
+	overlay(&resolvedOptions.listen, fc.Metald.Listen)
+	overlay(&resolvedOptions.authTokenHash, fc.Metald.AuthTokenHash)
+	overlay(&resolvedOptions.cfg.FirecrackerBin, fc.Firecracker.BinaryPath)
+	overlay(&resolvedOptions.cfg.SocketsDir, fc.Firecracker.SocketsDir)
+	overlay(&resolvedOptions.cfg.JailerBin, fc.Jailer.BinaryPath)
+	overlay(&resolvedOptions.pool, fc.ZFS.Pool)
+	overlay(&resolvedOptions.wireGuardName, fc.WireGuard.Interface)
+	overlayBool(&resolvedOptions.mesh.enabled, fc.WGMesh.Enabled)
+	overlay(&resolvedOptions.mesh.binaryPath, fc.WGMesh.BinaryPath)
+	overlay(&resolvedOptions.mesh.uplinkName, fc.WGMesh.Uplink)
+	overlayBool(&resolvedOptions.trafficMonitor.enabled, fc.Traffic.Enabled)
 	return nil
 }
 
 func overlay(dst *string, v string) {
 	if v != "" {
 		*dst = v
+	}
+}
+
+func overlayBool(destination *bool, value *bool) {
+	if value != nil {
+		*destination = *value
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"time"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -18,7 +19,8 @@ const (
 
 	// maximumMemoryMiB prevents unit memory overflow. The unit limit is twice the
 	// guest size plus fixed overhead.
-	maximumMemoryMiB = (math.MaxInt - 128) / 2
+	maximumMemoryMiB             = (math.MaxInt - 128) / 2
+	maximumSleepAfterIdleSeconds = int64(math.MaxInt64) / int64(time.Second)
 )
 
 // Patterns that keep caller-supplied values usable as host paths and names.
@@ -41,19 +43,11 @@ type createRequest struct {
 	Guest   guestRequest   `json:"guest"`
 }
 
-// computeRequest is the complete CPU shape, memory shape, and sleep policy.
+// computeRequest is the complete compute configuration.
 type computeRequest struct {
-	VirtualCPUCount int `json:"virtual_cpu_count" minimum:"1"`
-	MemoryMiB       int `json:"memory_mib" minimum:"1"`
-	// IsSleepy allows automatic sleep for an idle VM.
-	IsSleepy bool `json:"is_sleepy"`
-	// IdleTimeoutSeconds is the idle time before sleep. Zero disables sleep.
-	IdleTimeoutSeconds int `json:"idle_timeout_seconds" minimum:"0"`
-}
-
-// sleepPolicy returns the requested sleep policy.
-func (request computeRequest) sleepPolicy() vm.SleepPolicy {
-	return vm.SleepPolicy{IsSleepy: request.IsSleepy, IdleTimeoutSeconds: request.IdleTimeoutSeconds}
+	VirtualCPUCount       int `json:"virtual_cpu_count" minimum:"1"`
+	MemoryMiB             int `json:"memory_mib" minimum:"1"`
+	SleepAfterIdleSeconds int `json:"sleep_after_idle_seconds" minimum:"0"`
 }
 
 // imageRequest identifies boot content and how the host should keep it.
@@ -120,11 +114,9 @@ type guestRequest struct {
 	UserData string            `json:"user_data"`
 }
 
-// powerRequest is the desired power state and optional warm-stop request. Warm
-// is valid only for stopped and makes the next start resume the saved memory.
+// powerRequest is the desired power state.
 type powerRequest struct {
 	State string `json:"state" enums:"running,stopped,paused"`
-	Warm  bool   `json:"warm"`
 }
 
 // validate checks every group and the guest values a create carries.
@@ -151,16 +143,17 @@ func (request createRequest) validate() error {
 // specification converts the request into the domain VM specification.
 func (request createRequest) specification() vm.Specification {
 	return vm.Specification{
-		VirtualCPUCount: request.Compute.VirtualCPUCount,
-		MemoryMiB:       request.Compute.MemoryMiB,
-		DiskMiB:         request.Disk.SizeMiB,
-		Disk:            request.Disk.specification(),
-		Image:           request.Image.specification(),
-		Network:         request.Network.specification(),
-		SSHKeys:         request.Guest.SSHKeys,
-		Hostname:        request.Guest.Hostname,
-		UserData:        request.Guest.UserData,
-		Metadata:        request.Guest.Metadata,
+		VirtualCPUCount:       request.Compute.VirtualCPUCount,
+		MemoryMiB:             request.Compute.MemoryMiB,
+		SleepAfterIdleSeconds: request.Compute.SleepAfterIdleSeconds,
+		DiskMiB:               request.Disk.SizeMiB,
+		Disk:                  request.Disk.specification(),
+		Image:                 request.Image.specification(),
+		Network:               request.Network.specification(),
+		SSHKeys:               request.Guest.SSHKeys,
+		Hostname:              request.Guest.Hostname,
+		UserData:              request.Guest.UserData,
+		Metadata:              request.Guest.Metadata,
 	}
 }
 
@@ -172,8 +165,11 @@ func (request computeRequest) validate() error {
 	if request.MemoryMiB > maximumMemoryMiB {
 		return fmt.Errorf("compute.memory_mib is too large")
 	}
-	if request.IdleTimeoutSeconds < 0 {
-		return fmt.Errorf("compute.idle_timeout_seconds must not be negative")
+	if request.SleepAfterIdleSeconds < 0 {
+		return fmt.Errorf("compute.sleep_after_idle_seconds must not be negative")
+	}
+	if int64(request.SleepAfterIdleSeconds) > maximumSleepAfterIdleSeconds {
+		return fmt.Errorf("compute.sleep_after_idle_seconds is too large")
 	}
 	return nil
 }

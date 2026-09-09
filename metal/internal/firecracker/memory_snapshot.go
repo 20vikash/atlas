@@ -9,8 +9,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// Memory snapshot file names shared by warm images and sleep snapshots. A full
-// snapshot contains one state file and one memory file.
+// Memory snapshot file names are shared by warm images and saved VM state.
 const (
 	memorySnapshotStateFileName  = "state"
 	memorySnapshotMemoryFileName = "memory"
@@ -21,14 +20,9 @@ func (runtime *Runtime) Compatibility() string {
 	return runtime.firecrackerCompatibility()
 }
 
-// CreateMemorySnapshot publishes a VM-local snapshot and returns its file paths.
-// Warm image creation promotes those files into image storage.
+// CreateMemorySnapshot writes files for one warm image.
 func (runtime *Runtime) CreateMemorySnapshot(ctx context.Context, machine vm.RuntimeMachine) (string, string, error) {
-	published, err := runtime.createAndPublishMemorySnapshot(ctx, machine)
-	if err != nil {
-		return "", "", err
-	}
-	return published.StatePath, published.MemoryPath, nil
+	return runtime.createFullMemorySnapshot(ctx, machine, "warm")
 }
 
 // createFullMemorySnapshot writes a full snapshot of an already paused guest

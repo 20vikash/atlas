@@ -13,7 +13,6 @@ POOL=${METALD_POOL:-metal}
 FC_VER=${METALD_FC_VERSION:-v1.16.1}
 LISTEN=${METALD_LISTEN:-127.0.0.1:8080}
 AUTH_TOKEN=${METALD_AUTH_TOKEN:-metal-development-token}
-WG_MESH_ENABLED=${METALD_WG_MESH_ENABLED:-false}
 IMAGE_DIR=$WORKDIR/images
 VAR_DIR=$WORKDIR/machines
 BIN=$WORKDIR/bin
@@ -148,7 +147,6 @@ binary_path = "$BIN/jailer"
 pool = "$POOL"
 
 [wg_mesh]
-enabled = $WG_MESH_ENABLED
 uplink  = "$uplink"
 
 EOF

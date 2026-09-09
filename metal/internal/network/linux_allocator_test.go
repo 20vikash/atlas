@@ -7,30 +7,49 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/frappe/atlas/metal/internal/network/activity"
+	traffic "github.com/frappe/atlas/metal/internal/network/traffic"
 )
 
-// fakeActivityMonitor records the attach and release calls of the allocator.
-type fakeActivityMonitor struct {
-	ensured  []activity.AttachmentRequest
-	released []string
+// fakeTrafficMonitor records traffic monitor calls.
+type fakeTrafficMonitor struct {
+	attached []traffic.AttachmentRequest
+	detached []string
 }
 
-func (attacher *fakeActivityMonitor) EnsureAttachment(request activity.AttachmentRequest) error {
-	attacher.ensured = append(attacher.ensured, request)
+func (monitor *fakeTrafficMonitor) Attach(request traffic.AttachmentRequest) error {
+	monitor.attached = append(monitor.attached, request)
 	return nil
 }
 
-func (attacher *fakeActivityMonitor) ReleaseAttachment(virtualMachineID string) error {
-	attacher.released = append(attacher.released, virtualMachineID)
+func (monitor *fakeTrafficMonitor) Detach(virtualMachineID string) error {
+	monitor.detached = append(monitor.detached, virtualMachineID)
 	return nil
 }
 
-func TestNewLinuxAllocatorStoresTheActivityAttacher(t *testing.T) {
-	attacher := &fakeActivityMonitor{}
-	allocator := NewLinuxAllocator(nil, attacher)
-	if allocator.activityMonitor != attacher {
-		t.Error("the activity monitor was not stored")
+func TestNewLinuxAllocatorStoresTheTrafficMonitor(t *testing.T) {
+	monitor := &fakeTrafficMonitor{}
+	allocator := newLinuxAllocator(nil, monitor)
+	if allocator.trafficMonitor != monitor {
+		t.Error("the traffic monitor was not stored")
+	}
+}
+
+func TestTrafficTrackingFollowsTheRequestedSetting(t *testing.T) {
+	monitor := &fakeTrafficMonitor{}
+	allocator := newLinuxAllocator(nil, monitor)
+	request := request{VirtualMachineID: "vm-1", UserID: 1001}
+
+	if err := allocator.convergeTrafficMonitoring(true, request); err != nil {
+		t.Fatal(err)
+	}
+	if len(monitor.attached) != 1 || monitor.attached[0].Target.VirtualMachineID != request.VirtualMachineID {
+		t.Fatalf("attachments = %+v", monitor.attached)
+	}
+	if err := allocator.convergeTrafficMonitoring(false, request); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(monitor.detached, []string{request.VirtualMachineID}) {
+		t.Fatalf("detached = %v", monitor.detached)
 	}
 }
 
@@ -42,6 +61,20 @@ func TestGuestMACAddressIsTheSameForEveryVirtualMachine(t *testing.T) {
 	}
 	if address != "06:00:ac:10:00:02" {
 		t.Errorf("MAC address = %q", address)
+	}
+}
+
+func TestTrafficTrackingIsSkippedWithoutAMonitor(t *testing.T) {
+	allocator := NewLinuxAllocator(nil, nil)
+	if err := allocator.convergeTrafficMonitoring(true, request{VirtualMachineID: "vm-1", UserID: 1001}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMeshRegistrationIsSkippedWithoutAMesh(t *testing.T) {
+	allocator := NewLinuxAllocator(nil, nil)
+	if err := allocator.addMeshRegistration(context.Background(), "vm-1", 100000, "fdaa:1:0:1::1"); err != nil {
+		t.Fatal(err)
 	}
 }
 

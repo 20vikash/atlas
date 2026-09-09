@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/network/traffic"
 )
 
 // Phase names the host operation in progress. It is stored in the observed
@@ -21,8 +23,8 @@ const (
 	phaseMetadata       = "metadata"
 	phaseDisk           = "disk"
 	phaseSnapshot       = "snapshot"
-	phaseSleepCheck     = "sleep-check"
-	phaseSleepSnapshot  = "sleep-snapshot"
+	phaseSaveState      = "save-state"
+	phaseRestoreState   = "restore-state"
 	phaseDestroyRuntime = "destroy-runtime"
 	phaseDestroyNetwork = "destroy-network"
 	phaseDestroyStorage = "destroy-storage"
@@ -36,6 +38,7 @@ func (manager *Manager) Reconcile(ctx context.Context, identifier string) error 
 		return err
 	}
 	defer unlock()
+
 	desired, observed, err := virtualMachine.records()
 	if err != nil {
 		return err
@@ -56,10 +59,6 @@ func (manager *Manager) reconcileActive(
 	observed ObservedRecord,
 	operationID string,
 ) error {
-	// Capture state before an operation overwrites the phase.
-	wasSleeping := observed.State == StateSleeping
-	interruptedSleep := observed.Phase == phaseSleepSnapshot
-
 	var networkInterface NetworkInterface
 	err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseNetwork, func() error {
 		var ensureError error
@@ -72,20 +71,27 @@ func (manager *Manager) reconcileActive(
 
 	observed.NetworkInterface = networkInterface
 	machine := runtimeMachine(desired, networkInterface)
+
+	if desired.State == StateStopped {
+		return manager.reconcileHardStop(ctx, desired, machine, &observed, operationID)
+	}
+
+	if desired.SpecificationGeneration > observed.SpecificationGeneration ||
+		desired.RestartGeneration > observed.RestartGeneration {
+		if err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseStop, func() error {
+			return manager.runtime.DeleteSavedState(ctx, machine)
+		}); err != nil {
+			return err
+		}
+	}
+
 	status, err := manager.inspect(ctx, desired.ID, machine, &observed, operationID)
 	if err != nil {
 		return err
 	}
-
-	// Desired state decides whether a sleeping VM stays asleep, resumes, or
-	// discards its snapshot.
-	if wasSleeping {
-		return manager.reconcileSleeping(ctx, desired, machine, &observed, operationID, status)
-	}
-
-	// Recover a warm stop that ended before its sleeping status was written.
-	if interruptedSleep && status.State == StateStopped {
-		return manager.recoverInterruptedSleep(ctx, desired, machine, &observed, operationID)
+	status, reconcileComplete, err := manager.reconcileSavedState(ctx, desired, machine, &observed, operationID, status)
+	if err != nil || reconcileComplete {
+		return err
 	}
 
 	if observed.RestartGeneration < desired.RestartGeneration {
@@ -94,12 +100,6 @@ func (manager *Manager) reconcileActive(
 			return err
 		}
 		observed.RestartGeneration = desired.RestartGeneration
-	}
-
-	// A warm stop takes a live guest to sleeping.
-	if desired.State == StateStopped && desired.WarmStop &&
-		(status.State == StateRunning || status.State == StatePaused) {
-		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{RequestedAt: time.Now().UTC()})
 	}
 
 	status, err = manager.applyDesiredState(ctx, desired.ID, machine, status, desired.State, &observed, operationID)
@@ -111,6 +111,7 @@ func (manager *Manager) reconcileActive(
 			return err
 		}
 		observed.Generation = desired.Generation
+		observed.SpecificationGeneration = desired.SpecificationGeneration
 	}
 	if err := manager.runOperation(ctx, desired.ID, &observed, operationID, phaseStorage, func() error {
 		var usageError error
@@ -120,26 +121,125 @@ func (manager *Manager) reconcileActive(
 		return err
 	}
 
-	// An idle sleepy VM enters sleeping through a warm stop.
-	now := time.Now().UTC()
-	decision, err := manager.evaluateSleepEligibility(ctx, desired, observed, status, now)
-	if err != nil {
+	stopped, err := manager.stopAfterIdle(ctx, desired, machine, status, &observed, operationID)
+	if err != nil || stopped {
 		return err
-	}
-	if decision.Eligible {
-		return manager.enterSleep(ctx, desired, machine, &observed, operationID, sleepRequest{
-			EligibleAt:                   decision.Activity.LastSeenAt.Add(desired.Sleep.IdleTimeout()),
-			RequestedAt:                  now,
-			LastNetworkActivityAt:        decision.Activity.LastSeenAt,
-			LastNetworkActivityMonotonic: decision.Activity.LastPacketMonotonicNanoseconds,
-			AbortOnTraffic:               true,
-		})
 	}
 
 	observed.State = status.State
 	observed.completeOperation()
 
 	return manager.store.writeObserved(desired.ID, observed)
+}
+
+// reconcileSavedState applies the desired state when saved state is present.
+func (manager *Manager) reconcileSavedState(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+	status RuntimeStatus,
+) (RuntimeStatus, bool, error) {
+	if !status.HasSavedState {
+		return status, false, nil
+	}
+
+	if status.State == StateRunning {
+		if err := manager.runtime.DeleteSavedState(ctx, machine); err != nil {
+			return status, false, fmt.Errorf("delete stale saved state for VM %s: %w", desired.ID, err)
+		}
+		manager.stopTrafficWatch(traffic.Target{VirtualMachineID: desired.ID, UserID: desired.UserID})
+		status.HasSavedState = false
+		return status, false, nil
+	}
+
+	if status.State == StatePaused {
+		if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseSaveState, func() error {
+			return manager.runtime.SaveAndStop(ctx, machine)
+		}); err != nil {
+			return status, false, err
+		}
+		status.State = StateStopped
+	}
+
+	if status.State != StateStopped {
+		return status, false, &TransitionError{DesiredState: desired.State, ObservedState: status.State}
+	}
+
+	switch desired.State {
+	case StateRunning:
+		if desired.Specification.SleepAfterIdleSeconds > 0 && manager.traffic != nil {
+			target := traffic.Target{VirtualMachineID: desired.ID, UserID: desired.UserID}
+			if err := manager.traffic.StartWatching(target); err != nil {
+				return status, false, fmt.Errorf("watch traffic for VM %s: %w", desired.ID, err)
+			}
+			return status, true, manager.writeAppliedState(desired, observed, StateStopped)
+		}
+		if err := manager.restoreSavedState(ctx, desired, machine, observed, operationID, StateRunning); err != nil {
+			return status, false, err
+		}
+		return RuntimeStatus{State: StateRunning}, false, nil
+	case StatePaused:
+		if err := manager.restoreSavedState(ctx, desired, machine, observed, operationID, StatePaused); err != nil {
+			return status, false, err
+		}
+		return RuntimeStatus{State: StatePaused}, false, nil
+	default:
+		return status, false, &TransitionError{DesiredState: desired.State, ObservedState: status.State}
+	}
+}
+
+// restoreSavedState restores a saved runtime and records its resulting state.
+func (manager *Manager) restoreSavedState(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+	resultState State,
+) error {
+	restore := manager.runtime.Restore
+	if resultState == StatePaused {
+		restore = manager.runtime.RestorePaused
+	}
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseRestoreState, func() error {
+		return restore(ctx, machine)
+	}); err != nil {
+		return err
+	}
+	manager.stopTrafficWatch(traffic.Target{VirtualMachineID: desired.ID, UserID: desired.UserID})
+	return manager.writeAppliedState(desired, observed, resultState)
+}
+
+// reconcileHardStop stops the runtime and applies all stopped-state changes.
+func (manager *Manager) reconcileHardStop(
+	ctx context.Context,
+	desired DesiredRecord,
+	machine RuntimeMachine,
+	observed *ObservedRecord,
+	operationID string,
+) error {
+	manager.stopTrafficWatch(traffic.Target{VirtualMachineID: desired.ID, UserID: desired.UserID})
+	if err := manager.runOperation(ctx, desired.ID, observed, operationID, phaseStop, func() error {
+		return manager.runtime.Stop(ctx, machine)
+	}); err != nil {
+		return err
+	}
+	if err := manager.applyDesiredSpecification(ctx, desired, machine, RuntimeStatus{State: StateStopped}, observed, operationID); err != nil {
+		return err
+	}
+	return manager.writeAppliedState(desired, observed, StateStopped)
+}
+
+// writeAppliedState records a complete state transition at the desired generations.
+func (manager *Manager) writeAppliedState(desired DesiredRecord, observed *ObservedRecord, state State) error {
+	observed.State = state
+	observed.Generation = desired.Generation
+	observed.SpecificationGeneration = desired.SpecificationGeneration
+	observed.RestartGeneration = desired.RestartGeneration
+	observed.completeOperation()
+	return manager.store.writeObserved(desired.ID, *observed)
 }
 
 // inspect reads runtime state and stores StateUnknown on failure.
@@ -176,10 +276,10 @@ func (manager *Manager) applyRestart(
 		return status, nil
 	}
 	err := manager.runOperation(ctx, identifier, observed, operationID, phaseRestart, func() error {
-		if _, err := manager.runtime.Stop(ctx, machine, StopShutdown); err != nil {
+		if err := manager.runtime.Stop(ctx, machine); err != nil {
 			return err
 		}
-		return manager.runtime.Start(ctx, machine, StartNormal)
+		return manager.runtime.Start(ctx, machine)
 	})
 	if err != nil {
 		return status, err
@@ -187,8 +287,7 @@ func (manager *Manager) applyRestart(
 	return RuntimeStatus{State: StateRunning}, nil
 }
 
-// applyDesiredState moves the runtime to the requested power state. Sleeping
-// VMs use their snapshot path instead of this method.
+// applyDesiredState moves the runtime to the requested power state.
 func (manager *Manager) applyDesiredState(
 	ctx context.Context,
 	identifier string,
@@ -198,34 +297,23 @@ func (manager *Manager) applyDesiredState(
 	observed *ObservedRecord,
 	operationID string,
 ) (RuntimeStatus, error) {
-	start := func(ctx context.Context, machine RuntimeMachine) error {
-		return manager.runtime.Start(ctx, machine, StartNormal)
-	}
 	switch desiredState {
 	case StateRunning:
 		if status.State == StatePaused {
 			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseResume, StateRunning, manager.runtime.Resume)
 		}
 		if status.State != StateRunning {
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start)
+			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, manager.runtime.Start)
 		}
 	case StatePaused:
 		if status.State != StateRunning && status.State != StatePaused {
-			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, start); err != nil {
+			if _, err := manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStart, StateRunning, manager.runtime.Start); err != nil {
 				return status, err
 			}
 			status.State = StateRunning
 		}
 		if status.State == StateRunning {
 			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phasePause, StatePaused, manager.runtime.Pause)
-		}
-	case StateStopped:
-		if status.State != StateStopped {
-			stopShutdown := func(ctx context.Context, machine RuntimeMachine) error {
-				_, err := manager.runtime.Stop(ctx, machine, StopShutdown)
-				return err
-			}
-			return manager.runRuntimeTransition(ctx, identifier, machine, observed, operationID, phaseStop, StateStopped, stopShutdown)
 		}
 	default:
 		return status, &TransitionError{DesiredState: desiredState, ObservedState: status.State}
@@ -279,8 +367,7 @@ func (manager *Manager) applyDesiredSpecification(
 	return nil
 }
 
-// reconcileDestroyed releases host resources in order and records each step
-// before removing records, so an interrupted destroy resumes safely.
+// reconcileDestroyed releases host resources in order and records each completed step.
 func (manager *Manager) reconcileDestroyed(
 	ctx context.Context,
 	desired DesiredRecord,
@@ -322,8 +409,7 @@ func (manager *Manager) reconcileDestroyed(
 	return nil
 }
 
-// runOperation stores the phase before a host call and records failures. The
-// caller records successful state after the call completes.
+// runOperation stores the phase before a host call and records any failure.
 func (manager *Manager) runOperation(
 	ctx context.Context,
 	identifier string,

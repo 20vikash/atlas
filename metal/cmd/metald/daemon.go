@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/network/traffic"
 )
 
 const gracefulShutdownTimeout = 30 * time.Second
@@ -32,8 +34,8 @@ type systemdConnection interface {
 	Close()
 }
 
-// activityMonitorResource owns the eBPF activity links, programs, and maps.
-type activityMonitorResource interface {
+// trafficMonitorResource owns the eBPF links, programs, and maps.
+type trafficMonitorResource interface {
 	Close() error
 }
 
@@ -44,7 +46,7 @@ type daemon struct {
 	snapshotUploads  snapshotUploadOwner
 	serialBroker     serialBroker
 	systemd          systemdConnection
-	activityMonitor  activityMonitorResource
+	trafficMonitor   trafficMonitorResource
 	workers          sync.WaitGroup
 	httpServer       daemonHTTPServer
 	httpServerErrors chan error
@@ -68,10 +70,9 @@ func newDaemon(
 	}
 }
 
-// OwnActivityMonitor makes the daemon the owner that closes the activity
-// monitor after every worker stops.
-func (daemon *daemon) OwnActivityMonitor(monitor activityMonitorResource) {
-	daemon.activityMonitor = monitor
+// OwnTrafficMonitor makes the daemon the owner of the traffic monitor.
+func (daemon *daemon) OwnTrafficMonitor(monitor trafficMonitorResource) {
+	daemon.trafficMonitor = monitor
 }
 
 // StartWorker starts one daemon-owned background worker.
@@ -81,6 +82,28 @@ func (daemon *daemon) StartWorker(run func(context.Context)) {
 		defer daemon.workers.Done()
 		run(daemon.context)
 	}()
+}
+
+// StartTrafficListener dispatches each traffic event without blocking the listener.
+func (daemon *daemon) StartTrafficListener(events <-chan traffic.Event, restore func(context.Context, traffic.Event) error) {
+	daemon.StartWorker(func(ctx context.Context) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, open := <-events:
+				if !open {
+					return
+				}
+				trafficEvent := event
+				daemon.StartWorker(func(ctx context.Context) {
+					if err := restore(ctx, trafficEvent); err != nil {
+						daemon.logger.Error("traffic restoration failed", "virtual_machine_id", trafficEvent.Target.VirtualMachineID, "error", err)
+					}
+				})
+			}
+		}
+	})
 }
 
 // Serve runs the HTTP server until it stops or the daemon receives a signal.
@@ -118,9 +141,9 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 		shutdownErrors = append(shutdownErrors, fmt.Errorf("wait for reconcilers: %w", err))
 	}
 	// Close eBPF resources only after workers stop, so no worker reads a closed map.
-	if daemon.activityMonitor != nil {
-		if err := daemon.activityMonitor.Close(); err != nil {
-			shutdownErrors = append(shutdownErrors, fmt.Errorf("close activity monitor: %w", err))
+	if daemon.trafficMonitor != nil {
+		if err := daemon.trafficMonitor.Close(); err != nil {
+			shutdownErrors = append(shutdownErrors, fmt.Errorf("close traffic monitor: %w", err))
 		}
 	}
 	if err := daemon.snapshotUploads.Shutdown(shutdownContext); err != nil {

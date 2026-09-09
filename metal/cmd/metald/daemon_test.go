@@ -9,17 +9,19 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/network/traffic"
 )
 
-// fakeActivityMonitor records monitor closure after worker completion.
-type fakeActivityMonitor struct {
+// fakeTrafficMonitor records closure after worker completion.
+type fakeTrafficMonitor struct {
 	closeError     error
 	closed         bool
 	workerFinished *atomic.Bool
 	sawWorkerDone  bool
 }
 
-func (monitor *fakeActivityMonitor) Close() error {
+func (monitor *fakeTrafficMonitor) Close() error {
 	monitor.closed = true
 	if monitor.workerFinished != nil {
 		monitor.sawWorkerDone = monitor.workerFinished.Load()
@@ -87,13 +89,46 @@ func TestDaemonShutdownOwnsBackgroundLifecycle(t *testing.T) {
 	}
 }
 
-func TestDaemonShutdownClosesTheActivityMonitorAfterWorkers(t *testing.T) {
+func TestTrafficListenerDoesNotWaitForRestoration(t *testing.T) {
 	daemonContext, cancelDaemon := context.WithCancel(t.Context())
-	workerFinished := &atomic.Bool{}
-	monitor := &fakeActivityMonitor{workerFinished: workerFinished}
 	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
 		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
-	lifecycle.OwnActivityMonitor(monitor)
+	events := make(chan traffic.Event, 2)
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	lifecycle.StartTrafficListener(events, func(ctx context.Context, event traffic.Event) error {
+		started <- event.Target.VirtualMachineID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+
+	events <- traffic.Event{Target: traffic.Target{VirtualMachineID: "vm-1"}}
+	events <- traffic.Event{Target: traffic.Target{VirtualMachineID: "vm-2"}}
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("traffic listener waited for a restoration")
+		}
+	}
+
+	close(events)
+	close(release)
+	if err := lifecycle.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDaemonShutdownClosesTheTrafficMonitorAfterWorkers(t *testing.T) {
+	daemonContext, cancelDaemon := context.WithCancel(t.Context())
+	workerFinished := &atomic.Bool{}
+	monitor := &fakeTrafficMonitor{workerFinished: workerFinished}
+	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
+		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
+	lifecycle.OwnTrafficMonitor(monitor)
 	lifecycle.StartWorker(func(workerContext context.Context) {
 		<-workerContext.Done()
 		workerFinished.Store(true)
@@ -103,27 +138,27 @@ func TestDaemonShutdownClosesTheActivityMonitorAfterWorkers(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 	if !monitor.closed {
-		t.Fatal("the activity monitor was not closed")
+		t.Fatal("the traffic monitor was not closed")
 	}
 	if !monitor.sawWorkerDone {
-		t.Fatal("the activity monitor closed before the worker finished")
+		t.Fatal("the traffic monitor closed before the worker finished")
 	}
 }
 
-func TestDaemonShutdownReportsAnActivityMonitorCloseError(t *testing.T) {
+func TestDaemonShutdownReportsATrafficMonitorCloseError(t *testing.T) {
 	daemonContext, cancelDaemon := context.WithCancel(t.Context())
-	monitor := &fakeActivityMonitor{closeError: errors.New("map still busy")}
+	monitor := &fakeTrafficMonitor{closeError: errors.New("map still busy")}
 	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
 		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
-	lifecycle.OwnActivityMonitor(monitor)
+	lifecycle.OwnTrafficMonitor(monitor)
 
 	err := lifecycle.Shutdown(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "activity monitor") {
-		t.Fatalf("error = %v, want the activity monitor context", err)
+	if err == nil || !strings.Contains(err.Error(), "traffic monitor") {
+		t.Fatalf("error = %v, want the traffic monitor context", err)
 	}
 }
 
-func TestDaemonShutdownWithoutAnActivityMonitor(t *testing.T) {
+func TestDaemonShutdownWithoutATrafficMonitor(t *testing.T) {
 	daemonContext, cancelDaemon := context.WithCancel(t.Context())
 	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
 		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})

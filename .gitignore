@@ -71,6 +71,10 @@ jspm_packages/
 /services/wg-mesh/dist/
 /services/wg-mesh/cli/atlas-wg-mesh.bpf.o
 
+# Metal traffic tracker build outputs
+/metal/internal/network/traffic/traffic_bpfel.o
+/metal/internal/network/traffic/track_traffic.o
+
 # tmp
 1_gpt_atlas_plan.md
 1_gpt_metal_plan.md

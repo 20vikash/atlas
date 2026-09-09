@@ -35,11 +35,14 @@ jobs:
       - name: Generate the API specification
         run: make openapi
 
+      - name: Build the eBPF object
+        run: make bpf
+
       - name: Check formatting
         run: test -z "$(gofmt -l ./cmd ./internal)" || { gofmt -l ./cmd ./internal; exit 1; }
 
       - name: Vet
-        run: go vet ./...
+        run: make vet
 
       - name: Run unit tests with the race detector
         run: go test -race ./...

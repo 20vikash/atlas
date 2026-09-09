@@ -35,66 +35,29 @@ type DesiredRecord struct {
 	CreateFingerprint string `json:"create_fingerprint"`
 	Generation        uint64 `json:"generation"`
 	RestartGeneration uint64 `json:"restart_generation"`
-	// SpecificationGeneration identifies the compute, disk, and network shape. It
-	// stays stable across power and warm-stop changes so snapshots remain valid.
-	SpecificationGeneration uint64 `json:"specification_generation,omitempty"`
-	State                   State  `json:"state"`
-	// WarmStop asks a stopped VM to save a memory snapshot. A later start resumes
-	// it, while false keeps the old cold-stop behavior.
-	WarmStop bool `json:"warm_stop,omitempty"`
-	// Sleep is the automatic sleep policy of this VM.
-	Sleep         SleepPolicy   `json:"sleep,omitempty"`
-	Specification Specification `json:"specification"`
+	// SpecificationGeneration identifies the compute, disk, and network shape.
+	SpecificationGeneration uint64        `json:"specification_generation,omitempty"`
+	State                   State         `json:"state"`
+	Specification           Specification `json:"specification"`
 }
 
 // ObservedRecord stores reconciliation progress and observed state.
 type ObservedRecord struct {
-	SchemaVersion          int              `json:"schema_version"`
-	Generation             uint64           `json:"generation"`
-	RestartGeneration      uint64           `json:"restart_generation"`
-	State                  State            `json:"state"`
-	Phase                  string           `json:"phase,omitempty"`
-	OperationID            string           `json:"operation_id,omitempty"`
-	OperationStartedAt     time.Time        `json:"operation_started_at,omitempty"`
-	UpdatedAt              time.Time        `json:"updated_at"`
-	Error                  *OperationError  `json:"error,omitempty"`
-	RuntimeCleanupComplete bool             `json:"runtime_cleanup_complete,omitempty"`
-	NetworkCleanupComplete bool             `json:"network_cleanup_complete,omitempty"`
-	StorageCleanupComplete bool             `json:"storage_cleanup_complete,omitempty"`
-	NetworkInterface       NetworkInterface `json:"network_interface,omitempty"`
-	Disk                   DiskUsage        `json:"disk,omitempty"`
-	Sleep                  *SleepProgress   `json:"sleep,omitempty"`
-}
-
-// SleepProgress records one VM's automatic sleep operation.
-type SleepProgress struct {
-	EligibleAt               time.Time `json:"eligible_at,omitempty"`
-	RequestedAt              time.Time `json:"requested_at,omitempty"`
-	MemorySnapshotGeneration uint64    `json:"snapshot_generation,omitempty"`
-	MemorySnapshotCreatedAt  time.Time `json:"snapshot_created_at,omitempty"`
-	// SpecificationGeneration identifies the snapshot's VM shape. A later shape
-	// change makes the snapshot incompatible.
-	SpecificationGeneration uint64    `json:"specification_generation,omitempty"`
-	LastNetworkActivityAt   time.Time `json:"last_network_activity_at,omitempty"`
-}
-
-// validate rejects an incomplete sleep object or a sleeping record without a
-// published snapshot.
-func (record ObservedRecord) validateSleep() error {
-	if record.State == StateSleeping && record.Sleep == nil {
-		return errors.New("sleeping record has no sleep progress")
-	}
-	sleep := record.Sleep
-	if sleep == nil {
-		return nil
-	}
-	if (sleep.MemorySnapshotGeneration == 0) != sleep.MemorySnapshotCreatedAt.IsZero() {
-		return errors.New("sleep progress has a partial snapshot")
-	}
-	if record.State == StateSleeping && sleep.MemorySnapshotGeneration == 0 {
-		return errors.New("sleeping record has no published snapshot")
-	}
-	return nil
+	SchemaVersion           int              `json:"schema_version"`
+	Generation              uint64           `json:"generation"`
+	SpecificationGeneration uint64           `json:"specification_generation,omitempty"`
+	RestartGeneration       uint64           `json:"restart_generation"`
+	State                   State            `json:"state"`
+	Phase                   string           `json:"phase,omitempty"`
+	OperationID             string           `json:"operation_id,omitempty"`
+	OperationStartedAt      time.Time        `json:"operation_started_at,omitempty"`
+	UpdatedAt               time.Time        `json:"updated_at"`
+	Error                   *OperationError  `json:"error,omitempty"`
+	RuntimeCleanupComplete  bool             `json:"runtime_cleanup_complete,omitempty"`
+	NetworkCleanupComplete  bool             `json:"network_cleanup_complete,omitempty"`
+	StorageCleanupComplete  bool             `json:"storage_cleanup_complete,omitempty"`
+	NetworkInterface        NetworkInterface `json:"network_interface,omitempty"`
+	Disk                    DiskUsage        `json:"disk,omitempty"`
 }
 
 // OperationError stores public and local reconciliation error details. Local
@@ -140,7 +103,9 @@ func (store *recordStore) validateAll() error {
 		if err != nil {
 			return err
 		}
-		if observed.Generation > desired.Generation || observed.RestartGeneration > desired.RestartGeneration {
+		if observed.Generation > desired.Generation ||
+			observed.SpecificationGeneration > desired.SpecificationGeneration ||
+			observed.RestartGeneration > desired.RestartGeneration {
 			return fmt.Errorf("validate %s: observed generation is ahead of desired generation", store.virtualMachineDirectory(identifier))
 		}
 	}
@@ -205,9 +170,6 @@ func (store *recordStore) readObserved(identifier string) (ObservedRecord, error
 	}
 	if !isObservedState(record.State) || record.UpdatedAt.IsZero() {
 		return ObservedRecord{}, fmt.Errorf("read %s: invalid observed record", store.observedPath(identifier))
-	}
-	if err := record.validateSleep(); err != nil {
-		return ObservedRecord{}, fmt.Errorf("read %s: %w", store.observedPath(identifier), err)
 	}
 	return record, nil
 }

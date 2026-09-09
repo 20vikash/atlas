@@ -26,26 +26,9 @@ func TestPublicIPv4RuleCheckRemovesInsertPosition(t *testing.T) {
 }
 
 func TestDefaultRouteStepsAreSafeToRepeat(t *testing.T) {
-	steps := defaultRouteSteps("metal-vm-1", "10.0.0.1")
+	steps := defaultRouteSteps("10.0.0.1")
 
 	if !slices.Contains(steps[0], "replace") || slices.Contains(steps[0], "add") {
 		t.Fatalf("default route step = %v, want replace", steps[0])
-	}
-}
-
-func TestInternetPathStepsExtendTheDefaultRoute(t *testing.T) {
-	route := defaultRouteSteps("metal-vm-1", "10.0.0.1")
-	steps := internetPathSteps("metal-vm-1", "vg-1000", "10.0.0.1")
-
-	if len(steps) != len(route)+1 {
-		t.Fatalf("internet path steps = %d, want %d", len(steps), len(route)+1)
-	}
-	for index, step := range route {
-		if !slices.Equal(steps[index], step) {
-			t.Fatalf("step %d = %v, want %v", index, step, route[index])
-		}
-	}
-	if !slices.Contains(steps[len(steps)-1], "MASQUERADE") {
-		t.Fatalf("last step = %v, want MASQUERADE", steps[len(steps)-1])
 	}
 }

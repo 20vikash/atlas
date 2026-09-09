@@ -25,10 +25,7 @@ func (manager *Manager) RequestRestart(ctx context.Context, identifier string) e
 	return manager.store.writeDesired(record)
 }
 
-// SetCompute stores the complete requested CPU shape, memory shape, and sleep
-// policy. A shape change needs a stopped VM and starts it again. A sleep policy
-// change is accepted in any state and leaves the power state alone, because the
-// policy is not part of the machine shape.
+// SetCompute stores the complete requested compute configuration.
 func (manager *Manager) SetCompute(ctx context.Context, identifier string, compute Compute) error {
 	return manager.mutate(ctx, identifier, func(record *DesiredRecord) (bool, error) {
 		if record.State == StateDestroyed {
@@ -37,8 +34,8 @@ func (manager *Manager) SetCompute(ctx context.Context, identifier string, compu
 
 		shapeChanged := record.Specification.VirtualCPUCount != compute.VirtualCPUCount ||
 			record.Specification.MemoryMiB != compute.MemoryMiB
-		sleepChanged := record.Sleep != compute.Sleep
-		if !shapeChanged && !sleepChanged && record.State == StateRunning {
+		timeoutChanged := record.Specification.SleepAfterIdleSeconds != compute.SleepAfterIdleSeconds
+		if !shapeChanged && !timeoutChanged && record.State == StateRunning {
 			return false, nil
 		}
 
@@ -56,7 +53,7 @@ func (manager *Manager) SetCompute(ctx context.Context, identifier string, compu
 			record.State = StateRunning
 		}
 
-		record.Sleep = compute.Sleep
+		record.Specification.SleepAfterIdleSeconds = compute.SleepAfterIdleSeconds
 		return true, nil
 	})
 }

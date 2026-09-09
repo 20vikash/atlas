@@ -23,6 +23,7 @@ type NetworkRequest struct {
 	UserID           uint32
 	GroupID          uint32
 	Configuration    NetworkConfiguration
+	TrackTraffic     bool
 }
 
 // NetworkReleaseRequest identifies host network resources to remove.
