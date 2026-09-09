@@ -703,6 +703,23 @@ func TestCreateSnapshotRejectsUnknownRuntimeState(t *testing.T) {
 	}
 }
 
+// The runtime makes a machine directory for a temporary VM. A directory that
+// stays behind holds no records, so it stops every later start and list.
+func TestRunTemporaryRemovesMachineDirectory(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	identifier := "warm-529e5118abe6"
+	run := func(RuntimeMachine) error {
+		return os.MkdirAll(filepath.Join(manager.store.directory, identifier, "firecracker"), 0o700)
+	}
+	if err := manager.RunTemporary(context.Background(), identifier, testSpecification(), run); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(manager.store.directory, identifier)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("machine directory stat = %v, want not exist", err)
+	}
+}
+
 func TestRunTemporaryRejectsInvalidIdentifier(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
 	err := manager.RunTemporary(context.Background(), "../machine-1", testSpecification(), func(RuntimeMachine) error {
