@@ -73,5 +73,11 @@ docstring-code-format = true
 frappe = ">=16.0.0,<18.0.0"
 
 [tool.bench]
-validation-ignore = ["atlas/vm/scripts/*"]
+validation-ignore = [
+    "atlas/vm/scripts/*",
+    "scripts/*",
+    "clients/*",
+    "services/*",
+    "metal/*",
+]
 
