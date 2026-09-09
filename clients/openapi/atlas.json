@@ -1,0 +1,2233 @@
+{
+  "components": {
+    "schemas": {
+      "ComputeUpdatePayload": {
+        "additionalProperties": false,
+        "description": "New CPU and memory values for a stopped virtual machine.",
+        "properties": {
+          "memory_mib": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mib"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vcpus"
+          }
+        },
+        "title": "ComputeUpdatePayload",
+        "type": "object"
+      },
+      "ConsoleTokenPayload": {
+        "additionalProperties": false,
+        "description": "The console mode that the token opens.",
+        "properties": {
+          "mode": {
+            "default": "tty",
+            "enum": [
+              "tty",
+              "ssh"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "ConsoleTokenPayload",
+        "type": "object"
+      },
+      "ConsoleTokenResponse": {
+        "description": "A single-use console token.",
+        "examples": [
+          {
+            "expires_in": 60,
+            "mode": "tty",
+            "token": "console-token"
+          }
+        ],
+        "properties": {
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "tty",
+              "ssh"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "mode",
+          "expires_in"
+        ],
+        "title": "ConsoleTokenResponse",
+        "type": "object"
+      },
+      "CreateVirtualMachinePayload": {
+        "additionalProperties": false,
+        "description": "Values that create one virtual machine.",
+        "properties": {
+          "disk_iops": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Disk Iops",
+            "type": "integer"
+          },
+          "disk_mib": {
+            "exclusiveMinimum": 0,
+            "title": "Disk Mib",
+            "type": "integer"
+          },
+          "disk_throughput_mibps": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Disk Throughput Mibps",
+            "type": "integer"
+          },
+          "egress": {
+            "default": "uplink",
+            "enum": [
+              "uplink",
+              "mesh",
+              "none"
+            ],
+            "title": "Egress",
+            "type": "string"
+          },
+          "hostname": {
+            "default": "",
+            "title": "Hostname",
+            "type": "string"
+          },
+          "image_id": {
+            "minLength": 1,
+            "title": "Image Id",
+            "type": "string"
+          },
+          "ip_address_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ip Address Id"
+          },
+          "memory_mib": {
+            "exclusiveMinimum": 0,
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "private_network_throughput_mibps": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Private Network Throughput Mibps",
+            "type": "integer"
+          },
+          "public_network_throughput_mibps": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Public Network Throughput Mibps",
+            "type": "integer"
+          },
+          "ssh_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ssh Keys",
+            "type": "array"
+          },
+          "user_data": {
+            "default": "",
+            "title": "User Data",
+            "type": "string"
+          },
+          "vcpus": {
+            "exclusiveMinimum": 0,
+            "title": "Vcpus",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "image_id",
+          "vcpus",
+          "memory_mib",
+          "disk_mib"
+        ],
+        "title": "CreateVirtualMachinePayload",
+        "type": "object"
+      },
+      "DiskUpdatePayload": {
+        "additionalProperties": false,
+        "description": "New disk size and disk rate limits.",
+        "properties": {
+          "disk_iops": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Iops"
+          },
+          "disk_mib": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mib"
+          },
+          "disk_throughput_mibps": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Throughput Mibps"
+          }
+        },
+        "title": "DiskUpdatePayload",
+        "type": "object"
+      },
+      "IPAddressAssignmentPayload": {
+        "additionalProperties": false,
+        "description": "The public IPv4 address to attach.",
+        "properties": {
+          "ip_address_id": {
+            "minLength": 1,
+            "title": "Ip Address Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ip_address_id"
+        ],
+        "title": "IPAddressAssignmentPayload",
+        "type": "object"
+      },
+      "IPAddressResponse": {
+        "description": "A tenant public IPv4 address.",
+        "examples": [
+          {
+            "address": "203.0.113.10",
+            "created_at": 1788834165,
+            "id": "203.0.113.10",
+            "state": "reserved",
+            "tenant_id": 7,
+            "virtual_machine_id": null
+          }
+        ],
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "integer"
+          },
+          "virtual_machine_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Virtual Machine Id"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "address",
+          "state",
+          "virtual_machine_id",
+          "created_at"
+        ],
+        "title": "IPAddressResponse",
+        "type": "object"
+      },
+      "ImageDownloadResponse": {
+        "description": "Signed downloads for one image.",
+        "examples": [
+          {
+            "artifact": "rootfs",
+            "expires_at": 1788920565,
+            "expires_in": 86400,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_mib": 20480,
+            "url": "https://storage.example/rootfs"
+          }
+        ],
+        "properties": {
+          "artifact": {
+            "enum": [
+              "rootfs",
+              "kernel"
+            ],
+            "title": "Artifact",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_mib": {
+            "title": "Size Mib",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact",
+          "url",
+          "size_mib",
+          "sha256",
+          "expires_in",
+          "expires_at"
+        ],
+        "title": "ImageDownloadResponse",
+        "type": "object"
+      },
+      "ImageResponse": {
+        "description": "A tenant virtual machine image.",
+        "examples": [
+          {
+            "cache_image": false,
+            "created_at": 1788834165,
+            "enabled": true,
+            "id": "8f1c2d3e4b5a6978",
+            "image_type": "machine",
+            "kernel_size_mib": 8,
+            "memory_snapshot": false,
+            "operating_system": "Ubuntu",
+            "operating_system_version": "24.04",
+            "platform": "amd64",
+            "rootfs_size_mib": 20480,
+            "status": "available",
+            "supports_cloud_init": true,
+            "tenant_id": 7,
+            "title": "Worker snapshot",
+            "transfer_error": null,
+            "transfer_progress": 100
+          }
+        ],
+        "properties": {
+          "cache_image": {
+            "title": "Cache Image",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_type": {
+            "title": "Image Type",
+            "type": "string"
+          },
+          "kernel_size_mib": {
+            "title": "Kernel Size Mib",
+            "type": "integer"
+          },
+          "memory_snapshot": {
+            "title": "Memory Snapshot",
+            "type": "boolean"
+          },
+          "operating_system": {
+            "title": "Operating System",
+            "type": "string"
+          },
+          "operating_system_version": {
+            "title": "Operating System Version",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "rootfs_size_mib": {
+            "title": "Rootfs Size Mib",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supports_cloud_init": {
+            "title": "Supports Cloud Init",
+            "type": "boolean"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "transfer_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transfer Error"
+          },
+          "transfer_progress": {
+            "title": "Transfer Progress",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "title",
+          "image_type",
+          "platform",
+          "operating_system",
+          "operating_system_version",
+          "status",
+          "enabled",
+          "supports_cloud_init",
+          "cache_image",
+          "memory_snapshot",
+          "rootfs_size_mib",
+          "kernel_size_mib",
+          "transfer_progress",
+          "transfer_error",
+          "created_at"
+        ],
+        "title": "ImageResponse",
+        "type": "object"
+      },
+      "MetadataReplacementPayload": {
+        "additionalProperties": false,
+        "description": "The complete custom metadata map.",
+        "properties": {
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Metadata",
+            "type": "object"
+          }
+        },
+        "required": [
+          "metadata"
+        ],
+        "title": "MetadataReplacementPayload",
+        "type": "object"
+      },
+      "NetworkUpdatePayload": {
+        "additionalProperties": false,
+        "description": "New egress mode and network rate limits.",
+        "properties": {
+          "egress": {
+            "anyOf": [
+              {
+                "enum": [
+                  "uplink",
+                  "mesh",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Egress"
+          },
+          "private_network_throughput_mibps": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Private Network Throughput Mibps"
+          },
+          "public_network_throughput_mibps": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Public Network Throughput Mibps"
+          }
+        },
+        "title": "NetworkUpdatePayload",
+        "type": "object"
+      },
+      "Page[IPAddressResponse]": {
+        "examples": [
+          {
+            "has_more": false,
+            "items": [],
+            "limit": 20,
+            "offset": 0
+          }
+        ],
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IPAddressResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "offset",
+          "limit",
+          "has_more"
+        ],
+        "title": "Page[IPAddressResponse]",
+        "type": "object"
+      },
+      "Page[ImageResponse]": {
+        "examples": [
+          {
+            "has_more": false,
+            "items": [],
+            "limit": 20,
+            "offset": 0
+          }
+        ],
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImageResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "offset",
+          "limit",
+          "has_more"
+        ],
+        "title": "Page[ImageResponse]",
+        "type": "object"
+      },
+      "Page[VirtualMachineResponse]": {
+        "examples": [
+          {
+            "has_more": false,
+            "items": [],
+            "limit": 20,
+            "offset": 0
+          }
+        ],
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VirtualMachineResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "offset",
+          "limit",
+          "has_more"
+        ],
+        "title": "Page[VirtualMachineResponse]",
+        "type": "object"
+      },
+      "ReserveIPAddressPayload": {
+        "additionalProperties": false,
+        "description": "Select the source of an IP address reservation.",
+        "properties": {
+          "source": {
+            "default": "pool",
+            "enum": [
+              "pool",
+              "provider"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "title": "ReserveIPAddressPayload",
+        "type": "object"
+      },
+      "SSHKeysReplacementPayload": {
+        "additionalProperties": false,
+        "description": "The complete authorized key list.",
+        "properties": {
+          "ssh_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ssh Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ssh_keys"
+        ],
+        "title": "SSHKeysReplacementPayload",
+        "type": "object"
+      },
+      "SnapshotPayload": {
+        "additionalProperties": false,
+        "description": "Values that create one Machine image from a virtual machine.",
+        "properties": {
+          "cache_image": {
+            "default": false,
+            "title": "Cache Image",
+            "type": "boolean"
+          },
+          "memory_snapshot": {
+            "default": false,
+            "title": "Memory Snapshot",
+            "type": "boolean"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "SnapshotPayload",
+        "type": "object"
+      },
+      "VirtualMachineDetailResponse": {
+        "description": "A stored virtual machine with its live host state.",
+        "examples": [
+          {
+            "created_at": 1788834165,
+            "current_state": "running",
+            "desired_state": "running",
+            "disk_mib": 20480,
+            "id": "vm-00001",
+            "image_id": "8f1c2d3e4b5a6978",
+            "memory_mib": 2048,
+            "tenant_id": 7,
+            "vcpus": 2
+          }
+        ],
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "current_state": {
+            "title": "Current State",
+            "type": "string"
+          },
+          "desired_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desired State"
+          },
+          "disk_mib": {
+            "title": "Disk Mib",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_id": {
+            "title": "Image Id",
+            "type": "string"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "integer"
+          },
+          "vcpus": {
+            "title": "Vcpus",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "image_id",
+          "vcpus",
+          "memory_mib",
+          "disk_mib",
+          "created_at",
+          "desired_state",
+          "current_state"
+        ],
+        "title": "VirtualMachineDetailResponse",
+        "type": "object"
+      },
+      "VirtualMachineResponse": {
+        "description": "A stored tenant virtual machine.",
+        "examples": [
+          {
+            "created_at": 1788834165,
+            "disk_mib": 20480,
+            "id": "vm-00001",
+            "image_id": "8f1c2d3e4b5a6978",
+            "memory_mib": 2048,
+            "tenant_id": 7,
+            "vcpus": 2
+          }
+        ],
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "disk_mib": {
+            "title": "Disk Mib",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "image_id": {
+            "title": "Image Id",
+            "type": "string"
+          },
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "integer"
+          },
+          "vcpus": {
+            "title": "Vcpus",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "image_id",
+          "vcpus",
+          "memory_mib",
+          "disk_mib",
+          "created_at"
+        ],
+        "title": "VirtualMachineResponse",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "Access Token Authentication": {
+        "bearerFormat": "token",
+        "description": "Use: Bearer <access_token>. [Learn more](https://docs.frappe.io/framework/user/en/api/rest#3-access-token)",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "Central Token Authentication": {
+        "description": "Use: X-Atlas-Central-Token <token>.",
+        "in": "header",
+        "name": "X-Atlas-Central-Token",
+        "type": "apiKey"
+      },
+      "Token Based Authentication": {
+        "description": "Use: token api_key:api_secret. [Learn more](https://docs.frappe.io/framework/user/en/api/rest#1-token-based-authentication)",
+        "in": "header",
+        "name": "Authorization",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Atlas API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/atlas/images": {
+      "get": {
+        "description": "Returns one page of System and Machine images owned by the tenant in newest-first order.",
+        "operationId": "list_images",
+        "parameters": [
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page[ImageResponse]"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "List images",
+        "tags": [
+          "Images"
+        ]
+      }
+    },
+    "/api/atlas/images/{image_id}": {
+      "delete": {
+        "description": "Starts deletion of an unused Available Machine image. A cleanup job removes its stored artifacts and remaining host snapshot data.",
+        "operationId": "delete_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResponse"
+                }
+              }
+            },
+            "description": "Deletion started. Poll the image route."
+          },
+          "409": {
+            "description": "A virtual machine uses this image, or the image is not a Machine image."
+          }
+        },
+        "summary": "Delete image",
+        "tags": [
+          "Images"
+        ]
+      },
+      "get": {
+        "description": "Returns one tenant image with its artifact metadata and transfer state.",
+        "operationId": "get_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Get image",
+        "tags": [
+          "Images"
+        ]
+      }
+    },
+    "/api/atlas/images/{image_id}/download": {
+      "get": {
+        "description": "Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its size, SHA-256 value, and expiry time and cannot be cached.",
+        "operationId": "download_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact",
+            "required": true,
+            "schema": {
+              "enum": [
+                "rootfs",
+                "kernel"
+              ],
+              "title": "Artifact",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageDownloadResponse"
+                }
+              }
+            },
+            "description": "A signed artifact URL that expires after 24 hours."
+          }
+        },
+        "summary": "Download image",
+        "tags": [
+          "Images"
+        ]
+      }
+    },
+    "/api/atlas/ip-addresses": {
+      "get": {
+        "description": "Returns one page of IP addresses reserved by the tenant in newest-first order.",
+        "operationId": "list_ip_addresses",
+        "parameters": [
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page[IPAddressResponse]"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "List IP addresses",
+        "tags": [
+          "IP Addresses"
+        ]
+      },
+      "post": {
+        "description": "Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the provider source creates a provider reservation.",
+        "operationId": "reserve_ip_address",
+        "parameters": [
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "source": "pool"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ReserveIPAddressPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IPAddressResponse"
+                }
+              }
+            },
+            "description": "The address is reserved for the tenant."
+          },
+          "409": {
+            "description": "The shared pool holds no free address."
+          }
+        },
+        "summary": "Reserve IP address",
+        "tags": [
+          "IP Addresses"
+        ]
+      }
+    },
+    "/api/atlas/ip-addresses/{ip_address_id}": {
+      "delete": {
+        "description": "Returns an unattached address to the shared pool and keeps its provider reservation. An attached or detaching address cannot be released.",
+        "operationId": "release_ip_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip_address_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The address is back in the shared pool."
+          },
+          "409": {
+            "description": "The address is attached or detaching."
+          }
+        },
+        "summary": "Release IP address",
+        "tags": [
+          "IP Addresses"
+        ]
+      },
+      "get": {
+        "description": "Returns one tenant IP address with its attachment state and VM assignment.",
+        "operationId": "get_ip_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ip_address_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IPAddressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Get IP address",
+        "tags": [
+          "IP Addresses"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines": {
+      "get": {
+        "description": "Returns one page of tenant VM records in newest-first order. This request does not contact the host.",
+        "operationId": "list_virtual_machines",
+        "parameters": [
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page[VirtualMachineResponse]"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "List VMs",
+        "tags": [
+          "VM Lifecycle"
+        ]
+      },
+      "post": {
+        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration.",
+        "operationId": "create_virtual_machine",
+        "parameters": [
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "disk_mib": 20480,
+                "hostname": "worker-1",
+                "image_id": "8f1c2d3e4b5a6978",
+                "memory_mib": 2048,
+                "ssh_keys": [
+                  "ssh-ed25519 AAAA"
+                ],
+                "vcpus": 2
+              },
+              "schema": {
+                "$ref": "#/components/schemas/CreateVirtualMachinePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The virtual machine request is stored."
+          }
+        },
+        "summary": "Create VM",
+        "tags": [
+          "VM Lifecycle"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}": {
+      "delete": {
+        "description": "Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.",
+        "operationId": "delete_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "Termination started. Poll the virtual machine route."
+          }
+        },
+        "summary": "Delete VM",
+        "tags": [
+          "VM Lifecycle"
+        ]
+      },
+      "get": {
+        "description": "Returns the stored VM record together with its desired state and current state.",
+        "operationId": "get_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineDetailResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Get VM",
+        "tags": [
+          "VM Lifecycle"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/console-token": {
+      "post": {
+        "description": "Returns a single-use token for the Atlas realtime TTY or SSH console. The token expires after 60 seconds.",
+        "operationId": "create_virtual_machine_console_token",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "mode": "tty"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleTokenPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleTokenResponse"
+                }
+              }
+            },
+            "description": "A single-use console token."
+          }
+        },
+        "summary": "Create console token",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/pause": {
+      "post": {
+        "description": "Pauses the VM without stopping it. Poll the VM route to observe completion.",
+        "operationId": "pause_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The request is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Pause VM",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/restart": {
+      "post": {
+        "description": "Requests an in-place restart. Poll the VM route to observe completion.",
+        "operationId": "restart_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The request is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Restart VM",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/resume": {
+      "post": {
+        "description": "Returns a paused VM to the running state. Poll the VM route to observe completion.",
+        "operationId": "resume_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The request is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Resume VM",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/snapshot": {
+      "post": {
+        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts.",
+        "operationId": "create_virtual_machine_snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "cache_image": false,
+                "memory_snapshot": false,
+                "title": "worker-1 golden"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResponse"
+                }
+              }
+            },
+            "description": "The Machine image record is created."
+          }
+        },
+        "summary": "Create snapshot",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/start": {
+      "post": {
+        "description": "Requests the running state. Poll the VM route to observe completion.",
+        "operationId": "start_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The request is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Start VM",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/stop": {
+      "post": {
+        "description": "Requests the stopped state. Poll the VM route to observe completion.",
+        "operationId": "stop_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The request is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Stop VM",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/compute": {
+      "patch": {
+        "description": "Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the change.",
+        "operationId": "update_virtual_machine_compute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "vcpus": 4
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ComputeUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Resize compute",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/disk": {
+      "patch": {
+        "description": "Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease, and a limit of 0 removes that limit.",
+        "operationId": "update_virtual_machine_disk",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "disk_mib": 40960,
+                "disk_throughput_mibps": 100
+              },
+              "schema": {
+                "$ref": "#/components/schemas/DiskUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Resize disk",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/ip-address": {
+      "delete": {
+        "description": "Detaches the public IP address from the VM and keeps its tenant reservation.",
+        "operationId": "detach_virtual_machine_ip_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Detach IP address",
+        "tags": [
+          "VM Configuration"
+        ]
+      },
+      "put": {
+        "description": "Attaches one available IP address that the tenant reserved. Detach the current address before you attach a different one.",
+        "operationId": "attach_virtual_machine_ip_address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "ip_address_id": "203.0.113.10"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/IPAddressAssignmentPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Attach IP address",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/metadata": {
+      "put": {
+        "description": "Replaces the complete custom metadata map. Entries that are not in the request are removed.",
+        "operationId": "replace_virtual_machine_metadata",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "metadata": {
+                  "environment": "production"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/MetadataReplacementPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Replace metadata",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/network": {
+      "patch": {
+        "description": "Changes egress and network throughput limits. Egress controls internet reachability and does not change mesh reachability.",
+        "operationId": "update_virtual_machine_network",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "egress": "uplink",
+                "public_network_throughput_mibps": 50
+              },
+              "schema": {
+                "$ref": "#/components/schemas/NetworkUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Update network",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/ssh-keys": {
+      "put": {
+        "description": "Replaces the complete authorized SSH key list. Keys that are not in the request are removed.",
+        "operationId": "replace_virtual_machine_ssh_keys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 1 through 4294967295.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "ssh_keys": [
+                  "ssh-ed25519 AAAA"
+                ]
+              },
+              "schema": {
+                "$ref": "#/components/schemas/SSHKeysReplacementPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Replace SSH keys",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "Token Based Authentication": []
+    },
+    {
+      "Access Token Authentication": []
+    },
+    {
+      "Central Token Authentication": []
+    }
+  ],
+  "tags": [
+    {
+      "description": "Tenant control plane for virtual machines, IP addresses, and images.",
+      "name": "Atlas"
+    },
+    {
+      "description": "Create, manage, and terminate tenant virtual machines.",
+      "kind": "nav",
+      "name": "Virtual Machines"
+    },
+    {
+      "description": "Create, read, and terminate virtual machines.",
+      "name": "VM Lifecycle",
+      "parent": "Virtual Machines"
+    },
+    {
+      "description": "Control virtual machine state and create snapshots and console tokens.",
+      "name": "VM Actions",
+      "parent": "Virtual Machines"
+    },
+    {
+      "description": "Change virtual machine compute, storage, network, and guest settings.",
+      "name": "VM Configuration",
+      "parent": "Virtual Machines"
+    },
+    {
+      "description": "Reserve and release public IPv4 addresses for one tenant.",
+      "name": "IP Addresses"
+    },
+    {
+      "description": "Read and delete tenant virtual machine images.",
+      "name": "Images"
+    }
+  ]
+}

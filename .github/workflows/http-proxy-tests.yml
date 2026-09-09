@@ -4,11 +4,17 @@ on:
   pull_request:
     paths:
       - "services/http-proxy/**"
+      - "scripts/generate-api-client.py"
+      - "clients/atlas-http-proxy/**"
+      - "clients/openapi/atlas-http-proxy.json"
   push:
     branches:
       - develop
     paths:
       - "services/http-proxy/**"
+      - "scripts/generate-api-client.py"
+      - "clients/atlas-http-proxy/**"
+      - "clients/openapi/atlas-http-proxy.json"
 
 permissions:
   contents: read
@@ -36,6 +42,18 @@ jobs:
 
       - name: Run control daemon unit tests
         run: python -m pytest -q control/tests
+
+      - name: Check the generated API client
+        working-directory: ${{ github.workspace }}
+        run: |
+          control_python="$(command -v python)"
+          python -m venv "$RUNNER_TEMP/openapi-generator"
+          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1 ruff==0.16.6
+          export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
+          "$control_python" scripts/generate-api-client.py atlas-http-proxy
+          git add --all --intent-to-add clients
+          git diff --exit-code -- clients \
+            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-http-proxy and commit clients/."; exit 1; }
 
       - name: Start test stack
         run: docker compose -f tests/docker/docker-compose.yml up --build -d

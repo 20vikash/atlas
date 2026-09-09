@@ -10,6 +10,7 @@ The root contains the Frappe app and three components. They are not separate Git
 
 ```text
 atlas/                         Frappe app
+clients/                       Generated API clients
 metal/                         VM management
 services/http-proxy/           HTTP proxy
 services/wg-mesh/              Private VM network
@@ -27,6 +28,8 @@ SPEC.md                        This file
 - [WG Mesh](services/wg-mesh/SPEC.md): Private VM network.
 
 Read the matching specification before you change a component.
+
+`clients/` holds the generated Python clients for the Atlas API and the HTTP proxy control API. See [API clients](docs/api-clients.md).
 
 Each component specification links back to this file.
 

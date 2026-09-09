@@ -3,6 +3,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import Body, Depends, FastAPI, Header, Path, Response, status
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import docs
@@ -84,10 +85,16 @@ async def lifespan(_: FastAPI):
 		await proxy.close()
 
 
+def operation_id(route: APIRoute) -> str:
+	"""Return the route function name as the OpenAPI operation ID."""
+	return route.name
+
+
 app = FastAPI(
 	title="Atlas proxy control",
 	description="Route sites and custom domains to backend IPv6 addresses. Sync all routes after a controller restart, or change one route when an address changes.",
 	lifespan=lifespan,
+	generate_unique_id_function=operation_id,
 	docs_url=None,
 	redoc_url=None,
 	openapi_url=None,

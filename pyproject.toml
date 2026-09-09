@@ -29,7 +29,7 @@ packages = []
 [tool.ruff]
 line-length = 110
 target-version = "py314"
-extend-exclude = ["metal", "services/wg-mesh"]
+extend-exclude = ["metal", "services/wg-mesh", "clients"]
 
 [tool.ruff.lint]
 select = [
