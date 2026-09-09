@@ -114,6 +114,7 @@ class VirtualMachineService:
 				"disk_mib": request.disk_mib,
 				"tenant_id": request.tenant_id,
 				"is_privileged": request.is_privileged,
+				"sleep_after_idle_seconds": request.sleep_after_idle_seconds,
 			}
 		)
 		virtual_machine.flags.created_by_virtual_machine_api = True
@@ -130,8 +131,7 @@ class VirtualMachineService:
 			"compute": {
 				"virtual_cpu_count": request.virtual_cpu_count,
 				"memory_mib": request.memory_mib,
-				"is_sleepy": request.is_sleepy,
-				"idle_timeout_seconds": request.idle_timeout_seconds,
+				"sleep_after_idle_seconds": request.sleep_after_idle_seconds,
 			},
 			"disk": {
 				"size_mib": request.disk_mib,
@@ -246,8 +246,7 @@ class VirtualMachineService:
 		request = {
 			"virtual_cpu_count": current_compute.virtual_cpu_count,
 			"memory_mib": current_compute.memory_mib,
-			"is_sleepy": current_compute.is_sleepy,
-			"idle_timeout_seconds": current_compute.idle_timeout_seconds,
+			"sleep_after_idle_seconds": self.virtual_machine.sleep_after_idle_seconds,
 			**changes,
 		}
 		is_shape_changed = (
@@ -264,6 +263,8 @@ class VirtualMachineService:
 			self.virtual_machine.db_set(
 				{"vcpus": request["virtual_cpu_count"], "memory_mib": request["memory_mib"]}
 			)
+		if request["sleep_after_idle_seconds"] != self.virtual_machine.sleep_after_idle_seconds:
+			self.virtual_machine.db_set("sleep_after_idle_seconds", request["sleep_after_idle_seconds"])
 
 		return result
 

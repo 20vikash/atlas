@@ -287,7 +287,7 @@ def create_virtual_machine_console_token(
 
 @virtual_machine_configuration.patch("<virtual_machine_id>/compute")
 @api_docs(
-	request_example={"vcpus": 4, "is_sleepy": True, "idle_timeout_seconds": 1800},
+	request_example={"vcpus": 4, "sleep_after_idle_seconds": 1800},
 	responses=ACCEPTED_RESPONSE,
 )
 def update_virtual_machine_compute(
@@ -295,9 +295,9 @@ def update_virtual_machine_compute(
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Update compute.
 
-	Changes the vCPU count, the memory size, and the sleep policy. A vCPU or memory change needs a stopped VM.
+	Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs a stopped VM.
 
-	With `is_sleepy`, the host sleeps the VM after `idle_timeout_seconds` of no network activity and wakes it on the next packet. 0 disables sleep.
+	A value of `0` disables automatic idle shutdown.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.update_compute(payload.to_domain_changes())

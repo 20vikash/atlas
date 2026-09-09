@@ -204,8 +204,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	metadata: dict[str, str] = Field(default_factory=dict)
 	ip_address_id: str | None = None
 	egress: EgressMode = "uplink"
-	is_sleepy: bool = False
-	idle_timeout_seconds: int = Field(default=0, ge=0)
+	sleep_after_idle_seconds: int = Field(default=0, ge=0, le=9_223_372_036)
 	disk_throughput_mibps: int = Field(default=0, ge=0)
 	disk_iops: int = Field(default=0, ge=0)
 	private_network_throughput_mibps: int = Field(default=0, ge=0)
@@ -226,8 +225,7 @@ class CreateVirtualMachinePayload(StrictModel):
 			user_data=self.user_data,
 			metadata=self.metadata,
 			egress=self.egress,
-			is_sleepy=self.is_sleepy,
-			idle_timeout_seconds=self.idle_timeout_seconds,
+			sleep_after_idle_seconds=self.sleep_after_idle_seconds,
 			disk_throughput_mibps=self.disk_throughput_mibps,
 			disk_iops=self.disk_iops,
 			private_network_throughput_mibps=self.private_network_throughput_mibps,
@@ -237,12 +235,11 @@ class CreateVirtualMachinePayload(StrictModel):
 
 
 class ComputeUpdatePayload(PatchPayload):
-	"""New CPU shape, memory shape, and sleep policy."""
+	"""New compute configuration."""
 
 	vcpus: int | None = Field(default=None, gt=0)
 	memory_mib: int | None = Field(default=None, gt=0)
-	is_sleepy: bool | None = None
-	idle_timeout_seconds: int | None = Field(default=None, ge=0)
+	sleep_after_idle_seconds: int | None = Field(default=None, ge=0, le=9_223_372_036)
 
 	def to_domain_changes(self) -> dict[str, Any]:
 		"""Return the field names that the VM service accepts."""
@@ -329,6 +326,7 @@ class VirtualMachineResponse(BaseModel):
 					"vcpus": 2,
 					"memory_mib": 2048,
 					"disk_mib": 20480,
+					"sleep_after_idle_seconds": 0,
 					"created_at": 1788834165,
 				}
 			]
@@ -341,6 +339,7 @@ class VirtualMachineResponse(BaseModel):
 	vcpus: int
 	memory_mib: int
 	disk_mib: int
+	sleep_after_idle_seconds: int
 	created_at: int
 
 	@classmethod
@@ -353,6 +352,7 @@ class VirtualMachineResponse(BaseModel):
 			vcpus=virtual_machine.vcpus,
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
+			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
 			created_at=to_unix_timestamp(virtual_machine.creation),
 		)
 
