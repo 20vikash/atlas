@@ -38,6 +38,12 @@ SECURITY_SCHEMES: dict[str, dict[str, str]] = {
 		"bearerFormat": "token",
 		"description": "Use: Bearer <access_token>. [Learn more](https://docs.frappe.io/framework/user/en/api/rest#3-access-token)",
 	},
+	"Central Token Authentication": {
+		"type": "apiKey",
+		"in": "header",
+		"name": "X-Atlas-Central-Token",
+		"description": "Use: X-Atlas-Central-Token <token>.",
+	},
 }
 SCALAR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/@scalar/api-reference"
 API_REFERENCE_TEMPLATE = Template("""<!doctype html>

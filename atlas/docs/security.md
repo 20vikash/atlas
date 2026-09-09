@@ -10,9 +10,11 @@ The Atlas API at `/api/atlas` is the only tenant-facing surface. Metal Servers, 
 
 ## Who can call the API
 
-A caller needs a Frappe session from a user with the `Atlas Admin` role, or a valid central token. The role does not grant Desk access. The authentication validator restricts an Atlas Admin who is not a System Manager to `/api/atlas` routes, and leaves every other user and route to Frappe.
+A caller needs a Frappe session from a user with the `Atlas Admin` role, a Frappe API key for such a user, or a valid central token. The role does not grant Desk access.
 
-A central token is a JWT that the issuer at `central_jwks_url` signs. Atlas accepts it when it is unexpired and carries the audience `atlas-<region ID>-admin`. An unknown key ID is refused without a key set refetch, so a caller cannot make Atlas fetch on demand. A valid token signs the request in as `central-admin@atlas.local`, which holds the `Atlas Admin` role alone.
+The authentication validator applies two rules. A guest reaches only `/login`, `/api/method/login`, `/api/method/logout`, `/assets/`, and the API reference, so the standard Frappe guest surface is closed. An Atlas API route requires `Atlas Admin` or `System Manager`; its route handler performs the resource and tenant permission checks. An Atlas Admin who is not a System Manager reaches only `/api/atlas` routes. Every other signed-in user and route is left to Frappe.
+
+A central token is a JWT that the issuer at `central_jwks_url` signs. Send it in the `X-Atlas-Central-Token` header. Atlas accepts it when it is unexpired and carries the audience `atlas-<region ID>-admin`. An unknown key ID is refused without a key set refetch, so a caller cannot make Atlas fetch on demand. A valid token signs the request in as `central-admin@atlas.local`, which holds the `Atlas Admin` role alone.
 
 ## Tenant isolation
 
@@ -24,7 +26,7 @@ Tenant `0` is reserved. A privileged virtual machine reaches every tenant throug
 
 ## Accepted risks
 
-**The tenant header is not bound to the caller.** Any holder of an `Atlas Admin` session or a valid central token can set `X-Tenant-ID` to any tenant and act as that tenant. The header selects a tenant; it does not prove one. This is safe only while every credential belongs to the central control plane. Before Atlas issues a credential to anyone else, the tenant must move into the token as a claim and the header must become a check.
+**The tenant header is not bound to the caller.** Any holder of an `Atlas Admin` session, its Frappe API key, or a valid central token can set `X-Tenant-ID` to any tenant and act as that tenant. The header selects a tenant; it does not prove one. This is safe only while every credential belongs to the central control plane. Before Atlas issues a credential to anyone else, the tenant must move into the token as a claim and the header must become a check.
 
 **A central token is a bearer token.** Atlas checks the signature, the expiry, and the audience. It does not check an issuer, a subject, or a scope, and it does not track replay. A stolen token is usable until it expires, so the issuer must keep the lifetime short.
 

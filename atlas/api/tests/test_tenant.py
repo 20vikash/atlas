@@ -130,7 +130,47 @@ class TestTenantDocumentPermissions(UnitTestCase):
 			self.assertFalse(has_permission(document, "read"))
 
 
+class TestGuestPaths(UnitTestCase):
+	def setUp(self) -> None:
+		self.previous_user = frappe.session.user
+		frappe.set_user("Guest")
+
+	def tearDown(self) -> None:
+		frappe.set_user(self.previous_user)
+
+	def test_a_guest_may_sign_in_and_read_the_reference(self) -> None:
+		for path in (
+			"/login",
+			"/api/method/login",
+			"/api/method/logout",
+			"/assets/atlas/app.js",
+			"/api/atlas/docs",
+			"/api/atlas/docs/openapi.json",
+		):
+			with api_request(path=path):
+				validate_auth()
+
+	def test_a_guest_cannot_use_another_route(self) -> None:
+		for path in (
+			"/",
+			"/api/atlas/images",
+			"/api/atlas/docs-old",
+			"/api/resource/User",
+			"/api/method/frappe.client.get_list",
+		):
+			with api_request(path=path), self.assertRaises(frappe.PermissionError):
+				validate_auth()
+
+
 class TestAuthValidator(UnitTestCase):
+	def test_user_without_atlas_role_cannot_use_atlas_routes(self) -> None:
+		with (
+			api_request(path="/api/atlas/images"),
+			patch("atlas.auth.request.has_role", return_value=False),
+			self.assertRaises(frappe.PermissionError),
+		):
+			validate_auth()
+
 	def test_non_atlas_user_is_left_to_frappe(self) -> None:
 		with api_request(path="/api/resource/User"), patch("atlas.auth.request.has_role", return_value=False):
 			validate_auth()

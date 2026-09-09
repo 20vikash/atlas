@@ -76,7 +76,7 @@ class TestCentralTokenSession(UnitTestCase):
 
 	def test_a_valid_token_becomes_the_atlas_admin_user(self) -> None:
 		with (
-			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch("frappe.get_request_header", return_value="a-token"),
 			patch.object(CentralTokenValidator, "get_claims", return_value={"aud": AUDIENCE}),
 			patch("atlas.auth.request.frappe.set_user") as set_user,
 		):
@@ -86,7 +86,7 @@ class TestCentralTokenSession(UnitTestCase):
 
 	def test_an_invalid_token_keeps_the_guest_session(self) -> None:
 		with (
-			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch("frappe.get_request_header", return_value="a-token"),
 			patch.object(CentralTokenValidator, "get_claims", return_value=None),
 			patch("atlas.auth.request.frappe.set_user") as set_user,
 		):
@@ -97,7 +97,7 @@ class TestCentralTokenSession(UnitTestCase):
 	def test_a_signed_in_session_is_never_replaced(self) -> None:
 		frappe.set_user("Administrator")
 		with (
-			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch("frappe.get_request_header", return_value="a-token"),
 			patch.object(CentralTokenValidator, "get_claims") as get_claims,
 		):
 			authenticate_central_token()

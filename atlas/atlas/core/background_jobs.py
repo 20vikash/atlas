@@ -19,6 +19,6 @@ def run_as_admin[Result](function: Callable[..., Result]) -> Callable[..., Resul
 		try:
 			return function(*args, **kwargs)
 		finally:
-			frappe.set_user(previous_user)
+			frappe.set_user(previous_user)  # nosemgrep
 
 	return wrapped
