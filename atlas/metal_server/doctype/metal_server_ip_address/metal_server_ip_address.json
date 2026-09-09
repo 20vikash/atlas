@@ -8,6 +8,7 @@
   "status",
   "address",
   "provider_resource_id",
+  "tenant_id",
   "intent_version",
   "column_break_uoyq",
   "server",
@@ -64,6 +65,16 @@
   {
    "fieldname": "column_break_uoyq",
    "fieldtype": "Column Break"
+  },
+  {
+   "description": "Tenant that reserved this address. An empty value means that the address is in the shared pool.",
+   "fieldname": "tenant_id",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Tenant ID",
+   "read_only": 1,
+   "search_index": 1,
+   "show_description_on_click": 1
   }
  ],
  "links": [],
@@ -75,6 +86,7 @@
  "owner": "Administrator",
  "permissions": [
   {
+   "create": 1,
    "delete": 1,
    "read": 1,
    "role": "System Manager",

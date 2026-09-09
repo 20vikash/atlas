@@ -20,6 +20,7 @@ Provisioning is a sequence of phases, not one transaction. Each phase records pr
 | `disk_inventory` | Reading block devices into Metal Server Disk rows. |
 | `catalog_sync` | Refreshing Metal Server Size and Metal Server Image from the provider. |
 | `MetalServerIPAddress` (DocType) | One public IPv4 address and its provider intent. |
+| `IPAddressService` | Tenant reservation, shared-pool claims, and release. |
 | `MetalServerUsage` (DocType) | One capacity sample reported by Metal. |
 
 The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/README.md) for host commands. The DocType belongs to the Atlas module.
@@ -46,6 +47,8 @@ A transport fault and a response fault are logged separately, because they need 
 ## Public IPv4
 
 An address carries a desired intent and an intent version. Reconciliation applies the intent and preserves a pending one for a retry, so a failed apply is never mistaken for a completed one.
+
+An address also carries the tenant that reserved it. An address without a tenant is in the shared pool. `IPAddressService` owns reservation and release. A reservation uses the shared pool or the provider. A pool claim locks one unowned row before it writes the tenant, so two requests never take the same address, and an empty pool is an error instead of a silent provider reservation. A release clears the tenant, keeps the provider reservation, and refuses an attached or detaching address.
 
 ## Related
 
