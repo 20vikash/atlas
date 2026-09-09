@@ -238,6 +238,13 @@ class ComputeUpdatePayload(PatchPayload):
 	vcpus: int | None = Field(default=None, gt=0)
 	memory_mib: int | None = Field(default=None, gt=0)
 
+	def to_domain_changes(self) -> dict[str, Any]:
+		"""Return the field names that the VM service accepts."""
+		changes = self.model_dump(exclude_none=True)
+		if "vcpus" in changes:
+			changes["virtual_cpu_count"] = changes.pop("vcpus")
+		return changes
+
 
 class DiskUpdatePayload(PatchPayload):
 	"""New disk size and disk rate limits."""

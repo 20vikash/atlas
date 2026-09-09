@@ -19,6 +19,8 @@
   "section_break_compute_and_storage",
   "vcpus",
   "memory_mib",
+  "is_sleepy",
+  "idle_timeout_seconds",
   "column_break_compute",
   "disk_mib",
   "disk_throughput_mibps",
@@ -118,6 +120,24 @@
    "set_only_once": 1
   },
   {
+   "description": "Metal puts an idle VM to sleep and wakes it on a network packet.",
+   "fieldname": "is_sleepy",
+   "fieldtype": "Check",
+   "is_virtual": 1,
+   "label": "Is Sleepy",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "description": "Idle time before sleep. 0 disables sleep.",
+   "fieldname": "idle_timeout_seconds",
+   "fieldtype": "Int",
+   "is_virtual": 1,
+   "label": "Idle Timeout (Seconds)",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
    "fieldname": "disk_mib",
    "fieldtype": "Int",
    "label": "Disk (MiB)",
@@ -146,9 +166,9 @@
    "label": "Tenant ID",
    "read_only": 1,
    "reqd": 1,
+   "search_index": 1,
    "set_only_once": 1,
-   "show_description_on_click": 1,
-   "search_index": 1
+   "show_description_on_click": 1
   },
   {
    "default": "0",
@@ -253,7 +273,7 @@
    "link_fieldname": "target"
   }
  ],
- "modified": "2026-09-07 22:00:01.466665",
+ "modified": "2026-09-09 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine",

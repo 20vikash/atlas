@@ -170,13 +170,13 @@ class MetalClient:
 		return self._virtual_machine(response)
 
 	def set_virtual_machine_compute(
-		self, virtual_machine_id: str, virtual_cpu_count: int, memory_mib: int
+		self, virtual_machine_id: str, compute: dict[str, Any]
 	) -> MetalVirtualMachine:
-		"""Replace the desired CPU and memory for one stopped VM."""
+		"""Replace the complete desired compute object for one VM."""
 		response = self._request(
 			"PUT",
 			f"/v1/vms/{quote(virtual_machine_id, safe='')}/compute",
-			json={"virtual_cpu_count": virtual_cpu_count, "memory_mib": memory_mib},
+			json=compute,
 			expected_status=202,
 			uncertain_on_failure=True,
 		)

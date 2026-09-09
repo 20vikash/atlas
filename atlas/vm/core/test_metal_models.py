@@ -17,7 +17,12 @@ def complete_response() -> dict:
 			"generation": 3,
 			"restart_generation": 1,
 			"state": "running",
-			"compute": {"virtual_cpu_count": 2, "memory_mib": 2048},
+			"compute": {
+				"virtual_cpu_count": 2,
+				"memory_mib": 2048,
+				"is_sleepy": True,
+				"idle_timeout_seconds": 1800,
+			},
 			"disk": {"size_mib": 8192, "throughput_mibps": 100, "iops": 500},
 			"image": {
 				"ref": "ubuntu",
@@ -65,7 +70,12 @@ def new_virtual_machine_response() -> dict:
 			"generation": 1,
 			"restart_generation": 0,
 			"state": "running",
-			"compute": {"virtual_cpu_count": 0, "memory_mib": 0},
+			"compute": {
+				"virtual_cpu_count": 0,
+				"memory_mib": 0,
+				"is_sleepy": False,
+				"idle_timeout_seconds": 0,
+			},
 			"disk": {"size_mib": 0, "throughput_mibps": 0, "iops": 0},
 			"image": {
 				"ref": "ubuntu",
@@ -100,6 +110,8 @@ class TestMetalVirtualMachineParsing(UnitTestCase):
 
 		self.assertEqual(machine.id, "VM-00001")
 		self.assertEqual(machine.desired.compute.virtual_cpu_count, 2)
+		self.assertTrue(machine.desired.compute.is_sleepy)
+		self.assertEqual(machine.desired.compute.idle_timeout_seconds, 1800)
 		self.assertEqual(machine.desired.image.rootfs.sha256, "a" * 64)
 		self.assertEqual(machine.desired.guest.ssh_keys, ("ssh-ed25519 AAAA",))
 		self.assertEqual(machine.desired.guest.metadata, {"role": "web"})
@@ -172,6 +184,11 @@ class TestMetalContract(UnitTestCase):
 			definitions,
 			"api.desiredVirtualMachineResponse",
 			{"generation", "restart_generation", "state", "compute", "disk", "image", "network", "guest"},
+		)
+		self.assert_has_fields(
+			definitions,
+			"api.computeResponse",
+			{"virtual_cpu_count", "memory_mib", "is_sleepy", "idle_timeout_seconds"},
 		)
 		self.assert_has_fields(
 			definitions,

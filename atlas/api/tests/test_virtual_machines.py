@@ -233,7 +233,7 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		self.assertEqual(body["id"], "vm-00001")
-		virtual_machine.update_compute.assert_called_once_with(4, None)
+		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
 
 	def test_compute_change_keeps_the_value_that_is_absent(self) -> None:
 		with (
@@ -248,7 +248,7 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
 
 		self.assertEqual(status, 202)
-		virtual_machine.update_compute.assert_called_once_with(4, None)
+		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
 
 	def test_a_patch_without_a_supported_field_is_rejected(self) -> None:
 		with (

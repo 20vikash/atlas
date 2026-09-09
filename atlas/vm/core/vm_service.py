@@ -130,6 +130,8 @@ class VirtualMachineService:
 			"compute": {
 				"virtual_cpu_count": request.virtual_cpu_count,
 				"memory_mib": request.memory_mib,
+				"is_sleepy": request.is_sleepy,
+				"idle_timeout_seconds": request.idle_timeout_seconds,
 			},
 			"disk": {
 				"size_mib": request.disk_mib,
@@ -228,14 +230,46 @@ class VirtualMachineService:
 			)
 		)
 
-	def set_compute(self, virtual_cpu_count: int, memory_mib: int) -> None:
-		"""Set compute values in Metal, then update Atlas request metadata."""
-		self.perform_metal_operation(
+	def set_compute(self, compute: dict[str, Any]) -> dict[str, Any]:
+		"""Set the complete compute values in Metal."""
+		information = self.perform_metal_operation(
 			lambda metal_client: metal_client.set_virtual_machine_compute(
-				cast(str, self.virtual_machine.name), virtual_cpu_count, memory_mib
+				cast(str, self.virtual_machine.name), compute
 			)
 		)
-		self.virtual_machine.db_set({"vcpus": virtual_cpu_count, "memory_mib": memory_mib})
+		return information.as_dict()
+
+	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
+		"""Apply selected compute changes and keep the stored shape in step.
+
+		Only a CPU or memory change needs a stopped VM. The sleep policy is
+		intent, not machine shape, so Metal accepts it in any state.
+		"""
+		information = self.require_information()
+		current_compute = information.desired.compute
+		request = {
+			"virtual_cpu_count": current_compute.virtual_cpu_count,
+			"memory_mib": current_compute.memory_mib,
+			"is_sleepy": current_compute.is_sleepy,
+			"idle_timeout_seconds": current_compute.idle_timeout_seconds,
+			**changes,
+		}
+		is_shape_changed = (
+			request["virtual_cpu_count"] != current_compute.virtual_cpu_count
+			or request["memory_mib"] != current_compute.memory_mib
+		)
+		if is_shape_changed and information.observed.state != "stopped":
+			frappe.throw(
+				_("Stop the Virtual Machine before you change its compute values."), exc=AtlasUserError
+			)
+
+		result = self.set_compute(request)
+		if is_shape_changed:
+			self.virtual_machine.db_set(
+				{"vcpus": request["virtual_cpu_count"], "memory_mib": request["memory_mib"]}
+			)
+
+		return result
 
 	def set_disk(self, size_mib: int, throughput_mibps: int, iops: int) -> dict[str, Any]:
 		"""Set the complete disk values in Metal."""

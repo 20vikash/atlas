@@ -67,6 +67,11 @@ frappe.ui.form.on("Virtual Machine", {
 			);
 		}
 		frm.add_custom_button(
+			__("Edit Sleep Policy"),
+			() => showEditSleepPolicyDialog(frm),
+			__("Actions")
+		);
+		frm.add_custom_button(
 			__("Edit SSH Keys"),
 			() => showEditSSHKeysDialog(frm),
 			__("Actions")
@@ -338,6 +343,39 @@ function showResizeComputeDialog(frm) {
 				.then(() => frm.reload_doc()),
 		__("Resize Compute"),
 		__("Resize")
+	);
+}
+
+function showEditSleepPolicyDialog(frm) {
+	frappe.prompt(
+		[
+			{
+				fieldname: "is_sleepy",
+				fieldtype: "Check",
+				label: __("Is Sleepy"),
+				default: frm.doc.is_sleepy,
+				description: __("The host sleeps an idle VM and wakes it on a network packet."),
+			},
+			{
+				fieldname: "idle_timeout_seconds",
+				fieldtype: "Int",
+				label: __("Idle Timeout (Seconds)"),
+				default: frm.doc.idle_timeout_seconds,
+				description: __("0 disables sleep."),
+			},
+		],
+		(values) =>
+			frm
+				.call({
+					method: "update_sleep_policy",
+					doc: frm.doc,
+					args: values,
+					freeze: true,
+					freeze_message: __("Updating sleep policy..."),
+				})
+				.then(() => frm.reload_doc()),
+		__("Edit Sleep Policy"),
+		__("Save")
 	);
 }
 

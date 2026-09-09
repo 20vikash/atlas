@@ -292,7 +292,7 @@ def update_virtual_machine_compute(
 	Changes the vCPU count, memory size, or both. The VM must be stopped before Atlas applies the change.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	virtual_machine.update_compute(payload.vcpus, payload.memory_mib)
+	virtual_machine.update_compute(payload.to_domain_changes())
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
