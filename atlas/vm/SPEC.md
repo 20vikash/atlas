@@ -21,7 +21,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 | `MetalClient` | `/v1` HTTP transport and error classification. |
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
-| `image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
+| `vm_image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
 
 ## Create
@@ -52,11 +52,13 @@ A Virtual Machine property calls Metal once per request and caches the result. A
 
 ## Reconciliation
 
+Termination detaches the public IPv4 address and keeps its tenant reservation. The record stays until Metal confirms the VM is absent.
+
 Two scheduled jobs settle records that a lost response left uncertain: stale drafts and terminating VMs. Both ask Metal the same question and share one settle path. Metal is the authority: a confirmed absence deletes the record, and any other failure is logged and left alone, because an unreachable host says nothing about whether the VM exists.
 
 ## Images
 
-Virtual Machine Image is the durable boot artifact. `image_type` is `System` or `Machine`. Each image has its own rootfs and kernel object key, exact byte size, and SHA-256 value. The immutable reference uses the architecture and both artifact hashes.
+Virtual Machine Image is the durable boot artifact. `image_type` is `System` or `Machine`. Each image carries a tenant ID, and a Machine image inherits the tenant of its source virtual machine. System images are shared with every tenant. Machine images are visible only to their owning tenant. Each image has its own rootfs and kernel object key, exact byte size, and SHA-256 value. The immutable reference uses the architecture and both artifact hashes.
 
 Only enabled, Available images can create VMs. Atlas sends enabled, Available images with `cache_image` to each host through `POST /v1/sync`. Signed URLs are valid for 24 hours.
 
@@ -82,6 +84,12 @@ The Create Machine Image action calls `POST /v1/vms/{id}/snapshots`. Metal retur
 5. Completes both uploads and deletes the local staging data.
 
 The image record keeps the source server, upload IDs, status, and errors. Atlas saves the upload IDs before it asks Metal to start. A start or finalization error marks the image as Failed and keeps the retry values. Retry Transfer uses these values. `source_virtual_machine` is audit text only. Metal deletes staging after 48 hours without activity.
+
+## Machine image deletion
+
+`vm_image_deletion.py` owns Machine image removal. The request marks the image `Deleting`, disables it, and queues a repeatable cleanup job. Atlas refuses the request while a virtual machine uses the image.
+
+The job aborts every incomplete multipart upload, deletes both stored objects, removes the remaining Metal staging data, and then deletes the record. If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and queues it again every 30 seconds.
 
 ## System image publisher
 

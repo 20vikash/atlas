@@ -25,8 +25,7 @@ PROXY_CLUSTER_PASSWORD_LENGTH = 48
 PROXY_CONFIGURATION_FIELDS = (
 	"wildcard_tls_certificate",
 	"wildcard_tls_private_key",
-	"proxy_jwks_url",
-	"proxy_jwks_audience_id",
+	"central_jwks_url",
 	"proxy_cluster_password",
 	"previous_proxy_cluster_password",
 )
@@ -43,6 +42,7 @@ class AtlasSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		central_jwks_url: DF.Data | None
 		dns_provider: DF.Literal["Route53"]
 		http_proxy_package_file: DF.Link | None
 		http_proxy_package_hash: DF.Data | None
@@ -66,8 +66,6 @@ class AtlasSettings(Document):
 		private_network_mtu: DF.Int
 		proxy_cluster_password: DF.Password | None
 		proxy_cluster_password_rotated_on: DF.Datetime | None
-		proxy_jwks_audience_id: DF.Data | None
-		proxy_jwks_url: DF.Data | None
 		public_ssh_key: DF.SmallText
 		region_id: DF.Int
 		region_name: DF.Data
@@ -106,6 +104,16 @@ class AtlasSettings(Document):
 	def resource_name_prefix(self) -> str:
 		"""Return the prefix Atlas puts on provider resource names."""
 		return f"atlas-{self.region_name.lower()}-"
+
+	@property
+	def admin_audience_id(self) -> str:
+		"""Return the audience that a token for the Atlas API must carry."""
+		return f"atlas-{self.region_id}-admin"
+
+	@property
+	def proxy_audience_id(self) -> str:
+		"""Return the audience that a token for a regional proxy must carry."""
+		return f"atlas-{self.region_id}-proxy"
 
 	@cached_property
 	def server_provider_controller(self) -> "ServerProvider":

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Never, cast
+from typing import TYPE_CHECKING, Any, Never, TypedDict, cast
 
 import frappe
 from frappe import _
 
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import VirtualMachineCreateRequest
+from atlas.vm.core.models import EGRESS_MODES, VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementService
 
 if TYPE_CHECKING:
@@ -21,12 +22,25 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 
-class VirtualMachineCreateError(frappe.ValidationError):
+class MetalOperationError(frappe.ValidationError):
+	"""Report that the assigned host could not complete the request."""
+
+	http_status_code = 502
+
+
+class VirtualMachineCreateError(MetalOperationError):
 	"""Report a failed create and the draft that records it."""
 
 	def __init__(self, virtual_machine_name: str, error: MetalClientError) -> None:
 		super().__init__(_("Metal request failed: {0}").format(error))
 		self.virtual_machine_name = virtual_machine_name
+
+
+class VirtualMachineCreateResult(TypedDict):
+	"""The stored result of one virtual machine create request."""
+
+	name: str
+	is_draft: bool
 
 
 class VirtualMachineService:
@@ -36,15 +50,18 @@ class VirtualMachineService:
 		self.virtual_machine = virtual_machine
 
 	@classmethod
-	def create(cls, value: str | dict[str, Any]) -> dict[str, str | bool]:
+	def create(cls, value: str | dict[str, Any] | VirtualMachineCreateRequest) -> VirtualMachineCreateResult:
 		"""Create and commit an Atlas request before the Metal request."""
-		try:
-			request = VirtualMachineCreateRequest.from_value(value)
-		except ValueError as error:
-			frappe.throw(_(str(error)))
-			raise AssertionError from error
+		if isinstance(value, VirtualMachineCreateRequest):
+			request = value
+		else:
+			try:
+				request = VirtualMachineCreateRequest.from_value(value)
+			except ValueError as error:
+				frappe.throw(_(str(error)))
+				raise AssertionError from error
 
-		image = cls.get_image(request.virtual_machine_image)
+		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
 		server = PlacementService().select_server(request, image.platform)
 		virtual_machine = cls.insert_draft(request, cast(str, image.name), cast(str, server.name))
@@ -64,15 +81,20 @@ class VirtualMachineService:
 			raise VirtualMachineCreateError(virtual_machine_name, error) from error
 
 		virtual_machine.is_draft = 0
-		virtual_machine.save(ignore_permissions=True)
+		virtual_machine.save()
 		return {"name": virtual_machine_name, "is_draft": False}
 
 	@staticmethod
-	def get_image(image_name: str) -> VirtualMachineImage:
+	def get_image(image_name: str, tenant_id: int) -> VirtualMachineImage:
 		"""Return one enabled and available virtual machine image."""
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
+		if not image.is_visible_to_tenant(tenant_id):
+			frappe.throw(
+				_("Virtual Machine Image {0} is not available.").format(image.title),
+				exc=frappe.DoesNotExistError,
+			)
 		if not image.enabled:
-			frappe.throw(_("Virtual Machine Image {0} is disabled.").format(image.title))
+			frappe.throw(_("Virtual Machine Image {0} is disabled.").format(image.title), exc=AtlasUserError)
 		image.validate_is_available()
 		return image
 
@@ -95,7 +117,7 @@ class VirtualMachineService:
 			}
 		)
 		virtual_machine.flags.created_by_virtual_machine_api = True
-		return cast("VirtualMachine", virtual_machine.insert(ignore_permissions=True))
+		return cast("VirtualMachine", virtual_machine.insert())
 
 	def get_metal_request(
 		self,
@@ -143,7 +165,10 @@ class VirtualMachineService:
 		"""Allow deletion only after Metal confirms absence."""
 		is_absence_confirmed = getattr(self.virtual_machine.flags, "metal_absence_confirmed", False)
 		if self.virtual_machine.is_draft and not is_absence_confirmed:
-			frappe.throw(_("Wait for Virtual Machine creation reconciliation before deletion."))
+			frappe.throw(
+				_("Wait for Virtual Machine creation reconciliation before deletion."),
+				exc=AtlasUserError,
+			)
 
 		if not is_absence_confirmed:
 			try:
@@ -153,7 +178,8 @@ class VirtualMachineService:
 					self.raise_metal_error(error)
 			else:
 				frappe.throw(
-					_("Terminate Virtual Machine {0} before deletion.").format(self.virtual_machine.name)
+					_("Terminate Virtual Machine {0} before deletion.").format(self.virtual_machine.name),
+					exc=AtlasUserError,
 				)
 		self.release_ip_address()
 
@@ -221,16 +247,22 @@ class VirtualMachineService:
 		)
 		return information.as_dict()
 
-	def resize_disk(self, size_mib: int) -> None:
-		"""Keep disk limits while the requested disk size increases."""
+	def update_disk(self, changes: dict[str, int]) -> dict[str, Any]:
+		"""Apply selected disk changes and keep the stored disk size in step."""
 		current_disk = self.require_information().desired.disk
-		self.set_disk(size_mib, current_disk.throughput_mibps, current_disk.iops)
-		self.virtual_machine.db_set("disk_mib", size_mib)
+		size_mib = changes.get("size_mib", current_disk.size_mib)
+		if size_mib < current_disk.size_mib:
+			frappe.throw(_("Disk size can only increase."), exc=AtlasUserError)
 
-	def update_disk_limits(self, throughput_mibps: int, iops: int) -> dict[str, Any]:
-		"""Keep disk size while the requested disk limits change."""
-		current_disk = self.require_information().desired.disk
-		return self.set_disk(current_disk.size_mib, throughput_mibps, iops)
+		information = self.set_disk(
+			size_mib,
+			changes.get("throughput_mibps", current_disk.throughput_mibps),
+			changes.get("iops", current_disk.iops),
+		)
+		if size_mib != current_disk.size_mib:
+			self.virtual_machine.db_set("disk_mib", size_mib)
+
+		return information
 
 	def update_network(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Replace the complete network after applying selected changes."""
@@ -250,6 +282,20 @@ class VirtualMachineService:
 		)
 		return information.as_dict()
 
+	def apply_network_changes(self, changes: dict[str, Any]) -> dict[str, Any]:
+		"""Apply selected network changes after the egress and address rules."""
+		self.virtual_machine.validate_network_change()
+		egress = changes.get("egress")
+		if egress is not None and egress not in EGRESS_MODES:
+			frappe.throw(_("Egress must be uplink, mesh, or none."), exc=AtlasUserError)
+		if egress not in (None, "uplink") and self.get_attached_ip_address_name():
+			frappe.throw(
+				_("Detach the public IPv4 address before you remove the internet path."),
+				exc=AtlasUserError,
+			)
+
+		return self.update_network(changes)
+
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
 		"""Set the address intent before the Metal network request."""
 		address = self.assign_ip_address(server_ip_address)
@@ -267,16 +313,22 @@ class VirtualMachineService:
 			"MetalServerIPAddress",
 			frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True),
 		)
+		if address.tenant_id != self.virtual_machine.tenant_id:
+			frappe.throw(_("The IP address belongs to another tenant."), exc=frappe.PermissionError)
+		if address.status != "Allocated" or address.virtual_machine:
+			frappe.throw(_("The IP address is not available."), exc=frappe.ValidationError)
 		address.begin_assignment(self.virtual_machine.server, self.virtual_machine.name)
 		return address
 
 	def release_ip_address(self) -> None:
 		"""Set a release intent for the assigned public address."""
-		address_name = frappe.db.get_value(
-			"Metal Server IP Address", {"virtual_machine": self.virtual_machine.name}
-		)
+		address_name = self.get_attached_ip_address_name()
 		if address_name:
 			frappe.get_doc("Metal Server IP Address", address_name).release()
+
+	def get_attached_ip_address_name(self) -> str | None:
+		"""Return the public address this virtual machine holds, when there is one."""
+		return frappe.db.get_value("Metal Server IP Address", {"virtual_machine": self.virtual_machine.name})
 
 	def require_information(self) -> MetalVirtualMachine:
 		"""Return Metal state or raise a Frappe error."""
@@ -308,5 +360,5 @@ class VirtualMachineService:
 	@staticmethod
 	def raise_metal_error(error: MetalClientError) -> Never:
 		"""Raise one safe Metal failure at the Frappe boundary."""
-		frappe.throw(_("Metal request failed: {0}").format(error))
+		frappe.throw(_("Metal request failed: {0}").format(error), exc=MetalOperationError)
 		raise AssertionError from error

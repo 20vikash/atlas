@@ -20,6 +20,8 @@
   "region_name",
   "column_break_qqfv",
   "region_id",
+  "column_break_xvbe",
+  "central_jwks_url",
   "private_network_config_section",
   "private_network_cidr",
   "column_break_jzip",
@@ -69,9 +71,6 @@
   "previous_proxy_cluster_password",
   "proxy_cluster_password_rotated_on",
   "column_break_hpkg",
-  "proxy_jwks_url",
-  "proxy_jwks_audience_id",
-  "column_break_mosu",
   "http_proxy_package_file",
   "http_proxy_package_hash",
   "storage_tab",
@@ -487,15 +486,9 @@
    "read_only": 1
   },
   {
-   "fieldname": "proxy_jwks_url",
+   "fieldname": "central_jwks_url",
    "fieldtype": "Data",
-   "label": "JWKS URL"
-  },
-  {
-   "fieldname": "proxy_jwks_audience_id",
-   "fieldtype": "Data",
-   "label": "JWKS Audience ID",
-   "mandatory_depends_on": "eval: doc.proxy_jwks_url"
+   "label": "Central JWKS URL"
   },
   {
    "fieldname": "proxy_cluster_password",
@@ -516,7 +509,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_mosu",
+   "fieldname": "column_break_xvbe",
    "fieldtype": "Column Break"
   }
  ],
@@ -524,8 +517,8 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-08 00:10:05.469534",
- "modified_by": "test@gmail.com",
+ "modified": "2026-09-09 13:49:53.543053",
+ "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",
  "owner": "Administrator",

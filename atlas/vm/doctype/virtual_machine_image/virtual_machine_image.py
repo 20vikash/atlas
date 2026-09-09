@@ -2,14 +2,29 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import add_to_date, now_datetime
+
+from atlas.atlas.core.exceptions import AtlasUserError
 
 SIGNED_URL_EXPIRY_SECONDS = 86400
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+class ImageDownload(TypedDict):
+	"""One signed image artifact download."""
+
+	artifact: Literal["rootfs", "kernel"]
+	url: str
+	size_mib: int
+	sha256: str
+	expires_in: int
+	expires_at: str
+
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -48,9 +63,17 @@ class VirtualMachineImage(Document):
 		source_server: DF.Data | None
 		source_virtual_machine: DF.Data | None
 		status: DF.Literal[
-			"Pending", "Snapshotting", "Uploading", "Completing", "Cleaning", "Available", "Failed"
+			"Pending",
+			"Snapshotting",
+			"Uploading",
+			"Completing",
+			"Cleaning",
+			"Available",
+			"Failed",
+			"Deleting",
 		]
 		supports_cloud_init: DF.Check
+		tenant_id: DF.Int
 		title: DF.Data
 		transfer_error: DF.SmallText | None
 		transfer_progress: DF.Int
@@ -88,9 +111,18 @@ class VirtualMachineImage(Document):
 		return {
 			"ref": self.immutable_reference,
 			"architecture": self.platform,
-			"rootfs": {"url": self.get_image_url(expiry_seconds), "sha256": self.image_sha256},
-			"kernel": {"url": self.get_kernel_url(expiry_seconds), "sha256": self.kernel_sha256},
+			"rootfs": {"url": self.get_presigned_image_url(expiry_seconds), "sha256": self.image_sha256},
+			"kernel": {"url": self.get_presigned_kernel_url(expiry_seconds), "sha256": self.kernel_sha256},
 		}
+
+	@property
+	def is_shared(self) -> bool:
+		"""Return whether every tenant can read and boot this image."""
+		return self.image_type == "System"
+
+	def is_visible_to_tenant(self, tenant_id: int) -> bool:
+		"""Return whether one tenant can read and boot this image."""
+		return self.is_shared or self.tenant_id == tenant_id
 
 	@property
 	def immutable_reference(self) -> str:
@@ -109,11 +141,32 @@ class VirtualMachineImage(Document):
 			"disk_mib": self.memory_snapshot_disk_mib,
 		}
 
-	def get_image_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+	def get_presigned_download_url(self, artifact: Literal["rootfs", "kernel"]) -> ImageDownload:
+		"""Return one signed artifact URL with its size, digest, and expiry time."""
+		self.validate_is_available()
+		if artifact == "rootfs":
+			url = self.get_presigned_image_url()
+			size_mib = self.image_size_mib
+			sha256 = self.image_sha256
+		else:
+			url = self.get_presigned_kernel_url()
+			size_mib = self.kernel_size_mib
+			sha256 = self.kernel_sha256
+
+		return {
+			"artifact": artifact,
+			"url": url,
+			"size_mib": size_mib,
+			"sha256": sha256,
+			"expires_in": SIGNED_URL_EXPIRY_SECONDS,
+			"expires_at": str(add_to_date(now_datetime(), seconds=SIGNED_URL_EXPIRY_SECONDS)),
+		}
+
+	def get_presigned_image_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
 		"""Return a signed URL for the root file system object."""
 		return self.get_object_url(self.image_object_key, expiry_seconds)
 
-	def get_kernel_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+	def get_presigned_kernel_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
 		"""Return a signed URL for the kernel object."""
 		return self.get_object_url(self.kernel_object_key, expiry_seconds)
 
@@ -149,19 +202,24 @@ class VirtualMachineImage(Document):
 	def validate_is_available(self) -> None:
 		"""Reject an image that is not ready to boot a VM."""
 		if self.status != "Available":
-			frappe.throw(_("Virtual Machine Image {0} is not available.").format(self.title))
+			frappe.throw(
+				_("Virtual Machine Image {0} is not available.").format(self.title), exc=AtlasUserError
+			)
 
 	def validate_compatibility(self, disk_mib: int) -> None:
 		"""Check that the requested disk can hold the image."""
 		if disk_mib < self.image_size_mib:
 			frappe.throw(
-				_("Disk must be at least {0} MiB for image {1}.").format(self.image_size_mib, self.title)
+				_("Disk must be at least {0} MiB for image {1}.").format(self.image_size_mib, self.title),
+				exc=AtlasUserError,
 			)
 
 	def validate_user_data(self, user_data: str) -> None:
 		"""Reject user data that the guest cannot accept."""
 		if user_data and not self.supports_cloud_init:
-			frappe.throw(_("This Virtual Machine Image does not support cloud-init user data."))
+			frappe.throw(
+				_("This Virtual Machine Image does not support cloud-init user data."), exc=AtlasUserError
+			)
 
 	def get_object_url(self, object_key: str | None, expiry_seconds: int) -> str:
 		"""Return a signed URL for one stored object."""
@@ -173,10 +231,19 @@ class VirtualMachineImage(Document):
 	@frappe.whitelist(methods=["POST"])
 	def retry_transfer(self) -> None:
 		"""Start the image transfer again, keeping the existing identifiers."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		if self.image_type != "Machine" or self.status != "Failed":
 			frappe.throw(_("Only a failed Machine image transfer can be retried."))
 
-		from atlas.vm.core.image_transfer import MachineImageTransferService
+		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 
-		MachineImageTransferService().enqueue(self.name, queue="long", timeout=7200)
+		VirtualMachineImageTransferService().enqueue(self.name, queue="long", timeout=7200)
+
+	@frappe.whitelist(methods=["POST"])
+	def request_deletion(self) -> None:
+		"""Queue deletion of this unused Machine image."""
+		self.check_permission("write")
+
+		from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
+
+		VirtualMachineImageDeletionService().request(self)

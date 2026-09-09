@@ -24,7 +24,7 @@ Archive removes the regional DNS value and health check before it removes the no
 
 ## Configuration
 
-Atlas Settings owns the regional password, previous password, JWKS settings, wildcard certificate, and wildcard zone. Each rendered node configuration contains the same credentials and peer list, plus its own node ID and node control name.
+Atlas Settings owns the regional password, previous password, central JWKS URL, wildcard certificate, and wildcard zone. The audience is not stored. Atlas sends `atlas-<region ID>-proxy` to each proxy, and a token for the Atlas API carries `atlas-<region ID>-admin`. Each rendered node configuration contains the same credentials and peer list, plus its own node ID and node control name.
 
 Atlas writes the secret configuration through `SSHRunner`. It does not put the configuration content in an SSH Task. A digest detects changes to membership, credentials, certificate, control names, and the template. Reconciliation retries changed configurations every minute.
 

@@ -8,11 +8,13 @@ from frappe import _, request_cache
 from frappe.model.document import Document
 from frappe.utils import add_to_date, cint, now_datetime
 
+from atlas.atlas.core.background_jobs import run_as_admin
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.parsing import strict_bool
 from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import EGRESS_MODES
+from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.vm_service import VirtualMachineService
 
 DRAFT_EXPIRY_MINUTES = 2
@@ -197,12 +199,12 @@ class VirtualMachine(Document):
 			frappe.throw(_("Virtual Machine {0} is not ready for this change.").format(self.name))
 
 		self.is_privileged = strict_bool(is_privileged, "is_privileged")
-		self.save(ignore_permissions=True)
+		self.save()
 
 	@frappe.whitelist(methods=["POST"])
 	def terminate(self) -> None:
 		"""Ask Metal to remove this VM and release its IP address."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		VirtualMachineService(self).terminate()
 
 	@frappe.whitelist(methods=["POST"])
@@ -213,16 +215,16 @@ class VirtualMachine(Document):
 		memory_snapshot: bool = False,
 	) -> str:
 		"""Queue a Machine image transfer from this VM."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		if self.is_draft:
-			frappe.throw(_("Wait for Virtual Machine creation before creating an image."))
+			frappe.throw(_("Wait for Virtual Machine creation before creating an image."), exc=AtlasUserError)
 		title = title.strip()
 		if not title:
-			frappe.throw(_("Image title is required."))
+			frappe.throw(_("Image title is required."), exc=AtlasUserError)
 
-		from atlas.vm.core.image_transfer import MachineImageTransferService
+		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 
-		return MachineImageTransferService().create_from_virtual_machine(
+		return VirtualMachineImageTransferService().create_from_virtual_machine(
 			self,
 			title,
 			cache_image=bool(cint(cache_image)),
@@ -232,132 +234,146 @@ class VirtualMachine(Document):
 	@frappe.whitelist(methods=["POST"])
 	def replace_ssh_keys(self, ssh_keys: str | list[str]) -> dict[str, Any]:
 		"""Replace all authorized SSH keys for this VM."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		values = frappe.parse_json(ssh_keys) if isinstance(ssh_keys, str) else ssh_keys
 		if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
-			frappe.throw(_("SSH keys must be a list of strings."))
+			frappe.throw(_("SSH keys must be a list of strings."), exc=AtlasUserError)
 
 		return VirtualMachineService(self).replace_ssh_keys(values)
 
 	@frappe.whitelist(methods=["POST"])
 	def replace_metadata(self, metadata: dict[str, str]) -> dict[str, Any]:
 		"""Replace all custom metadata for this VM with a plain string-to-string map."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		if not isinstance(metadata, dict) or any(
 			not isinstance(key, str) or not isinstance(value, str) for key, value in metadata.items()
 		):
-			frappe.throw(_("Metadata must be a string-to-string map."))
+			frappe.throw(_("Metadata must be a string-to-string map."), exc=AtlasUserError)
 
 		return VirtualMachineService(self).replace_metadata(metadata)
 
 	@frappe.whitelist(methods=["POST"])
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
 		"""Attach one reserved public IPv4 address without a VM restart."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		self.validate_network_change()
 		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
-			frappe.throw(_("Detach the current public IPv4 address first."))
+			frappe.throw(_("Detach the current public IPv4 address first."), exc=AtlasUserError)
 
 		return VirtualMachineService(self).attach_ip_address(server_ip_address)
 
 	@frappe.whitelist(methods=["POST"])
 	def detach_ip_address(self) -> dict[str, Any]:
 		"""Remove the public IPv4 address without a VM restart."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		self.validate_network_change()
 		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
-			frappe.throw(_("This Virtual Machine has no public IPv4 address."))
+			frappe.throw(_("This Virtual Machine has no public IPv4 address."), exc=AtlasUserError)
 
 		return VirtualMachineService(self).detach_ip_address()
 
 	@frappe.whitelist(methods=["POST"])
 	def update_egress(self, egress: str) -> dict[str, Any]:
 		"""Change internet reachability without a VM restart. Mesh reachability does not change."""
-		frappe.only_for("System Manager")
-		if egress not in EGRESS_MODES:
-			frappe.throw(_("Egress must be uplink, mesh, or none."))
-		if egress != "uplink" and frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
-			frappe.throw(_("Detach the public IPv4 address before you remove the internet path."))
-
-		return self.update_network(egress=egress)
+		return self.update_network({"egress": egress})
 
 	@frappe.whitelist(methods=["POST"])
 	def update_network_throughput(
 		self, private_network_throughput_mibps: int, public_network_throughput_mibps: int
 	) -> dict[str, Any]:
 		"""Change the throughput limits in MiB/s without a VM restart. A value of 0 removes the limit."""
-		frappe.only_for("System Manager")
 		return self.update_network(
-			private_network_throughput_mibps=self.parse_throughput(private_network_throughput_mibps),
-			public_network_throughput_mibps=self.parse_throughput(public_network_throughput_mibps),
+			{
+				"private_network_throughput_mibps": self.parse_limit(
+					private_network_throughput_mibps, _("Network throughput")
+				),
+				"public_network_throughput_mibps": self.parse_limit(
+					public_network_throughput_mibps, _("Network throughput")
+				),
+			}
 		)
 
 	@frappe.whitelist(methods=["POST"])
 	def update_disk_limits(self, disk_throughput_mibps: int, disk_iops: int) -> dict[str, Any]:
 		"""Change the disk limits in MiB/s and IOPS without a VM restart. 0 removes a limit."""
-		frappe.only_for("System Manager")
-		if self.is_draft:
-			frappe.throw(_("Wait for Virtual Machine creation before a disk change."))
-
-		return VirtualMachineService(self).update_disk_limits(
-			self.parse_throughput(disk_throughput_mibps),
-			self.parse_throughput(disk_iops),
+		return self.update_disk(
+			{
+				"throughput_mibps": self.parse_limit(disk_throughput_mibps, _("Disk throughput")),
+				"iops": self.parse_limit(disk_iops, _("Disk IOPS")),
+			}
 		)
 
-	def parse_throughput(self, value: object) -> int:
-		"""Return one throughput limit in MiB/s. A malformed value is an error, not 0."""
+	def parse_limit(self, value: object, label: str) -> int:
+		"""Return one rate limit. A malformed value is an error, not 0."""
 		try:
-			throughput = int(str(value).strip())
+			limit = int(str(value).strip())
 		except TypeError, ValueError:
-			frappe.throw(_("Network throughput must be a whole number of MiB/s."))
+			frappe.throw(_("{0} must be a whole number.").format(label), exc=AtlasUserError)
 			raise AssertionError from None
-		if throughput < 0:
-			frappe.throw(_("Network throughput must not be negative."))
-		return throughput
-
-	def update_network(self, **changes: Any) -> dict[str, Any]:
-		"""Send the complete desired network settings to Metal.
-
-		Metal replaces every mutable setting, so unchanged values come from the
-		live Metal state instead of a local default.
-		"""
-		self.validate_network_change()
-		return VirtualMachineService(self).update_network(changes)
+		if limit < 0:
+			frappe.throw(_("{0} must not be negative.").format(label), exc=AtlasUserError)
+		return limit
 
 	def validate_network_change(self) -> None:
 		"""Reject a network change while the request is not ready."""
 		if self.is_draft:
-			frappe.throw(_("Wait for Virtual Machine creation before a network change."))
+			frappe.throw(_("Wait for Virtual Machine creation before a network change."), exc=AtlasUserError)
 		if self.is_terminating:
-			frappe.throw(_("Virtual Machine {0} is terminating.").format(self.name))
+			frappe.throw(_("Virtual Machine {0} is terminating.").format(self.name), exc=AtlasUserError)
 
 	@frappe.whitelist(methods=["POST"])
-	def resize_disk(self, disk_mib: int) -> None:
+	def resize_disk(self, disk_mib: int) -> dict[str, Any]:
 		"""Ask Metal to increase this VM disk size."""
-		frappe.only_for("System Manager")
-		VirtualMachineService(self).resize_disk(int(disk_mib))
+		return self.update_disk({"size_mib": int(disk_mib)})
 
 	@frappe.whitelist(methods=["POST"])
 	def resize_compute(self, vcpus: int, memory_mib: int) -> None:
 		"""Ask Metal to change this VM CPU and memory. The VM must be stopped."""
-		frappe.only_for("System Manager")
-		VirtualMachineService(self).set_compute(int(vcpus), int(memory_mib))
+		self.update_compute(int(vcpus), int(memory_mib))
+
+	def update_compute(self, vcpus: int | None, memory_mib: int | None) -> None:
+		"""Change the VM CPU and memory when the VM is stopped."""
+		self.check_permission("write")
+		service = VirtualMachineService(self)
+		information = service.require_information()
+		if information.observed.state != "stopped":
+			frappe.throw(
+				_("Stop the Virtual Machine before you change its compute values."), exc=AtlasUserError
+			)
+
+		service.set_compute(
+			vcpus if vcpus is not None else information.desired.compute.virtual_cpu_count,
+			memory_mib if memory_mib is not None else information.desired.compute.memory_mib,
+		)
+
+	def update_disk(self, changes: dict[str, int]) -> dict[str, Any]:
+		"""Apply selected disk size and limit changes."""
+		self.check_permission("write")
+		if self.is_draft:
+			frappe.throw(_("Wait for Virtual Machine creation before a disk change."), exc=AtlasUserError)
+
+		return VirtualMachineService(self).update_disk(changes)
+
+	def update_network(self, changes: dict[str, Any]) -> dict[str, Any]:
+		"""Apply selected egress and throughput changes."""
+		self.check_permission("write")
+		return VirtualMachineService(self).apply_network_changes(changes)
 
 	def set_power_state(self, state: str) -> None:
 		"""Ask Metal to store one desired power state."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		VirtualMachineService(self).set_power_state(state)
 
 	@frappe.whitelist(methods=["POST"])
 	def reboot(self) -> None:
 		"""Request an in-place VM restart."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
 		VirtualMachineService(self).request_restart()
 
 	@frappe.whitelist(methods=["POST"])
 	def get_console_token(self, mode: str = "tty") -> dict[str, str]:
 		"""Issue a one-time token to open this VM console in tty or ssh mode."""
-		frappe.only_for("System Manager")
+		self.check_permission("read")
 		if mode not in {"tty", "ssh"}:
 			frappe.throw(_("Console mode must be tty or ssh."))
 		from atlas.vm.core.console_token import issue_console_token
@@ -367,12 +383,26 @@ class VirtualMachine(Document):
 
 
 @frappe.whitelist(methods=["POST"])
-def create(request: str | dict[str, Any]) -> dict[str, str | bool]:
+def create(request: str | dict[str, Any] | VirtualMachineCreateRequest) -> dict[str, str | bool]:
 	"""Create one Atlas VM request and send its intent to Metal."""
-	frappe.only_for("System Manager")
-	return VirtualMachineService.create(request)
+	if not frappe.has_permission("Virtual Machine", ptype="create"):
+		raise frappe.PermissionError
+
+	try:
+		request_value = (
+			request
+			if isinstance(request, VirtualMachineCreateRequest)
+			else VirtualMachineCreateRequest.from_value(request)
+		)
+	except ValueError as error:
+		frappe.throw(_(str(error)))
+		raise AssertionError from error
+	if request_value.tenant_id == PRIVILEGED_TENANT_ID or request_value.is_privileged:
+		frappe.only_for("System Manager")
+	return VirtualMachineService.create(request_value)
 
 
+@run_as_admin
 def reconcile_stale_drafts() -> None:
 	"""Resolve old drafts without deletion when the result is uncertain."""
 	cutoff = add_to_date(now_datetime(), minutes=-DRAFT_EXPIRY_MINUTES)
@@ -390,6 +420,7 @@ def reconcile_stale_draft(name: str) -> None:
 	reconciliation.reconcile_stale_draft(name)
 
 
+@run_as_admin
 def reconcile_terminating_virtual_machines() -> None:
 	"""Delete terminated VMs that Metal reports as absent."""
 	names = frappe.get_all("Virtual Machine", filters={"is_terminating": 1}, pluck="name")

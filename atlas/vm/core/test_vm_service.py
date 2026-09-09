@@ -7,6 +7,18 @@ from frappe.tests import UnitTestCase
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.placement import PlacementService
 from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
+from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
+
+
+def build_image(tenant_id: int, image_type: str = "Machine") -> VirtualMachineImage:
+	"""Return one image document that answers the tenant visibility rule."""
+	image = VirtualMachineImage.__new__(VirtualMachineImage)
+	image.tenant_id = tenant_id
+	image.image_type = image_type
+	image.title = "Worker snapshot"
+	image.enabled = 1
+	image.validate_is_available = Mock()
+	return image
 
 
 class TestVirtualMachineCreation(UnitTestCase):
@@ -45,6 +57,23 @@ class TestVirtualMachineCreation(UnitTestCase):
 		self.assertEqual(result, {"name": "VM-00001", "is_draft": False})
 		self.assertEqual(operations, ["commit", "metal", "save"])
 		self.assertEqual(virtual_machine.is_draft, 0)
+
+	def test_a_system_image_can_boot_for_any_tenant(self) -> None:
+		image = build_image(tenant_id=0, image_type="System")
+
+		with patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=image):
+			self.assertIs(VirtualMachineService.get_image("system-image", 7), image)
+
+		image.validate_is_available.assert_called_once()
+
+	def test_another_tenant_machine_image_cannot_boot(self) -> None:
+		image = build_image(tenant_id=8)
+
+		with (
+			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=image),
+			self.assertRaises(frappe.DoesNotExistError),
+		):
+			VirtualMachineService.get_image("machine-image", 7)
 
 	def test_uncertain_create_keeps_the_committed_draft(self) -> None:
 		image = SimpleNamespace(
@@ -147,3 +176,98 @@ class TestVirtualMachineInformation(UnitTestCase):
 			self.assertRaisesRegex(frappe.ValidationError, "connection refused"),
 		):
 			VirtualMachineService(virtual_machine).get_information()
+
+
+class TestVirtualMachineDisk(UnitTestCase):
+	def build_service(self, size_mib: int = 20480) -> tuple[VirtualMachineService, Mock]:
+		"""Return a service whose host reports one desired disk."""
+		virtual_machine = SimpleNamespace(name="VM-00001", db_set=Mock())
+		service = VirtualMachineService(virtual_machine)
+		information = SimpleNamespace(
+			desired=SimpleNamespace(disk=SimpleNamespace(size_mib=size_mib, throughput_mibps=50, iops=2000))
+		)
+		return service, information
+
+	def test_a_limit_change_keeps_the_stored_disk_size(self) -> None:
+		service, information = self.build_service()
+
+		with (
+			patch.object(service, "require_information", return_value=information),
+			patch.object(service, "set_disk", return_value={}) as set_disk,
+		):
+			service.update_disk({"throughput_mibps": 100})
+
+		set_disk.assert_called_once_with(20480, 100, 2000)
+		service.virtual_machine.db_set.assert_not_called()
+
+	def test_a_larger_disk_updates_the_stored_size(self) -> None:
+		service, information = self.build_service()
+
+		with (
+			patch.object(service, "require_information", return_value=information),
+			patch.object(service, "set_disk", return_value={}) as set_disk,
+		):
+			service.update_disk({"size_mib": 40960})
+
+		set_disk.assert_called_once_with(40960, 50, 2000)
+		service.virtual_machine.db_set.assert_called_once_with("disk_mib", 40960)
+
+	def test_a_smaller_disk_is_rejected(self) -> None:
+		service, information = self.build_service()
+
+		with (
+			patch.object(service, "require_information", return_value=information),
+			patch.object(service, "set_disk") as set_disk,
+			self.assertRaises(frappe.ValidationError),
+		):
+			service.update_disk({"size_mib": 10240})
+
+		set_disk.assert_not_called()
+
+
+class TestVirtualMachineNetworkChanges(UnitTestCase):
+	def build_service(self, attached: str | None) -> VirtualMachineService:
+		"""Return a service for a managed virtual machine."""
+		virtual_machine = SimpleNamespace(name="VM-00001", validate_network_change=Mock())
+		service = VirtualMachineService(virtual_machine)
+		service.get_attached_ip_address_name = Mock(return_value=attached)
+		return service
+
+	def test_an_unknown_egress_mode_is_rejected(self) -> None:
+		service = self.build_service(None)
+
+		with patch.object(service, "update_network") as update_network:
+			with self.assertRaises(frappe.ValidationError):
+				service.apply_network_changes({"egress": "server"})
+
+			update_network.assert_not_called()
+
+	def test_an_attached_address_keeps_the_internet_path(self) -> None:
+		service = self.build_service("203.0.113.10")
+
+		for egress in ("mesh", "none"):
+			with patch.object(service, "update_network") as update_network:
+				with self.assertRaises(frappe.ValidationError):
+					service.apply_network_changes({"egress": egress})
+
+				update_network.assert_not_called()
+
+	def test_a_limit_change_needs_no_address_check(self) -> None:
+		service = self.build_service("203.0.113.10")
+
+		with patch.object(service, "update_network", return_value={}) as update_network:
+			service.apply_network_changes({"public_network_throughput_mibps": 25})
+
+		update_network.assert_called_once_with({"public_network_throughput_mibps": 25})
+
+	def test_an_ip_address_from_another_tenant_is_rejected(self) -> None:
+		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
+		address = SimpleNamespace(tenant_id=8, status="Allocated", virtual_machine=None)
+
+		with (
+			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address) as get_doc,
+			self.assertRaises(frappe.PermissionError),
+		):
+			VirtualMachineService(virtual_machine).assign_ip_address("203.0.113.10")
+
+		get_doc.assert_called_once_with("Metal Server IP Address", "203.0.113.10", for_update=True)

@@ -11,9 +11,12 @@ The Atlas app uses Frappe to manage provider hosts, virtual machines, images, an
 ## Layout
 
 ```text
+api/                           Tenant API routes and models
+  core/                        HTTP router, request decoding, errors, and API documentation
 atlas/                         Site settings, provider behavior, TLS, and host binary builds
-  core/                        Provider clients, TLS issuance, and the host binary builder
+  core/                        Provider clients, TLS issuance, background jobs, and the host binary builder
   doctype/                     Atlas Settings and SSH Task
+auth/                          Central tokens, role checks, tenant parsing, and permission overrides
 metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
   doctype/                     Metal Server records and catalog DocTypes
@@ -43,7 +46,7 @@ Virtual Machine Image is the durable boot artifact for System and Machine images
 
 Atlas holds one wildcard TLS certificate for the region. A wildcard name can only be proved through DNS, so issuance uses the ACME dns-01 challenge and the configured DNS provider. See [the wildcard TLS guide](docs/wildcard-tls.md).
 
-Use [the virtual machine control-plane guide](docs/vm-control-plane.md) for request and retry boundaries. Use [the image guide](docs/images.md) for System and Machine image lifecycles. Use [Atlas operations](docs/operations.md) for fault recovery.
+See [the security model](docs/security.md) for the trust boundaries and the accepted risks. See [the documentation index](docs/README.md) for every guide.
 
 ## Validation
 
@@ -59,7 +62,9 @@ See [docs/development.md](docs/development.md) for the commands to run.
 
 ## Ownership
 
-Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
+Keep the HTTP framework in `api/core/`: routing in `base.py`, request decoding in `binding.py`, failures in `errors.py`, and documentation generation in `docs.py`. Keep the Atlas surface in `api/router.py`, `api/models.py`, and `api/routes/`. Keep authorization in `auth/`: route authentication in `auth/request.py`, central token validation in `auth/token.py`, the Atlas Admin user in `auth/user.py`, role checks in `auth/roles.py`, tenant parsing in `auth/tenant.py`, and permission overrides in `auth/overrides.py`. Keep each resource API compact and keep route functions thin. Register every Atlas DocType with the shared permission overrides.
+
+Keep the Administrator job decorator in `atlas/core/background_jobs.py`. Every queued job entry point uses it. Keep provider behavior in `atlas/core/server_providers/`. Keep settings behavior in `atlas/doctype/`.
 
 Keep certificate issuance in `atlas/core/tls/`.
 

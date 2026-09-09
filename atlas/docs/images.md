@@ -22,6 +22,14 @@ Atlas saves both multipart upload IDs before it asks Metal to start. A failed st
 
 Retry Transfer uses these durable values. It does not create a second image record. Atlas does not log signed URLs.
 
+## Deletion
+
+Only an Available Machine image can enter deletion. Deletion marks the image `Deleting` and queues a cleanup job. The job deletes the root file system and kernel objects, removes the Metal staging data, and then deletes the record.
+
+Atlas refuses deletion while a virtual machine uses the image. A System image cannot be deleted through the tenant API.
+
+If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and tries the job again every 30 seconds.
+
 ## Cached and warm artifacts
 
 Atlas sends enabled Available images with `cache_image` during host synchronization. Metal downloads the root file system and kernel.

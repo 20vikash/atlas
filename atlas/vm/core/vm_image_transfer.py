@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 import frappe
 
+from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.multipart_upload import MultipartUploadError, MultipartUploadService, bytes_to_mib
@@ -19,11 +20,11 @@ TRANSFER_TIMEOUT_SECONDS = 900
 ImageStatus = Literal["Pending", "Uploading", "Completing", "Cleaning", "Available", "Failed"]
 
 
-class MachineImageTransferError(Exception):
+class VirtualMachineImageTransferError(Exception):
 	"""Report invalid Machine image transfer data."""
 
 
-class MachineImageTransferService:
+class VirtualMachineImageTransferService:
 	"""Create and transfer one Machine image."""
 
 	def create_from_virtual_machine(
@@ -57,6 +58,7 @@ class MachineImageTransferService:
 				"doctype": "Virtual Machine Image",
 				"title": title,
 				"image_type": "Machine",
+				"tenant_id": virtual_machine.tenant_id,
 				"status": "Pending",
 				"enabled": 1,
 				"platform": original_image.platform,
@@ -77,7 +79,7 @@ class MachineImageTransferService:
 			}
 		)
 		try:
-			image.insert(ignore_permissions=True, set_name=snapshot_id)
+			image.insert(set_name=snapshot_id)
 		except Exception:
 			self.delete_abandoned_snapshot(metal_client, snapshot_id)
 			raise
@@ -90,7 +92,7 @@ class MachineImageTransferService:
 	) -> None:
 		"""Enqueue one idempotent Machine image transfer."""
 		frappe.enqueue(
-			"atlas.vm.core.image_transfer.transfer_machine_image",
+			"atlas.vm.core.vm_image_transfer.transfer_machine_image",
 			queue=queue,
 			timeout=timeout,
 			image_name=image_name,
@@ -108,7 +110,7 @@ class MachineImageTransferService:
 			MetalClientError,
 			ObjectStorageError,
 			MultipartUploadError,
-			MachineImageTransferError,
+			VirtualMachineImageTransferError,
 		) as error:
 			self.mark_failed(image, str(error))
 			frappe.log_error(
@@ -119,7 +121,7 @@ class MachineImageTransferService:
 	def advance(self, image: VirtualMachineImage) -> None:
 		"""Move one Machine image transfer forward by one step."""
 		server = cast(
-			"Metal Server",
+			"MetalServer",
 			frappe.get_doc("Metal Server", self.require_value(image.source_server, "source server")),
 		)
 		metal_client = MetalClient(server)
@@ -136,7 +138,9 @@ class MachineImageTransferService:
 			status = metal_client.get_snapshot(cast(str, image.name))
 		except MetalClientError as error:
 			if error.is_not_found:
-				raise MachineImageTransferError("Metal has no staged snapshot for this image") from error
+				raise VirtualMachineImageTransferError(
+					"Metal has no staged snapshot for this image"
+				) from error
 			raise
 
 		state = status.get("state")
@@ -160,7 +164,7 @@ class MachineImageTransferService:
 		image.transfer_progress = 0
 		image.transfer_error = None
 		multipart_upload.ensure_uploads(save=False)
-		image.save(ignore_permissions=True)
+		image.save()
 		metal_client.start_snapshot_upload(cast(str, image.name), multipart_upload.get_upload_request())
 
 	def finalize(
@@ -190,7 +194,7 @@ class MachineImageTransferService:
 		image.status = "Completing"
 		image.transfer_progress = 100
 		image.transfer_error = None
-		image.save(ignore_permissions=True)
+		image.save()
 
 	@staticmethod
 	def require_artifact_sha256(status: dict[str, Any], artifact: str) -> str:
@@ -198,9 +202,9 @@ class MachineImageTransferService:
 		value = status.get(artifact)
 		sha256 = value.get("sha256") if isinstance(value, dict) else None
 		if not isinstance(sha256, str) or len(sha256) != 64:
-			raise MachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
 		if any(character not in "0123456789abcdef" for character in sha256):
-			raise MachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
 		return sha256
 
 	@staticmethod
@@ -208,7 +212,7 @@ class MachineImageTransferService:
 		"""Return the valid snapshot identifier from Metal."""
 		snapshot_id = response.get("id")
 		if not isinstance(snapshot_id, str) or not snapshot_id:
-			raise MachineImageTransferError("Metal returned an invalid snapshot ID")
+			raise VirtualMachineImageTransferError("Metal returned an invalid snapshot ID")
 		return snapshot_id
 
 	@staticmethod
@@ -217,14 +221,14 @@ class MachineImageTransferService:
 		value = response.get(artifact)
 		size_bytes = value.get("size_bytes") if isinstance(value, dict) else None
 		if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
-			raise MachineImageTransferError(f"Metal returned an invalid {artifact} size")
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} size")
 		return bytes_to_mib(size_bytes)
 
 	@staticmethod
 	def require_value(value: str | None, label: str) -> str:
 		"""Return one required transfer value."""
 		if not value:
-			raise MachineImageTransferError(f"Machine image has no {label}")
+			raise VirtualMachineImageTransferError(f"Machine image has no {label}")
 		return value
 
 	@staticmethod
@@ -243,7 +247,7 @@ class MachineImageTransferService:
 		"""Save one active transfer status."""
 		image.status = status
 		image.transfer_error = None
-		image.save(ignore_permissions=True)
+		image.save()
 
 	@staticmethod
 	def mark_available(image: VirtualMachineImage) -> None:
@@ -252,14 +256,14 @@ class MachineImageTransferService:
 		image.rootfs_multipart_upload_id = None
 		image.kernel_multipart_upload_id = None
 		image.transfer_error = None
-		image.save(ignore_permissions=True)
+		image.save()
 
 	@staticmethod
 	def mark_failed(image: VirtualMachineImage, message: str) -> None:
 		"""Store a transfer error without clearing retry identifiers."""
 		image.status = "Failed"
 		image.transfer_error = message[:1000]
-		image.save(ignore_permissions=True)
+		image.save()
 
 
 def enqueue_pending_machine_image_transfers() -> None:
@@ -272,11 +276,12 @@ def enqueue_pending_machine_image_transfers() -> None:
 		},
 		pluck="name",
 	)
-	service = MachineImageTransferService()
+	service = VirtualMachineImageTransferService()
 	for name in names:
 		service.enqueue(name)
 
 
+@run_as_admin
 def transfer_machine_image(image_name: str) -> None:
 	"""Advance one queued Machine image transfer."""
-	MachineImageTransferService().transfer(image_name)
+	VirtualMachineImageTransferService().transfer(image_name)

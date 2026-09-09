@@ -1,0 +1,12 @@
+[
+ {
+  "doctype": "Role Profile",
+  "name": "Atlas Admin",
+  "role_profile": "Atlas Admin",
+  "roles": [
+   {
+    "role": "Atlas Admin"
+   }
+  ]
+ }
+]

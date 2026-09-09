@@ -7,6 +7,9 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from atlas.atlas.core.background_jobs import run_as_admin
+from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID, IPAddressService
+
 
 @dataclass(frozen=True, slots=True)
 class IPAddressIntent:
@@ -34,6 +37,7 @@ class MetalServerIPAddress(Document):
 		provider_resource_id: DF.Data
 		server: DF.Link | None
 		status: DF.Literal["Allocated", "Attaching", "Attached", "Detaching"]
+		tenant_id: DF.Int
 		virtual_machine: DF.Link | None
 	# end: auto-generated types
 
@@ -66,7 +70,7 @@ class MetalServerIPAddress(Document):
 		self.server = server
 		self.virtual_machine = virtual_machine
 		self.intent_version = (self.intent_version or 0) + 1
-		self.save(ignore_permissions=True)
+		self.save()
 		self.queue_reconcile()
 
 	def release(self) -> None:
@@ -78,8 +82,13 @@ class MetalServerIPAddress(Document):
 			self.status = "Detaching"
 		else:
 			self.status = "Allocated"
-		self.save(ignore_permissions=True)
+		self.save()
 		self.queue_reconcile()
+
+	def release_to_pool(self) -> None:
+		"""Release this unused address to the shared pool."""
+		self.check_permission("write")
+		IPAddressService().release(self)
 
 	def queue_reconcile(self) -> None:
 		"""Queue the provider reconcile job for this address."""
@@ -93,6 +102,7 @@ class MetalServerIPAddress(Document):
 			enqueue_after_commit=True,
 		)
 
+	@run_as_admin
 	def reconcile(self) -> None:
 		"""Apply the current provider intent."""
 		current = frappe.get_doc(self.doctype, self.name)
@@ -158,25 +168,13 @@ def enqueue_pending_ip_address_reconcilation() -> None:
 
 @frappe.whitelist(methods=["POST"])
 def reserve() -> str:
-	"""Reserve one public IPv4 address from the provider."""
+	"""Reserve one public IPv4 address from the provider for the shared pool."""
 	frappe.only_for("System Manager")
-	provider = frappe.get_single("Atlas Settings").server_provider_controller
-	reserved = provider.reserve_public_ipv4_address()
-	try:
-		return (
-			frappe.get_doc(
-				{
-					"doctype": "Metal Server IP Address",
-					"address": reserved.address,
-					"provider_resource_id": reserved.provider_resource_id,
-				}
-			)
-			.insert(ignore_permissions=True)
-			.name
-		)
-	except Exception:
-		try:
-			provider.delete_public_ipv4_address(reserved.provider_resource_id)
-		except Exception:
-			frappe.log_error(title="Could not delete reserved Metal Server IP Address")
-		raise
+	return IPAddressService().reserve_from_provider(UNOWNED_TENANT_ID)
+
+
+def reserve_for_tenant(tenant_id: int, source: str) -> str:
+	"""Reserve one public IPv4 address for a tenant."""
+	if not frappe.has_permission("Metal Server IP Address", ptype="create"):
+		raise frappe.PermissionError
+	return IPAddressService().reserve(tenant_id, source)
