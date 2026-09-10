@@ -12,6 +12,38 @@ Atlas accepts `iss=central` and `iss=atlas:<region ID>`. The token audience must
 
 A token needs `scope=*`, a subject, a tenant, and no resource constraint. The subject is an identity label and does not change the authority. Central uses `tenant=*`. The Atlas scope applies only to tenant API routes. It does not grant access to global administration routes.
 
+A regional token names its tenant, and the header is unnecessary:
+
+```json
+{
+  "iss": "atlas:1",
+  "sub": "cargo",
+  "aud": "atlas-admin:1",
+  "scope": "*",
+  "tenant": "7",
+  "iat": 1789072323,
+  "nbf": 1789072323,
+  "exp": 1789072623
+}
+```
+
+A Central token serves every tenant, so each request must also send `X-Tenant-ID`:
+
+```json
+{
+  "iss": "central",
+  "sub": "central",
+  "aud": "atlas-admin:1",
+  "scope": "*",
+  "tenant": "*",
+  "iat": 1789072323,
+  "nbf": 1789072323,
+  "exp": 1789072623
+}
+```
+
+The header of both tokens is `{"alg": "EdDSA", "kid": "atlas:1:<key ID>"}`, and `kid` uses the `central:` namespace for a Central token.
+
 Atlas binds each key namespace to its issuer. A `central:*` key can validate only `iss=central`. An `atlas:<region ID>:*` key can validate only the matching regional issuer. Atlas refuses a key from another region.
 
 The public key set is at `GET /api/atlas/jwks.json`. Atlas gets Central keys every 5 minutes and keeps the last valid set after a fetch failure. The endpoint also contains the regional Atlas public key. The response does not contain a private key.
