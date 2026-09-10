@@ -19,6 +19,10 @@ type MigrationSourceClient interface {
 	RemoveSource(ctx context.Context, address, migrationID, token string) error
 }
 
+// reservationTimeout removes a target reservation whose worker never supplies a
+// config, so a lost handshake does not hold capacity forever.
+const reservationTimeout = 10 * time.Minute
+
 // TargetReservation is the host capacity that one migration target holds.
 type TargetReservation struct {
 	VirtualMachineID string
@@ -27,29 +31,46 @@ type TargetReservation struct {
 	DiskMiB          int
 }
 
+// AvailableCapacity is the free host capacity that a target reservation checks.
+type AvailableCapacity struct {
+	CPUCount   int
+	MemoryMiB  int
+	StorageMiB int
+}
+
+// CapacitySource reports the free host capacity at the target.
+type CapacitySource func(ctx context.Context) (AvailableCapacity, error)
+
 // MigrationManager owns the migration records and reservations on this host. The
 // VM manager owns the VM records that a migration reads and reconstructs.
 type MigrationManager struct {
 	machines *Manager
 	store    *migrationStore
 	source   MigrationSourceClient
+	capacity CapacitySource
 	locks    keyedLocks
 	logger   *slog.Logger
 	now      func() time.Time
 }
 
-// NewMigrationManager returns a migration manager for one host.
-func NewMigrationManager(machines *Manager, source MigrationSourceClient, logger *slog.Logger) (*MigrationManager, error) {
-	if machines == nil || source == nil {
+// NewMigrationManager validates the stored records and returns a migration
+// manager for one host.
+func NewMigrationManager(machines *Manager, source MigrationSourceClient, capacity CapacitySource, logger *slog.Logger) (*MigrationManager, error) {
+	if machines == nil || source == nil || capacity == nil {
 		return nil, fmt.Errorf("migration manager dependencies are required")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
+	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	if err := store.validateAll(); err != nil {
+		return nil, fmt.Errorf("validate migration records: %w", err)
+	}
 	return &MigrationManager{
 		machines: machines,
-		store:    newMigrationStore(machines.configuration.MachinesDirectory),
+		store:    store,
 		source:   source,
+		capacity: capacity,
 		logger:   logger,
 		now:      func() time.Time { return time.Now().UTC() },
 	}, nil
@@ -140,7 +161,12 @@ func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) 
 	if err != nil {
 		return err
 	}
+	return m.abortTargetLocked(ctx, record)
+}
 
+// abortTargetLocked runs the abort cleanup while the VM lock is already held.
+func (m *MigrationManager) abortTargetLocked(ctx context.Context, record TargetMigrationRecord) error {
+	virtualMachineID := record.VirtualMachineID
 	token, err := m.store.readToken(virtualMachineID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
@@ -149,7 +175,7 @@ func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) 
 		return err
 	}
 	if token != "" {
-		if err := m.source.RemoveSource(ctx, record.Source, migrationID, token); err != nil {
+		if err := m.source.RemoveSource(ctx, record.Source, record.ID, token); err != nil {
 			return fmt.Errorf("unlock migration source: %w", err)
 		}
 	}

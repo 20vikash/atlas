@@ -7,12 +7,17 @@ import (
 )
 
 type fakeSourceClient struct {
-	removeCalls int
-	removeError error
+	prepareCalls  int
+	removeCalls   int
+	removeError   error
+	prepareConfig PortableConfig
+	prepareState  State
+	prepareError  error
 }
 
 func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string, string) (PortableConfig, State, error) {
-	return PortableConfig{}, StateRunning, nil
+	c.prepareCalls++
+	return c.prepareConfig, c.prepareState, c.prepareError
 }
 
 func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string) error {
@@ -20,11 +25,15 @@ func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string)
 	return c.removeError
 }
 
+func ampleCapacity(context.Context) (AvailableCapacity, error) {
+	return AvailableCapacity{CPUCount: 64, MemoryMiB: 262144, StorageMiB: 4194304}, nil
+}
+
 func newMigrationManager(t *testing.T) (*MigrationManager, *Manager, *fakeSourceClient) {
 	t.Helper()
 	machines, _, _, _ := newTestManager(t)
 	source := &fakeSourceClient{}
-	migrationManager, err := NewMigrationManager(machines, source, nil)
+	migrationManager, err := NewMigrationManager(machines, source, ampleCapacity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

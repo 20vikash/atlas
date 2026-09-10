@@ -170,6 +170,10 @@ func (manager *Manager) Information(ctx context.Context, identifier string) (Inf
 		return Information{}, err
 	}
 	defer unlock()
+	// An incoming migration target is not a normal VM yet.
+	if manager.isTargetReserved(identifier) {
+		return Information{}, ErrNotFound
+	}
 	return manager.information(identifier)
 }
 
@@ -183,6 +187,10 @@ func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	}
 	information := make([]Information, 0, len(identifiers))
 	for _, identifier := range identifiers {
+		// An incoming migration target is hidden from the normal VM list.
+		if manager.isTargetReserved(identifier) {
+			continue
+		}
 		current, err := manager.Information(ctx, identifier)
 		if errors.Is(err, ErrNotFound) {
 			manager.logger.WarnContext(ctx, "skipped incomplete virtual machine records",

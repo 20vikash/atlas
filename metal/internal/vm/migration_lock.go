@@ -19,6 +19,12 @@ func (manager *Manager) isTargetReserved(virtualMachineID string) bool {
 	return fileExists(targetRecordPath(manager.configuration.MachinesDirectory, virtualMachineID))
 }
 
+// isMigrating reports whether any migration role holds this VM. Normal VM
+// listing, get, and reconciliation skip a VM in this state.
+func (manager *Manager) isMigrating(virtualMachineID string) bool {
+	return manager.isSourceLocked(virtualMachineID) || manager.isTargetReserved(virtualMachineID)
+}
+
 // assertNotSourceLocked rejects a mutation while the VM is a migration source.
 func (manager *Manager) assertNotSourceLocked(virtualMachineID string) error {
 	if manager.isSourceLocked(virtualMachineID) {
