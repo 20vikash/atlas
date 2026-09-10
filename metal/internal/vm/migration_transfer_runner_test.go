@@ -273,6 +273,29 @@ func TestStartTransferRunsOnceAndShutdownWaits(t *testing.T) {
 	}
 }
 
+func TestCancelTransferStopsABlockedWorker(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "g"}}
+	source.streamHang = true
+	writeCopyingTarget(t, machines, StateRunning)
+
+	migrationManager.StartTransfer("vm-1")
+	// The worker blocks in the stream, so a cancel must return once it exits.
+	if err := migrationManager.CancelTransfer(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCancelTransferWithoutAWorkerIsANoOp(t *testing.T) {
+	migrationManager, _, _ := newMigrationManager(t)
+	if err := migrationManager.CancelTransfer(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func equalInts(got, want []int) bool {
 	if len(got) != len(want) {
 		return false

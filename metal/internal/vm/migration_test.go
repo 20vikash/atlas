@@ -78,6 +78,7 @@ type fakeSourceClient struct {
 	nextSequences []int
 	streamBytes   int64
 	streamError   error
+	streamHang    bool
 	streamMiBps   []int
 	stopSnapshot  SourceSnapshot
 	stopError     error
@@ -105,8 +106,12 @@ func (c *fakeSourceClient) NextSnapshot(_ context.Context, _, _, _ string, recei
 	return c.nextSnapshot, nil
 }
 
-func (c *fakeSourceClient) StreamSnapshot(_ context.Context, _, _, _ string, _ int, _ string, throughputMiBps int, w io.Writer) (int64, error) {
+func (c *fakeSourceClient) StreamSnapshot(ctx context.Context, _, _, _ string, _ int, _ string, throughputMiBps int, w io.Writer) (int64, error) {
 	c.streamMiBps = append(c.streamMiBps, throughputMiBps)
+	if c.streamHang {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
 	if c.streamError != nil {
 		return 0, c.streamError
 	}

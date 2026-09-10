@@ -26,8 +26,14 @@ var throttleSteps = []int{64, 32, 16, 8}
 // errTransferFailed marks a definite failure that already updated the record.
 var errTransferFailed = errors.New("migration transfer failed")
 
-// StartTransfer runs one background disk transfer for a VM. A second call for a
-// VM that already has a running transfer does nothing.
+// transferHandle cancels one VM's background worker and signals its exit.
+type transferHandle struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// StartTransfer runs one background worker for a VM. A second call for a VM that
+// already has a running worker does nothing.
 func (m *MigrationManager) StartTransfer(virtualMachineID string) {
 	m.transfersMutex.Lock()
 	defer m.transfersMutex.Unlock()
@@ -37,16 +43,37 @@ func (m *MigrationManager) StartTransfer(virtualMachineID string) {
 	if _, active := m.transfers[virtualMachineID]; active {
 		return
 	}
-	m.transfers[virtualMachineID] = struct{}{}
+	workerContext, cancel := context.WithCancel(m.rootContext)
+	handle := &transferHandle{cancel: cancel, done: make(chan struct{})}
+	m.transfers[virtualMachineID] = handle
 	m.transfersWaitGroup.Add(1)
 	go func() {
 		defer m.transfersWaitGroup.Done()
+		defer close(handle.done)
 		defer m.forgetTransfer(virtualMachineID)
-		m.runTransfer(m.rootContext, virtualMachineID)
+		m.runTransfer(workerContext, virtualMachineID)
 	}()
 }
 
-// Shutdown stops accepting transfers and waits for the active ones to stop.
+// CancelTransfer cancels a VM's worker and waits for it to exit, so an abort can
+// stop an active stream before it cleans up. It returns when no worker runs.
+func (m *MigrationManager) CancelTransfer(ctx context.Context, virtualMachineID string) error {
+	m.transfersMutex.Lock()
+	handle := m.transfers[virtualMachineID]
+	m.transfersMutex.Unlock()
+	if handle == nil {
+		return nil
+	}
+	handle.cancel()
+	select {
+	case <-handle.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for migration worker: %w", ctx.Err())
+	}
+}
+
+// Shutdown stops accepting workers and waits for the active ones to stop.
 func (m *MigrationManager) Shutdown(shutdownContext context.Context) error {
 	m.transfersMutex.Lock()
 	if !m.closed {
@@ -68,7 +95,7 @@ func (m *MigrationManager) Shutdown(shutdownContext context.Context) error {
 	}
 }
 
-// forgetTransfer clears the active-transfer marker for a VM.
+// forgetTransfer clears the active-worker handle for a VM.
 func (m *MigrationManager) forgetTransfer(virtualMachineID string) {
 	m.transfersMutex.Lock()
 	delete(m.transfers, virtualMachineID)

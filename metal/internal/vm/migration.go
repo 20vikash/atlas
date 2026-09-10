@@ -87,9 +87,9 @@ type MigrationManager struct {
 	logger   *slog.Logger
 	now      func() time.Time
 
-	// The manager owns one background disk transfer per VM.
+	// The manager owns one cancellable background worker per VM.
 	transfersMutex     sync.Mutex
-	transfers          map[string]struct{}
+	transfers          map[string]*transferHandle
 	transfersWaitGroup sync.WaitGroup
 	rootContext        context.Context
 	rootCancel         context.CancelFunc
@@ -122,7 +122,7 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 		settings:    settings,
 		logger:      logger,
 		now:         func() time.Time { return time.Now().UTC() },
-		transfers:   make(map[string]struct{}),
+		transfers:   make(map[string]*transferHandle),
 		rootContext: rootContext,
 		rootCancel:  rootCancel,
 	}, nil
