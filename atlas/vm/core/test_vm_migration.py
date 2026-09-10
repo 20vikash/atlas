@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, call, patch
 
 import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.vm_migration import MigrationService
 from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
+
+
+def migration_doc(**overrides: object) -> SimpleNamespace:
+	values: dict[str, object] = {
+		"name": "mig-00001",
+		"virtual_machine": "vm-00001",
+		"source_server": "metal-1",
+		"target_server": "metal-2",
+		"status": "running",
+		"abort_requested": 0,
+		"progress": "{}",
+		"db_set": Mock(),
+	}
+	values.update(overrides)
+	return SimpleNamespace(**values)
 
 
 def source_vm(**overrides: object) -> SimpleNamespace:
@@ -122,3 +138,138 @@ class TestMigrationActionLock(UnitTestCase):
 		virtual_machine = frappe.new_doc("Virtual Machine")
 		virtual_machine.active_migration = "mig-00001"
 		self.assertEqual(virtual_machine.current_state, "unknown")
+
+
+class TestMigrationWorker(UnitTestCase):
+	def test_poll_interval_speeds_up_for_transitions(self) -> None:
+		self.assertEqual(MigrationService.poll_interval({"phase": "copying"}), 5)
+		self.assertEqual(MigrationService.poll_interval({}), 5)
+		self.assertEqual(MigrationService.poll_interval({"phase": "stopping"}), 2)
+		self.assertEqual(MigrationService.poll_interval({"phase": "starting"}), 2)
+
+	def test_run_commits_the_server_before_it_finishes(self) -> None:
+		service = MigrationService(migration_doc())
+		manager = Mock()
+		service.send_request = manager.send_request
+		service.commit_target = manager.commit_target
+		service.finish = manager.finish
+		service.settle = manager.settle
+		service.poll = Mock(
+			side_effect=[{"status": "running"}, {"status": "ready"}, {"status": "completed"}]
+		)
+
+		with (
+			patch.object(
+				MigrationService, "is_target_committed", new_callable=PropertyMock, return_value=False
+			),
+			patch("atlas.vm.core.vm_migration.time.sleep"),
+		):
+			service.run()
+
+		self.assertEqual(
+			manager.mock_calls,
+			[call.send_request(), call.commit_target(), call.finish(), call.settle("completed")],
+		)
+
+	def test_run_skips_the_request_when_an_abort_is_pending(self) -> None:
+		service = MigrationService(migration_doc(abort_requested=1))
+		service.send_request = Mock()
+		service.request_abort = Mock()
+		service.settle = Mock()
+		service.poll = Mock(side_effect=[{"status": "aborted"}])
+
+		with (
+			patch.object(
+				MigrationService, "is_target_committed", new_callable=PropertyMock, return_value=False
+			),
+			patch("atlas.vm.core.vm_migration.time.sleep"),
+		):
+			service.run()
+
+		service.send_request.assert_not_called()
+		service.settle.assert_called_once_with("aborted")
+
+	def test_failure_marks_failed_and_requests_abort(self) -> None:
+		service = MigrationService(migration_doc())
+		service.mark_failed = Mock()
+		service.request_abort = Mock()
+
+		self.assertFalse(service.advance({"status": "failed"}))
+		service.mark_failed.assert_called_once()
+		service.request_abort.assert_called_once()
+
+	def test_commit_target_changes_the_server_once(self) -> None:
+		service = MigrationService(migration_doc())
+		locked_vm = SimpleNamespace(server="metal-1", db_set=Mock())
+		locked_migration = migration_doc(status="running")
+
+		def fake_get_doc(doctype: str, *args: object, **kwargs: object) -> object:
+			return locked_vm if doctype == "Virtual Machine" else locked_migration
+
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc),
+			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+		):
+			service.commit_target()
+
+		locked_vm.db_set.assert_called_once_with("server", "metal-2")
+		locked_migration.db_set.assert_called_once_with("status", "ready")
+
+	def test_commit_target_is_idempotent(self) -> None:
+		service = MigrationService(migration_doc())
+		locked_vm = SimpleNamespace(server="metal-2", db_set=Mock())
+		locked_migration = migration_doc(status="ready")
+
+		def fake_get_doc(doctype: str, *args: object, **kwargs: object) -> object:
+			return locked_vm if doctype == "Virtual Machine" else locked_migration
+
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc),
+			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+		):
+			service.commit_target()
+
+		locked_vm.db_set.assert_not_called()
+		locked_migration.db_set.assert_not_called()
+
+	def test_request_abort_records_a_failed_abort(self) -> None:
+		service = MigrationService(migration_doc())
+		client = Mock()
+		client.abort_migration.side_effect = MetalClientError("host busy", status=503)
+		service.record_error = Mock()
+
+		with (
+			patch.object(
+				MigrationService, "target_client", new_callable=PropertyMock, return_value=client
+			),
+			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+		):
+			service.request_abort()
+
+		service.migration.db_set.assert_called_once_with("abort_requested", 1)
+		service.record_error.assert_called_once()
+
+	def test_abort_records_intent_and_queues_the_worker(self) -> None:
+		migration = frappe.new_doc("Virtual Machine Migration")
+		migration.virtual_machine = "vm-00001"
+		migration.name = "mig-00001"
+		migration.db_set = Mock()
+
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=Mock()),
+			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+			patch("atlas.vm.core.vm_migration.enqueue_migration") as enqueue,
+		):
+			migration.abort()
+
+		migration.db_set.assert_called_once_with("abort_requested", 1)
+		enqueue.assert_called_once_with("mig-00001")
+
+	def test_enqueue_deduplicates_per_migration(self) -> None:
+		from atlas.vm.core.vm_migration import enqueue_migration
+
+		with patch("atlas.vm.core.vm_migration.frappe.enqueue") as enqueue:
+			enqueue_migration("mig-00001")
+
+		self.assertEqual(enqueue.call_args.kwargs["job_id"], "atlas||vm-migration||mig-00001")
+		self.assertTrue(enqueue.call_args.kwargs["deduplicate"])

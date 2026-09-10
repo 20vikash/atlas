@@ -1,22 +1,37 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+import time
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any, cast
 
 import frappe
 from frappe import _
 from frappe.utils import now_datetime
 
+from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.metal_server.core.metal_token import (
+	SCOPE_MIGRATION,
+	SCOPE_READ_VIRTUAL_MACHINE,
+	MetalTokenIssuer,
+)
+from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementService
 
 if TYPE_CHECKING:
+	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 	from atlas.vm.doctype.virtual_machine_migration.virtual_machine_migration import (
 		VirtualMachineMigration,
 	)
 
 MIGRATABLE_STATES = frozenset({"running", "stopped", "paused"})
+COPY_POLL_SECONDS = 5
+TRANSITION_POLL_SECONDS = 2
+TRANSITION_PHASES = frozenset({"stopping", "starting"})
+MAXIMUM_RUN_DURATION = timedelta(minutes=30)
+MIGRATION_JOB_TIMEOUT_SECONDS = int(MAXIMUM_RUN_DURATION.total_seconds()) + 120
 
 
 class MigrationService:
@@ -53,6 +68,7 @@ class MigrationService:
 
 		locked.db_set("active_migration", migration.name)
 		frappe.db.commit()  # nosemgrep
+		enqueue_migration(cast(str, migration.name))
 		return cast(str, migration.name)
 
 	@staticmethod
@@ -95,4 +111,163 @@ class MigrationService:
 			frappe.db.get_value(
 				"Virtual Machine Image", virtual_machine.virtual_machine_image, "platform"
 			),
+		)
+
+	def run(self) -> None:
+		"""Send the request, then poll the target until the migration settles."""
+		if not self.migration.abort_requested and not self.is_target_committed:
+			self.send_request()
+
+		deadline = now_datetime() + MAXIMUM_RUN_DURATION
+		while now_datetime() < deadline:
+			status = self.poll()
+			if self.advance(status):
+				return
+			time.sleep(self.poll_interval(status))
+
+	def advance(self, status: dict[str, Any]) -> bool:
+		"""Apply one Metal status. Return True when the migration is settled."""
+		state = status.get("status")
+		if state == "completed":
+			self.settle("completed")
+			return True
+		if state == "aborted":
+			self.settle("aborted")
+			return True
+		if state == "failed":
+			self.mark_failed()
+			self.request_abort()
+			return False
+		if self.migration.abort_requested:
+			self.request_abort()
+			return False
+		if state == "ready":
+			self.commit_target()
+			self.finish()
+		return False
+
+	def send_request(self) -> None:
+		"""Issue one migration token and send the target-pull request. Safe to repeat."""
+		token = self.issue_token()
+		source = MetalClient.get_api_url(self.source_server)
+		self.target_client.put_migration(
+			cast(str, self.migration.name), self.migration.virtual_machine, source, token
+		)
+
+	def poll(self) -> dict[str, Any]:
+		"""Read the target migration status and store it as progress."""
+		status = self.target_client.get_migration(cast(str, self.migration.name))
+		self.migration.db_set("progress", frappe.as_json(status))
+		return status
+
+	@staticmethod
+	def poll_interval(status: dict[str, Any]) -> int:
+		"""Return the wait before the next poll. Transitions poll more often than a copy."""
+		return TRANSITION_POLL_SECONDS if status.get("phase") in TRANSITION_PHASES else COPY_POLL_SECONDS
+
+	def commit_target(self) -> None:
+		"""Point the VM at the target and mark the migration ready in one transaction."""
+		virtual_machine = frappe.get_doc(
+			"Virtual Machine", self.migration.virtual_machine, for_update=True
+		)
+		migration = cast(
+			"VirtualMachineMigration",
+			frappe.get_doc("Virtual Machine Migration", self.migration.name, for_update=True),
+		)
+		if virtual_machine.server != migration.target_server:
+			virtual_machine.db_set("server", migration.target_server)
+		if migration.status != "ready":
+			migration.db_set("status", "ready")
+		frappe.db.commit()  # nosemgrep
+		self.migration = migration
+
+	def finish(self) -> None:
+		"""Tell the target that Atlas committed the VM. Safe to repeat."""
+		self.target_client.finish_migration(cast(str, self.migration.name))
+
+	def request_abort(self) -> None:
+		"""Record the abort intent, then ask the target to abort. Safe to repeat."""
+		if not self.migration.abort_requested:
+			self.migration.db_set("abort_requested", 1)
+			frappe.db.commit()  # nosemgrep
+		try:
+			self.target_client.abort_migration(cast(str, self.migration.name))
+		except MetalClientError as error:
+			self.record_error(error)
+
+	def mark_failed(self) -> None:
+		"""Record that Metal reported a failed migration."""
+		if self.migration.status != "failed":
+			self.migration.db_set("status", "failed")
+
+	def settle(self, status: str) -> None:
+		"""Release the VM lock and record the final migration status."""
+		frappe.db.set_value("Virtual Machine", self.migration.virtual_machine, "active_migration", None)
+		self.migration.db_set("status", status)
+		frappe.db.commit()  # nosemgrep
+
+	def record_error(self, error: MetalClientError) -> None:
+		"""Store one migration error without releasing the VM lock."""
+		progress = frappe.parse_json(self.migration.progress or "{}")
+		if not isinstance(progress, dict):
+			progress = {}
+		progress["error"] = str(error)
+		self.migration.db_set("progress", frappe.as_json(progress))
+		frappe.db.commit()  # nosemgrep
+
+	def issue_token(self) -> str:
+		"""Return one token that lets the target pull the VM from the source."""
+		return MetalTokenIssuer().issue_token(
+			virtual_machine_id=self.migration.virtual_machine,
+			caller=self.migration.target_server,
+			receiver=self.migration.source_server,
+			scopes=[SCOPE_READ_VIRTUAL_MACHINE, SCOPE_MIGRATION],
+		)
+
+	@property
+	def is_target_committed(self) -> bool:
+		"""Report whether the VM already points at the target host."""
+		return (
+			frappe.db.get_value("Virtual Machine", self.migration.virtual_machine, "server")
+			== self.migration.target_server
+		)
+
+	@property
+	def target_client(self) -> MetalClient:
+		"""Return a Metal client for the target host."""
+		return MetalClient(cast("MetalServer", frappe.get_doc("Metal Server", self.migration.target_server)))
+
+	@property
+	def source_server(self) -> MetalServer:
+		"""Return the source Metal Server record."""
+		return cast("MetalServer", frappe.get_doc("Metal Server", self.migration.source_server))
+
+
+def enqueue_migration(migration_name: str) -> None:
+	"""Queue one deduplicated migration worker."""
+	frappe.enqueue(
+		"atlas.vm.core.vm_migration.run_migration",
+		queue="long",
+		timeout=MIGRATION_JOB_TIMEOUT_SECONDS,
+		migration_name=migration_name,
+		job_id=f"atlas||vm-migration||{migration_name}",
+		deduplicate=True,
+		enqueue_after_commit=True,
+	)
+
+
+@run_as_admin
+def run_migration(migration_name: str) -> None:
+	"""Advance one migration to completion, or record why it stopped."""
+	migration = cast(
+		"VirtualMachineMigration", frappe.get_doc("Virtual Machine Migration", migration_name)
+	)
+	service = MigrationService(migration)
+	try:
+		service.run()
+	except MetalClientError as error:
+		service.record_error(error)
+		frappe.log_error(
+			title=f"Virtual Machine migration {migration_name} failed",
+			message=frappe.get_traceback(),
 		)

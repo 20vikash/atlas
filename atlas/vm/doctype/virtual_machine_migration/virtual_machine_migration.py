@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import frappe
 from frappe.model.document import Document
 
 
@@ -22,3 +23,13 @@ class VirtualMachineMigration(Document):
 		target_server: DF.Link
 		virtual_machine: DF.Link
 	# end: auto-generated types
+
+	@frappe.whitelist(methods=["POST"])
+	def abort(self) -> None:
+		"""Record an abort request and queue the worker to continue it."""
+		frappe.get_doc("Virtual Machine", self.virtual_machine).check_permission("write")
+		self.db_set("abort_requested", 1)
+		frappe.db.commit()  # nosemgrep
+		from atlas.vm.core.vm_migration import enqueue_migration
+
+		enqueue_migration(self.name)
