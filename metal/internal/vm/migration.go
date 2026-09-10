@@ -155,15 +155,32 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 
 	existing, err := m.store.readTarget(virtualMachineID)
 	if err == nil {
-		if existing.ID != migrationID || existing.Source != source {
+		if existing.ID == migrationID {
+			// Same migration: refresh the token of an active retry, or return a
+			// settled result unchanged.
+			if isTerminalStatus(existing.Status) {
+				return existing, nil
+			}
+			if existing.Source != source {
+				return TargetMigrationRecord{}, ErrConflict
+			}
+			if err := m.store.writeToken(virtualMachineID, token); err != nil {
+				return TargetMigrationRecord{}, err
+			}
+			return existing, nil
+		}
+		// A different migration for this VM ID may replace only a clean aborted
+		// remnant. An active or completed record conflicts.
+		if existing.Status != MigrationAborted {
 			return TargetMigrationRecord{}, ErrConflict
 		}
-		if err := m.store.writeToken(virtualMachineID, token); err != nil {
+		if err := m.assertReplaceableAborted(ctx, virtualMachineID); err != nil {
 			return TargetMigrationRecord{}, err
 		}
-		return existing, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
+		if err := m.store.remove(virtualMachineID); err != nil {
+			return TargetMigrationRecord{}, err
+		}
+	} else if !errors.Is(err, ErrNotFound) {
 		return TargetMigrationRecord{}, err
 	}
 
@@ -268,6 +285,27 @@ func (m *MigrationManager) TargetReservations(_ context.Context) ([]TargetReserv
 		})
 	}
 	return reservations, nil
+}
+
+// assertReplaceableAborted confirms an aborted remnant left no VM record, source
+// lock, or target dataset, so a new migration can reuse the VM ID.
+func (m *MigrationManager) assertReplaceableAborted(ctx context.Context, virtualMachineID string) error {
+	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
+		return ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if m.machines.isSourceLocked(virtualMachineID) {
+		return ErrConflict
+	}
+	exists, err := m.transfer.TargetDatasetExists(ctx, virtualMachineID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrConflict
+	}
+	return nil
 }
 
 // assertVirtualMachineIDFree rejects a reservation when a live VM or another
