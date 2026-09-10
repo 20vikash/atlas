@@ -27,7 +27,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if record.Status != MigrationRunning {
 		return nil
 	}
-	if record.Phase == PhaseCopying {
+	if record.Phase == PhaseCopying || record.Phase == PhaseStopping || record.Phase == PhaseStarting {
 		m.StartTransfer(virtualMachineID)
 		return nil
 	}

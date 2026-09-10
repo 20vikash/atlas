@@ -72,10 +72,16 @@ type fakeSourceClient struct {
 	prepareState  State
 	prepareError  error
 	nextSnapshot  SourceSnapshot
+	nextQueue     []SourceSnapshot
 	nextError     error
 	nextCalls     int
+	nextSequences []int
 	streamBytes   int64
 	streamError   error
+	streamMiBps   []int
+	stopSnapshot  SourceSnapshot
+	stopError     error
+	stopCalls     int
 }
 
 func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string, string) (PortableConfig, State, error) {
@@ -83,12 +89,24 @@ func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string
 	return c.prepareConfig, c.prepareState, c.prepareError
 }
 
-func (c *fakeSourceClient) NextSnapshot(context.Context, string, string, string, int) (SourceSnapshot, error) {
+func (c *fakeSourceClient) NextSnapshot(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
+	c.nextSequences = append(c.nextSequences, receivedSequence)
+	index := c.nextCalls
 	c.nextCalls++
-	return c.nextSnapshot, c.nextError
+	if c.nextError != nil {
+		return SourceSnapshot{}, c.nextError
+	}
+	if index < len(c.nextQueue) {
+		return c.nextQueue[index], nil
+	}
+	if len(c.nextQueue) > 0 {
+		return SourceSnapshot{}, errors.New("no more snapshots")
+	}
+	return c.nextSnapshot, nil
 }
 
-func (c *fakeSourceClient) StreamSnapshot(_ context.Context, _, _, _ string, _ int, _ string, w io.Writer) (int64, error) {
+func (c *fakeSourceClient) StreamSnapshot(_ context.Context, _, _, _ string, _ int, _ string, throughputMiBps int, w io.Writer) (int64, error) {
+	c.streamMiBps = append(c.streamMiBps, throughputMiBps)
 	if c.streamError != nil {
 		return 0, c.streamError
 	}
@@ -96,6 +114,11 @@ func (c *fakeSourceClient) StreamSnapshot(_ context.Context, _, _, _ string, _ i
 		_, _ = w.Write(make([]byte, c.streamBytes))
 	}
 	return c.streamBytes, nil
+}
+
+func (c *fakeSourceClient) StopSource(context.Context, string, string, string) (SourceSnapshot, error) {
+	c.stopCalls++
+	return c.stopSnapshot, c.stopError
 }
 
 func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string) error {

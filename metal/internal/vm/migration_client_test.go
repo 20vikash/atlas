@@ -87,15 +87,35 @@ func TestStreamSnapshotCopiesTheResponse(t *testing.T) {
 	defer server.Close()
 
 	var sink bytes.Buffer
-	written, err := NewHTTPSourceClient(0).StreamSnapshot(context.Background(), server.URL, "mig-1", "tok-1", 2, "resume-abc", &sink)
+	written, err := NewHTTPSourceClient(0).StreamSnapshot(context.Background(), server.URL, "mig-1", "tok-1", 2, "resume-abc", 32, &sink)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if written != 4096 || sink.Len() != 4096 {
 		t.Fatalf("written = %d, buffered = %d", written, sink.Len())
 	}
-	if !strings.Contains(gotBody, `"sequence":2`) || !strings.Contains(gotBody, `"resume_token":"resume-abc"`) {
+	if !strings.Contains(gotBody, `"sequence":2`) || !strings.Contains(gotBody, `"resume_token":"resume-abc"`) || !strings.Contains(gotBody, `"throughput_mibps":32`) {
 		t.Fatalf("body = %q", gotBody)
+	}
+}
+
+func TestStopSourceReturnsFinalSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/migrations/mig-1/stop" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sequence":3,"size_bytes":2048,"guid":"final"}`))
+	}))
+	defer server.Close()
+
+	snapshot, err := NewHTTPSourceClient(0).StopSource(context.Background(), server.URL, "mig-1", "tok-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Sequence != 3 || snapshot.SizeBytes != 2048 || snapshot.GUID != "final" {
+		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 

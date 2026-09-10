@@ -47,8 +47,9 @@ type nextSnapshotResponse struct {
 
 // streamRequest asks the source for one snapshot stream.
 type streamRequest struct {
-	Sequence    int    `json:"sequence"`
-	ResumeToken string `json:"resume_token,omitempty"`
+	Sequence        int    `json:"sequence"`
+	ResumeToken     string `json:"resume_token,omitempty"`
+	ThroughputMiBps int    `json:"throughput_mibps,omitempty"`
 }
 
 // NextSnapshot acknowledges the received sequence and asks for the next snapshot.
@@ -70,8 +71,8 @@ func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationI
 }
 
 // StreamSnapshot reads one snapshot stream into w and returns the byte count.
-func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, w io.Writer) (int64, error) {
-	body, err := json.Marshal(streamRequest{Sequence: sequence, ResumeToken: resumeToken})
+func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
+	body, err := json.Marshal(streamRequest{Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps})
 	if err != nil {
 		return 0, err
 	}
@@ -140,6 +141,21 @@ func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migration
 		return PortableConfig{}, "", fmt.Errorf("decode source handshake: %w", err)
 	}
 	return response.Config, response.ObservedState, nil
+}
+
+// StopSource asks the source host to stop the VM, remove its network, and create
+// the final snapshot. It returns that snapshot.
+func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID, token string) (SourceSnapshot, error) {
+	path := fmt.Sprintf("/v1/migrations/%s/stop", url.PathEscape(migrationID))
+	responseBody, err := c.postJSON(ctx, address, path, token, nil)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+	var response nextSnapshotResponse
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		return SourceSnapshot{}, fmt.Errorf("decode stop response: %w", err)
+	}
+	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
 // RemoveSource asks the source host to unlock the VM and drop its migration state.

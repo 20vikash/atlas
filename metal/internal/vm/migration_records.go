@@ -51,21 +51,24 @@ func isValidMigrationStatus(status MigrationStatus) bool {
 	}
 }
 
-// MigrationPhase is the fine-grained step of a running migration. This
-// sub-feature uses only preparing and copying.
+// MigrationPhase is the fine-grained step of a running migration.
 type MigrationPhase string
 
 const (
 	// PhasePreparing means the target reserved the VM ID and is running the handshake.
 	PhasePreparing MigrationPhase = "preparing"
-	// PhaseCopying means the target holds the VM config and expects the transfer.
+	// PhaseCopying means the target holds the VM config and copies disk intervals.
 	PhaseCopying MigrationPhase = "copying"
+	// PhaseStopping means the target stops the source and pulls the final snapshot.
+	PhaseStopping MigrationPhase = "stopping"
+	// PhaseStarting means the target creates its network and applies the VM state.
+	PhaseStarting MigrationPhase = "starting"
 )
 
 // isValidMigrationPhase reports whether phase names one migration phase.
 func isValidMigrationPhase(phase MigrationPhase) bool {
 	switch phase {
-	case PhasePreparing, PhaseCopying:
+	case PhasePreparing, PhaseCopying, PhaseStopping, PhaseStarting:
 		return true
 	default:
 		return false
@@ -91,6 +94,7 @@ type IntervalProgress struct {
 	DurationSeconds  int       `json:"duration_seconds"`
 	BytesTransferred int64     `json:"bytes_transferred"`
 	TotalBytes       int64     `json:"total_bytes"`
+	ThroughputMiBps  int       `json:"throughput_mibps,omitempty"`
 	GUID             string    `json:"guid,omitempty"`
 	Completed        bool      `json:"completed"`
 }
@@ -110,7 +114,10 @@ type TargetMigrationRecord struct {
 	SourceObservedState State              `json:"source_observed_state,omitempty"`
 	CopyStartedAt       time.Time          `json:"copy_started_at,omitempty"`
 	ActiveSequence      int                `json:"active_sequence,omitempty"`
+	FinalSequence       int                `json:"final_sequence,omitempty"`
 	Intervals           []IntervalProgress `json:"intervals,omitempty"`
+	TargetNetworkReady  bool               `json:"target_network_ready,omitempty"`
+	TargetStateApplied  bool               `json:"target_state_applied,omitempty"`
 	Error               *OperationError    `json:"error,omitempty"`
 	CreatedAt           time.Time          `json:"created_at"`
 }
