@@ -340,6 +340,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	}
 	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
+		MigrationManager:      migrationManager,
 		SnapshotStore:         stores.Snapshots,
 		WakeReconciler:        notifyReconcilers,
 		HostService:           hostService,

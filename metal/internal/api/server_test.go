@@ -334,6 +334,7 @@ func newServerWithTrustedKeys(
 	}
 	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
 		VirtualMachineManager: virtualMachineManager,
+		MigrationManager:      &stubMigrationManager{},
 		SnapshotStore:         services,
 		WakeReconciler:        func() {},
 		HostService:           hostService,

@@ -62,6 +62,15 @@ type VirtualMachineManager interface {
 	ConnectSSH(context.Context, string) (vm.SSHConnection, error)
 }
 
+// MigrationManager owns migration records and reservations on this host.
+type MigrationManager interface {
+	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error)
+	TargetStatus(ctx context.Context, migrationID string) (vm.TargetMigrationRecord, error)
+	AbortTarget(ctx context.Context, migrationID string) error
+	LockSource(ctx context.Context, migrationID, virtualMachineID, caller string) (vm.SourceHandshake, error)
+	UnlockSource(ctx context.Context, migrationID, virtualMachineID, caller string) error
+}
+
 // TrustedKeyStore owns the Atlas issuer, receiver, and public keys that this
 // host trusts.
 type TrustedKeyStore interface {
@@ -72,6 +81,7 @@ type TrustedKeyStore interface {
 // Dependencies contains services used by the HTTP handlers.
 type Dependencies struct {
 	VirtualMachineManager VirtualMachineManager
+	MigrationManager      MigrationManager
 	SnapshotStore         SnapshotStore
 	WakeReconciler        func()
 	HostService           HostService
@@ -82,6 +92,7 @@ type Dependencies struct {
 // Server owns the HTTP handlers and their dependencies.
 type Server struct {
 	virtualMachineManager VirtualMachineManager
+	migrationManager      MigrationManager
 	snapshotStore         SnapshotStore
 	wakeReconciler        func()
 	hostService           HostService
@@ -99,6 +110,7 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 
 	server := &Server{
 		virtualMachineManager: dependencies.VirtualMachineManager,
+		migrationManager:      dependencies.MigrationManager,
 		snapshotStore:         dependencies.SnapshotStore,
 		wakeReconciler:        dependencies.WakeReconciler,
 		hostService:           dependencies.HostService,
@@ -152,7 +164,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil || dependencies.TrustedKeys == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.MigrationManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil || dependencies.TrustedKeys == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil

@@ -1,6 +1,10 @@
 package api
 
-import "github.com/labstack/echo/v4"
+import (
+	"github.com/labstack/echo/v4"
+
+	"github.com/frappe/atlas/metal/internal/token"
+)
 
 // registerRoutes binds handlers. PUT mutations are idempotent; POST is for
 // actions and creation of addressable resources. Health and documentation carry
@@ -32,4 +36,15 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	snapshotRoutes.POST("/:id/upload", s.uploadSnapshot)
 	snapshotRoutes.GET("/:id", s.getSnapshot)
 	snapshotRoutes.DELETE("/:id", s.deleteSnapshot)
+
+	// Atlas drives these with the static Metal token.
+	migrationRoutes := versionOneRoutes.Group("/migrations")
+	migrationRoutes.PUT("/:id", s.createMigration)
+	migrationRoutes.GET("/:id", s.getMigration)
+	migrationRoutes.POST("/:id/abort", s.abortMigration)
+
+	// The target host drives these with an Atlas-signed token, not the static token.
+	sourceRoutes := router.Group("/v1/migrations")
+	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource, s.requireScopes(token.ScopeReadVirtualMachine, token.ScopeMigration))
+	sourceRoutes.DELETE("/:id", s.deleteMigrationSource, s.requireScopes(token.ScopeMigration))
 }
