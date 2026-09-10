@@ -40,24 +40,30 @@ class MetalClientError(Exception):
 class MetalClient:
 	"""Call the Metal API on one bare-metal Server."""
 
+	api_port = 9000
 	timeout_seconds = (5, 60)
 	create_timeout_seconds = (5, 60)
 	status_timeout_seconds = (5, 30)
 	snapshot_timeout_seconds = (5, 3600)
 
 	def __init__(self, server: "MetalServer") -> None:
+		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
+		if not token:
+			raise MetalClientError(f"Server {server.name} has no Metal API token")
+
+		self.base_url = self.get_api_url(server)
+		self.headers = {"Authorization": f"Bearer {token}"}
+
+	@classmethod
+	def get_api_url(cls, server: "MetalServer") -> str:
+		"""Return the Metal HTTP address for one Server."""
 		if not server.public_ipv4_address:
 			raise MetalClientError(f"Server {server.name} has no public IPv4 address")
 		try:
 			public_ipv4_address = ipaddress.IPv4Address(server.public_ipv4_address)
 		except (ipaddress.AddressValueError, TypeError) as error:
 			raise MetalClientError(f"Server {server.name} has an invalid public IPv4 address") from error
-		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
-		if not token:
-			raise MetalClientError(f"Server {server.name} has no Metal API token")
-
-		self.base_url = f"http://{public_ipv4_address}:9000"
-		self.headers = {"Authorization": f"Bearer {token}"}
+		return f"http://{public_ipv4_address}:{cls.api_port}"
 
 	def get_console_connection(self, virtual_machine_id: str, mode: str = "tty") -> dict[str, str]:
 		"""Return the websocket URL and auth header for a VM console."""
@@ -238,6 +244,45 @@ class MetalClient:
 			request["jwt"] = key_sync
 
 		return self._request("POST", "/v1/sync", json=request, uncertain_on_failure=True)
+
+	def put_migration(
+		self, migration_id: str, virtual_machine_id: str, source: str, token: str
+	) -> dict[str, Any]:
+		"""Store one migration request at the target host. Safe to repeat."""
+		return self._request(
+			"PUT",
+			f"/v1/migrations/{quote(migration_id, safe='')}",
+			json={"virtual_machine_id": virtual_machine_id, "source": source, "jwt": token},
+			expected_status=202,
+			uncertain_on_failure=True,
+			timeout=self.create_timeout_seconds,
+		)
+
+	def get_migration(self, migration_id: str) -> dict[str, Any]:
+		"""Return the status and progress for one migration at the target host."""
+		return self._request(
+			"GET",
+			f"/v1/migrations/{quote(migration_id, safe='')}",
+			timeout=self.status_timeout_seconds,
+		)
+
+	def abort_migration(self, migration_id: str) -> dict[str, Any]:
+		"""Ask the target host to abort one migration. Safe to repeat."""
+		return self._request(
+			"POST",
+			f"/v1/migrations/{quote(migration_id, safe='')}/abort",
+			expected_status=202,
+			uncertain_on_failure=True,
+		)
+
+	def finish_migration(self, migration_id: str) -> dict[str, Any]:
+		"""Tell the target host that Atlas committed the VM. Safe to repeat."""
+		return self._request(
+			"POST",
+			f"/v1/migrations/{quote(migration_id, safe='')}/finish",
+			expected_status=202,
+			uncertain_on_failure=True,
+		)
 
 	def _request(
 		self,

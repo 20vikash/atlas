@@ -155,3 +155,79 @@ class TestMetalClientPaths(UnitTestCase):
 		self.assertEqual(
 			request.call_args.args[:2], ("POST", "http://10.0.0.2:9000/v1/snapshots/SNAP-1/upload")
 		)
+
+
+class TestMetalClientMigrations(UnitTestCase):
+	def test_put_migration_sends_the_target_pull_request(self) -> None:
+		client = build_client()
+		migration = {"status": "running"}
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(202, migration),
+		) as request:
+			result = client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000", "jwt-token")
+
+		self.assertEqual(result, migration)
+		self.assertEqual(
+			request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/migrations/mig-00001")
+		)
+		self.assertEqual(
+			request.call_args.kwargs["json"],
+			{"virtual_machine_id": "vm-00001", "source": "http://10.0.0.3:9000", "jwt": "jwt-token"},
+		)
+
+	def test_get_migration_reads_status(self) -> None:
+		client = build_client()
+		progress = {"status": "running", "phase": "copying"}
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			return_value=build_response(200, progress),
+		) as request:
+			result = client.get_migration("mig-00001")
+
+		self.assertEqual(result, progress)
+		self.assertEqual(
+			request.call_args.args[:2], ("GET", "http://10.0.0.2:9000/v1/migrations/mig-00001")
+		)
+
+	def test_abort_and_finish_use_their_routes(self) -> None:
+		client = build_client()
+
+		for method_name, suffix in (("abort_migration", "abort"), ("finish_migration", "finish")):
+			with patch(
+				"atlas.vm.core.metal_client.requests.request",
+				return_value=build_response(202, content=b""),
+			) as request:
+				getattr(client, method_name)("mig-00001")
+
+			self.assertEqual(
+				request.call_args.args[:2],
+				("POST", f"http://10.0.0.2:9000/v1/migrations/mig-00001/{suffix}"),
+			)
+
+	def test_repeatable_calls_report_an_uncertain_transport_failure(self) -> None:
+		"""A lost response on a repeatable call must not read as a definite failure."""
+		client = build_client()
+
+		for call_migration in (
+			lambda: client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000", "jwt"),
+			lambda: client.abort_migration("mig-00001"),
+			lambda: client.finish_migration("mig-00001"),
+		):
+			with patch(
+				"atlas.vm.core.metal_client.requests.request",
+				side_effect=requests.ConnectionError("timeout"),
+			):
+				with self.assertRaises(MetalClientError) as caught:
+					call_migration()
+
+			self.assertTrue(caught.exception.uncertain)
+
+	def test_api_url_rejects_a_server_without_an_address(self) -> None:
+		server = Mock(public_ipv4_address="")
+		server.name = "metal-1"
+
+		with self.assertRaises(MetalClientError):
+			MetalClient.get_api_url(server)
