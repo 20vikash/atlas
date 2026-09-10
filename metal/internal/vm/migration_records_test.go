@@ -38,6 +38,44 @@ func TestTargetRecordRoundTrips(t *testing.T) {
 	}
 }
 
+func TestTransferStateRoundTrips(t *testing.T) {
+	store := newMigrationStore(t.TempDir())
+	target := newTargetRecord()
+	target.Phase = PhaseCopying
+	target.SourceObservedState = StateRunning
+	target.CopyStartedAt = time.Now().UTC()
+	target.ActiveSequence = 2
+	target.Intervals = []IntervalProgress{
+		{Sequence: 1, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, GUID: "g1", Completed: true},
+		{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024},
+	}
+	if err := store.writeTarget(target); err != nil {
+		t.Fatal(err)
+	}
+	source := SourceMigrationRecord{
+		ID: "mig-1", VirtualMachineID: "vm-2", Caller: "metal-1",
+		Sequence: 2, AcknowledgedSequence: 1,
+	}
+	if err := store.writeSource(source); err != nil {
+		t.Fatal(err)
+	}
+
+	gotTarget, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotTarget.ActiveSequence != 2 || len(gotTarget.Intervals) != 2 || !gotTarget.Intervals[0].Completed {
+		t.Fatalf("target = %+v", gotTarget)
+	}
+	gotSource, err := store.readSource("vm-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotSource.Sequence != 2 || gotSource.AcknowledgedSequence != 1 {
+		t.Fatalf("source = %+v", gotSource)
+	}
+}
+
 func TestSourceRecordRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	record := SourceMigrationRecord{

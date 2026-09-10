@@ -84,32 +84,49 @@ type PortableConfig struct {
 	Specification           Specification `json:"specification"`
 }
 
+// IntervalProgress records the transfer of one snapshot interval on the target.
+type IntervalProgress struct {
+	Sequence         int       `json:"sequence"`
+	StartedAt        time.Time `json:"started_at"`
+	DurationSeconds  int       `json:"duration_seconds"`
+	BytesTransferred int64     `json:"bytes_transferred"`
+	TotalBytes       int64     `json:"total_bytes"`
+	GUID             string    `json:"guid,omitempty"`
+	Completed        bool      `json:"completed"`
+}
+
 // TargetMigrationRecord is the target host's durable state for one migration.
 // The JWT lives in a sibling file, never in this record.
 type TargetMigrationRecord struct {
-	SchemaVersion    int             `json:"schema_version"`
-	ID               string          `json:"id"`
-	VirtualMachineID string          `json:"virtual_machine_id"`
-	Source           string          `json:"source"`
-	Status           MigrationStatus `json:"status"`
-	Phase            MigrationPhase  `json:"phase"`
-	Config           *PortableConfig `json:"config,omitempty"`
-	UserID           uint32          `json:"user_id,omitempty"`
-	GroupID          uint32          `json:"group_id,omitempty"`
-	Error            *OperationError `json:"error,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
+	SchemaVersion       int                `json:"schema_version"`
+	ID                  string             `json:"id"`
+	VirtualMachineID    string             `json:"virtual_machine_id"`
+	Source              string             `json:"source"`
+	Status              MigrationStatus    `json:"status"`
+	Phase               MigrationPhase     `json:"phase"`
+	Config              *PortableConfig    `json:"config,omitempty"`
+	UserID              uint32             `json:"user_id,omitempty"`
+	GroupID             uint32             `json:"group_id,omitempty"`
+	SourceObservedState State              `json:"source_observed_state,omitempty"`
+	CopyStartedAt       time.Time          `json:"copy_started_at,omitempty"`
+	ActiveSequence      int                `json:"active_sequence,omitempty"`
+	Intervals           []IntervalProgress `json:"intervals,omitempty"`
+	Error               *OperationError    `json:"error,omitempty"`
+	CreatedAt           time.Time          `json:"created_at"`
 }
 
 // SourceMigrationRecord is the source host's durable lock for one migration. Its
 // presence in the VM directory is the source lock.
 type SourceMigrationRecord struct {
-	SchemaVersion    int       `json:"schema_version"`
-	ID               string    `json:"id"`
-	VirtualMachineID string    `json:"virtual_machine_id"`
-	Caller           string    `json:"caller"`
-	OriginalDesired  State     `json:"original_desired"`
-	OriginalObserved State     `json:"original_observed"`
-	LockedAt         time.Time `json:"locked_at"`
+	SchemaVersion        int       `json:"schema_version"`
+	ID                   string    `json:"id"`
+	VirtualMachineID     string    `json:"virtual_machine_id"`
+	Caller               string    `json:"caller"`
+	OriginalDesired      State     `json:"original_desired"`
+	OriginalObserved     State     `json:"original_observed"`
+	Sequence             int       `json:"sequence,omitempty"`
+	AcknowledgedSequence int       `json:"acknowledged_sequence,omitempty"`
+	LockedAt             time.Time `json:"locked_at"`
 }
 
 // migrationStore reads and writes the migration records that live under each VM
