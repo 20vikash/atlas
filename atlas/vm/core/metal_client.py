@@ -47,11 +47,11 @@ class MetalClient:
 	snapshot_timeout_seconds = (5, 3600)
 
 	def __init__(self, server: "MetalServer") -> None:
+		self.base_url = self.get_api_url(server)
 		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
 		if not token:
 			raise MetalClientError(f"Server {server.name} has no Metal API token")
 
-		self.base_url = self.get_api_url(server)
 		self.headers = {"Authorization": f"Bearer {token}"}
 
 	@classmethod
