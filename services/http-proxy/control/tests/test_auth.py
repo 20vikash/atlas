@@ -117,9 +117,10 @@ def _token(
 	audience: str = AUDIENCE,
 	ttl_seconds: int = 3600,
 	issuer: str = ATLAS_ISSUER,
-	subject: str = "cargo",
+	subject: str = "atlas",
 	scope: str = "site:*",
 	constraints: dict | None = None,
+	tenant: str | None = None,
 ) -> str:
 	now = int(time.time())
 	payload = {
@@ -131,6 +132,8 @@ def _token(
 		"exp": now + ttl_seconds,
 	}
 	payload["constraints"] = constraints if constraints is not None else {"site": {"suffix": "-svc"}}
+	if tenant is not None:
+		payload["tenant"] = tenant
 	return jwt.encode(payload, private_key, algorithm="EdDSA", headers={"kid": key_id})
 
 
@@ -177,7 +180,7 @@ def test_an_empty_constraint_allows_every_site_name(tmp_path):
 	authorization.require("site", "update", "any-site-name")
 
 
-def test_central_receives_unrestricted_proxy_authority(tmp_path):
+def test_an_unrestricted_scope_grants_every_resource(tmp_path):
 	private_key = _key_pair()
 	key_id = "central:key-1"
 	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
@@ -256,6 +259,30 @@ def test_a_key_cannot_claim_another_issuer(tmp_path):
 		authentication.require(f"Bearer {token}")
 
 
+def test_a_constraint_applies_to_an_unrestricted_scope(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, scope="*", constraints={"site": {"suffix": "-svc"}})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("site", "update", "pdf-svc")
+	authorization.require("domain", "update", "customer.example.com")
+	with pytest.raises(HTTPException):
+		authorization.require("site", "update", "customer")
+
+
+def test_an_administrative_token_is_refused_by_the_proxy(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, tenant="1")
+
+	with pytest.raises(HTTPException):
+		authentication.require(f"Bearer {token}")
+
+
 @pytest.mark.parametrize(
 	("scope", "constraints"),
 	[
@@ -263,7 +290,6 @@ def test_a_key_cannot_claim_another_issuer(tmp_path):
 		("site:*", {"unknown": {"suffix": "-svc"}}),
 		("site:*", {"site": {"unknown": "-svc"}}),
 		("site:*", {"site": {"suffix": ""}}),
-		("*", {"site": {"suffix": "-svc"}}),
 	],
 )
 def test_unknown_or_malformed_authority_is_rejected(tmp_path, scope, constraints):

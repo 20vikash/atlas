@@ -10,7 +10,7 @@ Each service request needs a valid JSON Web Token in the `Authorization: Bearer 
 
 Atlas accepts `iss=central` and `iss=atlas:<region ID>`. The token audience must be `atlas-admin:<region ID>`. Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. Atlas also checks `nbf` when the claim is present.
 
-Central tokens need `sub=central`, `scope=*`, and `tenant=*`. Atlas applies its regional subject and tenant policy to each regional token. The Atlas scope applies only to tenant API routes. It does not grant access to global administration routes.
+A token needs `scope=*`, a subject, a tenant, and no resource constraint. The subject is an identity label and does not change the authority. Central uses `tenant=*`. The Atlas scope applies only to tenant API routes. It does not grant access to global administration routes.
 
 Atlas binds each key namespace to its issuer. A `central:*` key can validate only `iss=central`. An `atlas:<region ID>:*` key can validate only the matching regional issuer. Atlas refuses a key from another region.
 

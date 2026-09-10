@@ -136,7 +136,7 @@ class Authentication:
 			)
 			if claims.get("aud") != auth.jwks_audience_id:
 				return None
-			return _authorization_from_claims(claims, issuer)
+			return _authorization_from_claims(claims)
 		except jwt.PyJWTError, ValueError, TypeError:
 			return None
 
@@ -156,7 +156,7 @@ def _issuer_for_key_id(key_id: str, issuers: tuple[str, ...]) -> str | None:
 	return None
 
 
-def _authorization_from_claims(claims: dict[str, object], issuer: str) -> Authorization | None:
+def _authorization_from_claims(claims: dict[str, object]) -> Authorization | None:
 	subject = claims.get("sub")
 	scope = claims.get("scope")
 	if not isinstance(subject, str) or not subject or not isinstance(scope, str):
@@ -174,13 +174,6 @@ def _authorization_from_claims(claims: dict[str, object], issuer: str) -> Author
 
 	constraints = claims.get("constraints", {})
 	if not isinstance(constraints, dict) or set(constraints) - {"site"}:
-		return None
-	if issuer == "central":
-		if subject != "central" or scopes != {"*"} or constraints:
-			return None
-		return Authorization(scopes)
-
-	if subject != "cargo" or scopes != {"site:*"}:
 		return None
 	if not constraints:
 		return Authorization(scopes)

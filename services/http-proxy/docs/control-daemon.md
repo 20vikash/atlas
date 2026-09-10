@@ -10,9 +10,9 @@ The `proxy` site name and every site name with the `proxy-` prefix are reserved.
 
 Every public route except the health and documentation routes needs a Bearer credential. Use the regional proxy password or a valid JSON Web Token (JWT).
 
-Central tokens need `iss=central`, `sub=central`, and `scope=*`. They can use all site, domain, and cluster status routes.
+A token needs a trusted issuer, the Proxy audience, a `sub` claim, and a `scope` claim. The daemon reads the authority from the signed `scope` and `constraints` claims and not from the subject. A `tenant` claim makes the token an Atlas API credential, and the daemon refuses it.
 
-A regional token needs the regional Atlas issuer and the Proxy audience. Its signed scope selects the permitted resource. A scope without a constraint applies to all names for that resource. An optional signed suffix constraint limits site names. A constrained token cannot replace a complete map.
+The `scope` claim selects the permitted resources. Use `site:*` for the site map or `*` for all resources. A resource without a constraint applies to all names for that resource. An optional signed site suffix constraint limits site names. A constrained token cannot replace a complete map.
 
 ```sh
 export ATLAS_PROXY_CONTROL_URL='https://proxy-001.iad.frappe.dev'

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import jwt
 from frappe.tests import UnitTestCase
 
-from atlas.auth.issuer import initialize_signing_key, issue_cargo_tokens
+from atlas.auth.issuer import initialize_signing_key, issue_token
 
 
 class TestIssuer(UnitTestCase):
@@ -33,24 +33,48 @@ class TestIssuer(UnitTestCase):
 		self.assertEqual(ignore_validate_during_save, [True])
 		self.assertFalse(settings.flags.ignore_validate)
 
-	def test_cargo_receives_separate_minimal_credentials(self) -> None:
-		settings = SimpleNamespace(
-			issuer="atlas:42",
-			admin_audience_id="atlas-admin:42",
-			proxy_audience_id="atlas-proxy:42",
-			jwt_signing_key_id=None,
-			jwt_signing_private_key=None,
+	def test_a_token_carries_the_requested_authority(self) -> None:
+		settings = _signed_settings()
+
+		token = issue_token(
+			settings,
+			audience="atlas-proxy:42",
+			subject="pdf-renderer",
+			scope="site:*",
+			constraints={"site": {"suffix": "-svc"}},
 		)
-		settings.get_password = lambda *args, **kwargs: settings.jwt_signing_private_key
-		initialize_signing_key(settings)
+		claims = jwt.decode(token, options={"verify_signature": False})
 
-		tokens = issue_cargo_tokens(settings)
-		atlas_claims = jwt.decode(tokens["atlas"], options={"verify_signature": False})
-		proxy_claims = jwt.decode(tokens["proxy"], options={"verify_signature": False})
+		self.assertEqual(claims["iss"], "atlas:42")
+		self.assertEqual(claims["aud"], "atlas-proxy:42")
+		self.assertEqual(claims["sub"], "pdf-renderer")
+		self.assertEqual(claims["scope"], "site:*")
+		self.assertEqual(claims["constraints"], {"site": {"suffix": "-svc"}})
+		self.assertNotIn("tenant", claims)
 
-		self.assertEqual(atlas_claims["aud"], "atlas-admin:42")
-		self.assertEqual(atlas_claims["tenant"], "1")
-		self.assertEqual(atlas_claims["scope"], "*")
-		self.assertEqual(proxy_claims["aud"], "atlas-proxy:42")
-		self.assertEqual(proxy_claims["scope"], "site:*")
-		self.assertEqual(proxy_claims["constraints"], {"site": {"suffix": "-svc"}})
+	def test_a_token_carries_a_tenant_only_when_asked(self) -> None:
+		settings = _signed_settings()
+
+		token = issue_token(
+			settings,
+			audience="atlas-admin:42",
+			subject="operator",
+			scope="*",
+			tenant="7",
+		)
+		claims = jwt.decode(token, options={"verify_signature": False})
+
+		self.assertEqual(claims["tenant"], "7")
+		self.assertNotIn("constraints", claims)
+
+
+def _signed_settings() -> SimpleNamespace:
+	"""Return settings that hold one usable regional signing key."""
+	settings = SimpleNamespace(
+		issuer="atlas:42",
+		jwt_signing_key_id=None,
+		jwt_signing_private_key=None,
+	)
+	settings.get_password = lambda *args, **kwargs: settings.jwt_signing_private_key
+	initialize_signing_key(settings)
+	return settings

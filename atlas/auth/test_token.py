@@ -76,17 +76,17 @@ class TestToken(UnitTestCase):
 
 		self.assertEqual(self.validate(token, key_id)["tenant"], "*")
 
-	def test_atlas_can_limit_cargo_to_tenant_one(self) -> None:
+	def test_a_regional_token_keeps_its_signed_subject_and_tenant(self) -> None:
 		key_id = "atlas:42:key-1"
 		token = build_token(
 			self.private_key,
 			key_id=key_id,
 			issuer=ATLAS_ISSUER,
-			subject="cargo",
-			tenant="1",
+			subject="operator",
+			tenant="7",
 		)
 
-		self.assertEqual(self.validate(token, key_id)["tenant"], "1")
+		self.assertEqual(self.validate(token, key_id)["tenant"], "7")
 
 	def test_an_atlas_key_cannot_claim_to_be_central(self) -> None:
 		key_id = "atlas:42:key-1"
@@ -106,8 +106,8 @@ class TestToken(UnitTestCase):
 			self.private_key,
 			key_id=key_id,
 			issuer="atlas:43",
-			subject="cargo",
-			tenant="1",
+			subject="operator",
+			tenant="7",
 		)
 
 		self.assertIsNone(self.validate(token, key_id))
@@ -116,16 +116,16 @@ class TestToken(UnitTestCase):
 		key_id = "atlas:42:key-1"
 		for changes in (
 			{"scope": "image:*"},
-			{"tenant": "*"},
-			{"tenant": "0"},
+			{"subject": ""},
+			{"tenant": ""},
 			{"constraints": {"site": {"suffix": "-svc"}}},
 		):
 			token = build_token(
 				self.private_key,
 				key_id=key_id,
 				issuer=ATLAS_ISSUER,
-				subject="cargo",
-				tenant=changes.get("tenant", "1"),
+				subject=changes.get("subject", "operator"),
+				tenant=changes.get("tenant", "7"),
 				scope=changes.get("scope", "*"),
 				constraints=changes.get("constraints"),
 			)

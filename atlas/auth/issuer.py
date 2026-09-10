@@ -11,7 +11,6 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
-CARGO_SUBJECT = "cargo"
 TOKEN_LIFETIME = timedelta(minutes=5)
 
 
@@ -41,37 +40,34 @@ def initialize_signing_key(settings: AtlasSettings, *, persist: bool = False) ->
 	return True
 
 
-def issue_cargo_tokens(settings: AtlasSettings) -> dict[str, str]:
-	"""Return separate Atlas and Proxy credentials for Cargo."""
+def issue_token(
+	settings: AtlasSettings,
+	*,
+	audience: str,
+	subject: str,
+	scope: str,
+	tenant: str | None = None,
+	constraints: dict[str, dict[str, str]] | None = None,
+	lifetime: timedelta = TOKEN_LIFETIME,
+) -> str:
+	"""Return one token that carries the audience, subject, and authority the caller asks for."""
 	now = datetime.now(UTC)
-	common = {
+	claims: dict[str, Any] = {
 		"iss": settings.issuer,
-		"sub": CARGO_SUBJECT,
+		"sub": subject,
+		"aud": audience,
+		"scope": scope,
 		"iat": now,
 		"nbf": now,
-		"exp": now + TOKEN_LIFETIME,
+		"exp": now + lifetime,
 	}
 
-	return {
-		"atlas": _encode(
-			settings,
-			{
-				**common,
-				"aud": settings.admin_audience_id,
-				"scope": "*",
-				"tenant": "1",
-			},
-		),
-		"proxy": _encode(
-			settings,
-			{
-				**common,
-				"aud": settings.proxy_audience_id,
-				"scope": "site:*",
-				"constraints": {"site": {"suffix": "-svc"}},
-			},
-		),
-	}
+	if tenant is not None:
+		claims["tenant"] = tenant
+	if constraints:
+		claims["constraints"] = constraints
+
+	return _encode(settings, claims)
 
 
 def _encode(settings: AtlasSettings, claims: dict[str, Any]) -> str:

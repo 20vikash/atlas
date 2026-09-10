@@ -6,7 +6,7 @@ import frappe
 import jwt
 from jwt import PyJWK
 
-from atlas.auth.jwks import CENTRAL_ISSUER, issuer_for_key_id, merged_jwks
+from atlas.auth.jwks import issuer_for_key_id, merged_jwks
 
 
 class TokenValidator:
@@ -42,7 +42,7 @@ class TokenValidator:
 			)
 			if claims.get("aud") != settings.admin_audience_id:
 				return None
-			return claims if self._has_atlas_authority(claims, issuer) else None
+			return claims if self._has_atlas_authority(claims) else None
 		except jwt.PyJWTError, ValueError, TypeError:
 			return None
 
@@ -52,24 +52,23 @@ class TokenValidator:
 				return PyJWK.from_dict(key)
 		return None
 
-	def _has_atlas_authority(self, claims: dict[str, Any], issuer: str) -> bool:
+	def _has_atlas_authority(self, claims: dict[str, Any]) -> bool:
+		"""Accept one unrestricted administrative token from a trusted issuer."""
 		subject = claims.get("sub")
+		tenant = claims.get("tenant")
 		if not isinstance(subject, str) or not subject:
 			return False
+		if not isinstance(tenant, str) or not tenant:
+			return False
+
 		if claims.get("scope") != "*":
 			return False
 		if claims.get("constraints", {}) != {}:
 			return False
+
 		if not all(_is_timestamp(claims.get(name)) for name in ("iat", "exp")):
 			return False
-		if "nbf" in claims and not _is_timestamp(claims["nbf"]):
-			return False
-
-		tenant = claims.get("tenant")
-		if issuer == CENTRAL_ISSUER:
-			return subject == CENTRAL_ISSUER and tenant == "*"
-
-		return subject == "cargo" and tenant == "1"
+		return "nbf" not in claims or _is_timestamp(claims["nbf"])
 
 
 def _is_timestamp(value: Any) -> bool:

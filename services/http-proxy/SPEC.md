@@ -33,7 +33,7 @@ Keep control and cluster code in `control/`. Keep data-plane code in `nginx/`. A
 
 The Proxy binds each key namespace to one issuer. A `central:*` key can validate only `iss=central`. An `atlas:<region ID>:*` key can validate only the matching regional issuer.
 
-Central has unrestricted site and domain access. A regional token grants only its signed scopes and resource constraints. A scope without a constraint applies to all names for that resource. A constrained token cannot replace the complete site map.
+A token grants only its signed scopes and resource constraints. The subject is an identity label and does not change the authority. A scope without a constraint applies to all names for that resource. A constrained token cannot replace the complete site map. A token that carries a `tenant` claim is an Atlas API credential, and the Proxy refuses it.
 
 ## Validation
 

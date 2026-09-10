@@ -233,14 +233,6 @@ class AtlasSettings(Document):
 		):
 			self.is_setup_completed = True
 
-	@frappe.whitelist(methods=["POST"])
-	def issue_cargo_credentials(self) -> dict[str, str]:
-		"""Return short-lived Atlas and Proxy credentials for Cargo."""
-		from atlas.auth.issuer import issue_cargo_tokens
-
-		frappe.only_for("System Manager")
-		return issue_cargo_tokens(self)
-
 	def validate_wildcard_certificate(self) -> None:
 		"""Keep the stored certificate, its private key, and the expiry consistent."""
 		from atlas.atlas.core.tls.certificate import CertificateError, read_certificate, verify_key_pair

@@ -14,7 +14,7 @@ A service caller needs a valid Central or regional Atlas token. Send the token i
 
 The authentication validator closes the standard Frappe guest surface. A guest can sign in and read the API reference or public key set. The realtime console stays open because its handshake and permission calls need the web process. An Atlas Admin session without verified token claims cannot use an Atlas API route.
 
-Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. It checks `nbf` when the claim is present. The audience is `atlas-admin:<region ID>`. Central uses `sub=central`, `scope=*`, and `tenant=*`. Atlas applies its regional subject and tenant policy to each regional token.
+Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. It checks `nbf` when the claim is present. The audience is `atlas-admin:<region ID>`. The API surface is unrestricted, so the token needs `scope=*`, a subject, a tenant, and no resource constraint. The subject is an identity label and does not change the authority. The `tenant` claim carries the tenant boundary. Central uses `tenant=*`.
 
 Atlas binds each key namespace to its issuer. A `central:*` key can validate only `iss=central`. The regional key can validate only `iss=atlas:<region ID>`. A regional token cannot claim Central authority.
 
