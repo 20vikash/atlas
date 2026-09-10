@@ -76,7 +76,5 @@ jspm_packages/
 /metal/internal/network/traffic/track_traffic.o
 
 # tmp
-1_gpt_atlas_plan.md
-1_gpt_metal_plan.md
-final_plan.md
 scripts/.dev-jwks-key.pem
+.tmp

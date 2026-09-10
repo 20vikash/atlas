@@ -1,5 +1,7 @@
 # Atlas WG Mesh design
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 This document explains packet paths, BPF state, and recovery behavior. Read the [operations guide](operations.md) for setup.
 
 ## Contents

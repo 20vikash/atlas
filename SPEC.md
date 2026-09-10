@@ -12,6 +12,7 @@ The root contains the Frappe app and three components. They are not separate Git
 atlas/                         Frappe app
 clients/                       Generated API clients
 metal/                         VM management
+llm/                           Review guides for language models
 services/http-proxy/           HTTP proxy
 services/wg-mesh/              Private VM network
 .github/workflows/             CI workflows

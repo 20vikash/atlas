@@ -1,5 +1,7 @@
 # network: VM and host network
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 [internal SPEC](../SPEC.md) · overview: [docs/networking.md](../../docs/networking.md)
 
 ## Purpose

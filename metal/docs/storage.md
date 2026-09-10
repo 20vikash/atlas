@@ -1,5 +1,7 @@
 # Storage
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 [metal SPEC](../SPEC.md) · detail: [internal/storage/SPEC.md](../internal/storage/SPEC.md)
 
 Metal uses ZFS for image volumes and virtual machine disks. A VM disk is a copy-on-write clone of an image snapshot, so reserving a disk costs almost nothing.

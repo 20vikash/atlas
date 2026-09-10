@@ -1,5 +1,7 @@
 # Metal host layout
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 [metal SPEC](../SPEC.md) · overview: [architecture.md](architecture.md)
 
 Metal keeps virtual machine state on disk. After a restart, it reads the state from these paths. The controller supplies each virtual machine ID.
