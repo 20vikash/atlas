@@ -115,8 +115,12 @@ class MigrationService:
 		)
 
 	def run(self) -> None:
-		"""Send the request, then poll the target until the migration settles."""
-		if not self.migration.abort_requested and not self.is_target_committed:
+		"""Send the request, then poll the target until the migration settles.
+
+		The request repeats on every non-abort run, so a recovery run refreshes the
+		target token before a finish retry when the stored token can be expired.
+		"""
+		if not self.migration.abort_requested:
 			self.send_request()
 
 		deadline = now_datetime() + MAXIMUM_RUN_DURATION
