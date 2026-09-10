@@ -294,9 +294,13 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
 	)
+	var migrationReconciler *reconciler.MigrationReconciler
 	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
+		if migrationReconciler != nil {
+			migrationReconciler.Wake()
+		}
 	}
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
@@ -305,6 +309,31 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
+	migrationCapacity := func(ctx context.Context) (vm.AvailableCapacity, error) {
+		capacity, err := hostService.Capacity(ctx)
+		if err != nil {
+			return vm.AvailableCapacity{}, err
+		}
+		return vm.AvailableCapacity{
+			CPUCount:   capacity.AvailableCPUCount,
+			MemoryMiB:  capacity.AvailableMemoryMiB,
+			StorageMiB: capacity.AvailableStorageMiB,
+		}, nil
+	}
+	migrationManager, err := vm.NewMigrationManager(
+		virtualMachineManager,
+		vm.NewHTTPSourceClient(0),
+		migrationCapacity,
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("configure migration manager: %w", err)
+	}
+	migrationReconciler = reconciler.NewMigrationReconciler(
+		migrationManager,
+		reconcileInterval,
+		reconciler.MigrationConfig{Logger: logger},
+	)
 	trustedKeys, err := token.NewKeyStore(filepath.Join(options.baseDir, "atlas-jwt.json"))
 	if err != nil {
 		return fmt.Errorf("load Atlas trusted keys: %w", err)
@@ -330,6 +359,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	server.Listener = listener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
+	daemon.StartWorker(migrationReconciler.Run)
 	if trafficMonitor != nil {
 		daemon.StartTrafficListener(trafficMonitor.Events(), virtualMachineManager.RestoreAfterTraffic)
 	}
