@@ -203,7 +203,9 @@ class VirtualMachine(Document):
 	@frappe.whitelist(methods=["POST"])
 	def set_privileged(self, is_privileged: bool | int | str) -> None:
 		"""Set or clear the privileged flag. Only tenant 0 may hold it."""
-		frappe.only_for("System Manager")
+		self.check_permission("write")
+		if self.tenant_id != PRIVILEGED_TENANT_ID:
+			frappe.throw(_("Only tenant {0} can hold the privileged flag.").format(PRIVILEGED_TENANT_ID))
 		if self.is_draft or self.is_terminating:
 			frappe.throw(_("Virtual Machine {0} is not ready for this change.").format(self.name))
 
@@ -429,8 +431,6 @@ def create(request: str | dict[str, Any] | VirtualMachineCreateRequest) -> dict[
 	except ValueError as error:
 		frappe.throw(_(str(error)))
 		raise AssertionError from error
-	if request_value.tenant_id == PRIVILEGED_TENANT_ID or request_value.is_privileged:
-		frappe.only_for("System Manager")
 	return VirtualMachineService.create(request_value)
 
 

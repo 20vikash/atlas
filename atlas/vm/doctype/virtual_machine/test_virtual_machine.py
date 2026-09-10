@@ -887,14 +887,14 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 		virtual_machine.is_privileged = is_privileged
 		virtual_machine.is_draft = 0
 		virtual_machine.is_terminating = 0
+		virtual_machine.check_permission = Mock()
 		virtual_machine.save = Mock()
 		return virtual_machine
 
 	def test_set_privileged_reads_the_boolean(self) -> None:
 		virtual_machine = self.build_virtual_machine(tenant_id=0)
 
-		with patch.object(virtual_machine_module.frappe, "only_for"):
-			virtual_machine.set_privileged("true")
+		virtual_machine.set_privileged("true")
 
 		self.assertTrue(virtual_machine.is_privileged)
 		virtual_machine.save.assert_called_once()
@@ -929,7 +929,7 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 		"""Tenant 0 alone is not privileged, so a plain tenant-0 VM is valid."""
 		self.build_virtual_machine(tenant_id=0).validate()
 
-	def test_create_requires_system_manager_for_a_privileged_vm(self) -> None:
+	def test_create_accepts_a_privileged_vm_of_tenant_zero(self) -> None:
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "image-1",
@@ -943,14 +943,13 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 
 		with (
 			patch.object(virtual_machine_module.frappe, "has_permission", return_value=True),
-			patch.object(virtual_machine_module.frappe, "only_for") as only_for,
 			patch.object(
 				VirtualMachineService, "create", return_value={"name": "VM-00001", "is_draft": False}
-			),
+			) as create,
 		):
 			virtual_machine_module.create(request)
 
-		only_for.assert_called_once_with("System Manager")
+		self.assertTrue(create.call_args.args[0].is_privileged)
 
 
 class TestSystemImageCreation(UnitTestCase):

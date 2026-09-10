@@ -222,6 +222,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	metadata: dict[str, str] = Field(default_factory=dict)
 	ip_address_id: str | None = None
 	egress: EgressMode = "uplink"
+	is_privileged: bool = False
 	sleep_after_idle_seconds: int = Field(default=0, ge=0, le=9_223_372_036)
 	disk_throughput_mibps: int = Field(default=0, ge=0)
 	disk_iops: int = Field(default=0, ge=0)
@@ -243,6 +244,7 @@ class CreateVirtualMachinePayload(StrictModel):
 			user_data=self.user_data,
 			metadata=self.metadata,
 			egress=self.egress,
+			is_privileged=self.is_privileged,
 			sleep_after_idle_seconds=self.sleep_after_idle_seconds,
 			disk_throughput_mibps=self.disk_throughput_mibps,
 			disk_iops=self.disk_iops,

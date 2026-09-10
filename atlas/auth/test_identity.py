@@ -38,12 +38,13 @@ def claims(tenant: str, subject: str = "cargo", scope: str = "*") -> dict:
 
 class TestTenantValue(UnitTestCase):
 	def test_accepted_tenant_values(self) -> None:
+		self.assertEqual(parse_tenant_id("0"), 0)
 		self.assertEqual(parse_tenant_id("1"), 1)
 		self.assertEqual(parse_tenant_id(" 42 "), 42)
 		self.assertEqual(parse_tenant_id(str(MAXIMUM_TENANT_ID)), MAXIMUM_TENANT_ID)
 
 	def test_rejected_tenant_values(self) -> None:
-		for value in ("", "   ", "0", "abc", "1.5", "-1", str(MAXIMUM_TENANT_ID + 1)):
+		for value in ("", "   ", "abc", "1.5", "-1", str(MAXIMUM_TENANT_ID + 1)):
 			with self.assertRaises(InvalidRequest):
 				parse_tenant_id(value)
 
@@ -68,7 +69,7 @@ class TestAtlasIdentity(UnitTestCase):
 		self.assertTrue(identity.is_central)
 
 	def test_an_unusable_claim_has_no_identity(self) -> None:
-		for changes in ({"tenant": ""}, {"tenant": "0"}, {"tenant": "abc"}, {"subject": ""}):
+		for changes in ({"tenant": ""}, {"tenant": "abc"}, {"subject": ""}):
 			values = claims(changes.get("tenant", "7"), subject=changes.get("subject", "cargo"))
 			self.assertIsNone(AtlasIdentity.from_claims(values))
 

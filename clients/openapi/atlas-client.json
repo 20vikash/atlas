@@ -154,6 +154,11 @@
             "default": null,
             "title": "Ip Address Id"
           },
+          "is_privileged": {
+            "default": false,
+            "title": "Is Privileged",
+            "type": "boolean"
+          },
           "memory_mib": {
             "exclusiveMinimum": 0,
             "title": "Memory Mib",
@@ -1547,7 +1552,7 @@
         ]
       },
       "post": {
-        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration.",
+        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.",
         "operationId": "create_virtual_machine",
         "parameters": [
           {

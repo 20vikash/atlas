@@ -30,9 +30,9 @@ The Frappe permission hooks are the enforcement point. `permission_query_conditi
 
 A System image is the one shared record. Every tenant can read, boot, and download it. Only its owner can write or delete an image it owns.
 
-A snapshot request carries `image_type`. Only tenant `0` may ask for `system`, and only tenant `0` may set the `cache_image` and `memory_snapshot` flags. Any other tenant that sends one of these values receives an error, and the default image type is `machine`. All 3 values are set at creation, and no API route changes them later.
+A snapshot request carries `image_type`. Only tenant `0` may ask for `system`, and only tenant `0` may set the `cache_image` and `memory_snapshot` flags. Any other tenant that sends one of these values receives an error, and the default image type is `machine`. All 3 values are set at creation, and no route changes them later.
 
-Tenant `0` is reserved. A privileged virtual machine reaches every tenant through the mesh, and an address without a tenant is in the shared pool, so both need a System Manager.
+Tenant `0` is the system tenant. A privileged virtual machine reaches every tenant through the mesh, so it must use tenant `0`, and only a caller that acts for tenant `0` can create one or hold the privileged flag. An unallocated IP address carries tenant `-1`, so no tenant can read it.
 
 ## Accepted risks
 

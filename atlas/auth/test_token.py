@@ -187,7 +187,7 @@ class TestTokenSession(UnitTestCase):
 		self.assertEqual(current_identity().tenant, "7")
 
 	def test_an_unusable_tenant_claim_keeps_the_guest_session(self) -> None:
-		claims = {"iss": "atlas:42", "sub": "cargo", "tenant": "0", "scope": "*"}
+		claims = {"iss": "atlas:42", "sub": "cargo", "tenant": "not-a-tenant", "scope": "*"}
 		with (
 			patch("frappe.get_request_header", return_value="Bearer a-token"),
 			patch.object(TokenValidator, "claims", return_value=claims),

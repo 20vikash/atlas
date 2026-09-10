@@ -95,7 +95,7 @@ def create_virtual_machine(
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Create VM.
 
-	Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration.
+	Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.
 	"""
 	image = get_owned_image(payload.image_id)
 	ip_address = get_available_ip_address(payload.ip_address_id) if payload.ip_address_id else None
@@ -131,6 +131,7 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 			"vcpus",
 			"memory_mib",
 			"disk_mib",
+			"sleep_after_idle_seconds",
 			"is_draft",
 			"is_terminating",
 			"creation",

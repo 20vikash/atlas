@@ -121,8 +121,14 @@ class TestCreateVirtualMachine(UnitTestCase):
 		self.assertEqual(status, 400)
 		self.assertEqual(body["error"]["code"], "invalid_request")
 
+	def test_create_passes_the_privileged_flag(self) -> None:
+		status, _, create = self.create({**CREATE_BODY, "is_privileged": True}, tenant_id=0)
+
+		self.assertEqual(status, 201)
+		self.assertTrue(create.call_args.args[0].is_privileged)
+
 	def test_create_rejects_a_field_the_caller_cannot_set(self) -> None:
-		for field in ("tenant_id", "server", "is_privileged", "is_sleepy", "idle_timeout_seconds"):
+		for field in ("tenant_id", "server", "is_sleepy", "idle_timeout_seconds"):
 			status, body, _ = self.create({**CREATE_BODY, field: 1})
 
 			self.assertEqual(status, 400)
