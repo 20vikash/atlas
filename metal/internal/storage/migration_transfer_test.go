@@ -79,6 +79,28 @@ func TestRemoveSnapshotIgnoresMissing(t *testing.T) {
 	}
 }
 
+func TestAbortReceiveIgnoresNoResumableStateAndRemovesTheDataset(t *testing.T) {
+	runner := &fakeRunner{runErr: map[string]error{
+		"recv -A metal/vms/vm-1": errors.New("'metal/vms/vm-1' does not have any resumable receive state to abort"),
+	}}
+	if err := newTransfer(runner).AbortReceive(context.Background(), "vm-1"); err != nil {
+		t.Fatalf("abort receive = %v, want nil", err)
+	}
+	if got := strings.Join(runner.calls, "|"); got != "recv -A metal/vms/vm-1|destroy -r metal/vms/vm-1" {
+		t.Fatalf("calls = %v", runner.calls)
+	}
+}
+
+func TestAbortReceiveIgnoresAMissingDataset(t *testing.T) {
+	runner := &fakeRunner{runErr: map[string]error{
+		"recv -A metal/vms/vm-1":    errors.New("cannot open 'metal/vms/vm-1': dataset does not exist"),
+		"destroy -r metal/vms/vm-1": errors.New("cannot open 'metal/vms/vm-1': dataset does not exist"),
+	}}
+	if err := newTransfer(runner).AbortReceive(context.Background(), "vm-1"); err != nil {
+		t.Fatalf("abort receive on a missing dataset = %v, want nil", err)
+	}
+}
+
 func TestSnapshotGUIDReadsTheValue(t *testing.T) {
 	runner := &fakeRunner{outputs: map[string]string{
 		"get -Hp -o value guid metal/vms/vm-1@migration-m1-1": "12345678901234567890\n",

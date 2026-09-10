@@ -170,6 +170,25 @@ func (transfer *MigrationTransfer) ReceiveSnapshot(ctx context.Context, virtualM
 	return nil
 }
 
+// AbortReceive cancels an interrupted receive and removes the target dataset. An
+// abort calls it before the target VM records are gone. A missing dataset, or a
+// dataset with no saved receive state, is not an error.
+func (transfer *MigrationTransfer) AbortReceive(ctx context.Context, virtualMachineID string) error {
+	dataset := transfer.pool.virtualMachineDataset(virtualMachineID)
+	// zfs recv -A: delete the saved partial state of an interrupted resumable receive.
+	if err := transfer.runner.Run(ctx, "zfs", "recv", "-A", dataset); err != nil &&
+		!strings.Contains(err.Error(), "does not exist") &&
+		!strings.Contains(err.Error(), "does not have any resumable") {
+		return fmt.Errorf("abort partial receive: %w", err)
+	}
+	// zfs destroy -r: remove the target dataset and its migration snapshots.
+	if err := transfer.runner.Run(ctx, "zfs", "destroy", "-r", dataset); err != nil &&
+		!strings.Contains(err.Error(), "does not exist") {
+		return fmt.Errorf("remove target dataset: %w", err)
+	}
+	return nil
+}
+
 // verifyResumeToken rejects a token that does not target this migration's
 // snapshot, so a crafted token cannot read another dataset.
 func (transfer *MigrationTransfer) verifyResumeToken(ctx context.Context, virtualMachineID, snapshotName, resumeToken string) error {
