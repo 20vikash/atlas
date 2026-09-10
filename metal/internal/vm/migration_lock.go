@@ -13,6 +13,12 @@ func (manager *Manager) isSourceLocked(virtualMachineID string) bool {
 	return fileExists(sourceRecordPath(manager.configuration.MachinesDirectory, virtualMachineID))
 }
 
+// isTargetReserved reports whether a migration reserves this VM ID for an
+// incoming target VM.
+func (manager *Manager) isTargetReserved(virtualMachineID string) bool {
+	return fileExists(targetRecordPath(manager.configuration.MachinesDirectory, virtualMachineID))
+}
+
 // assertNotSourceLocked rejects a mutation while the VM is a migration source.
 func (manager *Manager) assertNotSourceLocked(virtualMachineID string) error {
 	if manager.isSourceLocked(virtualMachineID) {

@@ -130,6 +130,9 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, ErrConflict
 	}
 	defer manager.allocationMutex.Unlock()
+	if manager.isTargetReserved(identifier) {
+		return Information{}, ErrConflict
+	}
 	if inUse, err := manager.publicIPv4InUse(identifier, specification.Network.PublicIPv4); err != nil {
 		return Information{}, err
 	} else if inUse {

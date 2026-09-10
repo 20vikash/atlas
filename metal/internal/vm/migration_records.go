@@ -291,3 +291,8 @@ func migrationDirectory(machinesDirectory, virtualMachineID string) string {
 func sourceRecordPath(machinesDirectory, virtualMachineID string) string {
 	return filepath.Join(migrationDirectory(machinesDirectory, virtualMachineID), sourceFileName)
 }
+
+// targetRecordPath is the target record file of one VM.
+func targetRecordPath(machinesDirectory, virtualMachineID string) string {
+	return filepath.Join(migrationDirectory(machinesDirectory, virtualMachineID), targetFileName)
+}
