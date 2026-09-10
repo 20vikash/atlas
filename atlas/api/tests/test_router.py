@@ -329,7 +329,7 @@ class TestSpecification(unittest.TestCase):
 	def test_path_and_query_parameters_are_described(self):
 		operation = self.operation("machines/{name}", "get")
 		parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
-		self.assertFalse(parameters["X-Tenant-ID"]["required"])
+		self.assertTrue(parameters["X-Tenant-ID"]["required"])
 		self.assertEqual(parameters["name"]["in"], "path")
 		self.assertTrue(parameters["name"]["required"])
 		self.assertTrue(parameters["region"]["required"])

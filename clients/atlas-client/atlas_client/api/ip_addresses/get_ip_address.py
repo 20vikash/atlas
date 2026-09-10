@@ -9,7 +9,6 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.ip_address_response import IPAddressResponse
-from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -17,12 +16,11 @@ from typing import cast
 def _get_kwargs(
     ip_address_id: str,
     *,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    if not isinstance(x_tenant_id, Unset):
-        headers["X-Tenant-ID"] = str(x_tenant_id)
+    headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -69,7 +67,7 @@ def sync_detailed(
     ip_address_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[IPAddressResponse]:
     """ Get IP address
@@ -78,7 +76,7 @@ def sync_detailed(
 
     Args:
         ip_address_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -105,7 +103,7 @@ def sync(
     ip_address_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> IPAddressResponse | None:
     """ Get IP address
@@ -114,7 +112,7 @@ def sync(
 
     Args:
         ip_address_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -136,7 +134,7 @@ async def asyncio_detailed(
     ip_address_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[IPAddressResponse]:
     """ Get IP address
@@ -145,7 +143,7 @@ async def asyncio_detailed(
 
     Args:
         ip_address_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -172,7 +170,7 @@ async def asyncio(
     ip_address_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> IPAddressResponse | None:
     """ Get IP address
@@ -181,7 +179,7 @@ async def asyncio(
 
     Args:
         ip_address_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

@@ -10,7 +10,6 @@ from ... import errors
 
 from ...models.compute_update_payload import ComputeUpdatePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
-from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -19,12 +18,11 @@ def _get_kwargs(
     virtual_machine_id: str,
     *,
     body: ComputeUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    if not isinstance(x_tenant_id, Unset):
-        headers["X-Tenant-ID"] = str(x_tenant_id)
+    headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -75,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: ComputeUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[VirtualMachineResponse]:
     """ Update compute
@@ -87,7 +85,7 @@ def sync_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
@@ -117,7 +115,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: ComputeUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> VirtualMachineResponse | None:
     """ Update compute
@@ -129,7 +127,7 @@ def sync(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
@@ -154,7 +152,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: ComputeUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[VirtualMachineResponse]:
     """ Update compute
@@ -166,7 +164,7 @@ async def asyncio_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (ComputeUpdatePayload): New compute configuration.
 
     Raises:
@@ -196,7 +194,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: ComputeUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> VirtualMachineResponse | None:
     """ Update compute
@@ -208,7 +206,7 @@ async def asyncio(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (ComputeUpdatePayload): New compute configuration.
 
     Raises:

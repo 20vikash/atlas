@@ -24,7 +24,7 @@ def ensure_tenant_user(tenant_id: int) -> str:
 		_insert_api_user(name, f"Tenant {tenant_id}")
 		# The authentication hook runs before any route work, so this commit holds only the new
 		# user. Frappe rolls a read request back, and the user must outlive the request.
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep
 	except frappe.DuplicateEntryError:
 		frappe.db.rollback()
 

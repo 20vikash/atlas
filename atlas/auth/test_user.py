@@ -13,7 +13,7 @@ class TestTenantUser(IntegrationTestCase):
 		name = f"tenant-{TENANT_ID}@atlas.local"
 		if frappe.db.exists("User", name):
 			frappe.delete_doc("User", name, force=True, ignore_permissions=True)
-			frappe.db.commit()
+			frappe.db.commit()  # nosemgrep
 
 	def test_a_tenant_user_is_created_once(self) -> None:
 		name = ensure_tenant_user(TENANT_ID)

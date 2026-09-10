@@ -18,12 +18,11 @@ def _get_kwargs(
     *,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    if not isinstance(x_tenant_id, Unset):
-        headers["X-Tenant-ID"] = str(x_tenant_id)
+    headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -80,7 +79,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[PageVirtualMachineListResponse]:
     """ List VMs
@@ -91,7 +90,7 @@ def sync_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -120,7 +119,7 @@ def sync(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> PageVirtualMachineListResponse | None:
     """ List VMs
@@ -131,7 +130,7 @@ def sync(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -155,7 +154,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[PageVirtualMachineListResponse]:
     """ List VMs
@@ -166,7 +165,7 @@ async def asyncio_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -195,7 +194,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> PageVirtualMachineListResponse | None:
     """ List VMs
@@ -206,7 +205,7 @@ async def asyncio(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

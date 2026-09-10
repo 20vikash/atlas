@@ -54,12 +54,12 @@ An `/api/atlas` route requires a verified token or a System Manager. The authent
 
 The `tenant` claim of the token decides the tenant boundary. Atlas signs each regional caller in as the Frappe user of its tenant, and Frappe permissions then filter every read and write.
 
-A token with a tenant claim needs no header. A header that names another tenant returns `400`. A Central token (`tenant=*`) is not bound to one tenant, so it must send `X-Tenant-ID` with an unsigned 32-bit integer from 1 through 4294967295. A System Manager uses the same header.
+Send `X-Tenant-ID` on every request with an unsigned 32-bit integer from 0 through 4294967295. A regional token must send the tenant of its own claim, and a header that names another tenant returns `400`. A Central token (`tenant=*`) is not bound to one tenant, so the header names the tenant it acts for. A System Manager uses the same header.
 
 | Caller | `X-Tenant-ID` |
 |---|---|
-| Regional token, such as `tenant=7` | Optional. The token tenant is used, and a different value returns `400`. |
-| Central token (`tenant=*`) | Required. A missing or invalid value returns `400`. |
+| Regional token, such as `tenant=7` | Required by this contract. It must match the token tenant, and a different value returns `400`. |
+| Central token (`tenant=*`) | Required. It names the tenant of the request, and a missing or invalid value returns `400`. |
 | System Manager session | Required, and the request is limited to that tenant. |
 
 Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token with `X-Tenant-ID: 0`, uses every route and can create a privileged virtual machine and a System image. An unallocated IP address carries tenant `-1` and stays outside every tenant. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.

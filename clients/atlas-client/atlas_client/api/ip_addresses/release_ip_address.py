@@ -8,19 +8,17 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...types import UNSET, Unset
 
 
 
 def _get_kwargs(
     ip_address_id: str,
     *,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    if not isinstance(x_tenant_id, Unset):
-        headers["X-Tenant-ID"] = str(x_tenant_id)
+    headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -66,7 +64,7 @@ def sync_detailed(
     ip_address_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[Any]:
     """ Release IP address
@@ -76,7 +74,7 @@ def sync_detailed(
 
     Args:
         ip_address_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -104,7 +102,7 @@ async def asyncio_detailed(
     ip_address_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[Any]:
     """ Release IP address
@@ -114,7 +112,7 @@ async def asyncio_detailed(
 
     Args:
         ip_address_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

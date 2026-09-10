@@ -10,7 +10,6 @@ from ... import errors
 
 from ...models.network_update_payload import NetworkUpdatePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
-from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -19,12 +18,11 @@ def _get_kwargs(
     virtual_machine_id: str,
     *,
     body: NetworkUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    if not isinstance(x_tenant_id, Unset):
-        headers["X-Tenant-ID"] = str(x_tenant_id)
+    headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -75,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: NetworkUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[VirtualMachineResponse]:
     """ Update network
@@ -85,7 +83,7 @@ def sync_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (NetworkUpdatePayload): New egress mode and network rate limits.
 
     Raises:
@@ -115,7 +113,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: NetworkUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> VirtualMachineResponse | None:
     """ Update network
@@ -125,7 +123,7 @@ def sync(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (NetworkUpdatePayload): New egress mode and network rate limits.
 
     Raises:
@@ -150,7 +148,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: NetworkUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> Response[VirtualMachineResponse]:
     """ Update network
@@ -160,7 +158,7 @@ async def asyncio_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (NetworkUpdatePayload): New egress mode and network rate limits.
 
     Raises:
@@ -190,7 +188,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: NetworkUpdatePayload,
-    x_tenant_id: int | Unset = UNSET,
+    x_tenant_id: int,
 
 ) -> VirtualMachineResponse | None:
     """ Update network
@@ -200,7 +198,7 @@ async def asyncio(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int | Unset):
+        x_tenant_id (int):
         body (NetworkUpdatePayload): New egress mode and network rate limits.
 
     Raises:

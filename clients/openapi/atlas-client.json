@@ -1293,10 +1293,10 @@
         "operationId": "list_images",
         "parameters": [
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1359,10 +1359,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1403,10 +1403,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1446,10 +1446,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1494,10 +1494,10 @@
         "operationId": "list_ip_addresses",
         "parameters": [
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1550,10 +1550,10 @@
         "operationId": "reserve_ip_address",
         "parameters": [
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1609,10 +1609,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1646,10 +1646,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1703,10 +1703,10 @@
         "operationId": "list_virtual_machines",
         "parameters": [
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1759,10 +1759,10 @@
         "operationId": "create_virtual_machine",
         "parameters": [
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1822,10 +1822,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1863,10 +1863,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1906,10 +1906,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -1962,10 +1962,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2005,10 +2005,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2048,10 +2048,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2091,10 +2091,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2150,10 +2150,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2193,10 +2193,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2236,10 +2236,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2293,10 +2293,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2350,10 +2350,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2391,10 +2391,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2447,10 +2447,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2505,10 +2505,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,
@@ -2562,10 +2562,10 @@
             }
           },
           {
-            "description": "Tenant that owns the resource, from 1 through 4294967295. A Central token (tenant=*) must send it. A regional token carries its tenant and ignores it.",
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
             "in": "header",
             "name": "X-Tenant-ID",
-            "required": false,
+            "required": true,
             "schema": {
               "maximum": 4294967295,
               "minimum": 1,

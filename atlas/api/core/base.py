@@ -33,10 +33,11 @@ TENANT_PARAMETERS = (
 	{
 		"name": TENANT_HEADER,
 		"in": "header",
-		"required": False,
+		"required": True,
 		"description": (
-			"Tenant that owns the resource, from 1 through 4294967295. A Central token"
-			" (tenant=*) must send it. A regional token carries its tenant and ignores it."
+			"Tenant that owns the resource, from 0 through 4294967295. A regional token must"
+			" send the tenant of its own claim, and a Central token (tenant=*) names the tenant"
+			" it acts for."
 		),
 		"schema": {"type": "integer", "minimum": 1, "maximum": MAXIMUM_TENANT_ID},
 	},
