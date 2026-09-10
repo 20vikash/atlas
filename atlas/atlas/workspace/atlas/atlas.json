@@ -1,0 +1,56 @@
+{
+ "charts": [],
+ "content": "[{\"id\": \"card0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Virtual Machines\", \"col\": 4}}, {\"id\": \"card1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Metal Servers\", \"col\": 4}}, {\"id\": \"card2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Proxy Servers\", \"col\": 4}}, {\"id\": \"card3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"IP Addresses In Use\", \"col\": 4}}, {\"id\": \"card4\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"IP Addresses Available\", \"col\": 4}}, {\"id\": \"card5\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Virtual Machine Images\", \"col\": 4}}]",
+ "creation": "2026-09-10 10:00:00",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "server-cog",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "Atlas",
+ "links": [],
+ "modified": "2026-09-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Atlas",
+ "name": "Atlas",
+ "number_cards": [
+  {
+   "label": "Virtual Machines",
+   "number_card_name": "Virtual Machines"
+  },
+  {
+   "label": "Metal Servers",
+   "number_card_name": "Metal Servers"
+  },
+  {
+   "label": "Proxy Servers",
+   "number_card_name": "Proxy Servers"
+  },
+  {
+   "label": "IP Addresses In Use",
+   "number_card_name": "IP Addresses In Use"
+  },
+  {
+   "label": "IP Addresses Available",
+   "number_card_name": "IP Addresses Available"
+  },
+  {
+   "label": "Virtual Machine Images",
+   "number_card_name": "Virtual Machine Images"
+  }
+ ],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [],
+ "sequence_id": 1.0,
+ "shortcuts": [],
+ "standard": 1,
+ "title": "Atlas",
+ "type": "Workspace"
+}

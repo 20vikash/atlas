@@ -17,15 +17,22 @@ fixtures = [
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "atlas",
-# 		"logo": "/assets/atlas/logo.png",
-# 		"title": "Atlas",
-# 		"route": "/atlas",
-# 		"has_permission": "atlas.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "atlas",
+		"logo": "/assets/atlas/logo.png",
+		"title": "Atlas",
+		"route": "/desk/atlas",
+	}
+]
+
+# Navigation lives in the Atlas sidebar. These modules keep their doctypes and stay
+# reachable, but they no longer get a dock entry of their own.
+code_only_modules = {
+	"Metal Server": ["Atlas"],
+	"Service": ["Atlas"],
+	"VM": ["Atlas"],
+}
 
 # Includes in <head>
 # ------------------
