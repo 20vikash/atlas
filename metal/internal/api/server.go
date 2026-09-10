@@ -16,6 +16,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/storage"
+	"github.com/frappe/atlas/metal/internal/token"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -61,6 +62,12 @@ type VirtualMachineManager interface {
 	ConnectSSH(context.Context, string) (vm.SSHConnection, error)
 }
 
+// TrustedKeyStore reports the Atlas issuer, receiver, and public keys that this
+// host trusts.
+type TrustedKeyStore interface {
+	Keys() token.TrustedKeys
+}
+
 // Dependencies contains services used by the HTTP handlers.
 type Dependencies struct {
 	VirtualMachineManager VirtualMachineManager
@@ -68,6 +75,7 @@ type Dependencies struct {
 	WakeReconciler        func()
 	HostService           HostService
 	SerialBroker          SerialBroker
+	TrustedKeys           TrustedKeyStore
 }
 
 // Server owns the HTTP handlers and their dependencies.
@@ -77,6 +85,7 @@ type Server struct {
 	wakeReconciler        func()
 	hostService           HostService
 	serialBroker          SerialBroker
+	trustedKeys           TrustedKeyStore
 	authTokenHash         []byte
 	logger                *slog.Logger
 }
@@ -93,6 +102,7 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 		wakeReconciler:        dependencies.WakeReconciler,
 		hostService:           dependencies.HostService,
 		serialBroker:          dependencies.SerialBroker,
+		trustedKeys:           dependencies.TrustedKeys,
 		authTokenHash:         []byte(configuration.AuthTokenHash),
 	}
 	if configuration.Logger == nil {
@@ -107,7 +117,6 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	// Correlation runs first, so every log line and error carries the same IDs.
 	router.Use(correlationMiddleware)
 	router.Use(server.logRequest)
-	router.Use(server.authenticate)
 	server.registerRoutes(router)
 
 	return router, nil
@@ -142,7 +151,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil || dependencies.TrustedKeys == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil
@@ -152,26 +161,28 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 // comparison is constant time.
 func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if isPublicPath(c.Path()) {
-			return next(c)
-		}
-
-		token := c.Request().Header.Get("Authorization")
-		const prefix = "Bearer "
-		if len(token) <= len(prefix) || token[:len(prefix)] != prefix {
+		presented, found := bearerToken(c)
+		if !found {
 			return unauthorized()
 		}
 
-		digest := sha256.Sum256([]byte(token[len(prefix):]))
+		digest := sha256.Sum256([]byte(presented))
 		if subtle.ConstantTimeCompare(s.authTokenHash, []byte(hex.EncodeToString(digest[:]))) != 1 {
 			return unauthorized()
 		}
+
 		return next(c)
 	}
 }
 
-// isPublicPath reports whether health and documentation serve without
-// authentication. They carry no VM data.
-func isPublicPath(path string) bool {
-	return path == "/health" || path == "/docs" || path == "/docs/swagger.json"
+// bearerToken returns the token the Authorization header presents.
+func bearerToken(c echo.Context) (string, bool) {
+	const prefix = "Bearer "
+
+	header := c.Request().Header.Get("Authorization")
+	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
+		return "", false
+	}
+
+	return header[len(prefix):], true
 }

@@ -3,13 +3,14 @@ package api
 import "github.com/labstack/echo/v4"
 
 // registerRoutes binds handlers. PUT mutations are idempotent; POST is for
-// actions and creation of addressable resources.
+// actions and creation of addressable resources. Health and documentation carry
+// no VM data and stay open.
 func (s *Server) registerRoutes(router *echo.Echo) {
 	router.GET("/health", s.checkHealth)
 	router.GET("/docs", s.showDocumentation)
 	router.GET("/docs/swagger.json", s.getOpenAPISpecification)
 
-	versionOneRoutes := router.Group("/v1")
+	versionOneRoutes := router.Group("/v1", s.authenticate)
 	versionOneRoutes.POST("/sync", s.exchangeControllerState)
 
 	virtualMachineRoutes := versionOneRoutes.Group("/vms")

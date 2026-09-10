@@ -12,18 +12,18 @@ That is why this package is thin: it owns request validation, the public respons
 
 `New(Config, Dependencies)` validates configuration and dependencies, then returns a configured Echo router. `Server` holds the injected services and every handler.
 
-`Dependencies` carries the VM manager, snapshot store, host service, wake function, and serial broker. Each is an interface declared here, so this package depends on no implementation.
+`Dependencies` carries the VM manager, snapshot store, host service, wake function, serial broker, and trusted key store. Each is an interface declared here, so this package depends on no implementation.
 
 ## Request flow
 
 ```text
-correlation -> log -> authenticate -> handler
-                                        |
-                    decode strict JSON -+
-                    validate            |
-                    call a service      |
-                    wake the reconciler |
-                    respond ------------+
+correlation -> log -> group authentication -> handler
+                                                 |
+                             decode strict JSON -+
+                             validate            |
+                             call a service      |
+                             wake the reconciler |
+                             respond ------------+
 ```
 
 Correlation runs first, so every log line and every error carries the same IDs. Each request gets an `X-Request-ID` and an `X-Operation-ID`, returned as response headers and included in logs. A caller-supplied value is kept when it is safe to echo, and replaced when it is not.
@@ -79,7 +79,20 @@ SSH key and metadata replacement try to reach a live guest first, within a short
 
 ## Authentication
 
-Every `/v1` route needs a bearer token. Only the SHA-256 digest of the token is configured, so the plain token never reaches this package, and the comparison is constant time.
+Each route group names the middleware it needs, so a route cannot inherit the wrong rule.
+
+| Middleware | Credential | Routes |
+|---|---|---|
+| `authenticate` | The static bearer token. Only its SHA-256 digest is configured, so the plain token never reaches this package, and the comparison is constant time. | The `/v1` controller group. |
+| `requireScopes` | An Atlas-signed token that carries every scope the route names. | Routes that one Metal host calls on another. |
+
+A static token cannot pass `requireScopes`, and an Atlas token cannot pass `authenticate`.
+
+`requireScopes` puts the validated claims in the request context and `tokenClaims` returns them. The handler matches the claim VM identifier to the VM its own request addresses, because only the handler knows which VM that is.
+
+The `TrustedKeyStore` dependency reports the keys. [internal/token/SPEC.md](../token/SPEC.md) owns the trust state and the verification rules.
+
+Group authentication makes the group answer every path below it. An unknown path and a wrong method under `/v1` both return `404`.
 
 The 3 public routes carry no VM data. Liveness must answer a probe that holds no token, and the documentation page is opened in a browser that cannot send one. Both stay open, so metald is expected to listen on a private control network.
 
@@ -95,6 +108,8 @@ A domain error is mapped to one status and one safe message. An unrecognized err
 | `storage.ErrImageIntegrity` | `422` | `image_integrity_failed` |
 | `storage.ErrShuttingDown` | `503` | `unavailable` |
 | `network.ErrInvalidPeers`, `storage.ErrInvalidUpload` | `400` | `invalid_request` |
+| `token.ErrUnauthorized` | `401` | `unauthorized` |
+| `token.ErrForbidden` | `403` | `forbidden` |
 
 Every error body carries a `retryable` flag, so a caller does not have to know which statuses are worth another attempt. `501` is excluded: repeating it cannot change the answer.
 
@@ -113,4 +128,5 @@ A response omits what the controller must not see or cannot use: transport URLs,
 - [docs/api.md](../../docs/api.md) gives request and response details.
 - [internal/vm/SPEC.md](../vm/SPEC.md) defines the VM contracts and the generation model.
 - [internal/console/SPEC.md](../console/SPEC.md) owns the serial console the tty mode attaches to.
+- [internal/token/SPEC.md](../token/SPEC.md) owns the Atlas trust state and token verification.
 - [cmd/metald/SPEC.md](../../cmd/metald/SPEC.md) injects server dependencies.

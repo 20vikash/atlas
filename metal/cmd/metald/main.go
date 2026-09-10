@@ -28,6 +28,7 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
+	"github.com/frappe/atlas/metal/internal/token"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -304,12 +305,17 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
+	trustedKeys, err := token.NewKeyStore(filepath.Join(options.baseDir, "atlas-jwt.json"))
+	if err != nil {
+		return fmt.Errorf("load Atlas trusted keys: %w", err)
+	}
 	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		SnapshotStore:         stores.Snapshots,
 		WakeReconciler:        notifyReconcilers,
 		HostService:           hostService,
 		SerialBroker:          serialBroker,
+		TrustedKeys:           trustedKeys,
 	})
 	if err != nil {
 		return fmt.Errorf("configure API: %w", err)

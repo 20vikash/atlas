@@ -36,6 +36,7 @@ load configuration
    -> create the host service
    -> create the VM and image reconcilers
    -> start the traffic listener when monitoring is enabled
+   -> load the Atlas trusted keys
    -> create the authenticated API
    -> listen and serve
 ```
@@ -45,6 +46,8 @@ The storage constructor receives the daemon context, pool, image directory, and 
 The network constructor receives optional mesh and traffic monitor services. The VM manager receives the runtime, network, storage, snapshot, optional traffic monitor, and logger services.
 
 The host service receives an optional mesh service, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
+
+The Atlas trusted keys load from `<base_dir>/atlas-jwt.json`. A missing file is permitted and leaves the host trusting no Atlas key. A file that metald cannot use stops startup.
 
 `connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 
