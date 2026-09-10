@@ -23,7 +23,7 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [network](network/SPEC.md) | VM namespaces, host rules, and managed WireGuard peers. |
 | [network/traffic](network/traffic/SPEC.md) | eBPF traffic tracking and packet events. |
 | [platform](platform/SPEC.md) | Host files, commands, and systemd control. |
-| [token](token/SPEC.md) | Atlas trust state: the issuer, the receiver, and the trusted Atlas public keys. |
+| [token](token/SPEC.md) | Atlas trust state and Atlas-signed token verification. |
 
 ## Dependency graph
 

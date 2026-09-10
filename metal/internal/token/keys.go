@@ -1,5 +1,5 @@
-// Package token holds the Atlas token trust state of one Metal host: the
-// issuer, the receiver, and the Atlas public keys that the host trusts.
+// Package token holds the Atlas trust state of one Metal host and verifies the
+// Atlas-signed tokens that arrive with it.
 package token
 
 import (
