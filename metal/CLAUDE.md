@@ -2,6 +2,8 @@
 
 The root `atlas/CLAUDE.md` governs the code in this module.
 
+For Go code, also follow the repository [Go anti-pattern rules](../llm/go-code-review-guide.md).
+
 ## Documentation
 
 Use these rules when you write or update any `SPEC.md` or file under `docs/`.

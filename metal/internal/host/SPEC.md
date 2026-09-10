@@ -1,5 +1,7 @@
 # host: controller synchronization and capacity
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 [internal SPEC](../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
 
 ## Purpose

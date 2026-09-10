@@ -29,6 +29,8 @@ Atlas is a monorepo for Frappe Cloud V2 VM infrastructure. It contains a Frappe/
 
 ## Commits and pull requests
 
+- Mandatory: Review all changed code before you make a commit.
+- For Go code, use the [Go anti-pattern detection and review guide](llm/go-code-review-guide.md).
 - Use a short Conventional Commit subject in this format: `type(scope): Sentence case`.
 - Use a kebab-case scope, such as `feat(metal-vm): Add snapshot support`.
 - Keep the commit subject short. Use `feat`, `fix`, `refactor`, `test`, `docs`, `build`, or `chore` when appropriate.

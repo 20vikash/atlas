@@ -1,5 +1,7 @@
 # Metal operations
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 Use the virtual machine ID and operation ID to connect API state, JSON logs, systemd units, network namespaces, and ZFS resources. Do not print bearer tokens or signed URLs.
 
 ## Network convergence fails

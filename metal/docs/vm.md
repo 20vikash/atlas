@@ -1,5 +1,7 @@
 # VM functionality
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 [metal SPEC](../SPEC.md) · contract: [internal/vm/SPEC.md](../internal/vm/SPEC.md)
 
 A virtual machine has persisted desired state and observed host state. The controller requests changes, and Metal reconciles them.

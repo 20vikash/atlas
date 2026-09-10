@@ -1,5 +1,7 @@
 # Debug in production
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 Use debug commands to inspect routes and packet decisions. Keep event readers short under load; see [benchmark results](benchmark.md#debug-mode) for their CPU cost.
 
 ## Commands

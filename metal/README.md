@@ -4,6 +4,8 @@ Metal is the host daemon for Atlas virtual machines. The executable is `metald`.
 
 Metal owns desired state, observed state, reconciliation, host resources, and cleanup progress. Atlas owns provider resources and user actions.
 
+For Go code, follow the repository [Go anti-pattern rules](../llm/go-code-review-guide.md).
+
 ## Start here
 
 1. [Architecture](docs/architecture.md) explains what Metal is and how the parts fit.

@@ -1,5 +1,7 @@
 # Unicast discovery networks
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 Atlas WG Mesh normally uses IPv4 multicast for discovery. Use this guide only when the participating hosts cannot share that multicast Layer-2 domain.
 
 ## When to use this

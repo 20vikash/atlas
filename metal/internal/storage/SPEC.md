@@ -1,5 +1,7 @@
 # storage: ZFS images and VM disks
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 [internal SPEC](../SPEC.md) · overview: [docs/storage.md](../../docs/storage.md)
 
 ## Purpose

@@ -1,5 +1,7 @@
 # api: Metal HTTP server
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 [internal SPEC](../SPEC.md) · endpoint guide: [docs/api.md](../../docs/api.md)
 
 ## Purpose

@@ -1,5 +1,7 @@
 # firecracker/api: REST client over the VM socket
 
+For Go code, follow the repository [Go anti-pattern rules](../../../../llm/go-code-review-guide.md).
+
 [firecracker SPEC](../SPEC.md) · overview: [docs/architecture.md](../../../docs/architecture.md)
 
 ## Purpose

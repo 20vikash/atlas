@@ -1,5 +1,7 @@
 # Metal architecture
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 [metal SPEC](../SPEC.md) · packages: [internal SPEC](../internal/SPEC.md)
 
 Metal manages Firecracker virtual machines on one host. Read the [system architecture](../../docs/architecture.md) for the Atlas-to-Metal ownership boundary.

@@ -1,5 +1,7 @@
 # Metal development
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 Run all Go commands from `metal/`. The repository root is not a Go module.
 
 ## Normal checks
