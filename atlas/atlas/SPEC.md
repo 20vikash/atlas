@@ -53,6 +53,8 @@ One Metal host calls another with a token that Atlas signs. Atlas Settings owns 
 
 The first key is created after install and after migration. A daily task rotates the key once it is 30 days old and keeps the key it replaces, so a token issued before the rotation stays usable.
 
+`MetalTokenIssuer` signs one token for a VM, a caller, a receiver, and a set of scopes. The only scopes are `read_vm` and `migration`, and a token expires inside two hours. The issuer reads no VM record.
+
 Nothing outside Atlas ever receives a private key. Metal receives public keys through the host state exchange.
 
 ## SSH tasks
