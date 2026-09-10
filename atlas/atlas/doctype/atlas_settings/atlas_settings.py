@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 WILDCARD_TLS_RENEWAL_WINDOW_DAYS = 30
 PROXY_CLUSTER_PASSWORD_LENGTH = 48
+METAL_TOKEN_KEY_ROTATION_DAYS = 30
 # A change to one of these reaches every active proxy through its own job.
 PROXY_CONFIGURATION_FIELDS = (
 	"wildcard_tls_certificate",
@@ -53,6 +54,8 @@ class AtlasSettings(Document):
 		is_wildcard_tls_auto_renew_enabled: DF.Check
 		letsencrypt_config_directory: DF.Data | None
 		letsencrypt_email: DF.Data
+		metal_token_key_rotated_on: DF.Datetime | None
+		metal_token_private_key: DF.Password | None
 		metald_binary_x86_64_file: DF.Link | None
 		metald_source_hash: DF.Data | None
 		object_storage_access_key_id: DF.Data | None
@@ -61,6 +64,7 @@ class AtlasSettings(Document):
 		object_storage_region: DF.Data | None
 		object_storage_secret_access_key: DF.Password | None
 		object_storage_signed_url_expiry: DF.Int
+		previous_metal_token_private_key: DF.Password | None
 		previous_proxy_cluster_password: DF.Password | None
 		private_network_cidr: DF.Data
 		private_network_mtu: DF.Int
@@ -114,6 +118,11 @@ class AtlasSettings(Document):
 	def proxy_audience_id(self) -> str:
 		"""Return the audience that a token for a regional proxy must carry."""
 		return f"atlas-{self.region_id}-proxy"
+
+	@property
+	def metal_issuer_id(self) -> str:
+		"""Return the issuer that an Atlas-signed Metal token carries."""
+		return f"atlas-{self.region_id}"
 
 	@cached_property
 	def server_provider_controller(self) -> "ServerProvider":
@@ -330,6 +339,25 @@ class AtlasSettings(Document):
 			)
 		return True
 
+	def initialize_metal_token_key(self, persist: bool = False) -> bool:
+		"""Create the Metal token signing key when it is missing."""
+		if self.get_password("metal_token_private_key", raise_exception=False):
+			return False
+
+		from atlas.metal_server.core.metal_token import generate_private_key
+
+		private_key = generate_private_key()
+		self.metal_token_private_key = private_key
+		self.metal_token_key_rotated_on = now_datetime()
+		if persist:
+			from frappe.utils.password import set_encrypted_password
+
+			set_encrypted_password(self.doctype, self.name, private_key, "metal_token_private_key")
+			frappe.db.set_single_value(
+				self.doctype, "metal_token_key_rotated_on", self.metal_token_key_rotated_on
+			)
+		return True
+
 	def enqueue_wildcard_certificate_renewal(self) -> None:
 		"""Queue one issuance. A wildcard order waits for DNS, so it cannot run in a request."""
 		if not self.is_dns_setup_completed:
@@ -369,6 +397,17 @@ class AtlasSettings(Document):
 			self.proxy_cluster_password_rotated_on = now_datetime()
 		self.save(ignore_permissions=True)
 
+	def _rotate_metal_token_key(self) -> None:
+		"""Rotate the Metal token signing key and retain the previous key."""
+		from atlas.metal_server.core.metal_token import generate_private_key
+
+		self.previous_metal_token_private_key = self.get_password(
+			"metal_token_private_key", raise_exception=False
+		)
+		self.metal_token_private_key = generate_private_key()
+		self.metal_token_key_rotated_on = now_datetime()
+		self.save(ignore_permissions=True)
+
 	def _renew_wildcard_certificate(self) -> None:
 		issued = self.letsencrypt_controller.issue_wildcard_certificate()
 		self.wildcard_tls_certificate = issued.certificate_pem
@@ -397,3 +436,21 @@ def initialize_proxy_cluster_password() -> None:
 def rotate_proxy_cluster_password() -> None:
 	"""Rotate the regional proxy password on schedule."""
 	frappe.get_single("Atlas Settings")._rotate_proxy_cluster_password()
+
+
+def initialize_metal_token_key() -> None:
+	"""Create the Metal token signing key after install and after migration."""
+	frappe.get_single("Atlas Settings").initialize_metal_token_key(persist=True)
+
+
+def rotate_metal_token_key() -> None:
+	"""Rotate the Metal token signing key once it reaches the rotation window."""
+	settings: AtlasSettings = frappe.get_single("Atlas Settings")
+	if settings.initialize_metal_token_key(persist=True):
+		return
+
+	rotate_after = add_days(get_datetime(settings.metal_token_key_rotated_on), METAL_TOKEN_KEY_ROTATION_DAYS)
+	if now_datetime() < rotate_after:
+		return
+
+	settings._rotate_metal_token_key()

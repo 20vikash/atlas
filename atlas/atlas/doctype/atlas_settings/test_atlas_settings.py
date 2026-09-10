@@ -44,6 +44,70 @@ class TestProxyClusterPassword(UnitTestCase):
 		settings.save.assert_called_once_with(ignore_permissions=True)
 
 
+class TestMetalTokenKey(UnitTestCase):
+	def setUp(self) -> None:
+		self.settings = MagicMock()
+
+	def test_a_missing_key_is_created(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		self.settings.get_password.return_value = None
+
+		self.assertTrue(AtlasSettings.initialize_metal_token_key(self.settings))
+		self.assertIn("BEGIN PRIVATE KEY", self.settings.metal_token_private_key)
+
+	def test_an_existing_key_is_kept(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		self.settings.get_password.return_value = "stored-key"
+
+		self.assertFalse(AtlasSettings.initialize_metal_token_key(self.settings))
+
+	def test_rotation_retains_one_previous_key(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		self.settings.get_password.return_value = "current-key"
+
+		AtlasSettings._rotate_metal_token_key(self.settings)
+
+		self.assertEqual(self.settings.previous_metal_token_private_key, "current-key")
+		self.assertIn("BEGIN PRIVATE KEY", self.settings.metal_token_private_key)
+		self.settings.save.assert_called_once_with(ignore_permissions=True)
+
+	def test_a_key_inside_the_rotation_window_is_left_alone(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import rotate_metal_token_key
+
+		self.settings.initialize_metal_token_key.return_value = False
+		self.settings.metal_token_key_rotated_on = now_datetime()
+
+		with patch("frappe.get_single", return_value=self.settings):
+			rotate_metal_token_key()
+
+		self.settings._rotate_metal_token_key.assert_not_called()
+
+	def test_a_key_outside_the_rotation_window_is_rotated(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import rotate_metal_token_key
+
+		self.settings.initialize_metal_token_key.return_value = False
+		self.settings.metal_token_key_rotated_on = add_days(now_datetime(), -31)
+
+		with patch("frappe.get_single", return_value=self.settings):
+			rotate_metal_token_key()
+
+		self.settings._rotate_metal_token_key.assert_called_once()
+
+	# A host that has no key yet needs one created, not rotated.
+	def test_a_missing_key_is_created_in_place_of_a_rotation(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import rotate_metal_token_key
+
+		self.settings.initialize_metal_token_key.return_value = True
+
+		with patch("frappe.get_single", return_value=self.settings):
+			rotate_metal_token_key()
+
+		self.settings._rotate_metal_token_key.assert_not_called()
+
+
 class TestRegionID(UnitTestCase):
 	def setUp(self) -> None:
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings

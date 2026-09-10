@@ -95,12 +95,14 @@ fixtures = [
 after_install = [
 	"atlas.auth.user.create_central_admin_user",
 	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_metal_token_key",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
 after_migrate = [
 	"atlas.auth.user.create_central_admin_user",
 	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_metal_token_key",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
@@ -237,7 +239,10 @@ scheduler_events = {
 		],
 	},
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],
-	"daily": ["atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate"],
+	"daily": [
+		"atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate",
+		"atlas.atlas.doctype.atlas_settings.atlas_settings.rotate_metal_token_key",
+	],
 }
 
 # Testing
