@@ -51,6 +51,13 @@ func isValidMigrationStatus(status MigrationStatus) bool {
 	}
 }
 
+// isTerminalStatus reports whether a status is a final result that no longer
+// hides the VM or reserves capacity. A failed migration is not terminal: it
+// stays locked for recovery.
+func isTerminalStatus(status MigrationStatus) bool {
+	return status == MigrationCompleted || status == MigrationAborted
+}
+
 // MigrationPhase is the fine-grained step of a running migration.
 type MigrationPhase string
 
@@ -63,12 +70,16 @@ const (
 	PhaseStopping MigrationPhase = "stopping"
 	// PhaseStarting means the target creates its network and applies the VM state.
 	PhaseStarting MigrationPhase = "starting"
+	// PhaseFinishing means the target commits and destroys the source.
+	PhaseFinishing MigrationPhase = "finishing"
+	// PhaseRollback means the target cleans up and restores the source.
+	PhaseRollback MigrationPhase = "rollback"
 )
 
 // isValidMigrationPhase reports whether phase names one migration phase.
 func isValidMigrationPhase(phase MigrationPhase) bool {
 	switch phase {
-	case PhasePreparing, PhaseCopying, PhaseStopping, PhaseStarting:
+	case PhasePreparing, PhaseCopying, PhaseStopping, PhaseStarting, PhaseFinishing, PhaseRollback:
 		return true
 	default:
 		return false
@@ -118,8 +129,22 @@ type TargetMigrationRecord struct {
 	Intervals           []IntervalProgress `json:"intervals,omitempty"`
 	TargetNetworkReady  bool               `json:"target_network_ready,omitempty"`
 	TargetStateApplied  bool               `json:"target_state_applied,omitempty"`
-	Error               *OperationError    `json:"error,omitempty"`
-	CreatedAt           time.Time          `json:"created_at"`
+
+	// Completion and recovery. FinishRequested and AbortRequested record the
+	// selected terminal request. The others are cleanup checkpoints.
+	FinishRequested      bool `json:"finish_requested,omitempty"`
+	AbortRequested       bool `json:"abort_requested,omitempty"`
+	SourceStopped        bool `json:"source_stopped,omitempty"`
+	TargetRuntimeRemoved bool `json:"target_runtime_removed,omitempty"`
+	TargetNetworkRemoved bool `json:"target_network_removed,omitempty"`
+	TargetStorageRemoved bool `json:"target_storage_removed,omitempty"`
+	SourceRestored       bool `json:"source_restored,omitempty"`
+	SourceUnlocked       bool `json:"source_unlocked,omitempty"`
+	SourceDestroyed      bool `json:"source_destroyed,omitempty"`
+
+	Error      *OperationError `json:"error,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	FinishedAt time.Time       `json:"finished_at,omitempty"`
 }
 
 // SourceMigrationRecord is the source host's durable lock for one migration. Its
@@ -137,6 +162,9 @@ type SourceMigrationRecord struct {
 	NetworkRemoved          bool      `json:"network_removed,omitempty"`
 	FinalSequence           int       `json:"final_sequence,omitempty"`
 	TemporaryDiskLimitMiBps int       `json:"temporary_disk_limit_mibps,omitempty"`
+	RollbackComplete        bool      `json:"rollback_complete,omitempty"`
+	DestroyRuntimeComplete  bool      `json:"destroy_runtime_complete,omitempty"`
+	DestroyStorageComplete  bool      `json:"destroy_storage_complete,omitempty"`
 	LockedAt                time.Time `json:"locked_at"`
 }
 
@@ -225,8 +253,10 @@ func (store *migrationStore) readTarget(virtualMachineID string) (TargetMigratio
 	if record.SchemaVersion != migrationSchemaVersion {
 		return TargetMigrationRecord{}, fmt.Errorf("read %s: unsupported schema version %d", store.targetPath(virtualMachineID), record.SchemaVersion)
 	}
+	// A terminal record has no phase. Every other record needs a valid phase.
+	validPhase := isValidMigrationPhase(record.Phase) || (record.Phase == "" && isTerminalStatus(record.Status))
 	if record.VirtualMachineID != virtualMachineID || record.ID == "" ||
-		!isValidMigrationStatus(record.Status) || !isValidMigrationPhase(record.Phase) {
+		!isValidMigrationStatus(record.Status) || !validPhase {
 		return TargetMigrationRecord{}, fmt.Errorf("read %s: invalid target record", store.targetPath(virtualMachineID))
 	}
 	return record, nil

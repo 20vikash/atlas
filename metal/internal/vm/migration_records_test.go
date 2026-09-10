@@ -38,6 +38,36 @@ func TestTargetRecordRoundTrips(t *testing.T) {
 	}
 }
 
+func TestTerminalRecordNeedsNoPhase(t *testing.T) {
+	store := newMigrationStore(t.TempDir())
+	record := newTargetRecord()
+	record.Status = MigrationCompleted
+	record.Phase = ""
+	record.FinishedAt = time.Now().UTC()
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatalf("a completed record with no phase must read back: %v", err)
+	}
+	if got.Status != MigrationCompleted || got.Phase != "" {
+		t.Fatalf("record = %+v", got)
+	}
+}
+
+func TestRunningRecordRequiresAPhase(t *testing.T) {
+	store := newMigrationStore(t.TempDir())
+	record := newTargetRecord()
+	record.Phase = ""
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.readTarget("vm-1"); err == nil {
+		t.Fatal("a running record with no phase must be rejected")
+	}
+}
+
 func TestTransferStateRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	target := newTargetRecord()
