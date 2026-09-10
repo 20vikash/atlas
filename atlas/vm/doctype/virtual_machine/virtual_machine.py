@@ -206,6 +206,7 @@ class VirtualMachine(Document):
 		frappe.only_for("System Manager")
 		if self.is_draft or self.is_terminating:
 			frappe.throw(_("Virtual Machine {0} is not ready for this change.").format(self.name))
+		self.ensure_not_migrating()
 
 		self.is_privileged = strict_bool(is_privileged, "is_privileged")
 		self.save()
@@ -214,7 +215,23 @@ class VirtualMachine(Document):
 	def terminate(self) -> None:
 		"""Ask Metal to remove this VM and release its IP address."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		VirtualMachineService(self).terminate()
+
+	@frappe.whitelist(methods=["POST"])
+	def migrate(self) -> str:
+		"""Move this VM to another host that Atlas selects. Return the migration ID."""
+		self.check_permission("write")
+		from atlas.vm.core.vm_migration import MigrationService
+
+		return MigrationService.create(self)
+
+	def ensure_not_migrating(self) -> None:
+		"""Reject a mutable action while a migration owns this VM."""
+		if self.active_migration:
+			frappe.throw(
+				_("Virtual Machine {0} is migrating.").format(self.name), exc=AtlasUserError
+			)
 
 	@frappe.whitelist(methods=["POST"])
 	def create_machine_image(
@@ -225,6 +242,7 @@ class VirtualMachine(Document):
 	) -> str:
 		"""Queue a Machine image transfer from this VM."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		if self.is_draft:
 			frappe.throw(_("Wait for Virtual Machine creation before creating an image."), exc=AtlasUserError)
 		title = title.strip()
@@ -244,6 +262,7 @@ class VirtualMachine(Document):
 	def replace_ssh_keys(self, ssh_keys: str | list[str]) -> dict[str, Any]:
 		"""Replace all authorized SSH keys for this VM."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		values = frappe.parse_json(ssh_keys) if isinstance(ssh_keys, str) else ssh_keys
 		if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
 			frappe.throw(_("SSH keys must be a list of strings."), exc=AtlasUserError)
@@ -254,6 +273,7 @@ class VirtualMachine(Document):
 	def replace_metadata(self, metadata: dict[str, str]) -> dict[str, Any]:
 		"""Replace all custom metadata for this VM with a plain string-to-string map."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		if not isinstance(metadata, dict) or any(
 			not isinstance(key, str) or not isinstance(value, str) for key, value in metadata.items()
 		):
@@ -265,6 +285,7 @@ class VirtualMachine(Document):
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
 		"""Attach one reserved public IPv4 address without a VM restart."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		self.validate_network_change()
 		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
 			frappe.throw(_("Detach the current public IPv4 address first."), exc=AtlasUserError)
@@ -275,6 +296,7 @@ class VirtualMachine(Document):
 	def detach_ip_address(self) -> dict[str, Any]:
 		"""Remove the public IPv4 address without a VM restart."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		self.validate_network_change()
 		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
 			frappe.throw(_("This Virtual Machine has no public IPv4 address."), exc=AtlasUserError)
@@ -354,6 +376,7 @@ class VirtualMachine(Document):
 	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Apply selected compute changes."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		if self.is_draft:
 			frappe.throw(_("Wait for Virtual Machine creation before a compute change."), exc=AtlasUserError)
 
@@ -362,6 +385,7 @@ class VirtualMachine(Document):
 	def update_disk(self, changes: dict[str, int]) -> dict[str, Any]:
 		"""Apply selected disk size and limit changes."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		if self.is_draft:
 			frappe.throw(_("Wait for Virtual Machine creation before a disk change."), exc=AtlasUserError)
 
@@ -370,17 +394,20 @@ class VirtualMachine(Document):
 	def update_network(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Apply selected egress and throughput changes."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		return VirtualMachineService(self).apply_network_changes(changes)
 
 	def set_power_state(self, state: str) -> None:
 		"""Ask Metal to store one desired power state."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		VirtualMachineService(self).set_power_state(state)
 
 	@frappe.whitelist(methods=["POST"])
 	def reboot(self) -> None:
 		"""Request an in-place VM restart."""
 		self.check_permission("write")
+		self.ensure_not_migrating()
 		VirtualMachineService(self).request_restart()
 
 	@frappe.whitelist(methods=["POST"])
