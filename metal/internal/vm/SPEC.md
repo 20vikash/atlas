@@ -83,6 +83,26 @@ The target reserves compute only after the handshake supplies the config. Host c
 
 An abort before transfer removes the target staging, unlocks the source, and removes the migration records. A cleanup failure keeps the records and locks for a retry.
 
+At the copying phase, `MigrationManager` runs one background disk transfer per VM and waits for the transfers at shutdown. The reconciler starts or resumes the transfer through `AdvanceTarget` and never moves data itself. The transfer holds no VM lock while data moves.
+
+```text
+next snapshot from source  (acknowledge the last completed sequence)
+        |
+        v
+stream into zfs recv -s -> resume the same sequence after an interrupt
+        |
+        v
+compare received GUID with the source GUID
+        |
+        v
+mark the interval complete, checkpoint bytes
+        |
+        v
+repeat until 16 intervals or 30 minutes, then wait for cutover
+```
+
+The source keeps the acknowledged snapshot as the next incremental base and removes the one before it. A stopped source needs one full interval. A network break or a restart leaves the migration in copying and resumes the same sequence. A GUID mismatch, an invalid sequence or token, or an unrelated target dataset fails the migration and keeps the dataset and snapshots for inspection.
+
 ## Boundaries
 
 `Runtime`, `Network`, `Storage`, and `Snapshots` are consumed here and implemented by host packages. The manager uses `traffic.Monitor` for samples and watch operations. The daemon traffic listener passes each `traffic.Event` to `Manager.RestoreAfterTraffic`.
