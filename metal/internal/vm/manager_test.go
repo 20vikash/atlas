@@ -30,6 +30,7 @@ type fakeRuntime struct {
 	restoreError   error
 	saveError      error
 	deleteError    error
+	coldStartError error
 }
 
 func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error) {
@@ -44,6 +45,9 @@ func (runtime *fakeRuntime) Start(context.Context, RuntimeMachine) error {
 
 func (runtime *fakeRuntime) ColdStart(context.Context, RuntimeMachine) error {
 	runtime.coldStarts++
+	if runtime.coldStartError != nil {
+		return runtime.coldStartError
+	}
 	runtime.state = StateRunning
 	runtime.hasSavedState = false
 	return nil
