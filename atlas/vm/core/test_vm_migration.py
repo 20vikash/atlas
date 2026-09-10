@@ -5,10 +5,11 @@ from unittest.mock import Mock, PropertyMock, call, patch
 
 import frappe
 from frappe.tests import UnitTestCase
+from frappe.utils import add_to_date, now_datetime
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.vm_migration import MigrationService
+from atlas.vm.core.vm_migration import MigrationService, reconcile_migrations
 from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
 
 
@@ -273,3 +274,73 @@ class TestMigrationWorker(UnitTestCase):
 
 		self.assertEqual(enqueue.call_args.kwargs["job_id"], "atlas||vm-migration||mig-00001")
 		self.assertTrue(enqueue.call_args.kwargs["deduplicate"])
+
+
+class TestMigrationRecovery(UnitTestCase):
+	def test_reconcile_requeues_every_locked_migration(self) -> None:
+		with (
+			patch(
+				"atlas.vm.core.vm_migration.frappe.get_all", return_value=["mig-00001", "mig-00002"]
+			),
+			patch("atlas.vm.core.vm_migration.enqueue_migration") as enqueue,
+		):
+			reconcile_migrations()
+
+		self.assertEqual(
+			enqueue.call_args_list, [call("mig-00001"), call("mig-00002")]
+		)
+
+	def test_missing_target_retries_before_the_timeout(self) -> None:
+		service = MigrationService(migration_doc())
+		service.send_request = Mock()
+
+		with patch.object(
+			MigrationService, "is_expired", new_callable=PropertyMock, return_value=False
+		):
+			self.assertFalse(service.advance({"status": "missing"}))
+
+		service.send_request.assert_called_once()
+
+	def test_missing_target_expires_after_the_timeout(self) -> None:
+		service = MigrationService(migration_doc())
+		service.expire = Mock()
+
+		with patch.object(
+			MigrationService, "is_expired", new_callable=PropertyMock, return_value=True
+		):
+			self.assertTrue(service.advance({"status": "missing"}))
+
+		service.expire.assert_called_once()
+
+	def test_expire_aborts_the_remnant_and_releases_the_lock(self) -> None:
+		service = MigrationService(migration_doc())
+		client = Mock()
+		service.settle = Mock()
+
+		with patch.object(
+			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
+		):
+			service.expire()
+
+		client.abort_migration.assert_called_once_with("mig-00001")
+		service.settle.assert_called_once_with("failed")
+
+	def test_poll_reports_a_missing_target(self) -> None:
+		service = MigrationService(migration_doc())
+		client = Mock()
+		client.get_migration.side_effect = MetalClientError("gone", status=404)
+
+		with patch.object(
+			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
+		):
+			status = service.poll()
+
+		self.assertEqual(status, {"status": "missing"})
+		service.migration.db_set.assert_not_called()
+
+	def test_is_expired_tracks_the_visibility_timeout(self) -> None:
+		recent = MigrationService(migration_doc(started_at=now_datetime()))
+		stale = MigrationService(migration_doc(started_at=add_to_date(now_datetime(), minutes=-11)))
+
+		self.assertFalse(recent.is_expired)
+		self.assertTrue(stale.is_expired)

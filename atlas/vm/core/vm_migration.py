@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
@@ -32,6 +32,7 @@ TRANSITION_POLL_SECONDS = 2
 TRANSITION_PHASES = frozenset({"stopping", "starting"})
 MAXIMUM_RUN_DURATION = timedelta(minutes=30)
 MIGRATION_JOB_TIMEOUT_SECONDS = int(MAXIMUM_RUN_DURATION.total_seconds()) + 120
+TARGET_VISIBILITY_TIMEOUT = timedelta(minutes=10)
 
 
 class MigrationService:
@@ -138,6 +139,8 @@ class MigrationService:
 			self.mark_failed()
 			self.request_abort()
 			return False
+		if state == "missing":
+			return self.handle_missing_target()
 		if self.migration.abort_requested:
 			self.request_abort()
 			return False
@@ -145,6 +148,23 @@ class MigrationService:
 			self.commit_target()
 			self.finish()
 		return False
+
+	def handle_missing_target(self) -> bool:
+		"""Retry an invisible target, or expire it after the visibility timeout."""
+		if self.is_expired:
+			self.expire()
+			return True
+		self.send_request()
+		return False
+
+	def expire(self) -> None:
+		"""Abort any target remnant, fail the migration, and release the VM lock."""
+		try:
+			self.target_client.abort_migration(cast(str, self.migration.name))
+		except MetalClientError as error:
+			if not error.is_not_found:
+				self.record_error(error)
+		self.settle("failed")
 
 	def send_request(self) -> None:
 		"""Issue one migration token and send the target-pull request. Safe to repeat."""
@@ -156,7 +176,12 @@ class MigrationService:
 
 	def poll(self) -> dict[str, Any]:
 		"""Read the target migration status and store it as progress."""
-		status = self.target_client.get_migration(cast(str, self.migration.name))
+		try:
+			status = self.target_client.get_migration(cast(str, self.migration.name))
+		except MetalClientError as error:
+			if error.is_not_found:
+				return {"status": "missing"}
+			raise
 		self.migration.db_set("progress", frappe.as_json(status))
 		return status
 
@@ -225,6 +250,11 @@ class MigrationService:
 		)
 
 	@property
+	def is_expired(self) -> bool:
+		"""Report whether the target stayed invisible past the visibility timeout."""
+		return now_datetime() > get_datetime(self.migration.started_at) + TARGET_VISIBILITY_TIMEOUT
+
+	@property
 	def is_target_committed(self) -> bool:
 		"""Report whether the VM already points at the target host."""
 		return (
@@ -271,3 +301,13 @@ def run_migration(migration_name: str) -> None:
 			title=f"Virtual Machine migration {migration_name} failed",
 			message=frappe.get_traceback(),
 		)
+
+
+@run_as_admin
+def reconcile_migrations() -> None:
+	"""Requeue every migration that still holds a VM action lock."""
+	names = frappe.get_all(
+		"Virtual Machine", filters={"active_migration": ["is", "set"]}, pluck="active_migration"
+	)
+	for name in names:
+		enqueue_migration(name)
