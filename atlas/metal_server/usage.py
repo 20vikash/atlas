@@ -7,6 +7,7 @@ import frappe
 from frappe.utils import now_datetime
 
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
+from atlas.metal_server.core.metal_token import MetalTokenError, MetalTokenIssuer
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.vm_state import store_reported_states
 
@@ -47,7 +48,12 @@ def sync_server(
 	"""Exchange state with one host, then store its capacity and VM states."""
 	server = cast("MetalServer", frappe.get_doc("Metal Server", server_name))
 	try:
-		response = MetalClient(server).sync(wireguard_peers, get_desired_images(), privileged_vm_addresses)
+		response = MetalClient(server).sync(
+			wireguard_peers,
+			get_desired_images(),
+			privileged_vm_addresses,
+			key_sync=get_key_sync_payload(server_name),
+		)
 		values = get_usage_values(response.get("capacity"))
 		store_reported_states(server_name, response.get("virtual_machines"))
 	except MetalClientError:
@@ -118,6 +124,15 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 			}
 		)
 	return peers
+
+
+def get_key_sync_payload(server_name: str) -> dict[str, Any] | None:
+	"""Return the Atlas public keys for one host. A missing signing key is reported."""
+	try:
+		return MetalTokenIssuer().get_key_sync_payload(server_name)
+	except MetalTokenError:
+		frappe.log_error(frappe.get_traceback(), "Atlas cannot supply Metal token keys")
+		return None
 
 
 def get_usage_values(usage: object) -> dict[str, int]:

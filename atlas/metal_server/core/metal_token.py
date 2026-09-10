@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import frappe
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from frappe.utils import get_datetime, now_datetime
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -18,6 +19,8 @@ SCOPE_READ_VIRTUAL_MACHINE = "read_vm"
 SCOPE_MIGRATION = "migration"
 VALID_SCOPES = frozenset({SCOPE_READ_VIRTUAL_MACHINE, SCOPE_MIGRATION})
 MAXIMUM_TOKEN_LIFETIME = timedelta(hours=2)
+# A token issued just before a rotation stays usable for its complete lifetime.
+PREVIOUS_KEY_OVERLAP = MAXIMUM_TOKEN_LIFETIME
 
 
 class MetalTokenError(Exception):
@@ -77,10 +80,38 @@ class MetalTokenIssuer:
 			raise MetalTokenError("Atlas Settings has no Metal token signing key")
 		return private_key
 
+	@cached_property
+	def previous_private_key(self) -> str | None:
+		"""Return the replaced key while a token it signed can still be usable."""
+		rotated_on = self.settings.metal_token_key_rotated_on
+		if not rotated_on or now_datetime() > get_datetime(rotated_on) + PREVIOUS_KEY_OVERLAP:
+			return None
+
+		return self.settings.get_password("previous_metal_token_private_key", raise_exception=False)
+
 	@property
 	def current_key_id(self) -> str:
 		"""Return the identifier of the key that signs a new token."""
 		return get_key_id(self.current_private_key)
+
+	def get_public_keys(self) -> list[dict[str, str]]:
+		"""Return the public keys that a host must trust now."""
+		private_keys = [self.current_private_key]
+		if self.previous_private_key:
+			private_keys.append(self.previous_private_key)
+
+		return [
+			{"id": get_key_id(private_key), "key": get_public_key(private_key)}
+			for private_key in private_keys
+		]
+
+	def get_key_sync_payload(self, receiver: str) -> dict[str, object]:
+		"""Return the `jwt` object that one host state exchange carries."""
+		return {
+			"issuer": self.settings.metal_issuer_id,
+			"receiver": receiver,
+			"public_keys": self.get_public_keys(),
+		}
 
 	def issue_token(
 		self,

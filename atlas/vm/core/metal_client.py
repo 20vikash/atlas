@@ -226,18 +226,18 @@ class MetalClient:
 		wireguard_peers: list[dict[str, Any]],
 		images: list[dict[str, Any]],
 		privileged_vm_addresses: list[str],
+		key_sync: dict[str, Any] | None = None,
 	) -> dict[str, Any]:
-		"""Exchange controller and host state."""
-		return self._request(
-			"POST",
-			"/v1/sync",
-			json={
-				"wireguard_peers": wireguard_peers,
-				"images": images,
-				"privileged_vm_addresses": privileged_vm_addresses,
-			},
-			uncertain_on_failure=True,
-		)
+		"""Exchange controller and host state. Absent keys leave the host keys alone."""
+		request = {
+			"wireguard_peers": wireguard_peers,
+			"images": images,
+			"privileged_vm_addresses": privileged_vm_addresses,
+		}
+		if key_sync:
+			request["jwt"] = key_sync
+
+		return self._request("POST", "/v1/sync", json=request, uncertain_on_failure=True)
 
 	def _request(
 		self,
