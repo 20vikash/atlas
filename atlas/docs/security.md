@@ -10,15 +10,19 @@ The Atlas API at `/api/atlas` is the only tenant-facing surface. Metal Servers, 
 
 ## Who can call the API
 
-A caller needs a Frappe session from a user with the `Atlas Admin` role, a Frappe API key for such a user, or a valid central token. The role does not grant Desk access.
+A service caller needs a valid Central or regional Atlas token. Send the token in the `Authorization: Bearer <token>` header. A System Manager can also use the Atlas API.
 
-The authentication validator applies two rules. A guest reaches only `/login`, `/api/method/login`, `/api/method/logout`, `/assets/`, and the API reference, so the standard Frappe guest surface is closed. The realtime console stays open to every user, because the Socket.IO handshake asks the web process who the user is through `frappe.realtime.get_user_info`, and a handler asks it for a document permission through `frappe.realtime.has_permission`. An Atlas API route requires `Atlas Admin` or `System Manager`; its route handler performs the resource and tenant permission checks. An Atlas Admin who is not a System Manager reaches only `/api/atlas` routes. Every other signed-in user and route is left to Frappe.
+The authentication validator closes the standard Frappe guest surface. A guest can sign in and read the API reference or public key set. The realtime console stays open because its handshake and permission calls need the web process. An Atlas Admin session without verified token claims cannot use an Atlas API route.
 
-A central token is a JWT that the issuer at `central_jwks_url` signs. Send it in the `X-Atlas-Central-Token` header. Atlas accepts it when it is unexpired and carries the audience `atlas-<region ID>-admin`. An unknown key ID is refused without a key set refetch, so a caller cannot make Atlas fetch on demand. A valid token signs the request in as `central-admin@atlas.local`, which holds the `Atlas Admin` role alone.
+Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. It checks `nbf` when the claim is present. The audience is `atlas-admin:<region ID>`. Central uses `sub=central`, `scope=*`, and `tenant=*`. Atlas applies its regional subject and tenant policy to each regional token.
+
+Atlas binds each key namespace to its issuer. A `central:*` key can validate only `iss=central`. The regional key can validate only `iss=atlas:<region ID>`. A regional token cannot claim Central authority.
+
+Atlas gets Central public keys every 5 minutes. It keeps the last valid key set after a fetch failure. Atlas publishes these keys and its regional public key at `/api/atlas/jwks.json`. An unknown key ID does not cause a fetch.
 
 ## Tenant isolation
 
-Each tenant record carries a `tenant_id`. The API reads the tenant from the `X-Tenant-ID` header, and a route returns `404` for a record of another tenant. The shared permission overrides apply the same rule to every list and document read of Virtual Machine, Virtual Machine Image, and Metal Server IP Address, so a Desk or REST path cannot pass the boundary either.
+Each tenant record carries a `tenant_id`. The API reads the tenant from `X-Tenant-ID`. The value must match the token tenant unless the claim is `tenant=*`. A route returns `404` for a record of another tenant. Shared permission overrides apply the same rule to each tenant DocType.
 
 A System image is the one shared record. Every tenant can read, boot, and download it. Only its owner can write or delete a Machine image.
 
@@ -26,9 +30,7 @@ Tenant `0` is reserved. A privileged virtual machine reaches every tenant throug
 
 ## Accepted risks
 
-**The tenant header is not bound to the caller.** Any holder of an `Atlas Admin` session, its Frappe API key, or a valid central token can set `X-Tenant-ID` to any tenant and act as that tenant. The header selects a tenant; it does not prove one. This is safe only while every credential belongs to the central control plane. Before Atlas issues a credential to anyone else, the tenant must move into the token as a claim and the header must become a check.
-
-**A central token is a bearer token.** Atlas checks the signature, the expiry, and the audience. It does not check an issuer, a subject, or a scope, and it does not track replay. A stolen token is usable until it expires, so the issuer must keep the lifetime short.
+**A service token is a bearer token.** Atlas does not track replay. A stolen token works until it expires, so each issuer must use a short lifetime.
 
 **There are no quotas.** A caller can create virtual machines, reserve provider IP addresses, and request any vCPU, memory, and disk size without a limit. Cost and capacity control belong to the central control plane, not to Atlas.
 

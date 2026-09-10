@@ -23,10 +23,17 @@ docs/          Setup, operation, and development guides
 - OpenResty sends both control names to the daemon before it reads the site map.
 - OpenResty and the daemon use private Unix sockets for map operations.
 - Atlas writes `/etc/atlas/proxy-control.toml`. The file is the source for node membership, credentials, and TLS configuration.
+- Atlas supplies one merged JSON Web Key Set. It contains Central keys and the regional Atlas key.
 
 ## Ownership
 
 Keep control and cluster code in `control/`. Keep data-plane code in `nginx/`. Atlas owns VM lifecycle, DNS records, credentials, peer membership, and the regional wildcard certificate.
+
+## Authorization
+
+The Proxy binds each key namespace to one issuer. A `central:*` key can validate only `iss=central`. An `atlas:<region ID>:*` key can validate only the matching regional issuer.
+
+Central has unrestricted site and domain access. A regional token grants only its signed scopes and resource constraints. A scope without a constraint applies to all names for that resource. A constrained token cannot replace the complete site map.
 
 ## Validation
 

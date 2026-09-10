@@ -10,6 +10,10 @@ The `proxy` site name and every site name with the `proxy-` prefix are reserved.
 
 Every public route except the health and documentation routes needs a Bearer credential. Use the regional proxy password or a valid JSON Web Token (JWT).
 
+Central tokens need `iss=central`, `sub=central`, and `scope=*`. They can use all site, domain, and cluster status routes.
+
+A regional token needs the regional Atlas issuer and the Proxy audience. Its signed scope selects the permitted resource. A scope without a constraint applies to all names for that resource. An optional signed suffix constraint limits site names. A constrained token cannot replace a complete map.
+
 ```sh
 export ATLAS_PROXY_CONTROL_URL='https://proxy-001.iad.frappe.dev'
 export ATLAS_PROXY_CONTROL_TOKEN='replace-with-the-proxy-password-or-a-jwt'
@@ -78,6 +82,7 @@ A custom-domain map accepts exact domain names only. A domain that equals the re
 | Status | Meaning                                                                                     |
 | ------ | ------------------------------------------------------------------------------------------- |
 | `401`  | The Bearer credential is missing or invalid.                                                |
+| `403`  | The credential does not grant access to the resource or name.                               |
 | `409`  | A site name is reserved, a domain belongs to the wildcard zone, or cluster state conflicts. |
 | `422`  | The request does not match the API schema, or a custom-domain key starts with `*`.           |
 | `502`  | OpenResty cannot apply or return a map.                                                     |

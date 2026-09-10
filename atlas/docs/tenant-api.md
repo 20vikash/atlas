@@ -6,17 +6,23 @@ Use `GET /api/atlas/docs` to explore every route, request body, and response. Th
 
 ## Access
 
-Each request needs Frappe authentication from a user with the `Atlas Admin` role. This role does not grant Desk access. A System Manager can also use these routes.
+Each service request needs a valid JSON Web Token in the `Authorization: Bearer <token>` header. A System Manager can also use these routes.
 
-Use either Frappe API-key authentication with `Authorization: token <api_key>:<api_secret>`, or send `X-Atlas-Central-Token: <token>` with a token from the central issuer. Atlas reads the key set from `central_jwks_url` in Atlas Settings and accepts a central token that is unexpired and carries the audience `atlas-<region ID>-admin`. A valid central token signs the request in as `central-admin@atlas.local`, which holds the `Atlas Admin` role alone. Atlas creates this user after install and after migrate.
+Atlas accepts `iss=central` and `iss=atlas:<region ID>`. The token audience must be `atlas-admin:<region ID>`. Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. Atlas also checks `nbf` when the claim is present.
 
-An `/api/atlas` route requires `Atlas Admin` or `System Manager`. The route handler performs the resource and tenant permission checks. A guest may reach only `/login`, `/api/method/login`, `/api/method/logout`, `/assets/`, and the API reference. The realtime console paths stay open to every user. Frappe handles access for every other user and route.
+Central tokens need `sub=central`, `scope=*`, and `tenant=*`. Atlas applies its regional subject and tenant policy to each regional token. The Atlas scope applies only to tenant API routes. It does not grant access to global administration routes.
+
+Atlas binds each key namespace to its issuer. A `central:*` key can validate only `iss=central`. An `atlas:<region ID>:*` key can validate only the matching regional issuer. Atlas refuses a key from another region.
+
+The public key set is at `GET /api/atlas/jwks.json`. Atlas gets Central keys every 5 minutes and keeps the last valid set after a fetch failure. The endpoint also contains the regional Atlas public key. The response does not contain a private key.
+
+An `/api/atlas` route requires verified service claims or a System Manager. The route handler does the resource and tenant permission checks. An Atlas Admin session without verified claims cannot use the API. A guest can read the API reference and the public key set. The realtime console paths stay open to every user.
 
 ## Tenant
 
 Each request must carry `X-Tenant-ID` with an unsigned 32-bit integer from 1 through 4294967295. Tenant `0` is reserved for System Manager Desk and DocType actions.
 
-A missing or invalid tenant header returns `400`. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
+A missing or invalid tenant header returns `400`. The header must match the token tenant unless the token contains `tenant=*`. A tenant mismatch returns `400`. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
 
 ## Conventions
 
@@ -36,7 +42,7 @@ Use [the virtual machine specification](../vm/SPEC.md) for the virtual machine a
 
 ## Layout
 
-`atlas/api/core/` holds the typed HTTP framework. `base.py` registers routes on the Frappe API URL map and builds responses, `binding.py` owns request decoding, `errors.py` owns the API failures, and `docs.py` owns the OpenAPI document and the Scalar reference page. `atlas/api/router.py`, `atlas/api/models.py`, and `atlas/api/routes/` hold the Atlas surface. `atlas/auth/request.py` owns API route authentication, `atlas/auth/token.py` owns central token validation, `atlas/auth/user.py` owns the Atlas Admin user, `atlas/auth/roles.py` owns role checks, `atlas/auth/tenant.py` owns tenant parsing, and `atlas/auth/overrides.py` owns the shared tenant permission overrides that each Atlas DocType registers.
+`atlas/api/core/` holds the typed HTTP framework. `atlas/api/router.py`, `atlas/api/models.py`, and `atlas/api/routes/` hold the Atlas API. `atlas/auth/request.py` owns request authentication. `atlas/auth/token.py` validates tokens. `atlas/auth/jwks.py` owns the merged key set. `atlas/auth/issuer.py` creates regional tokens. The other files in `atlas/auth/` own users, roles, tenants, and permission overrides.
 
 `atlas.api.router.register_atlas_api` imports every route module. The `before_request` hook calls it, so the routes exist before Frappe matches an API request.
 
