@@ -122,7 +122,7 @@ Use `Grant Privilege` and `Revoke Privilege` under `Dangerous Actions` to change
 
 The image is shared, so nothing per VM can be baked into it. `atlas-metadata.service` reads MMDS and applies the hostname and the mesh address. It writes a systemd-networkd drop-in with the address and the `fdaa::/16` route, then reloads networkd. Each step does nothing when the value already matches.
 
-`atlas-metadata.timer` repeats the unit every 10 seconds. A warm snapshot resumes with new MMDS content, and systemd does not start a unit again after a resume, so a warm VM needs the repeat to receive its own hostname and address. cloud-init uses `preserve_hostname`, so the unit is the only owner of the hostname.
+`atlas-metadata.service` reads MMDS every 250 ms. This lets a warm VM receive its own hostname and address after resume. cloud-init uses `preserve_hostname`, so the service owns the hostname.
 
 ## Custom metadata
 

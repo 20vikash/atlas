@@ -157,32 +157,18 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=exec
 ExecStart=/usr/local/lib/atlas/apply-metadata
+Restart=always
+RestartSec=1s
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-	cat > "$rootfs_directory/etc/systemd/system/atlas-metadata.timer" <<'EOF'
-[Unit]
-Description=Reapply the per-VM Atlas metadata
-
-[Timer]
-OnBootSec=10s
-OnUnitActiveSec=10s
-AccuracySec=1s
-
-[Install]
-WantedBy=timers.target
-EOF
-
 	install -d -m 0755 "$rootfs_directory/etc/systemd/system/multi-user.target.wants"
 	ln -sf /etc/systemd/system/atlas-metadata.service \
 		"$rootfs_directory/etc/systemd/system/multi-user.target.wants/atlas-metadata.service"
-	install -d -m 0755 "$rootfs_directory/etc/systemd/system/timers.target.wants"
-	ln -sf /etc/systemd/system/atlas-metadata.timer \
-		"$rootfs_directory/etc/systemd/system/timers.target.wants/atlas-metadata.timer"
 }
 
 install_serial_console() {

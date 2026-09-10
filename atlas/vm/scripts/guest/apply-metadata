@@ -3,36 +3,75 @@ import ipaddress
 import pathlib
 import socket
 import subprocess
-from urllib.request import Request, urlopen
+import time
 
-METADATA_BASE = "http://169.254.169.254/latest"
+METADATA_ADDRESS = ("169.254.169.254", 80)
+METADATA_PATH_PREFIX = "/latest"
 DROP_IN_PATH = pathlib.Path("/run/systemd/network/10-atlas.network.d/mesh.conf")
 MESH_GATEWAY = "fe80::1"
 MESH_PREFIX = "fdaa::/16"
 MESH_MTU = 1380
 TOKEN_TTL_SECONDS = "21600"
+POLL_SECONDS = 0.25
+TIMEOUT_SECONDS = 3
 
 
-def fetch(path, token="", method="GET", headers=None):
-    request_headers = dict(headers or {})
-    if token:
-        request_headers["X-metadata-token"] = token
-    request = Request(
-        f"{METADATA_BASE}/{path}", method=method, headers=request_headers
-    )
-    return urlopen(request, timeout=3).read().decode().strip()
+def content_length(head):
+    for line in head.split(b"\r\n")[1:]:
+        name, _, value = line.partition(b":")
+        if name.strip().lower() == b"content-length":
+            return int(value.strip())
+    return 0
+
+
+def read_response(connection):
+    """Return the head and the complete body of one HTTP response."""
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = connection.recv(4096)
+        if not chunk:
+            raise OSError("the metadata service closed the connection")
+        data += chunk
+
+    head, _, body = data.partition(b"\r\n\r\n")
+    length = content_length(head)
+    while len(body) < length:
+        chunk = connection.recv(4096)
+        if not chunk:
+            raise OSError("the metadata service sent a short body")
+        body += chunk
+    return head, body[:length]
+
+
+def request(method, path, headers):
+    """Return one MMDS response body, or an empty string on failure."""
+    lines = [f"{method} {METADATA_PATH_PREFIX}/{path} HTTP/1.1", "Host: metadata"]
+    lines.extend(f"{name}: {value}" for name, value in headers.items())
+    message = ("\r\n".join(lines) + "\r\n\r\n").encode()
+
+    try:
+        with socket.create_connection(METADATA_ADDRESS, TIMEOUT_SECONDS) as connection:
+            connection.settimeout(TIMEOUT_SECONDS)
+            connection.sendall(message)
+            head, body = read_response(connection)
+    except (OSError, ValueError):
+        return ""
+
+    if b" 200 " not in head.split(b"\r\n", 1)[0]:
+        return ""
+    return body.decode(errors="replace").strip()
+
+
+def get_token():
+    return request("PUT", "api/token", {"X-metadata-token-ttl-seconds": TOKEN_TTL_SECONDS})
 
 
 def read(path, token):
-    try:
-        return fetch(path, token)
-    except Exception:
-        return ""
+    return request("GET", path, {"X-metadata-token": token})
 
 
-def apply_hostname(token):
-    hostname = read("meta-data/local-hostname", token)
-    if not hostname or hostname == socket.gethostname():
+def apply_hostname(hostname):
+    if hostname == socket.gethostname():
         return
     subprocess.run(["hostnamectl", "set-hostname", hostname], check=True)
 
@@ -50,11 +89,7 @@ def mesh_drop_in(address):
     )
 
 
-def apply_mesh_network(token):
-    address = read("meta-data/mesh-ipv6", token)
-    if not address:
-        return
-
+def apply_mesh_network(address):
     drop_in = mesh_drop_in(ipaddress.IPv6Address(address))
     if DROP_IN_PATH.exists() and DROP_IN_PATH.read_text() == drop_in:
         return
@@ -65,17 +100,22 @@ def apply_mesh_network(token):
 
 
 def main():
-    try:
-        token = fetch(
-            "api/token",
-            method="PUT",
-            headers={"X-metadata-token-ttl-seconds": TOKEN_TTL_SECONDS},
-        )
-    except Exception:
-        return
-
-    apply_hostname(token)
-    apply_mesh_network(token)
+    """Watch MMDS and apply metadata changes."""
+    token = ""
+    while True:
+        if not token:
+            token = get_token()
+        if token:
+            hostname = read("meta-data/local-hostname", token)
+            address = read("meta-data/mesh-ipv6", token)
+            if not hostname and not address:
+                token = ""
+            else:
+                if hostname:
+                    apply_hostname(hostname)
+                if address:
+                    apply_mesh_network(address)
+        time.sleep(POLL_SECONDS)
 
 
 main()
