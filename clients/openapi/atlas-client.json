@@ -835,23 +835,76 @@
         "title": "SnapshotPayload",
         "type": "object"
       },
+      "VirtualMachineCompute": {
+        "description": "The compute shape of one virtual machine.",
+        "properties": {
+          "memory_mib": {
+            "title": "Memory Mib",
+            "type": "integer"
+          },
+          "sleep_after_idle_seconds": {
+            "title": "Sleep After Idle Seconds",
+            "type": "integer"
+          },
+          "vcpus": {
+            "title": "Vcpus",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "vcpus",
+          "memory_mib",
+          "sleep_after_idle_seconds"
+        ],
+        "title": "VirtualMachineCompute",
+        "type": "object"
+      },
       "VirtualMachineDetailResponse": {
-        "description": "A stored virtual machine with its live host state.",
+        "description": "One virtual machine with its state, addresses, and guest configuration.",
         "examples": [
           {
+            "compute": {
+              "memory_mib": 2048,
+              "sleep_after_idle_seconds": 0,
+              "vcpus": 2
+            },
             "created_at": 1788834165,
             "current_state": "running",
             "desired_state": "running",
-            "disk_mib": 20480,
+            "disk": {
+              "iops": 0,
+              "size_mib": 20480,
+              "throughput_mibps": 0,
+              "used_mib": 8123
+            },
+            "error": null,
+            "guest": {
+              "hostname": "worker-1",
+              "metadata": {
+                "role": "worker"
+              },
+              "ssh_keys": [
+                "ssh-ed25519 AAAA"
+              ]
+            },
             "id": "vm-00001",
             "image_id": "8f1c2d3e4b5a6978",
-            "memory_mib": 2048,
-            "sleep_after_idle_seconds": 0,
-            "tenant_id": 7,
-            "vcpus": 2
+            "is_privileged": false,
+            "network": {
+              "egress": "uplink",
+              "mac": "52:54:00:12:34:56",
+              "mesh_ipv6": "fdaa:1::5",
+              "private_network_throughput_mibps": 0,
+              "public_ipv4": "203.0.113.10",
+              "public_network_throughput_mibps": 0
+            },
+            "tenant_id": 7
           }
         ],
         "properties": {
+          "compute": {
+            "$ref": "#/components/schemas/VirtualMachineCompute"
+          },
           "created_at": {
             "title": "Created At",
             "type": "integer"
@@ -871,9 +924,22 @@
             ],
             "title": "Desired State"
           },
-          "disk_mib": {
-            "title": "Disk Mib",
-            "type": "integer"
+          "disk": {
+            "$ref": "#/components/schemas/VirtualMachineDisk"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "guest": {
+            "$ref": "#/components/schemas/VirtualMachineGuest"
           },
           "id": {
             "title": "Id",
@@ -883,20 +949,15 @@
             "title": "Image Id",
             "type": "string"
           },
-          "memory_mib": {
-            "title": "Memory Mib",
-            "type": "integer"
+          "is_privileged": {
+            "title": "Is Privileged",
+            "type": "boolean"
           },
-          "sleep_after_idle_seconds": {
-            "title": "Sleep After Idle Seconds",
-            "type": "integer"
+          "network": {
+            "$ref": "#/components/schemas/VirtualMachineNetwork"
           },
           "tenant_id": {
             "title": "Tenant Id",
-            "type": "integer"
-          },
-          "vcpus": {
-            "title": "Vcpus",
             "type": "integer"
           }
         },
@@ -904,15 +965,90 @@
           "id",
           "tenant_id",
           "image_id",
-          "vcpus",
-          "memory_mib",
-          "disk_mib",
-          "sleep_after_idle_seconds",
           "created_at",
+          "is_privileged",
           "desired_state",
-          "current_state"
+          "current_state",
+          "error",
+          "compute",
+          "disk",
+          "network",
+          "guest"
         ],
         "title": "VirtualMachineDetailResponse",
+        "type": "object"
+      },
+      "VirtualMachineDisk": {
+        "description": "The disk size and its rate limits.",
+        "properties": {
+          "iops": {
+            "title": "Iops",
+            "type": "integer"
+          },
+          "size_mib": {
+            "title": "Size Mib",
+            "type": "integer"
+          },
+          "throughput_mibps": {
+            "title": "Throughput Mibps",
+            "type": "integer"
+          },
+          "used_mib": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Mib"
+          }
+        },
+        "required": [
+          "size_mib",
+          "throughput_mibps",
+          "iops",
+          "used_mib"
+        ],
+        "title": "VirtualMachineDisk",
+        "type": "object"
+      },
+      "VirtualMachineGuest": {
+        "description": "The guest configuration of one virtual machine.",
+        "properties": {
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "ssh_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ssh Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hostname",
+          "ssh_keys",
+          "metadata"
+        ],
+        "title": "VirtualMachineGuest",
         "type": "object"
       },
       "VirtualMachineListResponse": {
@@ -993,6 +1129,73 @@
           "state_synced_at"
         ],
         "title": "VirtualMachineListResponse",
+        "type": "object"
+      },
+      "VirtualMachineNetwork": {
+        "description": "The addresses and network limits of one virtual machine.",
+        "properties": {
+          "egress": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Egress"
+          },
+          "mac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mac"
+          },
+          "mesh_ipv6": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mesh Ipv6"
+          },
+          "private_network_throughput_mibps": {
+            "title": "Private Network Throughput Mibps",
+            "type": "integer"
+          },
+          "public_ipv4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ipv4"
+          },
+          "public_network_throughput_mibps": {
+            "title": "Public Network Throughput Mibps",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "egress",
+          "public_ipv4",
+          "mesh_ipv6",
+          "mac",
+          "private_network_throughput_mibps",
+          "public_network_throughput_mibps"
+        ],
+        "title": "VirtualMachineNetwork",
         "type": "object"
       },
       "VirtualMachineResponse": {

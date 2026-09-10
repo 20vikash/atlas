@@ -37,6 +37,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"memory_mib": 2048,
 		"disk_mib": 20480,
 		"sleep_after_idle_seconds": 0,
+		"is_privileged": 0,
 		"is_draft": 0,
 		"is_terminating": 0,
 		"creation": "2026-09-08T10:00:00+05:30",
@@ -50,6 +51,34 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
+
+
+def build_metal_information() -> SimpleNamespace:
+	"""Return one Metal record with a desired and an observed half."""
+	return SimpleNamespace(
+		desired=SimpleNamespace(
+			state="running",
+			disk=SimpleNamespace(throughput_mibps=100, iops=500),
+			network=SimpleNamespace(
+				egress="uplink",
+				public_ipv4="203.0.113.10",
+				wireguard_mesh_ipv6="fdaa:1::5",
+				private_network_throughput_mibps=0,
+				public_network_throughput_mibps=0,
+			),
+			guest=SimpleNamespace(
+				hostname="worker-1",
+				ssh_keys=("ssh-ed25519 AAAA",),
+				metadata={"role": "worker"},
+			),
+		),
+		observed=SimpleNamespace(
+			state="stopped",
+			disk=SimpleNamespace(used_mib=8123),
+			network=SimpleNamespace(mac="52:54:00:12:34:56"),
+			error=SimpleNamespace(message="boot failed"),
+		),
+	)
 
 
 def stored_rows(rows: list[SimpleNamespace]):
@@ -78,16 +107,38 @@ class TestVirtualMachineViews(UnitTestCase):
 		self.assertNotIn("virtual_machine_image_id", summary.model_fields)
 		self.assertNotIn("server", summary.model_fields)
 
-	def test_detail_exposes_only_public_state_names(self) -> None:
-		information = SimpleNamespace(
-			desired=SimpleNamespace(state="running"),
-			observed=SimpleNamespace(state="stopped"),
+	def test_detail_carries_the_addresses_and_the_guest_configuration(self) -> None:
+		detail = VirtualMachineDetailResponse.from_document_and_metal(
+			build_virtual_machine(), build_metal_information()
 		)
-		detail = VirtualMachineDetailResponse.from_document_and_metal(build_virtual_machine(), information)
 
 		self.assertEqual(detail.desired_state, "running")
 		self.assertEqual(detail.current_state, "stopped")
-		self.assertNotIn("operation", detail.model_fields)
+		self.assertEqual(detail.network.public_ipv4, "203.0.113.10")
+		self.assertEqual(detail.network.mesh_ipv6, "fdaa:1::5")
+		self.assertEqual(detail.network.mac, "52:54:00:12:34:56")
+		self.assertEqual(detail.network.egress, "uplink")
+		self.assertEqual(detail.disk.iops, 500)
+		self.assertEqual(detail.disk.used_mib, 8123)
+		self.assertEqual(detail.guest.ssh_keys, ["ssh-ed25519 AAAA"])
+		self.assertEqual(detail.guest.metadata, {"role": "worker"})
+		self.assertEqual(detail.error, "boot failed")
+
+	def test_detail_hides_the_host_operation_data(self) -> None:
+		detail = VirtualMachineDetailResponse.from_document_and_metal(
+			build_virtual_machine(), build_metal_information()
+		)
+
+		for field in ("operation_id", "phase", "generation", "restart_generation", "server"):
+			self.assertNotIn(field, detail.model_fields)
+
+	def test_detail_without_metal_state_reports_unknown(self) -> None:
+		detail = VirtualMachineDetailResponse.from_document_and_metal(build_virtual_machine(), None)
+
+		self.assertIsNone(detail.desired_state)
+		self.assertEqual(detail.current_state, "unknown")
+		self.assertIsNone(detail.network.public_ipv4)
+		self.assertEqual(detail.guest.ssh_keys, [])
 
 
 class TestCreateVirtualMachine(UnitTestCase):
