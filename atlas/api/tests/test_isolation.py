@@ -64,7 +64,7 @@ class TestPermissionQueryConditions(IntegrationTestCase):
 	def setUp(self) -> None:
 		self.own_image = insert_image(TENANT_ID)
 		self.other_image = insert_image(OTHER_TENANT_ID)
-		self.system_image = insert_image(0, "System")
+		self.system_image = insert_image(0, "system")
 
 	def test_the_hook_filters_a_query_that_carries_no_tenant_filter(self) -> None:
 		with api_request(tenant_id=TENANT_ID):

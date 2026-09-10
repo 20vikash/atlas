@@ -148,7 +148,7 @@ class ImageResponse(BaseModel):
 			id=image.name,
 			tenant_id=image.tenant_id,
 			title=image.title,
-			image_type=image.image_type.lower(),
+			image_type=image.image_type,
 			platform=image.platform,
 			operating_system=image.operating_system,
 			operating_system_version=image.operating_system_version,
@@ -309,9 +309,10 @@ class IPAddressAssignmentPayload(StrictModel):
 
 
 class SnapshotPayload(StrictModel):
-	"""Values that create one Machine image from a virtual machine."""
+	"""Values that create one image from a virtual machine."""
 
 	title: str = Field(min_length=1)
+	image_type: Literal["machine", "system"] = "machine"
 	cache_image: bool = False
 	memory_snapshot: bool = False
 

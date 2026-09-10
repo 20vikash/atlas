@@ -236,7 +236,12 @@ def restart_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachine
 
 @virtual_machine_actions.post("<virtual_machine_id>/actions/snapshot")
 @api_docs(
-	request_example={"title": "worker-1 golden", "cache_image": False, "memory_snapshot": False},
+	request_example={
+		"title": "worker-1 golden",
+		"image_type": "machine",
+		"cache_image": False,
+		"memory_snapshot": False,
+	},
 	responses={201: {"description": "The Machine image record is created."}},
 )
 def create_virtual_machine_snapshot(
@@ -246,11 +251,12 @@ def create_virtual_machine_snapshot(
 
 	Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.
 
-	If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts.
+	If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	image_name = virtual_machine.create_machine_image(
 		payload.title.strip(),
+		image_type=payload.image_type,
 		cache_image=payload.cache_image,
 		memory_snapshot=payload.memory_snapshot,
 	)

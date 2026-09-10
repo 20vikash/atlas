@@ -135,7 +135,7 @@ class TestTenantDocumentPermissions(UnitTestCase):
 			self.assertFalse(has_permission(document, "read"))
 
 	def test_a_system_image_is_readable_but_not_writable(self) -> None:
-		document = build_image(tenant_id=0, image_type="System")
+		document = build_image(tenant_id=0, image_type="system")
 		with api_request(tenant_id=7):
 			self.assertTrue(has_permission(document, "read"))
 			self.assertFalse(has_permission(document, "write"))
@@ -146,7 +146,7 @@ class TestTenantDocumentPermissions(UnitTestCase):
 			condition = get_permission_query_conditions(doctype="Virtual Machine Image")
 
 		self.assertIn("tenant_id` = 7", condition)
-		self.assertIn("image_type` = 'System'", condition)
+		self.assertIn("image_type` = 'system'", condition)
 
 	def test_an_identity_filters_a_system_manager_too(self) -> None:
 		with api_request(tenant_id=7), patch("atlas.auth.overrides.has_role", return_value=True):

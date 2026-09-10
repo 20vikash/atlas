@@ -40,7 +40,7 @@ def get_permission_query_conditions(user: str | None = None, doctype: str | None
 
 	condition = f"`tab{doctype}`.`tenant_id` = {tenant_id}"
 	if doctype == "Virtual Machine Image":
-		return f"({condition} OR `tabVirtual Machine Image`.`image_type` = 'System')"
+		return f"({condition} OR `tabVirtual Machine Image`.`image_type` = 'system')"
 	return condition
 
 

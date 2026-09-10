@@ -27,6 +27,7 @@ from .page_virtual_machine_list_response import PageVirtualMachineListResponse
 from .reserve_ip_address_payload import ReserveIPAddressPayload
 from .reserve_ip_address_payload_source import ReserveIPAddressPayloadSource
 from .snapshot_payload import SnapshotPayload
+from .snapshot_payload_image_type import SnapshotPayloadImageType
 from .ssh_keys_replacement_payload import SSHKeysReplacementPayload
 from .virtual_machine_detail_response import VirtualMachineDetailResponse
 from .virtual_machine_list_response import VirtualMachineListResponse
@@ -60,6 +61,7 @@ __all__ = (
     "ReserveIPAddressPayload",
     "ReserveIPAddressPayloadSource",
     "SnapshotPayload",
+    "SnapshotPayloadImageType",
     "SSHKeysReplacementPayload",
     "VirtualMachineDetailResponse",
     "VirtualMachineListResponse",

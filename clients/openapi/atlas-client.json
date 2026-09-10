@@ -797,12 +797,21 @@
       },
       "SnapshotPayload": {
         "additionalProperties": false,
-        "description": "Values that create one Machine image from a virtual machine.",
+        "description": "Values that create one image from a virtual machine.",
         "properties": {
           "cache_image": {
             "default": false,
             "title": "Cache Image",
             "type": "boolean"
+          },
+          "image_type": {
+            "default": "machine",
+            "enum": [
+              "machine",
+              "system"
+            ],
+            "title": "Image Type",
+            "type": "string"
           },
           "memory_snapshot": {
             "default": false,
@@ -1130,7 +1139,7 @@
     },
     "/api/atlas/images/{image_id}": {
       "delete": {
-        "description": "Starts deletion of an unused Available Machine image. A cleanup job removes its stored artifacts and remaining host snapshot data.",
+        "description": "Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored artifacts and remaining host snapshot data.",
         "operationId": "delete_image",
         "parameters": [
           {
@@ -1165,7 +1174,7 @@
             "description": "Deletion started. Poll the image route."
           },
           "409": {
-            "description": "A virtual machine uses this image, or the image is not a Machine image."
+            "description": "A virtual machine uses this image, or another tenant owns it."
           }
         },
         "summary": "Delete image",
@@ -1474,7 +1483,7 @@
           }
         },
         "security": [],
-        "summary": "Return the public keys that this Atlas region trusts",
+        "summary": "JSON Web Key Set (JWKS)",
         "tags": [
           "Atlas"
         ]
@@ -1862,7 +1871,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/actions/snapshot": {
       "post": {
-        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts.",
+        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.",
         "operationId": "create_virtual_machine_snapshot",
         "parameters": [
           {
@@ -1890,6 +1899,7 @@
             "application/json": {
               "example": {
                 "cache_image": false,
+                "image_type": "machine",
                 "memory_snapshot": false,
                 "title": "worker-1 golden"
               },

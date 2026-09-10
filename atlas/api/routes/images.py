@@ -38,7 +38,7 @@ def list_images(query: ListQuery) -> Page[ImageResponse]:
 	"""
 	rows: list[VirtualMachineImage] = frappe.get_list(
 		"Virtual Machine Image",
-		or_filters={"tenant_id": get_current_tenant_id(), "image_type": "System"},
+		or_filters={"tenant_id": get_current_tenant_id(), "image_type": "system"},
 		fields=[
 			"name",
 			"tenant_id",
@@ -94,16 +94,16 @@ def download_image(image_id: str, query: ImageDownloadQuery) -> ApiResult[ImageD
 @api_docs(
 	responses={
 		202: {"description": "Deletion started. Poll the image route."},
-		409: {"description": "A virtual machine uses this image, or the image is not a Machine image."},
+		409: {"description": "A virtual machine uses this image, or another tenant owns it."},
 	},
 )
 def delete_image(image_id: str) -> ApiResult[ImageResponse]:
 	"""Delete image.
 
-	Starts deletion of an unused Available Machine image. A cleanup job removes its stored artifacts and remaining host snapshot data.
+	Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored artifacts and remaining host snapshot data.
 	"""
 	image = get_owned_image(image_id)
-	if image.is_shared:
-		raise ResourceConflict("Only a Machine image can be deleted.")
+	if image.tenant_id != get_current_tenant_id():
+		raise ResourceConflict("A shared System image of another tenant cannot be deleted.")
 	image.request_deletion()
 	return ApiResult(ImageResponse.from_document(image), status=202)

@@ -64,6 +64,8 @@ A token with a tenant claim needs no header. A header that names another tenant 
 
 Tenant `0` is reserved for System Manager Desk and DocType actions. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
 
+A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snapshot` only from tenant `0`, which is a System Manager action. Any other tenant that sends one receives `400`, and its snapshot becomes a Machine image. These values cannot change after the image exists.
+
 ## Conventions
 
 An error response has `error.code`, `error.message`, and `error.fields`. Validation errors use `400`; missing authentication uses `401`; denied access uses `403`; missing resources use `404`; and invalid resource state uses `409`.

@@ -28,7 +28,9 @@ Each tenant record carries a `tenant_id`. The `tenant` claim of the token decide
 
 The Frappe permission hooks are the enforcement point. `permission_query_conditions` filters each list query and `has_permission` checks each document, both for `Virtual Machine`, `Virtual Machine Image`, and `Metal Server IP Address`. A list route uses `frappe.get_list`, so the hook applies. `get_owned_document` applies the same rule to a single resource and returns `404` for a record of another tenant. Outside an Atlas API request there is no identity, so a caller without the System Manager role reads nothing.
 
-A System image is the one shared record. Every tenant can read, boot, and download it. Only its owner can write or delete a Machine image.
+A System image is the one shared record. Every tenant can read, boot, and download it. Only its owner can write or delete an image it owns.
+
+A snapshot request carries `image_type`. Only tenant `0` may ask for `system`, and only tenant `0` may set the `cache_image` and `memory_snapshot` flags. Any other tenant that sends one of these values receives an error, and the default image type is `machine`. All 3 values are set at creation, and no API route changes them later.
 
 Tenant `0` is reserved. A privileged virtual machine reaches every tenant through the mesh, and an address without a tenant is in the shared pool, so both need a System Manager.
 
