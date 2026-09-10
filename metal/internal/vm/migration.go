@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -17,6 +18,19 @@ type MigrationSourceClient interface {
 	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID, token string) (PortableConfig, State, error)
 	// RemoveSource unlocks the source VM and removes its migration state.
 	RemoveSource(ctx context.Context, address, migrationID, token string) error
+}
+
+// DiskTransfer runs the ZFS operations of one migration. The source host uses
+// the snapshot and send calls; the target host uses the receive calls.
+type DiskTransfer interface {
+	CreateSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
+	RemoveSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
+	SnapshotGUID(ctx context.Context, virtualMachineID, snapshotName string) (string, error)
+	EstimateStreamBytes(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName string) (int64, error)
+	SendSnapshot(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string, w io.Writer) (int64, error)
+	TargetDatasetExists(ctx context.Context, virtualMachineID string) (bool, error)
+	ReceiveResumeToken(ctx context.Context, virtualMachineID string) (string, error)
+	ReceiveSnapshot(ctx context.Context, virtualMachineID string, r io.Reader) error
 }
 
 // reservationTimeout removes a target reservation whose worker never supplies a
@@ -47,6 +61,7 @@ type MigrationManager struct {
 	machines *Manager
 	store    *migrationStore
 	source   MigrationSourceClient
+	transfer DiskTransfer
 	capacity CapacitySource
 	locks    keyedLocks
 	logger   *slog.Logger
@@ -55,8 +70,8 @@ type MigrationManager struct {
 
 // NewMigrationManager validates the stored records and returns a migration
 // manager for one host.
-func NewMigrationManager(machines *Manager, source MigrationSourceClient, capacity CapacitySource, logger *slog.Logger) (*MigrationManager, error) {
-	if machines == nil || source == nil || capacity == nil {
+func NewMigrationManager(machines *Manager, source MigrationSourceClient, transfer DiskTransfer, capacity CapacitySource, logger *slog.Logger) (*MigrationManager, error) {
+	if machines == nil || source == nil || transfer == nil || capacity == nil {
 		return nil, fmt.Errorf("migration manager dependencies are required")
 	}
 	if logger == nil {
@@ -70,6 +85,7 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, capaci
 		machines: machines,
 		store:    store,
 		source:   source,
+		transfer: transfer,
 		capacity: capacity,
 		logger:   logger,
 		now:      func() time.Time { return time.Now().UTC() },

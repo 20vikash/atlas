@@ -3,12 +3,28 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 )
 
 // SourceHandshake is the portable state that the source returns to the target.
 type SourceHandshake struct {
 	Config        PortableConfig
 	ObservedState State
+}
+
+// SourceSnapshot is the source reply to a snapshot request.
+type SourceSnapshot struct {
+	Sequence  int
+	SizeBytes int64
+	GUID      string
+}
+
+// migrationSnapshotName names the source snapshot for one migration interval. It
+// includes the migration ID so a stale snapshot from a prior migration on the
+// same VM never collides.
+func migrationSnapshotName(migrationID string, sequence int) string {
+	return fmt.Sprintf("migration-%s-%d", migrationID, sequence)
 }
 
 // LockSource locks the source VM and returns its portable config and observed
@@ -82,6 +98,93 @@ func (m *MigrationManager) UnlockSource(ctx context.Context, migrationID, virtua
 		return ErrConflict
 	}
 	return m.store.remove(virtualMachineID)
+}
+
+// NextSourceSnapshot records the acknowledged sequence, rotates old snapshots,
+// and returns the next snapshot for the target to pull. A repeat returns the
+// same unacknowledged snapshot.
+func (m *MigrationManager) NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID, caller string, receivedSequence int) (SourceSnapshot, error) {
+	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+	defer unlock()
+
+	record, err := m.boundSourceRecord(virtualMachineID, migrationID, caller)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+
+	if receivedSequence > record.AcknowledgedSequence {
+		record.AcknowledgedSequence = receivedSequence
+		if err := m.store.writeSource(record); err != nil {
+			return SourceSnapshot{}, err
+		}
+		if receivedSequence >= 2 {
+			_ = m.transfer.RemoveSnapshot(ctx, virtualMachineID, migrationSnapshotName(migrationID, receivedSequence-1))
+		}
+	}
+
+	if record.Sequence <= record.AcknowledgedSequence {
+		next := record.AcknowledgedSequence + 1
+		if err := m.transfer.CreateSnapshot(ctx, virtualMachineID, migrationSnapshotName(migrationID, next)); err != nil {
+			return SourceSnapshot{}, err
+		}
+		record.Sequence = next
+		if err := m.store.writeSource(record); err != nil {
+			return SourceSnapshot{}, err
+		}
+	}
+	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.Sequence)
+}
+
+// SendSourceStream streams one requested snapshot to the target. It does not
+// hold the VM lock while data moves. An unknown sequence is rejected.
+func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, w io.Writer) (int64, error) {
+	record, err := m.boundSourceRecord(virtualMachineID, migrationID, caller)
+	if err != nil {
+		return 0, err
+	}
+	if sequence != record.Sequence {
+		return 0, ErrConflict
+	}
+	name := migrationSnapshotName(migrationID, sequence)
+	base := ""
+	if sequence > 1 {
+		base = migrationSnapshotName(migrationID, sequence-1)
+	}
+	return m.transfer.SendSnapshot(ctx, virtualMachineID, name, base, resumeToken, w)
+}
+
+// describeSnapshot returns the sequence, estimated size, and GUID of one snapshot.
+func (m *MigrationManager) describeSnapshot(ctx context.Context, virtualMachineID, migrationID string, sequence int) (SourceSnapshot, error) {
+	name := migrationSnapshotName(migrationID, sequence)
+	base := ""
+	if sequence > 1 {
+		base = migrationSnapshotName(migrationID, sequence-1)
+	}
+	sizeBytes, err := m.transfer.EstimateStreamBytes(ctx, virtualMachineID, name, base)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+	guid, err := m.transfer.SnapshotGUID(ctx, virtualMachineID, name)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+	return SourceSnapshot{Sequence: sequence, SizeBytes: sizeBytes, GUID: guid}, nil
+}
+
+// boundSourceRecord returns the source record after it confirms the migration ID
+// and caller match, so one migration cannot act on another's lock.
+func (m *MigrationManager) boundSourceRecord(virtualMachineID, migrationID, caller string) (SourceMigrationRecord, error) {
+	record, err := m.store.readSource(virtualMachineID)
+	if err != nil {
+		return SourceMigrationRecord{}, err
+	}
+	if record.ID != migrationID || record.Caller != caller {
+		return SourceMigrationRecord{}, ErrConflict
+	}
+	return record, nil
 }
 
 // sourceHandshake reads the current VM records into the portable response.

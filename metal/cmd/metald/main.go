@@ -331,6 +331,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	migrationManager, err = vm.NewMigrationManager(
 		virtualMachineManager,
 		vm.NewHTTPSourceClient(0),
+		storage.NewMigrationTransfer(stores.Pool),
 		migrationCapacity,
 		logger,
 	)

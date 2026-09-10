@@ -1,11 +1,115 @@
 package vm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 	"time"
 )
+
+// writeSourceRecord sets up a source lock record for the transfer tests.
+func writeSourceRecord(t *testing.T, machines *Manager) {
+	t.Helper()
+	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	record := SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Caller: "metal-1"}
+	if err := store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNextSourceSnapshotWalksSequences(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer.guid = "g"
+	transfer.sizeBytes = 1000
+	writeSourceRecord(t, machines)
+	ctx := context.Background()
+
+	first, err := migrationManager.NextSourceSnapshot(ctx, "mig-1", "vm-1", "metal-1", 0)
+	if err != nil || first.Sequence != 1 || first.SizeBytes != 1000 || first.GUID != "g" {
+		t.Fatalf("first = %+v, %v", first, err)
+	}
+
+	second, err := migrationManager.NextSourceSnapshot(ctx, "mig-1", "vm-1", "metal-1", 1)
+	if err != nil || second.Sequence != 2 {
+		t.Fatalf("second = %+v, %v", second, err)
+	}
+	third, err := migrationManager.NextSourceSnapshot(ctx, "mig-1", "vm-1", "metal-1", 2)
+	if err != nil || third.Sequence != 3 {
+		t.Fatalf("third = %+v, %v", third, err)
+	}
+	if want := []string{"migration-mig-1-1", "migration-mig-1-2", "migration-mig-1-3"}; !equalStringSlices(transfer.created, want) {
+		t.Fatalf("created = %v", transfer.created)
+	}
+	// Acknowledging sequence 2 removes sequence 1 and keeps 2 as the base.
+	if want := []string{"migration-mig-1-1"}; !equalStringSlices(transfer.removed, want) {
+		t.Fatalf("removed = %v", transfer.removed)
+	}
+}
+
+func TestNextSourceSnapshotIsIdempotent(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	writeSourceRecord(t, machines)
+	ctx := context.Background()
+
+	if _, err := migrationManager.NextSourceSnapshot(ctx, "mig-1", "vm-1", "metal-1", 0); err != nil {
+		t.Fatal(err)
+	}
+	created := len(transfer.created)
+	repeat, err := migrationManager.NextSourceSnapshot(ctx, "mig-1", "vm-1", "metal-1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repeat.Sequence != 1 || len(transfer.created) != created {
+		t.Fatalf("repeat = %+v, created %d", repeat, len(transfer.created))
+	}
+}
+
+func TestNextSourceSnapshotRejectsAnotherMigration(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	writeSourceRecord(t, machines)
+
+	if _, err := migrationManager.NextSourceSnapshot(context.Background(), "mig-2", "vm-1", "metal-1", 0); !errors.Is(err, ErrConflict) {
+		t.Fatalf("other migration = %v, want ErrConflict", err)
+	}
+}
+
+func TestSendSourceStreamRejectsAnUnknownSequence(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer.sentBytes = 2048
+	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	if err := store.writeSource(SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Caller: "metal-1", Sequence: 2}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	var buffer bytes.Buffer
+	written, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 2, "", &buffer)
+	if err != nil || written != 2048 {
+		t.Fatalf("send = %d, %v", written, err)
+	}
+	if want := []string{"migration-mig-1-2|migration-mig-1-1|"}; !equalStringSlices(transfer.sent, want) {
+		t.Fatalf("sent = %v", transfer.sent)
+	}
+	if _, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 3, "", &buffer); !errors.Is(err, ErrConflict) {
+		t.Fatalf("unknown sequence = %v, want ErrConflict", err)
+	}
+}
+
+func equalStringSlices(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
 
 func setObservedState(t *testing.T, machines *Manager, virtualMachineID string, state State) {
 	t.Helper()

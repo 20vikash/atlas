@@ -3,8 +3,66 @@ package vm
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 )
+
+type fakeTransfer struct {
+	created       []string
+	removed       []string
+	sent          []string
+	guid          string
+	sizeBytes     int64
+	sentBytes     int64
+	datasetExists bool
+	resumeToken   string
+	received      int
+	sendErr       error
+	receiveErr    error
+}
+
+func (f *fakeTransfer) CreateSnapshot(_ context.Context, _, name string) error {
+	f.created = append(f.created, name)
+	return nil
+}
+
+func (f *fakeTransfer) RemoveSnapshot(_ context.Context, _, name string) error {
+	f.removed = append(f.removed, name)
+	return nil
+}
+
+func (f *fakeTransfer) SnapshotGUID(_ context.Context, _, _ string) (string, error) {
+	return f.guid, nil
+}
+
+func (f *fakeTransfer) EstimateStreamBytes(_ context.Context, _, _, _ string) (int64, error) {
+	return f.sizeBytes, nil
+}
+
+func (f *fakeTransfer) SendSnapshot(_ context.Context, _, name, base, token string, w io.Writer) (int64, error) {
+	f.sent = append(f.sent, name+"|"+base+"|"+token)
+	if f.sendErr != nil {
+		return 0, f.sendErr
+	}
+	if f.sentBytes > 0 {
+		_, _ = w.Write(make([]byte, f.sentBytes))
+	}
+	return f.sentBytes, nil
+}
+
+func (f *fakeTransfer) TargetDatasetExists(_ context.Context, _ string) (bool, error) {
+	return f.datasetExists, nil
+}
+
+func (f *fakeTransfer) ReceiveResumeToken(_ context.Context, _ string) (string, error) {
+	return f.resumeToken, nil
+}
+
+func (f *fakeTransfer) ReceiveSnapshot(_ context.Context, _ string, r io.Reader) error {
+	f.received++
+	_, _ = io.Copy(io.Discard, r)
+	return f.receiveErr
+}
 
 type fakeSourceClient struct {
 	prepareCalls  int
@@ -33,7 +91,7 @@ func newMigrationManager(t *testing.T) (*MigrationManager, *Manager, *fakeSource
 	t.Helper()
 	machines, _, _, _ := newTestManager(t)
 	source := &fakeSourceClient{}
-	migrationManager, err := NewMigrationManager(machines, source, ampleCapacity, nil)
+	migrationManager, err := NewMigrationManager(machines, source, &fakeTransfer{}, ampleCapacity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

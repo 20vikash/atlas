@@ -17,6 +17,7 @@ import (
 type commandRunner interface {
 	Run(ctx context.Context, name string, args ...string) error
 	Output(ctx context.Context, name string, args ...string) (string, error)
+	CombinedOutput(ctx context.Context, name string, args ...string) (string, error)
 }
 
 // platformRunner runs commands on the host.
@@ -28,6 +29,11 @@ func (platformRunner) Run(ctx context.Context, name string, args ...string) erro
 
 func (platformRunner) Output(ctx context.Context, name string, args ...string) (string, error) {
 	return platform.Output(ctx, name, args...)
+}
+
+func (platformRunner) CombinedOutput(ctx context.Context, name string, args ...string) (string, error) {
+	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return string(output), err
 }
 
 // MigrationTransfer runs the ZFS operations of one VM disk migration: snapshot,
@@ -44,6 +50,7 @@ func NewMigrationTransfer(pool *ZFSPool) *MigrationTransfer {
 
 // CreateSnapshot creates one migration snapshot. A repeat is safe.
 func (transfer *MigrationTransfer) CreateSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error {
+	// zfs snapshot: atomic read-only point-in-time copy of the VM volume.
 	err := transfer.runner.Run(ctx, "zfs", "snapshot", transfer.pool.snapshot(virtualMachineID, snapshotName))
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		return nil
@@ -53,6 +60,7 @@ func (transfer *MigrationTransfer) CreateSnapshot(ctx context.Context, virtualMa
 
 // RemoveSnapshot destroys one migration snapshot. A missing snapshot is not an error.
 func (transfer *MigrationTransfer) RemoveSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error {
+	// zfs destroy: remove one snapshot, leaving the volume and other snapshots.
 	err := transfer.runner.Run(ctx, "zfs", "destroy", transfer.pool.snapshot(virtualMachineID, snapshotName))
 	if err != nil && strings.Contains(err.Error(), "does not exist") {
 		return nil
@@ -63,6 +71,7 @@ func (transfer *MigrationTransfer) RemoveSnapshot(ctx context.Context, virtualMa
 // SnapshotGUID returns the GUID of one snapshot. The target compares it after a
 // receive, so a silent corruption cannot pass as a complete interval.
 func (transfer *MigrationTransfer) SnapshotGUID(ctx context.Context, virtualMachineID, snapshotName string) (string, error) {
+	// zfs get -Hp -o value guid: exact GUID value, no header; equal on both hosts after a clean receive.
 	output, err := transfer.runner.Output(ctx, "zfs", "get", "-Hp", "-o", "value", "guid", transfer.pool.snapshot(virtualMachineID, snapshotName))
 	if err != nil {
 		return "", notFoundAware(err)
@@ -77,6 +86,7 @@ func (transfer *MigrationTransfer) SnapshotGUID(ctx context.Context, virtualMach
 // EstimateStreamBytes returns the send size in bytes. An empty base estimates a
 // full stream, and a base name estimates the incremental stream after it.
 func (transfer *MigrationTransfer) EstimateStreamBytes(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName string) (int64, error) {
+	// zfs send -nP: dry run (-n) with parseable output (-P) that carries a "size" line.
 	output, err := transfer.runner.Output(ctx, "zfs", transfer.sendArguments(virtualMachineID, snapshotName, baseSnapshotName, "", true)...)
 	if err != nil {
 		return 0, notFoundAware(err)
@@ -87,6 +97,7 @@ func (transfer *MigrationTransfer) EstimateStreamBytes(ctx context.Context, virt
 // TargetDatasetExists reports whether the target VM dataset is already present.
 // The first receive uses this to refuse an unrelated existing dataset.
 func (transfer *MigrationTransfer) TargetDatasetExists(ctx context.Context, virtualMachineID string) (bool, error) {
+	// zfs list: succeeds if the dataset exists, else reports it does not exist.
 	err := transfer.runner.Run(ctx, "zfs", "list", transfer.pool.virtualMachineDataset(virtualMachineID))
 	if err == nil {
 		return true, nil
@@ -100,6 +111,7 @@ func (transfer *MigrationTransfer) TargetDatasetExists(ctx context.Context, virt
 // ReceiveResumeToken returns the token that resumes an interrupted receive. It
 // returns an empty string when the dataset is absent or holds no token.
 func (transfer *MigrationTransfer) ReceiveResumeToken(ctx context.Context, virtualMachineID string) (string, error) {
+	// zfs get receive_resume_token: the token that resumes an interrupted receive; "-" means none.
 	output, err := transfer.runner.Output(ctx, "zfs", "get", "-Hp", "-o", "value", "receive_resume_token", transfer.pool.virtualMachineDataset(virtualMachineID))
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
@@ -118,6 +130,12 @@ func (transfer *MigrationTransfer) ReceiveResumeToken(ctx context.Context, virtu
 // resume token it continues an interrupted send. With a base name it sends the
 // incremental stream. Otherwise it sends the full stream.
 func (transfer *MigrationTransfer) SendSnapshot(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string, w io.Writer) (int64, error) {
+	if resumeToken != "" {
+		if err := transfer.verifyResumeToken(ctx, virtualMachineID, snapshotName, resumeToken); err != nil {
+			return 0, err
+		}
+	}
+	// zfs send: replication stream to stdout; -t resumes from the receiver token, -i sends the base..snapshot delta, else the whole snapshot.
 	command := exec.CommandContext(ctx, "zfs", transfer.sendArguments(virtualMachineID, snapshotName, baseSnapshotName, resumeToken, false)...)
 	var sendError strings.Builder
 	command.Stderr = &sendError
@@ -141,12 +159,27 @@ func (transfer *MigrationTransfer) SendSnapshot(ctx context.Context, virtualMach
 // ReceiveSnapshot receives one stream into the target VM dataset. The -s flag
 // saves a resume token if the receive is interrupted.
 func (transfer *MigrationTransfer) ReceiveSnapshot(ctx context.Context, virtualMachineID string, r io.Reader) error {
+	// zfs recv -s: receive the stream from stdin; -s saves a resume token if interrupted.
 	command := exec.CommandContext(ctx, "zfs", "recv", "-s", transfer.pool.virtualMachineDataset(virtualMachineID))
 	command.Stdin = r
 	var receiveError strings.Builder
 	command.Stderr = &receiveError
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("zfs receive: %w: %s", err, strings.TrimSpace(receiveError.String()))
+	}
+	return nil
+}
+
+// verifyResumeToken rejects a token that does not target this migration's
+// snapshot, so a crafted token cannot read another dataset.
+func (transfer *MigrationTransfer) verifyResumeToken(ctx context.Context, virtualMachineID, snapshotName, resumeToken string) error {
+	// zfs send -nvt: dry run (-n) whose verbose output (-v) names the snapshot the resume token (-t) targets.
+	output, err := transfer.runner.CombinedOutput(ctx, "zfs", "send", "-nvt", resumeToken)
+	if err != nil {
+		return fmt.Errorf("validate resume token: %w", err)
+	}
+	if !strings.Contains(output, transfer.pool.snapshot(virtualMachineID, snapshotName)) {
+		return fmt.Errorf("resume token does not match snapshot %s", snapshotName)
 	}
 	return nil
 }

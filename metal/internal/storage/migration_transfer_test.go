@@ -11,10 +11,11 @@ import (
 )
 
 type fakeRunner struct {
-	runErr  map[string]error
-	outputs map[string]string
-	outErr  map[string]error
-	calls   []string
+	runErr   map[string]error
+	outputs  map[string]string
+	outErr   map[string]error
+	combined map[string]string
+	calls    []string
 }
 
 func commandKey(args ...string) string { return strings.Join(args, " ") }
@@ -28,6 +29,11 @@ func (f *fakeRunner) Output(_ context.Context, _ string, args ...string) (string
 	f.calls = append(f.calls, commandKey(args...))
 	key := commandKey(args...)
 	return f.outputs[key], f.outErr[key]
+}
+
+func (f *fakeRunner) CombinedOutput(_ context.Context, _ string, args ...string) (string, error) {
+	f.calls = append(f.calls, commandKey(args...))
+	return f.combined[commandKey(args...)], nil
 }
 
 func newTransfer(runner commandRunner) *MigrationTransfer {
@@ -134,6 +140,21 @@ func TestTargetDatasetExists(t *testing.T) {
 	present, err = newTransfer(runner).TargetDatasetExists(context.Background(), "vm-2")
 	if err != nil || present {
 		t.Fatalf("absent = %v, %v", present, err)
+	}
+}
+
+func TestVerifyResumeTokenChecksTheTargetSnapshot(t *testing.T) {
+	runner := &fakeRunner{combined: map[string]string{
+		"send -nvt good": "resume token contents:\n\ttoname = metal/vms/vm-1@migration-m1-2\n",
+		"send -nvt bad":  "resume token contents:\n\ttoname = metal/vms/other-vm@migration-x-1\n",
+	}}
+	transfer := newTransfer(runner)
+
+	if err := transfer.verifyResumeToken(context.Background(), "vm-1", "migration-m1-2", "good"); err != nil {
+		t.Fatalf("matching token = %v, want nil", err)
+	}
+	if err := transfer.verifyResumeToken(context.Background(), "vm-1", "migration-m1-2", "bad"); err == nil {
+		t.Fatal("mismatched token = nil, want an error")
 	}
 }
 

@@ -145,7 +145,7 @@ func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
 	machines, _, _, _ := newTestManager(t)
 	source := &fakeSourceClient{prepareConfig: portableConfig("vm-1"), prepareState: StateRunning}
 	noCapacity := func(context.Context) (AvailableCapacity, error) { return AvailableCapacity{}, nil }
-	migrationManager, err := NewMigrationManager(machines, source, noCapacity, nil)
+	migrationManager, err := NewMigrationManager(machines, source, &fakeTransfer{}, noCapacity, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
