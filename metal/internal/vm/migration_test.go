@@ -111,7 +111,7 @@ func newMigrationManager(t *testing.T) (*MigrationManager, *Manager, *fakeSource
 	t.Helper()
 	machines, _, _, _ := newTestManager(t)
 	source := &fakeSourceClient{}
-	migrationManager, err := NewMigrationManager(machines, source, &fakeTransfer{}, ampleCapacity, nil)
+	migrationManager, err := NewMigrationManager(machines, source, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

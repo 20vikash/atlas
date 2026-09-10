@@ -37,3 +37,8 @@ uplink = "eno1.1878"
 [traffic_monitor]
 # Set false to disable VM traffic monitoring on this host.
 enabled = true
+
+[migration]
+# Incremental size at or below which the target stops the source and takes the
+# final snapshot, in MiB.
+final_delta_mib = 512

@@ -333,6 +333,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		vm.NewHTTPSourceClient(0),
 		storage.NewMigrationTransfer(stores.Pool),
 		migrationCapacity,
+		vm.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
 		logger,
 	)
 	if err != nil {

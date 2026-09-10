@@ -42,6 +42,17 @@ type DiskTransfer interface {
 // config, so a lost handshake does not hold capacity forever.
 const reservationTimeout = 10 * time.Minute
 
+// defaultFinalDeltaMiB is the incremental size at or below which the target cuts
+// over when the configuration sets no value.
+const defaultFinalDeltaMiB = 512
+
+// MigrationSettings holds the tunable limits of a migration on this host.
+type MigrationSettings struct {
+	// FinalDeltaMiB is the incremental size at or below which the target stops
+	// the source and takes the final snapshot.
+	FinalDeltaMiB int
+}
+
 // TargetReservation is the host capacity that one migration target holds.
 type TargetReservation struct {
 	VirtualMachineID string
@@ -68,6 +79,7 @@ type MigrationManager struct {
 	source   MigrationSourceClient
 	transfer DiskTransfer
 	capacity CapacitySource
+	settings MigrationSettings
 	locks    keyedLocks
 	logger   *slog.Logger
 	now      func() time.Time
@@ -83,12 +95,15 @@ type MigrationManager struct {
 
 // NewMigrationManager validates the stored records and returns a migration
 // manager for one host.
-func NewMigrationManager(machines *Manager, source MigrationSourceClient, transfer DiskTransfer, capacity CapacitySource, logger *slog.Logger) (*MigrationManager, error) {
+func NewMigrationManager(machines *Manager, source MigrationSourceClient, transfer DiskTransfer, capacity CapacitySource, settings MigrationSettings, logger *slog.Logger) (*MigrationManager, error) {
 	if machines == nil || source == nil || transfer == nil || capacity == nil {
 		return nil, fmt.Errorf("migration manager dependencies are required")
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if settings.FinalDeltaMiB <= 0 {
+		settings.FinalDeltaMiB = defaultFinalDeltaMiB
 	}
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
 	if err := store.validateAll(); err != nil {
@@ -101,6 +116,7 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 		source:      source,
 		transfer:    transfer,
 		capacity:    capacity,
+		settings:    settings,
 		logger:      logger,
 		now:         func() time.Time { return time.Now().UTC() },
 		transfers:   make(map[string]struct{}),

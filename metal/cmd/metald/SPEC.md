@@ -71,6 +71,7 @@ The Atlas trusted keys load from `<base_dir>/atlas-jwt.json`. A missing file is 
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
 | `wg_mesh.uplink` | none | Discovery uplink. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
+| `migration.final_delta_mib` | `512` | Incremental size at or below which the target stops the source and takes the final snapshot. |
 
 See `config.example.toml` for the complete file format.
 

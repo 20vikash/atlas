@@ -79,6 +79,20 @@ func TestLoadAuthenticationTokenHash(t *testing.T) {
 	}
 }
 
+func TestLoadMigrationFinalDelta(t *testing.T) {
+	if got := defaultOptions().migration.finalDeltaMiB; got != 512 {
+		t.Fatalf("default final_delta_mib = %d, want 512", got)
+	}
+	path := writeConfig(t, "[migration]\nfinal_delta_mib = 256\n")
+	options, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.migration.finalDeltaMiB != 256 {
+		t.Errorf("final_delta_mib = %d, want the file value", options.migration.finalDeltaMiB)
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	if _, err := load("/no/such/config.toml"); err == nil {
 		t.Error("explicit missing path: want error, got nil")
