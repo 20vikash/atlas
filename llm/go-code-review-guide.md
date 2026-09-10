@@ -1,5 +1,7 @@
 # Go Anti-pattern Detection and Review Guide
 
+See [agent tooling setup](README.md) for related skills and installation commands.
+
 Use this guide to review Go code for defensive, overly abstract, unnecessarily generic, or AI-generated code.
 
 The review goal is code that an experienced Go engineer can read and trace:
