@@ -1,0 +1,84 @@
+package vm
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+// writeReadyTarget writes a ready target record with a token for finish tests.
+func writeReadyTarget(t *testing.T, machines *Manager, mutate func(*TargetMigrationRecord)) *migrationStore {
+	t.Helper()
+	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	record := TargetMigrationRecord{
+		ID:               "mig-1",
+		VirtualMachineID: "vm-1",
+		Source:           "http://10.0.0.3:9000",
+		Status:           MigrationReady,
+		Phase:            PhaseStarting,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if mutate != nil {
+		mutate(&record)
+	}
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.writeToken("vm-1", "tok-1"); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func TestRunTransferFinishesToCompleted(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	store := writeReadyTarget(t, machines, func(r *TargetMigrationRecord) { r.FinishRequested = true })
+
+	migrationManager.runTransfer(context.Background(), "vm-1")
+
+	record, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != MigrationCompleted || record.Phase != "" || record.FinishedAt.IsZero() {
+		t.Fatalf("record = %+v", record)
+	}
+	if source.finishCalls != 1 {
+		t.Fatalf("source finish calls = %d, want 1", source.finishCalls)
+	}
+	if _, err := store.readToken("vm-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("token still present: %v", err)
+	}
+}
+
+func TestRequestFinishRecordsIntent(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	store := writeReadyTarget(t, machines, nil)
+
+	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := store.readTarget("vm-1")
+	if !record.FinishRequested {
+		t.Fatal("finish request was not recorded")
+	}
+}
+
+func TestRequestFinishRequiresReady(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	writeCopyingTarget(t, machines, StateRunning)
+
+	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("finish before ready = %v, want ErrConflict", err)
+	}
+}
+
+func TestRequestFinishConflictsWithAbort(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	writeReadyTarget(t, machines, func(r *TargetMigrationRecord) { r.AbortRequested = true })
+
+	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("finish after abort = %v, want ErrConflict", err)
+	}
+}

@@ -31,6 +31,8 @@ type stubMigrationManager struct {
 	unlockArgs        []string
 	snapshotArgs      []string
 	abortedID         string
+	finishedID        string
+	finishErr         error
 	receivedSequence  int
 	streamSequence    int
 	streamResumeToken string
@@ -50,6 +52,11 @@ func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virt
 
 func (m *stubMigrationManager) TargetStatus(context.Context, string) (vm.TargetMigrationRecord, error) {
 	return m.record, m.statusErr
+}
+
+func (m *stubMigrationManager) RequestFinish(_ context.Context, migrationID string) error {
+	m.finishedID = migrationID
+	return m.finishErr
 }
 
 func (m *stubMigrationManager) AbortTarget(_ context.Context, migrationID string) error {
@@ -315,6 +322,16 @@ func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
 	}
 	if response.Sequence != 3 || response.SizeBytes != 2048 || response.GUID != "final" {
 		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestFinishMigrationRecordsTheRequest(t *testing.T) {
+	stub := &stubMigrationManager{}
+	server := newMigrationTestServer(t, stub)
+
+	do(t, server, http.MethodPost, "/v1/migrations/mig-1/finish", "", http.StatusAccepted)
+	if stub.finishedID != "mig-1" {
+		t.Fatalf("finished id = %q", stub.finishedID)
 	}
 }
 

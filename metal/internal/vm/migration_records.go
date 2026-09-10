@@ -262,6 +262,19 @@ func (store *migrationStore) readTarget(virtualMachineID string) (TargetMigratio
 	return record, nil
 }
 
+// terminalTargetRecord returns the compact record kept after success or abort.
+// It drops secrets, copied config, progress, and cleanup fields.
+func terminalTargetRecord(record TargetMigrationRecord, status MigrationStatus, finishedAt time.Time) TargetMigrationRecord {
+	return TargetMigrationRecord{
+		SchemaVersion:    migrationSchemaVersion,
+		ID:               record.ID,
+		VirtualMachineID: record.VirtualMachineID,
+		Status:           status,
+		CreatedAt:        record.CreatedAt,
+		FinishedAt:       finishedAt,
+	}
+}
+
 // readSource reads and validates the source record of one VM.
 func (store *migrationStore) readSource(virtualMachineID string) (SourceMigrationRecord, error) {
 	var record SourceMigrationRecord
@@ -310,6 +323,14 @@ func (store *migrationStore) readToken(virtualMachineID string) (string, error) 
 		return "", fmt.Errorf("read migration token: %w", err)
 	}
 	return string(data), nil
+}
+
+// removeToken deletes the stored migration JWT. A missing token is not an error.
+func (store *migrationStore) removeToken(virtualMachineID string) error {
+	if err := os.Remove(store.tokenPath(virtualMachineID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove migration token: %w", err)
+	}
+	return nil
 }
 
 // remove deletes every migration record of one VM. It leaves the VM's own

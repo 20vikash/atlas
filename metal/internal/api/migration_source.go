@@ -112,19 +112,6 @@ func (s *Server) startMigrationSource(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// finishMigrationSource destroys the stopped source VM and its migration state.
-func (s *Server) finishMigrationSource(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
-	if err != nil {
-		return err
-	}
-	claims := tokenClaims(c)
-	if err := s.migrationManager.DestroySource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller); err != nil {
-		return err
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
 // deleteMigrationSource unlocks the source VM and removes its migration state.
 func (s *Server) deleteMigrationSource(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)

@@ -66,6 +66,7 @@ type VirtualMachineManager interface {
 type MigrationManager interface {
 	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error)
 	TargetStatus(ctx context.Context, migrationID string) (vm.TargetMigrationRecord, error)
+	RequestFinish(ctx context.Context, migrationID string) error
 	AbortTarget(ctx context.Context, migrationID string) error
 	LockSource(ctx context.Context, migrationID, virtualMachineID, caller string) (vm.SourceHandshake, error)
 	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID, caller string, receivedSequence int) (vm.SourceSnapshot, error)
@@ -189,6 +190,32 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 			return unauthorized()
 		}
 
+		return next(c)
+	}
+}
+
+// isControllerTokenKey marks a request that the static controller token authenticated.
+const isControllerTokenKey = "atlas_controller_token"
+
+// authenticateControllerOrMigration accepts either the static controller token
+// or an Atlas migration-scoped token. The finish route serves Atlas on the
+// target and one host on another, so it must accept both credentials.
+func (s *Server) authenticateControllerOrMigration(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		presented, found := bearerToken(c)
+		if !found {
+			return unauthorized()
+		}
+		digest := sha256.Sum256([]byte(presented))
+		if subtle.ConstantTimeCompare(s.authTokenHash, []byte(hex.EncodeToString(digest[:]))) == 1 {
+			c.Set(isControllerTokenKey, true)
+			return next(c)
+		}
+		claims, err := token.Verify(s.trustedKeys.Keys(), presented, token.ScopeMigration)
+		if err != nil {
+			return err
+		}
+		c.Set(claimsContextKey, claims)
 		return next(c)
 	}
 }

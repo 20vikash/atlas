@@ -111,17 +111,18 @@ func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID str
 		if err != nil {
 			return
 		}
-		if record.Status != MigrationRunning {
-			return
-		}
 
 		var advanceError error
-		switch record.Phase {
-		case PhaseCopying:
+		switch {
+		case isTerminalStatus(record.Status):
+			return
+		case record.FinishRequested && record.Status == MigrationReady:
+			advanceError = m.advanceFinish(ctx, record)
+		case record.Status == MigrationRunning && record.Phase == PhaseCopying:
 			advanceError = m.advanceCopying(ctx, record)
-		case PhaseStopping:
+		case record.Status == MigrationRunning && record.Phase == PhaseStopping:
 			advanceError = m.advanceStopping(ctx, record)
-		case PhaseStarting:
+		case record.Status == MigrationRunning && record.Phase == PhaseStarting:
 			advanceError = m.advanceStarting(ctx, record)
 		default:
 			return

@@ -87,6 +87,28 @@ func (s *Server) getMigration(c echo.Context) error {
 	return c.JSON(http.StatusOK, toMigration(record))
 }
 
+// finishMigration serves both finish calls on one path. The static controller
+// token records a finish request on the target. A migration token destroys the
+// source on another host.
+func (s *Server) finishMigration(c echo.Context) error {
+	identifier, err := migrationIdentifier(c)
+	if err != nil {
+		return err
+	}
+	if controller, _ := c.Get(isControllerTokenKey).(bool); controller {
+		if err := s.migrationManager.RequestFinish(c.Request().Context(), identifier); err != nil {
+			return err
+		}
+		s.wakeReconciler()
+		return c.NoContent(http.StatusAccepted)
+	}
+	claims := tokenClaims(c)
+	if err := s.migrationManager.DestroySource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 // abortMigration removes a target migration that has not finished.
 func (s *Server) abortMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)

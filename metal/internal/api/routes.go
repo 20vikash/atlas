@@ -43,6 +43,10 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	migrationRoutes.GET("/:id", s.getMigration)
 	migrationRoutes.POST("/:id/abort", s.abortMigration)
 
+	// Finish serves Atlas on the target and one host on another, so it accepts
+	// either the static controller token or a migration-scoped Atlas token.
+	router.POST("/v1/migrations/:id/finish", s.finishMigration, s.authenticateControllerOrMigration)
+
 	// The target host drives these with an Atlas-signed token, not the static token.
 	sourceRoutes := router.Group("/v1/migrations")
 	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource, s.requireScopes(token.ScopeReadVirtualMachine, token.ScopeMigration))
@@ -50,6 +54,5 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	sourceRoutes.POST("/:id/stream", s.streamMigrationSnapshot, s.requireScopes(token.ScopeMigration))
 	sourceRoutes.POST("/:id/stop", s.stopMigrationSource, s.requireScopes(token.ScopeMigration))
 	sourceRoutes.POST("/:id/start", s.startMigrationSource, s.requireScopes(token.ScopeMigration))
-	sourceRoutes.POST("/:id/finish", s.finishMigrationSource, s.requireScopes(token.ScopeMigration))
 	sourceRoutes.DELETE("/:id", s.deleteMigrationSource, s.requireScopes(token.ScopeMigration))
 }

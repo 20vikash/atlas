@@ -24,6 +24,12 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if err != nil {
 		return err
 	}
+	if record.Status == MigrationReady {
+		if record.FinishRequested {
+			m.StartTransfer(virtualMachineID)
+		}
+		return nil
+	}
 	if record.Status != MigrationRunning {
 		return nil
 	}
