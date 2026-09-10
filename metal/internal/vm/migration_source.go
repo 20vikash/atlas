@@ -191,9 +191,10 @@ func (m *MigrationManager) StopSource(ctx context.Context, migrationID, virtualM
 	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.FinalSequence)
 }
 
-// SendSourceStream streams one requested snapshot to the target. It does not
-// hold the VM lock while data moves. An unknown sequence is rejected.
-func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, w io.Writer) (int64, error) {
+// SendSourceStream streams one requested snapshot to the target. It applies the
+// temporary disk limit first, then streams without the VM lock. An unknown
+// sequence is rejected.
+func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
 	record, err := m.boundSourceRecord(virtualMachineID, migrationID, caller)
 	if err != nil {
 		return 0, err
@@ -201,12 +202,43 @@ func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, vi
 	if sequence != record.Sequence {
 		return 0, ErrConflict
 	}
+	if err := m.applySourceDiskLimit(ctx, migrationID, virtualMachineID, caller, throughputMiBps); err != nil {
+		return 0, err
+	}
 	name := migrationSnapshotName(migrationID, sequence)
 	base := ""
 	if sequence > 1 {
 		base = migrationSnapshotName(migrationID, sequence-1)
 	}
 	return m.transfer.SendSnapshot(ctx, virtualMachineID, name, base, resumeToken, w)
+}
+
+// applySourceDiskLimit applies and saves the temporary disk limit for one
+// stream. It takes the VM lock only for this quick update, then releases it
+// before the stream. A retry for the same value does not write again.
+func (m *MigrationManager) applySourceDiskLimit(ctx context.Context, migrationID, virtualMachineID, caller string, throughputMiBps int) error {
+	if throughputMiBps <= 0 {
+		return nil
+	}
+	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	record, err := m.boundSourceRecord(virtualMachineID, migrationID, caller)
+	if err != nil {
+		return err
+	}
+	applied, err := m.machines.LimitSourceDisk(ctx, virtualMachineID, throughputMiBps)
+	if err != nil {
+		return err
+	}
+	if applied == 0 || applied == record.TemporaryDiskLimitMiBps {
+		return nil
+	}
+	record.TemporaryDiskLimitMiBps = applied
+	return m.store.writeSource(record)
 }
 
 // describeSnapshot returns the sequence, estimated size, and GUID of one snapshot.

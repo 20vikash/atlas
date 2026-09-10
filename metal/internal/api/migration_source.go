@@ -41,10 +41,12 @@ type snapshotResponse struct {
 	GUID      string `json:"guid"`
 }
 
-// streamSnapshotRequest names the snapshot stream the target wants.
+// streamSnapshotRequest names the snapshot stream the target wants. The optional
+// throughput limit caps the source disk during this interval.
 type streamSnapshotRequest struct {
-	Sequence    int    `json:"sequence"`
-	ResumeToken string `json:"resume_token"`
+	Sequence        int    `json:"sequence"`
+	ResumeToken     string `json:"resume_token"`
+	ThroughputMiBps int    `json:"throughput_mibps"`
 }
 
 // createMigrationSnapshot returns the next source snapshot for the target.
@@ -78,8 +80,23 @@ func (s *Server) streamMigrationSnapshot(c echo.Context) error {
 	}
 	claims := tokenClaims(c)
 	c.Response().Header().Set(echo.HeaderContentType, "application/octet-stream")
-	_, err = s.migrationManager.SendSourceStream(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller, request.Sequence, request.ResumeToken, c.Response())
+	_, err = s.migrationManager.SendSourceStream(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller, request.Sequence, request.ResumeToken, request.ThroughputMiBps, c.Response())
 	return err
+}
+
+// stopMigrationSource stops the source, removes its network, and returns the
+// final snapshot for the target to pull.
+func (s *Server) stopMigrationSource(c echo.Context) error {
+	identifier, err := migrationIdentifier(c)
+	if err != nil {
+		return err
+	}
+	claims := tokenClaims(c)
+	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
 }
 
 // deleteMigrationSource unlocks the source VM and removes its migration state.

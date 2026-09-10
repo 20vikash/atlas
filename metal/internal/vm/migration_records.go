@@ -118,18 +118,19 @@ type TargetMigrationRecord struct {
 // SourceMigrationRecord is the source host's durable lock for one migration. Its
 // presence in the VM directory is the source lock.
 type SourceMigrationRecord struct {
-	SchemaVersion        int       `json:"schema_version"`
-	ID                   string    `json:"id"`
-	VirtualMachineID     string    `json:"virtual_machine_id"`
-	Caller               string    `json:"caller"`
-	OriginalDesired      State     `json:"original_desired"`
-	OriginalObserved     State     `json:"original_observed"`
-	Sequence             int       `json:"sequence,omitempty"`
-	AcknowledgedSequence int       `json:"acknowledged_sequence,omitempty"`
-	Stopped              bool      `json:"stopped,omitempty"`
-	NetworkRemoved       bool      `json:"network_removed,omitempty"`
-	FinalSequence        int       `json:"final_sequence,omitempty"`
-	LockedAt             time.Time `json:"locked_at"`
+	SchemaVersion           int       `json:"schema_version"`
+	ID                      string    `json:"id"`
+	VirtualMachineID        string    `json:"virtual_machine_id"`
+	Caller                  string    `json:"caller"`
+	OriginalDesired         State     `json:"original_desired"`
+	OriginalObserved        State     `json:"original_observed"`
+	Sequence                int       `json:"sequence,omitempty"`
+	AcknowledgedSequence    int       `json:"acknowledged_sequence,omitempty"`
+	Stopped                 bool      `json:"stopped,omitempty"`
+	NetworkRemoved          bool      `json:"network_removed,omitempty"`
+	FinalSequence           int       `json:"final_sequence,omitempty"`
+	TemporaryDiskLimitMiBps int       `json:"temporary_disk_limit_mibps,omitempty"`
+	LockedAt                time.Time `json:"locked_at"`
 }
 
 // migrationStore reads and writes the migration records that live under each VM

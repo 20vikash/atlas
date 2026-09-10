@@ -48,5 +48,6 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource, s.requireScopes(token.ScopeReadVirtualMachine, token.ScopeMigration))
 	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot, s.requireScopes(token.ScopeMigration))
 	sourceRoutes.POST("/:id/stream", s.streamMigrationSnapshot, s.requireScopes(token.ScopeMigration))
+	sourceRoutes.POST("/:id/stop", s.stopMigrationSource, s.requireScopes(token.ScopeMigration))
 	sourceRoutes.DELETE("/:id", s.deleteMigrationSource, s.requireScopes(token.ScopeMigration))
 }

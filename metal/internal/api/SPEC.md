@@ -63,12 +63,15 @@ POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
 PUT    /v1/migrations/:id/source   the target locks the source, Atlas token
 POST   /v1/migrations/:id/snapshot the target asks for the next snapshot, Atlas token
 POST   /v1/migrations/:id/stream   the target reads one snapshot stream, Atlas token
+POST   /v1/migrations/:id/stop     the target stops the source and gets the final snapshot, Atlas token
 DELETE /v1/migrations/:id          the target unlocks the source, Atlas token
 ```
 
-Atlas drives the first three routes with the static token. The target host drives the source, snapshot, stream, and delete routes on another host with an Atlas-signed token. Each Atlas-token handler reads the VM ID and caller from the token claims and binds them to the source record.
+Atlas drives the first three routes with the static token. The target host drives the source, snapshot, stream, stop, and delete routes on another host with an Atlas-signed token. Each Atlas-token handler reads the VM ID and caller from the token claims and binds them to the source record.
 
-The stream route returns `application/octet-stream`. It writes no status code until the first byte, so a validation error still maps to a code, and it streams with the request context and no whole-request timeout.
+The stream route returns `application/octet-stream`. It writes no status code until the first byte, so a validation error still maps to a code, and it streams with the request context and no whole-request timeout. Its optional `throughput_mibps` field applies a temporary combined read and write limit to the source disk for that interval, and never raises the configured limit.
+
+The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 

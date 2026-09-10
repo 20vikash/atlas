@@ -34,6 +34,9 @@ type stubMigrationManager struct {
 	receivedSequence  int
 	streamSequence    int
 	streamResumeToken string
+	streamThroughput  int
+	stopArgs          []string
+	stopErr           error
 }
 
 func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error) {
@@ -61,14 +64,20 @@ func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID
 	return m.snapshot, m.snapshotErr
 }
 
-func (m *stubMigrationManager) SendSourceStream(_ context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, w io.Writer) (int64, error) {
+func (m *stubMigrationManager) SendSourceStream(_ context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
 	m.streamSequence = sequence
 	m.streamResumeToken = resumeToken
+	m.streamThroughput = throughputMiBps
 	if m.streamErr != nil {
 		return 0, m.streamErr
 	}
 	_, _ = w.Write(make([]byte, m.streamBytes))
 	return m.streamBytes, nil
+}
+
+func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID, caller string) (vm.SourceSnapshot, error) {
+	m.stopArgs = []string{migrationID, virtualMachineID, caller}
+	return m.snapshot, m.stopErr
 }
 
 func (m *stubMigrationManager) UnlockSource(_ context.Context, migrationID, virtualMachineID, caller string) error {
@@ -253,7 +262,7 @@ func TestStreamMigrationSnapshotStreamsBytes(t *testing.T) {
 	stub := &stubMigrationManager{streamBytes: 4096}
 	server := newMigrationTestServer(t, stub, signer.trusted)
 
-	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/stream", strings.NewReader(`{"sequence":2,"resume_token":"rt"}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/stream", strings.NewReader(`{"sequence":2,"resume_token":"rt","throughput_mibps":32}`))
 	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -265,8 +274,33 @@ func TestStreamMigrationSnapshotStreamsBytes(t *testing.T) {
 	if recorder.Body.Len() != 4096 || recorder.Header().Get("Content-Type") != "application/octet-stream" {
 		t.Fatalf("body = %d bytes, type %q", recorder.Body.Len(), recorder.Header().Get("Content-Type"))
 	}
-	if stub.streamSequence != 2 || stub.streamResumeToken != "rt" {
-		t.Fatalf("stream args = %d %q", stub.streamSequence, stub.streamResumeToken)
+	if stub.streamSequence != 2 || stub.streamResumeToken != "rt" || stub.streamThroughput != 32 {
+		t.Fatalf("stream args = %d %q %d", stub.streamSequence, stub.streamResumeToken, stub.streamThroughput)
+	}
+}
+
+func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
+	signer := newAtlasSigner(t)
+	stub := &stubMigrationManager{snapshot: vm.SourceSnapshot{Sequence: 3, SizeBytes: 2048, GUID: "final"}}
+	server := newMigrationTestServer(t, stub, signer.trusted)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/stop", nil)
+	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("stop = %d (%s)", recorder.Code, recorder.Body)
+	}
+	if want := []string{"mig-1", "vm-00001", testCaller}; !equalStrings(stub.stopArgs, want) {
+		t.Fatalf("stop args = %v", stub.stopArgs)
+	}
+	var response snapshotResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Sequence != 3 || response.SizeBytes != 2048 || response.GUID != "final" {
+		t.Fatalf("response = %+v", response)
 	}
 }
 

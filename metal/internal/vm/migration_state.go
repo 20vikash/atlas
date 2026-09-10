@@ -44,6 +44,27 @@ func (manager *Manager) NormalizeSourceToStopped(ctx context.Context, virtualMac
 	}
 }
 
+// LimitSourceDisk applies a temporary combined read and write bandwidth limit to
+// the live source drive before a stream. It never raises the configured limit
+// and returns the value it applied. A value of zero or less does nothing.
+func (manager *Manager) LimitSourceDisk(ctx context.Context, virtualMachineID string, throughputMiBps int) (int, error) {
+	if throughputMiBps <= 0 {
+		return 0, nil
+	}
+	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
+	if err != nil {
+		return 0, err
+	}
+	if configured := desired.Specification.Disk.ThroughputMiBps; configured > 0 && configured < throughputMiBps {
+		throughputMiBps = configured
+	}
+	machine := runtimeMachine(desired, observed.NetworkInterface)
+	if err := manager.runtime.LimitDiskThroughput(ctx, machine, throughputMiBps); err != nil {
+		return 0, err
+	}
+	return throughputMiBps, nil
+}
+
 // RemoveMigrationNetwork releases the host network of a migration source VM. The
 // target creates its own network after the source network is gone. The caller
 // holds the VM operation lock.

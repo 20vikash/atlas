@@ -87,14 +87,14 @@ func TestSendSourceStreamRejectsAnUnknownSequence(t *testing.T) {
 	ctx := context.Background()
 
 	var buffer bytes.Buffer
-	written, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 2, "", &buffer)
+	written, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 2, "", 0, &buffer)
 	if err != nil || written != 2048 {
 		t.Fatalf("send = %d, %v", written, err)
 	}
 	if want := []string{"migration-mig-1-2|migration-mig-1-1|"}; !equalStringSlices(transfer.sent, want) {
 		t.Fatalf("sent = %v", transfer.sent)
 	}
-	if _, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 3, "", &buffer); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 3, "", 0, &buffer); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unknown sequence = %v, want ErrConflict", err)
 	}
 }
@@ -172,6 +172,48 @@ func TestStopSourceIsIdempotent(t *testing.T) {
 	}
 	if runtime.stops != 1 || network.releases != 1 || len(transfer.created) != created {
 		t.Fatalf("repeat did work again: stops %d, releases %d, created %d", runtime.stops, network.releases, len(transfer.created))
+	}
+}
+
+func TestSendSourceStreamAppliesDiskLimit(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	seedSourceVM(t, migrationManager, machines, StateRunning, 1)
+	runtime := machines.runtime.(*fakeRuntime)
+	ctx := context.Background()
+
+	var buffer bytes.Buffer
+	if _, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", "metal-1", 1, "", 32, &buffer); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.diskLimitMiBps != 32 {
+		t.Fatalf("applied disk limit = %d, want 32", runtime.diskLimitMiBps)
+	}
+	record, err := migrationManager.store.readSource("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.TemporaryDiskLimitMiBps != 32 {
+		t.Fatalf("persisted disk limit = %d, want 32", record.TemporaryDiskLimitMiBps)
+	}
+}
+
+func TestLimitSourceDiskNeverRaisesConfigured(t *testing.T) {
+	machines, runtime, _, _ := newTestManager(t)
+	ctx := context.Background()
+	specification := testSpecification()
+	specification.Disk.ThroughputMiBps = 16
+	if _, err := machines.Create(ctx, "vm-1", specification); err != nil {
+		t.Fatal(err)
+	}
+	setObservedState(t, machines, "vm-1", StateRunning)
+	runtime.state = StateRunning
+
+	applied, err := machines.LimitSourceDisk(ctx, "vm-1", 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied != 16 || runtime.diskLimitMiBps != 16 {
+		t.Fatalf("applied = %d, runtime = %d, want the configured 16", applied, runtime.diskLimitMiBps)
 	}
 }
 
