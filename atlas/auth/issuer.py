@@ -47,7 +47,7 @@ def issue_token(
 	subject: str,
 	scope: str,
 	tenant: str | None = None,
-	constraints: dict[str, dict[str, str]] | None = None,
+	constraints: dict[str, dict[str, str | list[str]]] | None = None,
 	lifetime: timedelta = TOKEN_LIFETIME,
 ) -> str:
 	"""Return one token that carries the audience, subject, and authority the caller asks for."""

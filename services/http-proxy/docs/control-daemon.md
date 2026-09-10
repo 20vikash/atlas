@@ -12,7 +12,27 @@ Every public route except the health and documentation routes needs a Bearer cre
 
 A token needs a trusted issuer, the Proxy audience, a `sub` claim, and a `scope` claim. The daemon reads the authority from the signed `scope` and `constraints` claims and not from the subject. A `tenant` claim makes the token an Atlas API credential, and the daemon refuses it.
 
-The `scope` claim selects the permitted resources. Use `site:*` for the site map or `*` for all resources. A resource without a constraint applies to all names for that resource. An optional signed site suffix constraint limits site names. A constrained token cannot replace a complete map.
+The `scope` claim selects the permitted resources. Use `site:*` for the site map, `domain:*` for the custom-domain map, or `*` for all resources. The cluster status route needs `*`. Use a space between two scopes, such as `site:* domain:*`.
+
+The optional `constraints` claim limits the names inside a resource. Use the `site` key, the `domain` key, or both. Each key holds 1 or more of these fields:
+
+| Field | Effect |
+|---|---|
+| `prefix` | The name must start with this text. |
+| `suffix` | The name must end with this text. |
+| `names` | The name must be one of these exact names. |
+
+A name is permitted when it is in `names`, or when it matches each `prefix` and `suffix` field in the claim. A resource without a constraint applies to all names for that resource. A read route returns only the permitted names. A constrained resource cannot replace its complete map. Name comparison is case-sensitive, and Atlas issues lowercase names.
+
+```json
+{
+  "scope": "site:* domain:*",
+  "constraints": {
+    "site": { "prefix": "erp-", "suffix": "-svc" },
+    "domain": { "names": ["www.customer.com"] }
+  }
+}
+```
 
 ```sh
 export ATLAS_PROXY_CONTROL_URL='https://proxy-001.iad.frappe.dev'

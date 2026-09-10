@@ -12,7 +12,9 @@ from jwt import PyJWKClient
 from .config import AuthConfig, ConfigError, load
 
 CONTROL_BEARER_SCHEME = "BearerAuth"
-KNOWN_SCOPES = frozenset({"*", "site:*"})
+KNOWN_SCOPES = frozenset({"*", "site:*", "domain:*"})
+CONSTRAINED_RESOURCES = frozenset({"site", "domain"})
+CONSTRAINT_KEYS = frozenset({"prefix", "suffix", "names"})
 bearer = HTTPBearer(
 	scheme_name=CONTROL_BEARER_SCHEME,
 	bearerFormat="password or JWT",
@@ -22,11 +24,29 @@ bearer = HTTPBearer(
 
 
 @dataclass(frozen=True)
+class NameConstraint:
+	"""The resource names one authority can reach."""
+
+	prefix: str = ""
+	suffix: str = ""
+	names: frozenset[str] = frozenset()
+
+	def matches(self, name: str) -> bool:
+		"""Report whether one resource name is inside this constraint."""
+		if name in self.names:
+			return True
+		if not self.prefix and not self.suffix:
+			return False
+
+		return name.startswith(self.prefix) and name.endswith(self.suffix)
+
+
+@dataclass(frozen=True)
 class Authorization:
 	"""The verified Proxy authority for one request."""
 
 	scopes: frozenset[str]
-	constraints: dict[str, dict[str, str]] = field(default_factory=dict)
+	constraints: dict[str, NameConstraint] = field(default_factory=dict)
 
 	def require(self, resource: str, action: str, name: str | None = None) -> None:
 		"""Refuse a request outside this authority."""
@@ -49,11 +69,10 @@ class Authorization:
 
 	def _matches_name(self, resource: str, name: str | None) -> bool:
 		constraint = self.constraints.get(resource)
-		if constraint is None:
+		if constraint is None or name is None:
 			return True
-		if name is None:
-			return True
-		return name.endswith(constraint["suffix"])
+
+		return constraint.matches(name)
 
 
 class Authentication:
@@ -172,20 +191,49 @@ def _authorization_from_claims(claims: dict[str, object]) -> Authorization | Non
 	if not scopes or not scopes <= KNOWN_SCOPES:
 		return None
 
-	constraints = claims.get("constraints", {})
-	if not isinstance(constraints, dict) or set(constraints) - {"site"}:
-		return None
-	if not constraints:
-		return Authorization(scopes)
-
-	site = constraints["site"]
-	if not isinstance(site, dict) or set(site) != {"suffix"}:
-		return None
-	suffix = site["suffix"]
-	if not isinstance(suffix, str) or not suffix:
+	constraints = _name_constraints(claims.get("constraints", {}))
+	if constraints is None:
 		return None
 
-	return Authorization(scopes, {"site": {"suffix": suffix}})
+	return Authorization(scopes, constraints)
+
+
+def _name_constraints(value: object) -> dict[str, NameConstraint] | None:
+	"""Return one constraint for each constrained resource, or None when a claim is not usable."""
+	if not isinstance(value, dict) or set(value) - CONSTRAINED_RESOURCES:
+		return None
+
+	constraints = {}
+	for resource, claim in value.items():
+		constraint = _name_constraint(claim)
+		if constraint is None:
+			return None
+		constraints[resource] = constraint
+
+	return constraints
+
+
+def _name_constraint(claim: object) -> NameConstraint | None:
+	"""Return one validated name constraint, or None when the claim is not usable."""
+	if not isinstance(claim, dict) or not claim or set(claim) - CONSTRAINT_KEYS:
+		return None
+
+	patterns: dict[str, str] = {}
+	for key in ("prefix", "suffix"):
+		if key not in claim:
+			continue
+		pattern = claim[key]
+		if not isinstance(pattern, str) or not pattern:
+			return None
+		patterns[key] = pattern
+
+	names = claim.get("names", [])
+	if not isinstance(names, list) or ("names" in claim and not names):
+		return None
+	if not all(isinstance(name, str) and name for name in names):
+		return None
+
+	return NameConstraint(patterns.get("prefix", ""), patterns.get("suffix", ""), frozenset(names))
 
 
 def _is_timestamp(value: object) -> bool:

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from jwt import PyJWK
 from jwt.algorithms import OKPAlgorithm
 
-from proxy_control.auth import Authentication, Authorization
+from proxy_control.auth import Authentication, Authorization, NameConstraint
 
 AUDIENCE = "atlas-proxy:42"
 ATLAS_ISSUER = "atlas:42"
@@ -259,6 +259,73 @@ def test_a_key_cannot_claim_another_issuer(tmp_path):
 		authentication.require(f"Bearer {token}")
 
 
+def test_a_prefix_and_a_suffix_narrow_one_resource(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, constraints={"site": {"prefix": "erp-", "suffix": "-svc"}})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("site", "update", "erp-pdf-svc")
+	for name in ("erp-pdf", "pdf-svc"):
+		with pytest.raises(HTTPException):
+			authorization.require("site", "update", name)
+
+
+def test_a_name_list_grants_the_listed_names_beside_a_pattern(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, constraints={"site": {"prefix": "erp-", "names": ["legacy-pdf"]}})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("site", "update", "erp-pdf-svc")
+	authorization.require("site", "update", "legacy-pdf")
+	with pytest.raises(HTTPException):
+		authorization.require("site", "update", "pdf-svc")
+
+
+def test_a_domain_scope_carries_its_own_constraint(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(
+		private_key,
+		key_id,
+		scope="domain:*",
+		constraints={"domain": {"names": ["www.customer.com"]}},
+	)
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("domain", "update", "www.customer.com")
+	assert authorization.filter("domain", {"www.customer.com": "::1", "api.customer.com": "::2"}) == {
+		"www.customer.com": "::1"
+	}
+	with pytest.raises(HTTPException):
+		authorization.require("domain", "update", "api.customer.com")
+	with pytest.raises(HTTPException):
+		authorization.require_unconstrained("domain", "update")
+	with pytest.raises(HTTPException):
+		authorization.require("site", "update", "pdf-svc")
+
+
+def test_a_site_constraint_leaves_other_resources_open(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, scope="site:* domain:*", constraints={"site": {"suffix": "-svc"}})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("domain", "update", "www.customer.com")
+	authorization.require_unconstrained("domain", "update")
+	with pytest.raises(HTTPException):
+		authorization.require("site", "update", "customer")
+
+
 def test_a_constraint_applies_to_an_unrestricted_scope(tmp_path):
 	private_key = _key_pair()
 	key_id = f"{ATLAS_ISSUER}:key-1"
@@ -290,6 +357,11 @@ def test_an_administrative_token_is_refused_by_the_proxy(tmp_path):
 		("site:*", {"unknown": {"suffix": "-svc"}}),
 		("site:*", {"site": {"unknown": "-svc"}}),
 		("site:*", {"site": {"suffix": ""}}),
+		("site:*", {"site": {"prefix": ""}}),
+		("site:*", {"site": {}}),
+		("site:*", {"site": {"names": []}}),
+		("site:*", {"site": {"names": ["pdf-svc", ""]}}),
+		("site:*", {"site": {"names": "pdf-svc"}}),
 	],
 )
 def test_unknown_or_malformed_authority_is_rejected(tmp_path, scope, constraints):
@@ -303,7 +375,7 @@ def test_unknown_or_malformed_authority_is_rejected(tmp_path, scope, constraints
 
 
 def test_a_site_constraint_filters_and_restricts_names():
-	authorization = Authorization(frozenset({"site:*"}), {"site": {"suffix": "-svc"}})
+	authorization = Authorization(frozenset({"site:*"}), {"site": NameConstraint(suffix="-svc")})
 
 	assert authorization.filter("site", {"pdf-svc": "::1", "customer": "::2"}) == {"pdf-svc": "::1"}
 	authorization.require("site", "update", "pdf-svc")
@@ -313,7 +385,7 @@ def test_a_site_constraint_filters_and_restricts_names():
 
 
 def test_a_constrained_token_cannot_replace_a_complete_map():
-	authorization = Authorization(frozenset({"site:*"}), {"site": {"suffix": "-svc"}})
+	authorization = Authorization(frozenset({"site:*"}), {"site": NameConstraint(suffix="-svc")})
 
 	with pytest.raises(HTTPException) as failure:
 		authorization.require_unconstrained("site", "update")
