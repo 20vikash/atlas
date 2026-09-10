@@ -36,6 +36,16 @@ Use the `METALD_IMAGE_URL`, digest, kernel, and architecture variables to test a
 
 The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2` in the VM namespace. It requests termination when the test ends.
 
+## Atlas token test
+
+`scripts/check-metal-token.sh <site>` checks that Metal accepts a token that Atlas signs. Atlas issues one token and writes the trust state in the shape of `atlas-jwt.json`. Metal then loads that file and verifies the token as a route does.
+
+```bash
+./scripts/check-metal-token.sh atlas.localhost
+```
+
+The script creates the Atlas signing key on the site when it is missing. `go test ./internal/token/` skips this check when the script does not supply the two files.
+
 ## Network activity tests
 
 These tests need root, `ip`, and Linux 6.6 or newer. Run them when no other test uses the same namespaces:
