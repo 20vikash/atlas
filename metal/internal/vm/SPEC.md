@@ -133,6 +133,28 @@ The source normalizes to stopped before the final snapshot: a running VM stops, 
 
 Each source stop, network removal, final snapshot, target network, and target state is checkpointed before the next external operation, so a restart repeats only idempotent work. A failure after the source stop marks the migration failed and keeps both hosts locked and the snapshots preserved for rollback.
 
+### Completion and recovery
+
+One cancellable background worker per VM drives finish and abort as well as the transfer. Atlas records a request on the target, which wakes the worker.
+
+```text
+POST /finish (controller token, target ready) -> finishing -> destroy source -> completed
+POST /abort  (controller token, nonterminal)  -> cancel transfer -> rollback -> aborted
+```
+
+A finish and an abort are mutually exclusive: the first request wins, and the other returns a conflict. A finish is valid only after the target reports ready.
+
+```text
+abort, source not stopped -> clean target -> unlock the still-available source
+abort, source stopped     -> clean target -> restore the source -> unlock the source
+```
+
+The rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before it removes the dataset. It creates the target network never before the source network is gone. A stopped source is restored to its original desired state with a cold start, then unlocked. A rollback failure keeps both records, both locks, and the source disk, and reports failed with phase rollback.
+
+The finish and abort records checkpoint source stop, target runtime removal, target network removal, target storage removal, source restoration, source unlock, and source destruction. The source record checkpoints rollback completion and each source destruction step. A restart requeues every nonterminal record, including failed, and repeats only idempotent work.
+
+A success or abort keeps a compact terminal record with only the schema version, migration ID, VM ID, terminal status, and finished time. A terminal record has no phase, does not hide the VM, and reserves no capacity. Every nonterminal record, including failed, keeps the VM hidden and its capacity reserved. A new target migration can replace an aborted record only when no VM record, source lock, or target dataset remains.
+
 ## Boundaries
 
 `Runtime`, `Network`, `Storage`, and `Snapshots` are consumed here and implemented by host packages. The manager uses `traffic.Monitor` for samples and watch operations. The daemon traffic listener passes each `traffic.Event` to `Manager.RestoreAfterTraffic`.

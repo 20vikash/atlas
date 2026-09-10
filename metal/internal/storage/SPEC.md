@@ -84,6 +84,8 @@ Durable upload state lives in the staging metadata. Live byte progress stays in 
 
 Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send and receive use `exec` and are covered by a host-guarded integration test. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
 
+`AbortReceive` cancels an interrupted resumable receive and removes the target dataset. An abort calls it before it removes the target VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
+
 ## Concurrency
 
 Image imports and snapshot staging are serialized per resource, not per store. One lock covers an image reference, and one covers a snapshot ID, so unrelated images and snapshots proceed at the same time.
