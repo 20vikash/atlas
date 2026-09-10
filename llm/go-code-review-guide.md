@@ -2,6 +2,8 @@
 
 See [agent tooling setup](README.md) for related skills and installation commands.
 
+Adapted from the [Go anti-pattern gist](https://gist.github.com/pipethedev/0bc97d0d4a13edafbad95a00ad8b7ffe) by pipethedev.
+
 Use this guide to review Go code for defensive, overly abstract, unnecessarily generic, or AI-generated code.
 
 The review goal is code that an experienced Go engineer can read and trace:
