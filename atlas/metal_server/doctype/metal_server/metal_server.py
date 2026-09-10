@@ -21,6 +21,7 @@ from atlas.metal_server.core.host_installation import (
 	HostInstallation,
 )
 from atlas.metal_server.core.provisioning import ServerProvisioner
+from atlas.metal_server.usage import enqueue_server_sync
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -236,6 +237,15 @@ class MetalServer(Document):
 			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
 
 		DiskInventory(self).sync()
+
+	@frappe.whitelist(methods=["POST"])
+	def sync_state(self) -> None:
+		"""Queue one host state exchange for this server."""
+		frappe.only_for("System Manager")
+		if self.status != "Running" or not self.is_provisioning_completed:
+			frappe.throw(_("Metal Server {0} is not ready to synchronize.").format(self.name))
+
+		enqueue_server_sync(self.name)
 
 	@property
 	def metald_job_id(self) -> str:

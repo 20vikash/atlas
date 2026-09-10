@@ -263,6 +263,38 @@ class TestServer(UnitTestCase):
 
 		create_for_command.assert_not_called()
 
+	def test_sync_state_queues_one_host_exchange(self) -> None:
+		server = self._server(status="Running")
+		server.is_provisioning_completed = True
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.enqueue_server_sync"
+			) as enqueue_server_sync,
+		):
+			MetalServer.sync_state(server)
+
+		enqueue_server_sync.assert_called_once_with(server.name)
+
+	# A host without a completed provisioning holds no Metal token.
+	def test_sync_state_rejects_a_server_that_is_not_ready(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.enqueue_server_sync"
+			) as enqueue_server_sync,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.sync_state(server)
+
+		enqueue_server_sync.assert_not_called()
+
 	def test_install_metald_queues_the_install_job(self) -> None:
 		server = self._server(status="Running")
 

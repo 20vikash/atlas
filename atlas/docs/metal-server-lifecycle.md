@@ -49,6 +49,7 @@ The existing whitelisted methods remain the public boundary:
 - `poweron_server`
 - `archive_server`
 - `sync_disks`
+- `sync_state`
 - `install_metald`
 - `upgrade_metald`
 

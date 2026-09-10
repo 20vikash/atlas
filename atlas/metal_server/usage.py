@@ -28,16 +28,31 @@ def enqueue_server_syncs() -> None:
 	peers = get_wireguard_peers()
 	privileged_addresses = get_privileged_vm_addresses()
 	for server_name in servers:
-		frappe.enqueue(
-			sync_server,
-			queue="default",
-			timeout=30,
-			server_name=server_name,
-			wireguard_peers=peers,
-			privileged_vm_addresses=privileged_addresses,
-			job_id=f"atlas||server-sync||{server_name}",
-			deduplicate=True,
-		)
+		enqueue_server_sync(server_name, peers, privileged_addresses)
+
+
+def enqueue_server_sync(
+	server_name: str,
+	wireguard_peers: list[dict[str, Any]] | None = None,
+	privileged_vm_addresses: list[str] | None = None,
+) -> None:
+	"""Queue one state exchange. A caller that queues many syncs reads the shared
+	sets once and supplies them."""
+	if wireguard_peers is None:
+		wireguard_peers = get_wireguard_peers()
+	if privileged_vm_addresses is None:
+		privileged_vm_addresses = get_privileged_vm_addresses()
+
+	frappe.enqueue(
+		sync_server,
+		queue="default",
+		timeout=30,
+		server_name=server_name,
+		wireguard_peers=wireguard_peers,
+		privileged_vm_addresses=privileged_vm_addresses,
+		job_id=f"atlas||server-sync||{server_name}",
+		deduplicate=True,
+	)
 
 
 def sync_server(
