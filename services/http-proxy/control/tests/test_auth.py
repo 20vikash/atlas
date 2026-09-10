@@ -5,14 +5,15 @@ from pathlib import Path
 import bcrypt
 import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import HTTPException
 from jwt import PyJWK
-from jwt.algorithms import RSAAlgorithm
+from jwt.algorithms import OKPAlgorithm
 
-from proxy_control.auth import Authentication
+from proxy_control.auth import Authentication, Authorization
 
-AUDIENCE = "atlas-proxy-control"
+AUDIENCE = "atlas-proxy:42"
+ATLAS_ISSUER = "atlas:42"
 PASSWORD = "correct-horse"
 PREVIOUS_PASSWORD = "previous-horse"
 
@@ -47,6 +48,7 @@ def write_config(
 			[
 				'jwks_url = "https://issuer.example.com/jwks.json"',
 				f'jwks_audience_id = "{AUDIENCE}"',
+				f'jwks_issuers = ["central", "{ATLAS_ISSUER}"]',
 			]
 		)
 	path.write_text("\n".join(lines) + "\n")
@@ -99,19 +101,37 @@ class _FakeJWKClient:
 		return self.keys
 
 
-def _key_pair() -> rsa.RSAPrivateKey:
-	return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+def _key_pair() -> Ed25519PrivateKey:
+	return Ed25519PrivateKey.generate()
 
 
 def _jwk(public_key, key_id: str) -> PyJWK:
-	jwk_data = json.loads(RSAAlgorithm.to_jwk(public_key))
-	jwk_data["kid"] = key_id
+	jwk_data = json.loads(OKPAlgorithm.to_jwk(public_key))
+	jwk_data.update({"kid": key_id, "alg": "EdDSA", "use": "sig"})
 	return PyJWK.from_json(json.dumps(jwk_data))
 
 
-def _token(private_key, key_id: str, audience: str = AUDIENCE, ttl_seconds: int = 3600) -> str:
-	payload = {"sub": "controller", "aud": audience, "exp": int(time.time()) + ttl_seconds}
-	return jwt.encode(payload, private_key, algorithm="RS256", headers={"kid": key_id})
+def _token(
+	private_key,
+	key_id: str,
+	audience: str = AUDIENCE,
+	ttl_seconds: int = 3600,
+	issuer: str = ATLAS_ISSUER,
+	subject: str = "cargo",
+	scope: str = "site:*",
+	constraints: dict | None = None,
+) -> str:
+	now = int(time.time())
+	payload = {
+		"iss": issuer,
+		"sub": subject,
+		"aud": audience,
+		"scope": scope,
+		"iat": now,
+		"exp": now + ttl_seconds,
+	}
+	payload["constraints"] = constraints if constraints is not None else {"site": {"suffix": "-svc"}}
+	return jwt.encode(payload, private_key, algorithm="EdDSA", headers={"kid": key_id})
 
 
 def _authentication(path: Path, jwk: PyJWK) -> Authentication:
@@ -124,9 +144,49 @@ def _authentication(path: Path, jwk: PyJWK) -> Authentication:
 
 def test_require_accepts_a_valid_jwks_token(tmp_path):
 	private_key = _key_pair()
-	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), "key-1"))
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
 
-	authentication.require(authorization=f"Bearer {_token(private_key, 'key-1')}")
+	authorization = authentication.require(authorization=f"Bearer {_token(private_key, key_id)}")
+
+	authorization.require("site", "update", "pdf-svc")
+
+
+def test_the_signed_claim_selects_the_site_suffix(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, constraints={"site": {"suffix": "-worker"}})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("site", "update", "render-worker")
+	with pytest.raises(HTTPException):
+		authorization.require("site", "update", "render-svc")
+
+
+def test_an_empty_constraint_allows_every_site_name(tmp_path):
+	private_key = _key_pair()
+	key_id = f"{ATLAS_ISSUER}:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, constraints={})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require_unconstrained("site", "update")
+	authorization.require("site", "update", "any-site-name")
+
+
+def test_central_receives_unrestricted_proxy_authority(tmp_path):
+	private_key = _key_pair()
+	key_id = "central:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, issuer="central", subject="central", scope="*", constraints={})
+
+	authorization = authentication.require(authorization=f"Bearer {token}")
+
+	authorization.require("domain", "update", "customer.example.com")
+	authorization.require_unconstrained("site", "update")
 
 
 @pytest.mark.parametrize("authorization", [None, "token", "Basic token"])
@@ -170,15 +230,73 @@ def test_require_rejects_a_missing_or_malformed_config(tmp_path):
 @pytest.mark.parametrize(
 	("key_id", "audience", "ttl_seconds"),
 	[
-		("unknown-key", AUDIENCE, 3600),
-		("key-1", "another-audience", 3600),
-		("key-1", AUDIENCE, -60),
+		("atlas:42:unknown-key", AUDIENCE, 3600),
+		("atlas:42:key-1", "another-audience", 3600),
+		("atlas:42:key-1", AUDIENCE, -60),
 	],
 )
 def test_require_rejects_an_invalid_jwks_token(tmp_path, key_id, audience, ttl_seconds):
 	private_key = _key_pair()
-	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), "key-1"))
+	authentication = _authentication(
+		tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), "atlas:42:key-1")
+	)
 	token = _token(private_key, key_id, audience, ttl_seconds)
 
 	with pytest.raises(HTTPException):
 		authentication.require(f"Bearer {token}")
+
+
+def test_a_key_cannot_claim_another_issuer(tmp_path):
+	private_key = _key_pair()
+	key_id = "atlas:42:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, issuer="central", scope="*")
+
+	with pytest.raises(HTTPException):
+		authentication.require(f"Bearer {token}")
+
+
+@pytest.mark.parametrize(
+	("scope", "constraints"),
+	[
+		("unknown:*", None),
+		("site:*", {"unknown": {"suffix": "-svc"}}),
+		("site:*", {"site": {"unknown": "-svc"}}),
+		("site:*", {"site": {"suffix": ""}}),
+		("*", {"site": {"suffix": "-svc"}}),
+	],
+)
+def test_unknown_or_malformed_authority_is_rejected(tmp_path, scope, constraints):
+	private_key = _key_pair()
+	key_id = "atlas:42:key-1"
+	authentication = _authentication(tmp_path / "proxy-control.toml", _jwk(private_key.public_key(), key_id))
+	token = _token(private_key, key_id, scope=scope, constraints=constraints)
+
+	with pytest.raises(HTTPException):
+		authentication.require(f"Bearer {token}")
+
+
+def test_a_site_constraint_filters_and_restricts_names():
+	authorization = Authorization(frozenset({"site:*"}), {"site": {"suffix": "-svc"}})
+
+	assert authorization.filter("site", {"pdf-svc": "::1", "customer": "::2"}) == {"pdf-svc": "::1"}
+	authorization.require("site", "update", "pdf-svc")
+	with pytest.raises(HTTPException) as failure:
+		authorization.require("site", "update", "customer")
+	assert failure.value.status_code == 403
+
+
+def test_a_constrained_token_cannot_replace_a_complete_map():
+	authorization = Authorization(frozenset({"site:*"}), {"site": {"suffix": "-svc"}})
+
+	with pytest.raises(HTTPException) as failure:
+		authorization.require_unconstrained("site", "update")
+	assert failure.value.status_code == 403
+
+
+def test_site_authority_does_not_grant_domain_authority():
+	authorization = Authorization(frozenset({"site:*"}))
+
+	with pytest.raises(HTTPException) as failure:
+		authorization.require("domain", "update", "customer.example.com")
+	assert failure.value.status_code == 403
