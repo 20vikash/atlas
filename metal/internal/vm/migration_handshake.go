@@ -24,6 +24,11 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if err != nil {
 		return err
 	}
+	// A pending abort takes priority over every other phase.
+	if record.AbortRequested && !isTerminalStatus(record.Status) {
+		m.StartTransfer(virtualMachineID)
+		return nil
+	}
 	if record.Status == MigrationReady {
 		if record.FinishRequested {
 			m.StartTransfer(virtualMachineID)
@@ -37,9 +42,15 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 		m.StartTransfer(virtualMachineID)
 		return nil
 	}
+	// A target that never advanced past preparing is expired: roll it back.
 	if m.now().Sub(record.CreatedAt) > reservationTimeout {
 		m.logger.Warn("migration target expired before the handshake started", "migration_id", record.ID)
-		return m.abortTargetLocked(ctx, record)
+		record.AbortRequested = true
+		if err := m.store.writeTarget(record); err != nil {
+			return err
+		}
+		m.StartTransfer(virtualMachineID)
+		return nil
 	}
 
 	token, err := m.store.readToken(virtualMachineID)
@@ -63,7 +74,9 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	return nil
 }
 
-// ActiveTargetVirtualMachineIDs returns the VM IDs of running target migrations.
+// ActiveTargetVirtualMachineIDs returns the VM IDs of every nonterminal target
+// migration, so the reconciler advances handshakes, transfers, finishes, and
+// rollbacks, and requeues pending work after a restart.
 func (m *MigrationManager) ActiveTargetVirtualMachineIDs(_ context.Context) ([]string, error) {
 	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
 	if err != nil {
@@ -78,7 +91,7 @@ func (m *MigrationManager) ActiveTargetVirtualMachineIDs(_ context.Context) ([]s
 		if err != nil {
 			return nil, err
 		}
-		if record.Status == MigrationRunning {
+		if !isTerminalStatus(record.Status) {
 			active = append(active, virtualMachineID)
 		}
 	}

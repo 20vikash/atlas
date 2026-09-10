@@ -17,8 +17,10 @@ type fakeTransfer struct {
 	datasetExists bool
 	resumeToken   string
 	received      int
+	aborts        int
 	sendErr       error
 	receiveErr    error
+	abortErr      error
 }
 
 func (f *fakeTransfer) CreateSnapshot(_ context.Context, _, name string) error {
@@ -62,6 +64,11 @@ func (f *fakeTransfer) ReceiveSnapshot(_ context.Context, _ string, r io.Reader)
 	f.received++
 	_, _ = io.Copy(io.Discard, r)
 	return f.receiveErr
+}
+
+func (f *fakeTransfer) AbortReceive(_ context.Context, _ string) error {
+	f.aborts++
+	return f.abortErr
 }
 
 type fakeSourceClient struct {
@@ -258,6 +265,13 @@ func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	if err := migrationManager.AbortTarget(ctx, "mig-1"); err != nil {
 		t.Fatal(err)
 	}
+	// The worker performs the rollback; drive and wait for it.
+	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if source.removeCalls != 1 {
 		t.Fatalf("RemoveSource calls = %d, want 1", source.removeCalls)
 	}
@@ -266,7 +280,7 @@ func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	}
 }
 
-func TestAbortTargetKeepsRecordsWhenCleanupFails(t *testing.T) {
+func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	source.removeError = errors.New("source unreachable")
 	ctx := context.Background()
@@ -274,11 +288,17 @@ func TestAbortTargetKeepsRecordsWhenCleanupFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := migrationManager.AbortTarget(ctx, "mig-1"); err == nil {
-		t.Fatal("want a cleanup error")
+	if err := migrationManager.AbortTarget(ctx, "mig-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.Shutdown(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if !machines.isTargetReserved("vm-1") {
-		t.Fatal("reservation was cleared despite a cleanup failure")
+		t.Fatal("reservation was cleared despite a rollback failure")
 	}
 }
 

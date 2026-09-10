@@ -100,6 +100,10 @@ func TestAdvanceTargetExpiresAStaleReservation(t *testing.T) {
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
 		t.Fatal(err)
 	}
+	// Expiry requests an abort and the worker rolls the reservation back.
+	if err := migrationManager.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if source.removeCalls != 1 {
 		t.Fatalf("RemoveSource calls = %d, want 1", source.removeCalls)
 	}

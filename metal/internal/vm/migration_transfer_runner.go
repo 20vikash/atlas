@@ -116,6 +116,8 @@ func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID str
 		switch {
 		case isTerminalStatus(record.Status):
 			return
+		case record.AbortRequested:
+			advanceError = m.advanceAbort(ctx, record)
 		case record.FinishRequested && record.Status == MigrationReady:
 			advanceError = m.advanceFinish(ctx, record)
 		case record.Status == MigrationRunning && record.Phase == PhaseCopying:
@@ -181,6 +183,7 @@ func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMig
 	}
 
 	record.SourceObservedState = StateStopped
+	record.SourceStopped = true
 	record.FinalSequence = final.Sequence
 	if err := m.store.writeTarget(record); err != nil {
 		return err

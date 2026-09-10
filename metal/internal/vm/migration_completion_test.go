@@ -82,3 +82,84 @@ func TestRequestFinishConflictsWithAbort(t *testing.T) {
 		t.Fatalf("finish after abort = %v, want ErrConflict", err)
 	}
 }
+
+func TestRunTransferAbortsBeforeStop(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	store := writeCopyingTarget(t, machines, StateRunning)
+	record, _ := store.readTarget("vm-1")
+	record.AbortRequested = true
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+
+	migrationManager.runTransfer(context.Background(), "vm-1")
+
+	rec, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != MigrationAborted || rec.Phase != "" {
+		t.Fatalf("record = %+v", rec)
+	}
+	// A source that never stopped is unlocked, not restarted.
+	if source.startCalls != 0 || source.removeCalls != 1 {
+		t.Fatalf("start calls = %d, remove calls = %d", source.startCalls, source.removeCalls)
+	}
+	if transfer.aborts != 1 {
+		t.Fatalf("receive aborts = %d, want 1", transfer.aborts)
+	}
+	if _, err := store.readToken("vm-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("token still present: %v", err)
+	}
+}
+
+func TestRunTransferAbortsAfterStop(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	store := writeCopyingTarget(t, machines, StateRunning)
+	record, _ := store.readTarget("vm-1")
+	record.SourceStopped = true
+	record.FinalSequence = 2
+	record.AbortRequested = true
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+
+	migrationManager.runTransfer(context.Background(), "vm-1")
+
+	rec, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != MigrationAborted {
+		t.Fatalf("status = %s, want aborted", rec.Status)
+	}
+	// A stopped source is restored, then unlocked.
+	if source.startCalls != 1 || source.removeCalls != 1 {
+		t.Fatalf("start calls = %d, remove calls = %d", source.startCalls, source.removeCalls)
+	}
+}
+
+func TestRunTransferKeepsLockedWhenRollbackFails(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	source.removeError = errors.New("source unreachable")
+	store := writeCopyingTarget(t, machines, StateRunning)
+	record, _ := store.readTarget("vm-1")
+	record.AbortRequested = true
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+
+	migrationManager.runTransfer(context.Background(), "vm-1")
+
+	rec, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isTerminalStatus(rec.Status) {
+		t.Fatal("a failed rollback must keep the migration locked")
+	}
+	if !rec.AbortRequested {
+		t.Fatal("the abort request must be preserved for a retry")
+	}
+}

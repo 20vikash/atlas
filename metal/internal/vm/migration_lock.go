@@ -14,9 +14,18 @@ func (manager *Manager) isSourceLocked(virtualMachineID string) bool {
 }
 
 // isTargetReserved reports whether a migration reserves this VM ID for an
-// incoming target VM.
+// incoming target VM. A terminal record no longer reserves the VM. An unreadable
+// record stays reserved, so a corrupt record locks conservatively.
 func (manager *Manager) isTargetReserved(virtualMachineID string) bool {
-	return fileExists(targetRecordPath(manager.configuration.MachinesDirectory, virtualMachineID))
+	store := newMigrationStore(manager.configuration.MachinesDirectory)
+	if !store.has(store.targetPath(virtualMachineID)) {
+		return false
+	}
+	record, err := store.readTarget(virtualMachineID)
+	if err != nil {
+		return true
+	}
+	return !isTerminalStatus(record.Status)
 }
 
 // isMigrating reports whether any migration role holds this VM. Normal VM

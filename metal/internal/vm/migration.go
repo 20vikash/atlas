@@ -43,6 +43,7 @@ type DiskTransfer interface {
 	TargetDatasetExists(ctx context.Context, virtualMachineID string) (bool, error)
 	ReceiveResumeToken(ctx context.Context, virtualMachineID string) (string, error)
 	ReceiveSnapshot(ctx context.Context, virtualMachineID string, r io.Reader) error
+	AbortReceive(ctx context.Context, virtualMachineID string) error
 }
 
 // reservationTimeout removes a target reservation whose worker never supplies a
@@ -194,8 +195,9 @@ func (m *MigrationManager) TargetStatus(_ context.Context, migrationID string) (
 	return record, err
 }
 
-// AbortTarget removes a migration that has not finished. It unlocks the source
-// and clears the reservation. A cleanup failure keeps the records for a retry.
+// AbortTarget records an abort request and cancels an active transfer. The
+// background worker performs the rollback. A finish request or a completed
+// migration conflicts. A repeat is safe.
 func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) error {
 	virtualMachineID, _, err := m.store.findTarget(migrationID)
 	if errors.Is(err, ErrNotFound) {
@@ -204,6 +206,14 @@ func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) 
 	if err != nil {
 		return err
 	}
+	if err := m.requestAbort(ctx, virtualMachineID); err != nil {
+		return err
+	}
+	return m.CancelTransfer(ctx, virtualMachineID)
+}
+
+// requestAbort records the abort intent under the migration lock.
+func (m *MigrationManager) requestAbort(ctx context.Context, virtualMachineID string) error {
 	unlock, err := m.locks.lock(ctx, virtualMachineID)
 	if err != nil {
 		return err
@@ -217,25 +227,17 @@ func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) 
 	if err != nil {
 		return err
 	}
-	return m.abortTargetLocked(ctx, record)
-}
-
-// abortTargetLocked runs the abort cleanup while the VM lock is already held.
-func (m *MigrationManager) abortTargetLocked(ctx context.Context, record TargetMigrationRecord) error {
-	virtualMachineID := record.VirtualMachineID
-	token, err := m.store.readToken(virtualMachineID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+	if record.Status == MigrationAborted {
+		return nil
 	}
-	if err := m.removeTargetStaging(virtualMachineID); err != nil {
-		return err
+	if record.FinishRequested || record.Status == MigrationCompleted {
+		return ErrConflict
 	}
-	if token != "" {
-		if err := m.source.RemoveSource(ctx, record.Source, record.ID, token); err != nil {
-			return fmt.Errorf("unlock migration source: %w", err)
-		}
+	if record.AbortRequested {
+		return nil
 	}
-	return m.store.remove(virtualMachineID)
+	record.AbortRequested = true
+	return m.store.writeTarget(record)
 }
 
 // TargetReservations returns the capacity that active migration targets hold.
