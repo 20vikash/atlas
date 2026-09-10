@@ -16,13 +16,21 @@ Atlas binds each key namespace to its issuer. A `central:*` key can validate onl
 
 The public key set is at `GET /api/atlas/jwks.json`. Atlas gets Central keys every 5 minutes and keeps the last valid set after a fetch failure. The endpoint also contains the regional Atlas public key. The response does not contain a private key.
 
-An `/api/atlas` route requires verified service claims or a System Manager. The route handler does the resource and tenant permission checks. An Atlas Admin session without verified claims cannot use the API. A guest can read the API reference and the public key set. The realtime console paths stay open to every user.
+An `/api/atlas` route requires a verified token or a System Manager. The authentication hook is the only access gate, and it runs before Frappe matches the route. A session without a verified token cannot use the API. A guest can read the API reference and the public key set. The realtime console paths stay open to every user.
 
 ## Tenant
 
-Each request must carry `X-Tenant-ID` with an unsigned 32-bit integer from 1 through 4294967295. Tenant `0` is reserved for System Manager Desk and DocType actions.
+The `tenant` claim of the token decides the tenant boundary. Atlas signs each regional caller in as the Frappe user of its tenant, and Frappe permissions then filter every read and write.
 
-A missing or invalid tenant header returns `400`. The header must match the token tenant unless the token contains `tenant=*`. A tenant mismatch returns `400`. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
+A token with a tenant claim needs no header. A header that names another tenant returns `400`. A Central token (`tenant=*`) is not bound to one tenant, so it must send `X-Tenant-ID` with an unsigned 32-bit integer from 1 through 4294967295. A System Manager uses the same header.
+
+| Caller | `X-Tenant-ID` |
+|---|---|
+| Regional token, such as `tenant=7` | Optional. The token tenant is used, and a different value returns `400`. |
+| Central token (`tenant=*`) | Required. A missing or invalid value returns `400`. |
+| System Manager session | Required, and the request is limited to that tenant. |
+
+Tenant `0` is reserved for System Manager Desk and DocType actions. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
 
 ## Conventions
 
@@ -80,7 +88,7 @@ def create_machine(payload: MachinePayload) -> ApiResult[MachineResponse]:
 	return ApiResult(machine, status=201)
 ```
 
-A route function reads request data through two reserved parameter names. Each value must be a Pydantic model or a list of one Pydantic model. The router rejects raw dictionaries, raw lists, scalar values, unions, and missing annotations when it registers a route. Atlas adds the required `X-Tenant-ID` header to each documented operation.
+A route function reads request data through two reserved parameter names. Each value must be a Pydantic model or a list of one Pydantic model. The router rejects raw dictionaries, raw lists, scalar values, unions, and missing annotations when it registers a route. Atlas documents the optional `X-Tenant-ID` header on each operation. Central tokens and System Manager sessions must send it.
 
 - `payload` decodes the JSON request body. A route on `GET` or `HEAD` cannot declare it.
 - `query` decodes the query string. Pydantic converts each string value to the annotated type.

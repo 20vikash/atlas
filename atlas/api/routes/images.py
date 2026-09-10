@@ -18,7 +18,7 @@ from atlas.api.core.errors import (
 )
 from atlas.api.models import ImageDownloadQuery, ImageDownloadResponse, ImageResponse
 from atlas.api.router import images
-from atlas.auth.tenant import get_tenant_id
+from atlas.auth.identity import get_current_tenant_id
 
 if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
@@ -26,10 +26,7 @@ if TYPE_CHECKING:
 
 def get_owned_image(image_id: str) -> VirtualMachineImage:
 	"""Return one tenant image or a shared System image."""
-	image: VirtualMachineImage = get_owned_document("Virtual Machine Image", image_id, {})
-	if not image.is_visible_to_tenant(get_tenant_id()):
-		raise ResourceNotFound("The Virtual Machine Image does not exist.")
-	return image
+	return get_owned_document("Virtual Machine Image", image_id)
 
 
 @images.get("")
@@ -39,9 +36,9 @@ def list_images(query: ListQuery) -> Page[ImageResponse]:
 
 	Returns one page of System and Machine images owned by the tenant in newest-first order.
 	"""
-	rows: list[VirtualMachineImage] = frappe.get_all(
+	rows: list[VirtualMachineImage] = frappe.get_list(
 		"Virtual Machine Image",
-		or_filters={"tenant_id": get_tenant_id(), "image_type": "System"},
+		or_filters={"tenant_id": get_current_tenant_id(), "image_type": "System"},
 		fields=[
 			"name",
 			"tenant_id",
@@ -62,7 +59,7 @@ def list_images(query: ListQuery) -> Page[ImageResponse]:
 			"creation",
 		],
 		order_by="creation desc",
-		start=query.offset,
+		offset=query.offset,
 		limit=query.fetch_limit,
 	)
 	return build_page([ImageResponse.from_document(row) for row in rows], query)

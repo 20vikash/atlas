@@ -10,6 +10,7 @@ from ... import errors
 
 from ...models.image_response import ImageResponse
 from ...models.snapshot_payload import SnapshotPayload
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -18,11 +19,12 @@ def _get_kwargs(
     virtual_machine_id: str,
     *,
     body: SnapshotPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -73,7 +75,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: SnapshotPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ImageResponse]:
     """ Create snapshot
@@ -84,7 +86,7 @@ def sync_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SnapshotPayload): Values that create one Machine image from a virtual machine.
 
     Raises:
@@ -114,7 +116,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: SnapshotPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ImageResponse | None:
     """ Create snapshot
@@ -125,7 +127,7 @@ def sync(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SnapshotPayload): Values that create one Machine image from a virtual machine.
 
     Raises:
@@ -150,7 +152,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: SnapshotPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ImageResponse]:
     """ Create snapshot
@@ -161,7 +163,7 @@ async def asyncio_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SnapshotPayload): Values that create one Machine image from a virtual machine.
 
     Raises:
@@ -191,7 +193,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: SnapshotPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ImageResponse | None:
     """ Create snapshot
@@ -202,7 +204,7 @@ async def asyncio(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SnapshotPayload): Values that create one Machine image from a virtual machine.
 
     Raises:

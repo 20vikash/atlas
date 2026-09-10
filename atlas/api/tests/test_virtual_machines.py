@@ -54,28 +54,17 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 
 def stored_rows(rows: list[SimpleNamespace]):
 	"""Patch the Virtual Machine query and leave every other query alone."""
-	query = frappe.get_all
+	query = frappe.get_list
 
-	def get_all(doctype, *args, **kwargs):
+	def get_list(doctype, *args, **kwargs):
 		return rows if doctype == "Virtual Machine" else query(doctype, *args, **kwargs)
 
-	return patch("atlas.api.routes.virtual_machines.frappe.get_all", side_effect=get_all)
+	return patch("atlas.api.routes.virtual_machines.frappe.get_list", side_effect=get_list)
 
 
-def owned_document(virtual_machine: SimpleNamespace, tenant_id: int = TENANT_ID):
-	"""Patch the tenant lookup so it returns one virtual machine."""
-	return patch(
-		"atlas.api.routes.virtual_machines.get_owned_document",
-		side_effect=lambda doctype, name, filters, label=None: (
-			virtual_machine if filters["tenant_id"] == tenant_id else raise_not_found(label)
-		),
-	)
-
-
-def raise_not_found(label: str):
-	from atlas.api.core.errors import ResourceNotFound
-
-	raise ResourceNotFound(f"The {label} does not exist.")
+def owned_document(virtual_machine: SimpleNamespace):
+	"""Patch the ownership lookup so it returns one virtual machine."""
+	return patch("atlas.api.routes.virtual_machines.get_owned_document", return_value=virtual_machine)
 
 
 class TestVirtualMachineViews(UnitTestCase):
@@ -159,14 +148,14 @@ class TestReadVirtualMachines(UnitTestCase):
 			api_request(
 				"GET", "/api/atlas/virtual-machines", tenant_id=TENANT_ID, query_string={"limit": "2"}
 			),
-			stored_rows(rows) as get_all,
+			stored_rows(rows) as get_list,
 			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
 		):
 			status, body = call_route(list_virtual_machines)
 
 		self.assertEqual(status, 200)
-		self.assertEqual(get_all.call_args.kwargs["filters"], {"tenant_id": TENANT_ID})
-		self.assertEqual(get_all.call_args.kwargs["limit"], 3)
+		self.assertEqual(get_list.call_args.kwargs["filters"], {"tenant_id": TENANT_ID})
+		self.assertEqual(get_list.call_args.kwargs["limit"], 3)
 		self.assertEqual(len(body["items"]), 2)
 		self.assertTrue(body["has_more"])
 
@@ -215,16 +204,6 @@ class TestReadVirtualMachines(UnitTestCase):
 		self.assertEqual(body["id"], "vm-00001")
 		self.assertIsNone(body["desired_state"])
 		self.assertEqual(body["current_state"], "unknown")
-
-	def test_another_tenant_cannot_read_the_record(self) -> None:
-		with (
-			api_request("GET", "/api/atlas/virtual-machines/vm-00001", tenant_id=OTHER_TENANT_ID),
-			owned_document(build_virtual_machine()),
-		):
-			status, body = call_route(get_virtual_machine, virtual_machine_id="vm-00001")
-
-		self.assertEqual(status, 404)
-		self.assertEqual(body["error"]["code"], "not_found")
 
 
 class TestVirtualMachineActions(UnitTestCase):

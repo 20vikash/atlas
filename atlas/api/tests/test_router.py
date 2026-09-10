@@ -199,58 +199,6 @@ class TestRequestDecoding(unittest.TestCase):
 		self.assertEqual(body["error"]["code"], "invalid_request")
 		self.assertEqual(body["error"]["message"], "The request body is not valid JSON.")
 
-	def test_guest_request_is_rejected_when_login_is_needed(self):
-		router = make_router()
-
-		@router.get("machines")
-		def protected():
-			return {}
-
-		previous_user = frappe.session.user
-		frappe.session.user = "Guest"
-		try:
-			with http_request("GET"):
-				status, body = error_body(protected)
-		finally:
-			frappe.session.user = previous_user
-
-		self.assertEqual(status, 401)
-		self.assertEqual(body["error"]["code"], "authentication_required")
-
-	def test_user_without_atlas_admin_profile_is_rejected(self):
-		router = make_router()
-
-		@router.get("machines")
-		def protected():
-			return {}
-
-		with (
-			http_request("GET"),
-			patch("atlas.api.core.base.has_role", return_value=False),
-		):
-			status, body = error_body(protected)
-
-		self.assertEqual(status, 403)
-		self.assertEqual(body["error"]["code"], "permission_denied")
-
-	def test_system_manager_can_use_a_protected_route(self):
-		router = make_router()
-
-		@router.get("machines")
-		def protected():
-			return {}
-
-		def has_system_manager_role(role: str, user: str | None = None) -> bool:
-			return role == "System Manager"
-
-		with (
-			http_request("GET"),
-			patch("atlas.api.core.base.has_role", side_effect=has_system_manager_role),
-		):
-			status, _ = call_route(protected)
-
-		self.assertEqual(status, 200)
-
 	def test_explicit_arguments_are_not_overwritten(self):
 		router = make_router()
 
@@ -381,7 +329,7 @@ class TestSpecification(unittest.TestCase):
 	def test_path_and_query_parameters_are_described(self):
 		operation = self.operation("machines/{name}", "get")
 		parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
-		self.assertTrue(parameters["X-Tenant-ID"]["required"])
+		self.assertFalse(parameters["X-Tenant-ID"]["required"])
 		self.assertEqual(parameters["name"]["in"], "path")
 		self.assertTrue(parameters["name"]["required"])
 		self.assertTrue(parameters["region"]["required"])

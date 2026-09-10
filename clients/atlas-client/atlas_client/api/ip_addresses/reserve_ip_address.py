@@ -10,6 +10,7 @@ from ... import errors
 
 from ...models.ip_address_response import IPAddressResponse
 from ...models.reserve_ip_address_payload import ReserveIPAddressPayload
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -17,11 +18,12 @@ from typing import cast
 def _get_kwargs(
     *,
     body: ReserveIPAddressPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -75,7 +77,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: ReserveIPAddressPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[Any | IPAddressResponse]:
     """ Reserve IP address
@@ -84,7 +86,7 @@ def sync_detailed(
     provider source creates a provider reservation.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ReserveIPAddressPayload): Select the source of an IP address reservation.
 
     Raises:
@@ -112,7 +114,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: ReserveIPAddressPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Any | IPAddressResponse | None:
     """ Reserve IP address
@@ -121,7 +123,7 @@ def sync(
     provider source creates a provider reservation.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ReserveIPAddressPayload): Select the source of an IP address reservation.
 
     Raises:
@@ -144,7 +146,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: ReserveIPAddressPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[Any | IPAddressResponse]:
     """ Reserve IP address
@@ -153,7 +155,7 @@ async def asyncio_detailed(
     provider source creates a provider reservation.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ReserveIPAddressPayload): Select the source of an IP address reservation.
 
     Raises:
@@ -181,7 +183,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: ReserveIPAddressPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Any | IPAddressResponse | None:
     """ Reserve IP address
@@ -190,7 +192,7 @@ async def asyncio(
     provider source creates a provider reservation.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ReserveIPAddressPayload): Select the source of an IP address reservation.
 
     Raises:

@@ -10,6 +10,7 @@ from ... import errors
 
 from ...models.console_token_payload import ConsoleTokenPayload
 from ...models.console_token_response import ConsoleTokenResponse
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -18,11 +19,12 @@ def _get_kwargs(
     virtual_machine_id: str,
     *,
     body: ConsoleTokenPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -73,7 +75,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: ConsoleTokenPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ConsoleTokenResponse]:
     """ Create console token
@@ -83,7 +85,7 @@ def sync_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ConsoleTokenPayload): The console mode that the token opens.
 
     Raises:
@@ -113,7 +115,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: ConsoleTokenPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ConsoleTokenResponse | None:
     """ Create console token
@@ -123,7 +125,7 @@ def sync(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ConsoleTokenPayload): The console mode that the token opens.
 
     Raises:
@@ -148,7 +150,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: ConsoleTokenPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ConsoleTokenResponse]:
     """ Create console token
@@ -158,7 +160,7 @@ async def asyncio_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ConsoleTokenPayload): The console mode that the token opens.
 
     Raises:
@@ -188,7 +190,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: ConsoleTokenPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ConsoleTokenResponse | None:
     """ Create console token
@@ -198,7 +200,7 @@ async def asyncio(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (ConsoleTokenPayload): The console mode that the token opens.
 
     Raises:

@@ -10,6 +10,7 @@ from ... import errors
 
 from ...models.download_image_artifact import DownloadImageArtifact
 from ...models.image_download_response import ImageDownloadResponse
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -18,11 +19,12 @@ def _get_kwargs(
     image_id: str,
     *,
     artifact: DownloadImageArtifact,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -78,7 +80,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ImageDownloadResponse]:
     """ Download image
@@ -89,7 +91,7 @@ def sync_detailed(
     Args:
         image_id (str):
         artifact (DownloadImageArtifact):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -118,7 +120,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ImageDownloadResponse | None:
     """ Download image
@@ -129,7 +131,7 @@ def sync(
     Args:
         image_id (str):
         artifact (DownloadImageArtifact):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -153,7 +155,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ImageDownloadResponse]:
     """ Download image
@@ -164,7 +166,7 @@ async def asyncio_detailed(
     Args:
         image_id (str):
         artifact (DownloadImageArtifact):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -193,7 +195,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     artifact: DownloadImageArtifact,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ImageDownloadResponse | None:
     """ Download image
@@ -204,7 +206,7 @@ async def asyncio(
     Args:
         image_id (str):
         artifact (DownloadImageArtifact):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

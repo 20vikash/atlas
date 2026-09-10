@@ -39,7 +39,7 @@ from atlas.api.router import (
 )
 from atlas.api.routes.images import get_owned_image
 from atlas.api.routes.ip_addresses import get_owned_ip_address
-from atlas.auth.tenant import get_tenant_id
+from atlas.auth.identity import get_current_tenant_id
 from atlas.vm.core.console_token import CONSOLE_TOKEN_TTL_SECONDS
 from atlas.vm.core.vm_state import get_reported_state_rows
 from atlas.vm.doctype.virtual_machine.virtual_machine import create as create_virtual_machine_request
@@ -57,10 +57,7 @@ ACCEPTED_RESPONSE = {202: {"description": "The change is accepted. Poll the virt
 
 def get_owned_virtual_machine(virtual_machine_id: str) -> VirtualMachine:
 	"""Return one virtual machine that the request tenant owns."""
-	virtual_machine: VirtualMachine = get_owned_document(
-		"Virtual Machine", virtual_machine_id, {"tenant_id": get_tenant_id()}
-	)
-	return virtual_machine
+	return get_owned_document("Virtual Machine", virtual_machine_id)
 
 
 def request_virtual_machine_power_state(
@@ -102,7 +99,9 @@ def create_virtual_machine(
 	"""
 	image = get_owned_image(payload.image_id)
 	ip_address = get_available_ip_address(payload.ip_address_id) if payload.ip_address_id else None
-	request = payload.to_domain_request(get_tenant_id(), image.name, ip_address.name if ip_address else None)
+	request = payload.to_domain_request(
+		get_current_tenant_id(), image.name, ip_address.name if ip_address else None
+	)
 	result = create_virtual_machine_request(request)
 	virtual_machine: VirtualMachine = frappe.get_doc("Virtual Machine", result["name"])
 
@@ -122,9 +121,9 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 
 	Returns one page of tenant VM records in newest-first order, with the state each host last reported. This request does not contact the host.
 	"""
-	rows: list[VirtualMachine] = frappe.get_all(
+	rows: list[VirtualMachine] = frappe.get_list(
 		"Virtual Machine",
-		filters={"tenant_id": get_tenant_id()},
+		filters={"tenant_id": get_current_tenant_id()},
 		fields=[
 			"name",
 			"tenant_id",
@@ -137,7 +136,7 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 			"creation",
 		],
 		order_by="creation desc",
-		start=query.offset,
+		offset=query.offset,
 		limit=query.fetch_limit,
 	)
 	states = get_reported_state_rows([row.name for row in rows])

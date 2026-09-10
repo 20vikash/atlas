@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.virtual_machine_response import VirtualMachineResponse
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -16,11 +17,12 @@ from typing import cast
 def _get_kwargs(
     virtual_machine_id: str,
     *,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -67,7 +69,7 @@ def sync_detailed(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[VirtualMachineResponse]:
     """ Delete VM
@@ -77,7 +79,7 @@ def sync_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -104,7 +106,7 @@ def sync(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> VirtualMachineResponse | None:
     """ Delete VM
@@ -114,7 +116,7 @@ def sync(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -136,7 +138,7 @@ async def asyncio_detailed(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[VirtualMachineResponse]:
     """ Delete VM
@@ -146,7 +148,7 @@ async def asyncio_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -173,7 +175,7 @@ async def asyncio(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> VirtualMachineResponse | None:
     """ Delete VM
@@ -183,7 +185,7 @@ async def asyncio(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

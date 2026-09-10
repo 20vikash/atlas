@@ -7,7 +7,13 @@ from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption,
 from frappe.tests import UnitTestCase
 from jwt.algorithms import OKPAlgorithm
 
-from atlas.auth.jwks import JWKSError, merged_jwks, sync_central_jwks, validate_central_jwks
+from atlas.auth.jwks import (
+	JWKSError,
+	_build_trusted_keys,
+	sync_central_jwks,
+	trusted_keys,
+	validate_central_jwks,
+)
 
 
 def private_key_pem() -> str:
@@ -68,29 +74,59 @@ class TestCentralJWKS(UnitTestCase):
 		settings.db_set.assert_not_called()
 
 
-class TestMergedJWKS(UnitTestCase):
-	def test_the_regional_key_set_contains_central_and_atlas_keys(self) -> None:
-		central_key = public_jwk("central:key-1")
-		settings = SimpleNamespace(
-			central_jwks=json.dumps({"keys": [central_key]}),
+class TestTrustedKeys(UnitTestCase):
+	def setUp(self) -> None:
+		_build_trusted_keys.clear_cache()
+
+	def tearDown(self) -> None:
+		_build_trusted_keys.clear_cache()
+
+	def build_settings(self, key_id: str = "atlas:42:key-1", central_key_id: str | None = None):
+		central_jwks = json.dumps({"keys": [public_jwk(central_key_id)]}) if central_key_id else ""
+		return SimpleNamespace(
+			central_jwks=central_jwks,
 			issuer="atlas:42",
-			jwt_signing_key_id="atlas:42:key-1",
+			jwt_signing_key_id=key_id,
+			modified="2026-09-11 00:00:00",
 			get_password=lambda *args, **kwargs: private_key_pem(),
 		)
-		with patch("atlas.auth.jwks.frappe.get_cached_doc", return_value=settings):
-			keys = merged_jwks()["keys"]
 
-		self.assertEqual([key["kid"] for key in keys], ["central:key-1", "atlas:42:key-1"])
+	def test_the_regional_key_set_contains_central_and_atlas_keys(self) -> None:
+		settings = self.build_settings(central_key_id="central:key-1")
+		with patch("atlas.auth.jwks.frappe.get_cached_doc", return_value=settings):
+			keys = trusted_keys()
+
+		self.assertEqual([key["kid"] for key in keys.document["keys"]], ["central:key-1", "atlas:42:key-1"])
+		self.assertIsNotNone(keys.key("atlas:42:key-1"))
+		self.assertIsNone(keys.key("central:unknown"))
+
+	def test_one_revision_is_built_once(self) -> None:
+		settings = self.build_settings()
+		with patch("atlas.auth.jwks.frappe.get_cached_doc", return_value=settings):
+			self.assertIs(trusted_keys(), trusted_keys())
+
+	def test_a_changed_revision_rebuilds_the_key_set(self) -> None:
+		settings = self.build_settings()
+		with patch("atlas.auth.jwks.frappe.get_cached_doc", return_value=settings):
+			first = trusted_keys()
+			settings.modified = "2026-09-11 01:00:00"
+			settings.jwt_signing_key_id = "atlas:42:key-2"
+			second = trusted_keys()
+
+		self.assertIsNot(first, second)
+		self.assertIsNotNone(second.key("atlas:42:key-2"))
 
 	def test_the_atlas_key_must_use_the_current_region_namespace(self) -> None:
-		settings = SimpleNamespace(
-			central_jwks="",
-			issuer="atlas:42",
-			jwt_signing_key_id="central:key-1",
-			get_password=lambda *args, **kwargs: private_key_pem(),
-		)
+		settings = self.build_settings(key_id="central:key-1")
 		with (
 			patch("atlas.auth.jwks.frappe.get_cached_doc", return_value=settings),
 			self.assertRaises(JWKSError),
 		):
-			merged_jwks()
+			trusted_keys()
+
+	def test_a_failure_is_not_cached(self) -> None:
+		settings = self.build_settings(key_id="central:key-1")
+		with patch("atlas.auth.jwks.frappe.get_cached_doc", return_value=settings):
+			for _ in range(2):
+				with self.assertRaises(JWKSError):
+					trusted_keys()

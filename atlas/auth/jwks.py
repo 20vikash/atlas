@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import frappe
 import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from frappe.utils.caching import site_cache
 from jwt import PyJWK
 from jwt.algorithms import OKPAlgorithm
 
@@ -13,6 +15,7 @@ if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
 CENTRAL_ISSUER = "central"
+KEY_CACHE_SECONDS = 600
 JWKS_PATH = "/api/atlas/jwks.json"
 JWKS_TIMEOUT_SECONDS = 10
 MAXIMUM_CENTRAL_KEYS = 100
@@ -23,12 +26,34 @@ class JWKSError(ValueError):
 	"""The JSON Web Key Set is not safe to publish or use."""
 
 
-def merged_jwks() -> dict[str, list[dict[str, Any]]]:
-	"""Return the Central keys and the public Atlas key."""
-	settings = frappe.get_cached_doc("Atlas Settings")
-	central_keys = _stored_central_keys(settings.central_jwks or "")
+@dataclass(frozen=True, slots=True)
+class TrustedKeys:
+	"""The verification keys of one Atlas Settings revision."""
 
-	return {"keys": [*central_keys, atlas_public_jwk(settings)]}
+	document: dict[str, list[dict[str, Any]]]
+	keys: dict[str, PyJWK]
+
+	def key(self, key_id: str) -> PyJWK | None:
+		"""Return the verification key of one key ID."""
+		return self.keys.get(key_id)
+
+
+def trusted_keys() -> TrustedKeys:
+	"""Return the keys that this region trusts, rebuilt when Atlas Settings changes."""
+	settings = frappe.get_cached_doc("Atlas Settings")
+
+	return _build_trusted_keys(str(settings.modified), settings.central_jwks or "")
+
+
+@site_cache(ttl=KEY_CACHE_SECONDS, maxsize=4)
+def _build_trusted_keys(modified: str, central_jwks: str) -> TrustedKeys:
+	settings = frappe.get_cached_doc("Atlas Settings")
+	keys = [*_stored_central_keys(central_jwks), atlas_public_jwk(settings)]
+
+	return TrustedKeys(
+		document={"keys": keys},
+		keys={key["kid"]: PyJWK.from_dict(key) for key in keys},
+	)
 
 
 def atlas_public_jwk(settings: AtlasSettings) -> dict[str, Any]:

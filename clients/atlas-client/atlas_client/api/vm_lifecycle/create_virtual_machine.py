@@ -10,6 +10,7 @@ from ... import errors
 
 from ...models.create_virtual_machine_payload import CreateVirtualMachinePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -17,11 +18,12 @@ from typing import cast
 def _get_kwargs(
     *,
     body: CreateVirtualMachinePayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -71,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[VirtualMachineResponse]:
     """ Create VM
@@ -80,7 +82,7 @@ def sync_detailed(
     configuration.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (CreateVirtualMachinePayload): Values that create one virtual machine.
 
     Raises:
@@ -108,7 +110,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> VirtualMachineResponse | None:
     """ Create VM
@@ -117,7 +119,7 @@ def sync(
     configuration.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (CreateVirtualMachinePayload): Values that create one virtual machine.
 
     Raises:
@@ -140,7 +142,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[VirtualMachineResponse]:
     """ Create VM
@@ -149,7 +151,7 @@ async def asyncio_detailed(
     configuration.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (CreateVirtualMachinePayload): Values that create one virtual machine.
 
     Raises:
@@ -177,7 +179,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: CreateVirtualMachinePayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> VirtualMachineResponse | None:
     """ Create VM
@@ -186,7 +188,7 @@ async def asyncio(
     configuration.
 
     Args:
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (CreateVirtualMachinePayload): Values that create one virtual machine.
 
     Raises:

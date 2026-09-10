@@ -10,6 +10,7 @@ from ... import errors
 
 from ...models.ssh_keys_replacement_payload import SSHKeysReplacementPayload
 from ...models.virtual_machine_response import VirtualMachineResponse
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -18,11 +19,12 @@ def _get_kwargs(
     virtual_machine_id: str,
     *,
     body: SSHKeysReplacementPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -73,7 +75,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: SSHKeysReplacementPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[VirtualMachineResponse]:
     """ Replace SSH keys
@@ -82,7 +84,7 @@ def sync_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SSHKeysReplacementPayload): The complete authorized key list.
 
     Raises:
@@ -112,7 +114,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     body: SSHKeysReplacementPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> VirtualMachineResponse | None:
     """ Replace SSH keys
@@ -121,7 +123,7 @@ def sync(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SSHKeysReplacementPayload): The complete authorized key list.
 
     Raises:
@@ -146,7 +148,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     body: SSHKeysReplacementPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[VirtualMachineResponse]:
     """ Replace SSH keys
@@ -155,7 +157,7 @@ async def asyncio_detailed(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SSHKeysReplacementPayload): The complete authorized key list.
 
     Raises:
@@ -185,7 +187,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     body: SSHKeysReplacementPayload,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> VirtualMachineResponse | None:
     """ Replace SSH keys
@@ -194,7 +196,7 @@ async def asyncio(
 
     Args:
         virtual_machine_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
         body (SSHKeysReplacementPayload): The complete authorized key list.
 
     Raises:

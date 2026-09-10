@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.image_response import ImageResponse
+from ...types import UNSET, Unset
 from typing import cast
 
 
@@ -16,11 +17,12 @@ from typing import cast
 def _get_kwargs(
     image_id: str,
     *,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -67,7 +69,7 @@ def sync_detailed(
     image_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ImageResponse]:
     """ Get image
@@ -76,7 +78,7 @@ def sync_detailed(
 
     Args:
         image_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -103,7 +105,7 @@ def sync(
     image_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ImageResponse | None:
     """ Get image
@@ -112,7 +114,7 @@ def sync(
 
     Args:
         image_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -134,7 +136,7 @@ async def asyncio_detailed(
     image_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[ImageResponse]:
     """ Get image
@@ -143,7 +145,7 @@ async def asyncio_detailed(
 
     Args:
         image_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -170,7 +172,7 @@ async def asyncio(
     image_id: str,
     *,
     client: AuthenticatedClient | Client,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> ImageResponse | None:
     """ Get image
@@ -179,7 +181,7 @@ async def asyncio(
 
     Args:
         image_id (str):
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

@@ -159,29 +159,13 @@ after_migrate = [
 # Permissions evaluated in scripted ways
 
 permission_query_conditions = {
-	"Atlas Settings": "atlas.auth.overrides.get_permission_query_conditions",
-	"SSH Task": "atlas.auth.overrides.get_permission_query_conditions",
-	"Metal Server": "atlas.auth.overrides.get_permission_query_conditions",
-	"Metal Server Disk": "atlas.auth.overrides.get_permission_query_conditions",
-	"Metal Server Image": "atlas.auth.overrides.get_permission_query_conditions",
 	"Metal Server IP Address": "atlas.auth.overrides.get_permission_query_conditions",
-	"Metal Server Size": "atlas.auth.overrides.get_permission_query_conditions",
-	"Metal Server Usage": "atlas.auth.overrides.get_permission_query_conditions",
-	"Proxy Server": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine Image": "atlas.auth.overrides.get_permission_query_conditions",
 }
 
 has_permission = {
-	"Atlas Settings": "atlas.auth.overrides.has_permission",
-	"SSH Task": "atlas.auth.overrides.has_permission",
-	"Metal Server": "atlas.auth.overrides.has_permission",
-	"Metal Server Disk": "atlas.auth.overrides.has_permission",
-	"Metal Server Image": "atlas.auth.overrides.has_permission",
 	"Metal Server IP Address": "atlas.auth.overrides.has_permission",
-	"Metal Server Size": "atlas.auth.overrides.has_permission",
-	"Metal Server Usage": "atlas.auth.overrides.has_permission",
-	"Proxy Server": "atlas.auth.overrides.has_permission",
 	"Virtual Machine": "atlas.auth.overrides.has_permission",
 	"Virtual Machine Image": "atlas.auth.overrides.has_permission",
 }

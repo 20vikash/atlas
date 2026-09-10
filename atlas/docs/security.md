@@ -12,9 +12,11 @@ The Atlas API at `/api/atlas` is the only tenant-facing surface. Metal Servers, 
 
 A service caller needs a valid Central or regional Atlas token. Send the token in the `Authorization: Bearer <token>` header. A System Manager can also use the Atlas API.
 
-The authentication validator closes the standard Frappe guest surface. A guest can sign in and read the API reference or public key set. The realtime console stays open because its handshake and permission calls need the web process. An Atlas Admin session without verified token claims cannot use an Atlas API route.
+The authentication validator closes the standard Frappe guest surface. A guest can sign in and read the API reference or public key set. The realtime console stays open because its handshake and permission calls need the web process. A session without a verified token cannot use an Atlas API route.
 
 Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. It checks `nbf` when the claim is present. The audience is `atlas-admin:<region ID>`. The API surface is unrestricted, so the token needs `scope=*`, a subject, a tenant, and no resource constraint. The subject is an identity label and does not change the authority. The `tenant` claim carries the tenant boundary. Central uses `tenant=*`.
+
+The authentication hook is the one access gate. It signs the caller in, stores the request identity, and refuses a path that the caller may not use. A route function performs no access check of its own.
 
 Atlas binds each key namespace to its issuer. A `central:*` key can validate only `iss=central`. The regional key can validate only `iss=atlas:<region ID>`. A regional token cannot claim Central authority.
 
@@ -22,7 +24,9 @@ Atlas gets Central public keys every 5 minutes. It keeps the last valid key set 
 
 ## Tenant isolation
 
-Each tenant record carries a `tenant_id`. The API reads the tenant from `X-Tenant-ID`. The value must match the token tenant unless the claim is `tenant=*`. A route returns `404` for a record of another tenant. Shared permission overrides apply the same rule to each tenant DocType.
+Each tenant record carries a `tenant_id`. The `tenant` claim of the token decides the tenant of a request. Atlas signs a regional caller in as `tenant-<tenant ID>@atlas.local` and creates that user on first use, so the tenant belongs to the authenticated user and not to a request header. A Central caller (`tenant=*`) is not bound to one tenant and sends `X-Tenant-ID`.
+
+The Frappe permission hooks are the enforcement point. `permission_query_conditions` filters each list query and `has_permission` checks each document, both for `Virtual Machine`, `Virtual Machine Image`, and `Metal Server IP Address`. A list route uses `frappe.get_list`, so the hook applies. `get_owned_document` applies the same rule to a single resource and returns `404` for a record of another tenant. Outside an Atlas API request there is no identity, so a caller without the System Manager role reads nothing.
 
 A System image is the one shared record. Every tenant can read, boot, and download it. Only its owner can write or delete a Machine image.
 
@@ -40,7 +44,13 @@ Tenant `0` is reserved. A privileged virtual machine reaches every tenant throug
 
 **A console token is a bearer capability.** It is a 48-character value that expires after 60 seconds and is single use. The realtime handler accepts it from a guest, because the token is the only credential the console needs.
 
+## Future work
+
+**The Atlas API has no resource scopes.** A token carries `scope=*` and reaches every tenant API route. The HTTP proxy already binds a token to resource scopes and name constraints. Add the same model here when one caller must reach fewer routes than another.
+
 ## Rules for a change
+
+A list route must use `frappe.get_list`. `frappe.get_all` ignores permissions and must not appear in a route.
 
 Keep an API route thin. Put the permission check on the domain object, so a whitelisted method is safe on its own. A route is a second line of defence, not the only one.
 

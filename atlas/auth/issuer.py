@@ -67,10 +67,6 @@ def issue_token(
 	if constraints:
 		claims["constraints"] = constraints
 
-	return _encode(settings, claims)
-
-
-def _encode(settings: AtlasSettings, claims: dict[str, Any]) -> str:
 	private_key = settings.get_password("jwt_signing_private_key", raise_exception=False)
 	if not private_key or not settings.jwt_signing_key_id:
 		raise RuntimeError("Atlas has no JSON Web Token signing key.")

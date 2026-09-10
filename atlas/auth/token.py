@@ -4,9 +4,8 @@ from typing import Any
 
 import frappe
 import jwt
-from jwt import PyJWK
 
-from atlas.auth.jwks import issuer_for_key_id, merged_jwks
+from atlas.auth.jwks import issuer_for_key_id, trusted_keys
 
 
 class TokenValidator:
@@ -25,7 +24,7 @@ class TokenValidator:
 				return None
 
 			issuer = issuer_for_key_id(key_id, settings.region_id)
-			key = self._signing_key(key_id)
+			key = trusted_keys().key(key_id)
 			if issuer is None or key is None:
 				return None
 
@@ -46,21 +45,8 @@ class TokenValidator:
 		except jwt.PyJWTError, ValueError, TypeError:
 			return None
 
-	def _signing_key(self, key_id: str) -> PyJWK | None:
-		for key in merged_jwks()["keys"]:
-			if key.get("kid") == key_id:
-				return PyJWK.from_dict(key)
-		return None
-
 	def _has_atlas_authority(self, claims: dict[str, Any]) -> bool:
-		"""Accept one unrestricted administrative token from a trusted issuer."""
-		subject = claims.get("sub")
-		tenant = claims.get("tenant")
-		if not isinstance(subject, str) or not subject:
-			return False
-		if not isinstance(tenant, str) or not tenant:
-			return False
-
+		"""Accept one unrestricted administrative token. AtlasIdentity validates the tenant."""
 		if claims.get("scope") != "*":
 			return False
 		if claims.get("constraints", {}) != {}:

@@ -10,7 +10,9 @@ from frappe.tests import UnitTestCase
 from jwt import PyJWK
 from jwt.algorithms import OKPAlgorithm
 
-from atlas.auth.request import authenticate_token, token_claims
+from atlas.auth.identity import current_identity
+from atlas.auth.jwks import TrustedKeys
+from atlas.auth.request import authenticate_token
 from atlas.auth.token import TokenValidator
 from atlas.auth.user import CENTRAL_ADMIN_USER
 
@@ -58,9 +60,10 @@ class TestToken(UnitTestCase):
 
 	def validate(self, token: str, key_id: str):
 		settings = SimpleNamespace(region_id=42, admin_audience_id=AUDIENCE)
+		keys = TrustedKeys(document={"keys": []}, keys={key_id: public_jwk(self.private_key, key_id)})
 		with (
 			patch("frappe.get_cached_doc", return_value=settings),
-			patch.object(TokenValidator, "_signing_key", return_value=public_jwk(self.private_key, key_id)),
+			patch("atlas.auth.token.trusted_keys", return_value=keys),
 		):
 			return TokenValidator().claims(token)
 
@@ -113,19 +116,15 @@ class TestToken(UnitTestCase):
 		self.assertIsNone(self.validate(token, key_id))
 
 	def test_invalid_authority_is_refused(self) -> None:
+		"""The tenant grammar belongs to AtlasIdentity, so this covers scope and constraints."""
 		key_id = "atlas:42:key-1"
-		for changes in (
-			{"scope": "image:*"},
-			{"subject": ""},
-			{"tenant": ""},
-			{"constraints": {"site": {"suffix": "-svc"}}},
-		):
+		for changes in ({"scope": "image:*"}, {"constraints": {"site": {"suffix": "-svc"}}}):
 			token = build_token(
 				self.private_key,
 				key_id=key_id,
 				issuer=ATLAS_ISSUER,
-				subject=changes.get("subject", "operator"),
-				tenant=changes.get("tenant", "7"),
+				subject="operator",
+				tenant="7",
 				scope=changes.get("scope", "*"),
 				constraints=changes.get("constraints"),
 			)
@@ -153,16 +152,16 @@ class TestToken(UnitTestCase):
 class TestTokenSession(UnitTestCase):
 	def setUp(self) -> None:
 		self.previous_user = frappe.session.user
-		self.previous_claims = getattr(frappe.local, "atlas_token_claims", None)
+		self.previous_identity = getattr(frappe.local, "atlas_identity", None)
 		frappe.set_user("Guest")
-		frappe.local.atlas_token_claims = None
+		frappe.local.atlas_identity = None
 
 	def tearDown(self) -> None:
-		frappe.local.atlas_token_claims = self.previous_claims
+		frappe.local.atlas_identity = self.previous_identity
 		frappe.set_user(self.previous_user)
 
-	def test_a_valid_token_becomes_the_atlas_admin_user(self) -> None:
-		claims = {"iss": "central", "tenant": "*"}
+	def test_a_central_token_becomes_the_central_admin_user(self) -> None:
+		claims = {"iss": "central", "sub": "central", "tenant": "*", "scope": "*"}
 		with (
 			patch("frappe.get_request_header", return_value="Bearer a-token"),
 			patch.object(TokenValidator, "claims", return_value=claims),
@@ -171,7 +170,33 @@ class TestTokenSession(UnitTestCase):
 			authenticate_token()
 
 		set_user.assert_called_once_with(CENTRAL_ADMIN_USER)
-		self.assertEqual(token_claims(), claims)
+		self.assertTrue(current_identity().is_central)
+
+	def test_a_regional_token_becomes_its_tenant_user(self) -> None:
+		claims = {"iss": "atlas:42", "sub": "cargo", "tenant": "7", "scope": "*"}
+		with (
+			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch.object(TokenValidator, "claims", return_value=claims),
+			patch("atlas.auth.request.ensure_tenant_user", return_value="tenant-7@atlas.local") as ensure,
+			patch("atlas.auth.request.frappe.set_user") as set_user,
+		):
+			authenticate_token()
+
+		ensure.assert_called_once_with(7)
+		set_user.assert_called_once_with("tenant-7@atlas.local")
+		self.assertEqual(current_identity().tenant, "7")
+
+	def test_an_unusable_tenant_claim_keeps_the_guest_session(self) -> None:
+		claims = {"iss": "atlas:42", "sub": "cargo", "tenant": "0", "scope": "*"}
+		with (
+			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch.object(TokenValidator, "claims", return_value=claims),
+			patch("atlas.auth.request.frappe.set_user") as set_user,
+		):
+			authenticate_token()
+
+		set_user.assert_not_called()
+		self.assertIsNone(current_identity())
 
 	def test_an_invalid_token_keeps_the_guest_session(self) -> None:
 		with (

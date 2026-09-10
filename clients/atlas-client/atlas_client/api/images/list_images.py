@@ -18,11 +18,12 @@ def _get_kwargs(
     *,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
-    headers["X-Tenant-ID"] = str(x_tenant_id)
+    if not isinstance(x_tenant_id, Unset):
+        headers["X-Tenant-ID"] = str(x_tenant_id)
 
 
 
@@ -79,7 +80,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[PageImageResponse]:
     """ List images
@@ -89,7 +90,7 @@ def sync_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -118,7 +119,7 @@ def sync(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> PageImageResponse | None:
     """ List images
@@ -128,7 +129,7 @@ def sync(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -152,7 +153,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> Response[PageImageResponse]:
     """ List images
@@ -162,7 +163,7 @@ async def asyncio_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -191,7 +192,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
-    x_tenant_id: int,
+    x_tenant_id: int | Unset = UNSET,
 
 ) -> PageImageResponse | None:
     """ List images
@@ -201,7 +202,7 @@ async def asyncio(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
-        x_tenant_id (int):
+        x_tenant_id (int | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

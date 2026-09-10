@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import frappe
 
+from atlas.auth.identity import (
+	CENTRAL_TENANT,
+	SESSION_ISSUER,
+	AtlasIdentity,
+	current_identity,
+	set_identity,
+)
 from atlas.auth.roles import has_role
 from atlas.auth.token import TokenValidator
-from atlas.auth.user import CENTRAL_ADMIN_USER
+from atlas.auth.user import CENTRAL_ADMIN_USER, ensure_tenant_user
 
 ATLAS_API_PREFIX = "/api/atlas"
 ATLAS_DOCS_PREFIX = "/api/atlas/docs"
@@ -22,25 +29,32 @@ GUEST_PATH_PREFIXES = ("/assets/",)
 
 def validate_auth() -> None:
 	"""Accept a service token, allow realtime support paths, and enforce route access."""
-	frappe.local.atlas_token_claims = None
+	set_identity(None)
 	authenticate_token()
 	path = frappe.request.path.rstrip("/") or "/"
-	if is_realtime_path(path):
-		return
-	if path in PUBLIC_ATLAS_PATHS:
+	if is_realtime_path(path) or path in PUBLIC_ATLAS_PATHS:
 		return
 
 	if frappe.session.user in ("", "Guest"):
 		validate_guest_path(path)
 		return
 
-	if has_role("System Manager"):
+	is_system_manager = has_role("System Manager")
+	if is_path_within(path, ATLAS_API_PREFIX):
+		if is_system_manager:
+			set_identity(
+				AtlasIdentity(
+					subject=frappe.session.user,
+					issuer=SESSION_ISSUER,
+					tenant=CENTRAL_TENANT,
+					scope="*",
+				)
+			)
+		elif current_identity() is None:
+			raise frappe.PermissionError
 		return
 
-	if is_path_within(path, ATLAS_API_PREFIX):
-		# Atlas routes perform their own resource and tenant permission checks.
-		if not has_role("Atlas Admin") or token_claims() is None:
-			raise frappe.PermissionError
+	if is_system_manager:
 		return
 
 	if has_role("Atlas Admin"):
@@ -83,10 +97,10 @@ def authenticate_token() -> None:
 	if claims is None:
 		return
 
-	frappe.local.atlas_token_claims = claims
-	frappe.set_user(CENTRAL_ADMIN_USER)  # nosemgrep
+	identity = AtlasIdentity.from_claims(claims)
+	if identity is None:
+		return
 
-
-def token_claims() -> dict | None:
-	"""Return the verified service claims for the current request."""
-	return getattr(frappe.local, "atlas_token_claims", None)
+	set_identity(identity)
+	user = CENTRAL_ADMIN_USER if identity.is_central else ensure_tenant_user(int(identity.tenant))
+	frappe.set_user(user)  # nosemgrep

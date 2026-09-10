@@ -21,13 +21,11 @@ from atlas.api.core.docs import DocsConfig, RouteDocs, generate_specification, r
 from atlas.api.core.errors import (
 	ApiError,
 	InvalidRequest,
-	PermissionDenied,
 	ResourceNotFound,
 	describe_exception,
 )
-from atlas.auth.request import token_claims
-from atlas.auth.roles import has_role
-from atlas.auth.tenant import MAXIMUM_TENANT_ID, TENANT_HEADER
+from atlas.auth.identity import MAXIMUM_TENANT_ID, TENANT_HEADER, get_current_tenant_id
+from atlas.auth.overrides import is_document_visible
 
 DEFAULT_LIST_LIMIT = 20
 MAXIMUM_LIST_LIMIT = 100
@@ -35,8 +33,11 @@ TENANT_PARAMETERS = (
 	{
 		"name": TENANT_HEADER,
 		"in": "header",
-		"required": True,
-		"description": "Tenant that owns the resource, from 1 through 4294967295.",
+		"required": False,
+		"description": (
+			"Tenant that owns the resource, from 1 through 4294967295. A Central token"
+			" (tenant=*) must send it. A regional token carries its tenant and ignores it."
+		),
 		"schema": {"type": "integer", "minimum": 1, "maximum": MAXIMUM_TENANT_ID},
 	},
 )
@@ -84,11 +85,23 @@ class Page[PageItem](PydanticBaseModel):
 	has_more: bool
 
 
-def get_owned_document(doctype: str, name: str, filters: dict[str, Any], label: str | None = None):
-	"""Return one document that matches the tenant filters, or report that it is absent."""
-	if not name or not frappe.db.exists(doctype, {"name": name, **filters}):
-		raise ResourceNotFound(f"The {label or doctype} does not exist.")
-	return frappe.get_doc(doctype, name)
+def get_owned_document(doctype: str, name: str, label: str | None = None):
+	"""Return one document that the tenant of the request may read, or report that it is absent."""
+	absent = ResourceNotFound(f"The {label or doctype} does not exist.")
+	if not name:
+		raise absent
+
+	get_current_tenant_id()
+
+	try:
+		document = frappe.get_doc(doctype, name)
+	except frappe.DoesNotExistError:
+		raise absent from None
+
+	if not is_document_visible(document, "read"):
+		raise absent
+
+	return document
 
 
 def build_page[PageItem](rows: list[PageItem], query: ListQuery) -> Page[PageItem]:
@@ -229,11 +242,6 @@ class Router:
 		return tags
 
 	@property
-	def documentation_paths(self) -> set[str]:
-		"""Paths of the documentation routes, which every caller may read."""
-		return {self.join("docs"), self.join("docs/openapi.json")}
-
-	@property
 	def openapi_specification(self) -> dict[str, Any]:
 		"""The OpenAPI document for this router."""
 		if not self.docs:
@@ -254,7 +262,13 @@ class Router:
 		def openapi_specification():
 			return self.openapi_specification
 
-		API_URL_MAP.add(Rule(self.join("docs"), endpoint=RouteHandler(self, api_reference), methods=["GET"]))
+		API_URL_MAP.add(
+			Rule(
+				self.join("docs"),
+				endpoint=RouteHandler(self, api_reference),
+				methods=["GET"],
+			)
+		)
 		API_URL_MAP.add(
 			Rule(
 				self.join("docs/openapi.json"),
@@ -267,11 +281,10 @@ class Router:
 class RouteHandler:
 	"""Runs one route function for an HTTP request and turns its result into a response."""
 
-	def __init__(self, router: Router, function: Callable, *, public: bool = False):
+	def __init__(self, router: Router, function: Callable):
 		functools.update_wrapper(self, function)
 		self.router = router
 		self.function = function
-		self.public = public
 		self.shape = CallShape.of(function)
 		self.payload = resolve_binding(function, "payload")
 		self.query = resolve_binding(function, "query")
@@ -282,7 +295,6 @@ class RouteHandler:
 			return self.function(*args, **kwargs)
 
 		try:
-			self.check_permission()
 			kwargs.update(self.read_parameters(request, args, kwargs))
 			result = self.function(*args, **self.shape.accepted_keywords(kwargs))
 			if frappe.flags.in_test:
@@ -293,17 +305,6 @@ class RouteHandler:
 			raise
 		except Exception as exception:
 			raise HTTPException(response=self.build_error_response(exception))
-
-	def check_permission(self) -> None:
-		"""Require the configured authentication and Atlas role profile."""
-		if self.public or frappe.request.path.rstrip("/") in self.router.documentation_paths:
-			return
-
-		if not frappe.session or frappe.session.user == "Guest":
-			raise frappe.AuthenticationError
-
-		if not (has_role("System Manager") or (has_role("Atlas Admin") and token_claims() is not None)):
-			raise PermissionDenied("The Atlas Admin role profile is required.")
 
 	def read_parameters(self, request: Request, args: tuple, kwargs: dict) -> dict[str, Any]:
 		"""Decode the query and payload parameters that the caller did not supply."""
@@ -358,7 +359,7 @@ def register_route(
 		raise ValueError(f"Route {path} uses unsupported HTTP methods: {unsupported}")
 
 	def decorator(function: Callable) -> RouteHandler:
-		handler = RouteHandler(router, function, public=public)
+		handler = RouteHandler(router, function)
 		if handler.payload and set(methods) <= {"HEAD", "GET"}:
 			raise TypeError(f"{function.__name__} cannot accept a payload on {methods}")
 
