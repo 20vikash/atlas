@@ -73,6 +73,7 @@ type fakeSourceClient struct {
 	prepareError  error
 	nextSnapshot  SourceSnapshot
 	nextError     error
+	nextCalls     int
 	streamBytes   int64
 	streamError   error
 }
@@ -83,6 +84,7 @@ func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string
 }
 
 func (c *fakeSourceClient) NextSnapshot(context.Context, string, string, string, int) (SourceSnapshot, error) {
+	c.nextCalls++
 	return c.nextSnapshot, c.nextError
 }
 

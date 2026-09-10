@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -70,6 +71,14 @@ type MigrationManager struct {
 	locks    keyedLocks
 	logger   *slog.Logger
 	now      func() time.Time
+
+	// The manager owns one background disk transfer per VM.
+	transfersMutex     sync.Mutex
+	transfers          map[string]struct{}
+	transfersWaitGroup sync.WaitGroup
+	rootContext        context.Context
+	rootCancel         context.CancelFunc
+	closed             bool
 }
 
 // NewMigrationManager validates the stored records and returns a migration
@@ -85,14 +94,18 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 	if err := store.validateAll(); err != nil {
 		return nil, fmt.Errorf("validate migration records: %w", err)
 	}
+	rootContext, rootCancel := context.WithCancel(context.Background())
 	return &MigrationManager{
-		machines: machines,
-		store:    store,
-		source:   source,
-		transfer: transfer,
-		capacity: capacity,
-		logger:   logger,
-		now:      func() time.Time { return time.Now().UTC() },
+		machines:    machines,
+		store:       store,
+		source:      source,
+		transfer:    transfer,
+		capacity:    capacity,
+		logger:      logger,
+		now:         func() time.Time { return time.Now().UTC() },
+		transfers:   make(map[string]struct{}),
+		rootContext: rootContext,
+		rootCancel:  rootCancel,
 	}, nil
 }
 
