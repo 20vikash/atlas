@@ -48,6 +48,12 @@ class TestTenantHeader(UnitTestCase):
 		with api_request(tenant_id=9):
 			self.assertEqual(get_tenant_id(), 9)
 
+	def test_header_must_match_the_service_tenant(self) -> None:
+		with api_request(tenant_id=9):
+			frappe.local.atlas_token_claims = {"scope": "*", "tenant": "1"}
+			with self.assertRaises(InvalidRequest):
+				get_tenant_id()
+
 	def test_missing_header_is_rejected(self) -> None:
 		with api_request(), self.assertRaises(InvalidRequest):
 			get_tenant_id()
@@ -146,6 +152,7 @@ class TestGuestPaths(UnitTestCase):
 			"/assets/atlas/app.js",
 			"/api/atlas/docs",
 			"/api/atlas/docs/openapi.json",
+			"/api/atlas/jwks.json",
 		):
 			with api_request(path=path):
 				validate_auth()
@@ -154,6 +161,11 @@ class TestGuestPaths(UnitTestCase):
 		for path in ("/socket.io/", "/api/method/frappe.realtime.get_user_info"):
 			with api_request(path=path):
 				validate_auth()
+
+	def test_a_signed_in_user_may_read_the_public_jwks(self) -> None:
+		frappe.set_user("ordinary@example.com")
+		with api_request(path="/api/atlas/jwks.json"):
+			validate_auth()
 
 	def test_a_guest_cannot_use_another_route(self) -> None:
 		for path in (
@@ -180,19 +192,37 @@ class TestAuthValidator(UnitTestCase):
 		with api_request(path="/api/resource/User"), patch("atlas.auth.request.has_role", return_value=False):
 			validate_auth()
 
-	def test_atlas_admin_can_use_only_atlas_routes(self) -> None:
+	def test_atlas_admin_needs_service_claims_for_atlas_routes(self) -> None:
 		def has_atlas_role(role: str, user: str | None = None) -> bool:
 			return role == "Atlas Admin"
 
 		with (
 			api_request(path="/api/atlas/images"),
 			patch("atlas.auth.request.has_role", side_effect=has_atlas_role),
+			self.assertRaises(frappe.PermissionError),
+		):
+			validate_auth()
+
+	def test_a_service_token_can_use_only_atlas_routes(self) -> None:
+		def has_atlas_role(role: str, user: str | None = None) -> bool:
+			return role == "Atlas Admin"
+
+		claims = {"scope": "*", "tenant": "*"}
+
+		def set_claims() -> None:
+			frappe.local.atlas_token_claims = claims
+
+		with (
+			api_request(path="/api/atlas/images"),
+			patch("atlas.auth.request.has_role", side_effect=has_atlas_role),
+			patch("atlas.auth.request.authenticate_token", side_effect=set_claims),
 		):
 			validate_auth()
 
 		with (
 			api_request(path="/api/resource/User"),
 			patch("atlas.auth.request.has_role", side_effect=has_atlas_role),
+			patch("atlas.auth.request.authenticate_token", side_effect=set_claims),
 			self.assertRaises(frappe.PermissionError),
 		):
 			validate_auth()

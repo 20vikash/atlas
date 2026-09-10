@@ -25,7 +25,6 @@ PROXY_CLUSTER_PASSWORD_LENGTH = 48
 PROXY_CONFIGURATION_FIELDS = (
 	"wildcard_tls_certificate",
 	"wildcard_tls_private_key",
-	"central_jwks_url",
 	"proxy_cluster_password",
 	"previous_proxy_cluster_password",
 )
@@ -42,6 +41,7 @@ class AtlasSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		central_jwks: DF.JSON | None
 		central_jwks_url: DF.Data | None
 		dns_provider: DF.Literal["Route53"]
 		http_proxy_package_file: DF.Link | None
@@ -51,6 +51,8 @@ class AtlasSettings(Document):
 		is_server_provider_setup_completed: DF.Check
 		is_setup_completed: DF.Check
 		is_wildcard_tls_auto_renew_enabled: DF.Check
+		jwt_signing_key_id: DF.Data | None
+		jwt_signing_private_key: DF.Password | None
 		letsencrypt_config_directory: DF.Data | None
 		letsencrypt_email: DF.Data
 		metald_binary_x86_64_file: DF.Link | None
@@ -108,12 +110,25 @@ class AtlasSettings(Document):
 	@property
 	def admin_audience_id(self) -> str:
 		"""Return the audience that a token for the Atlas API must carry."""
-		return f"atlas-{self.region_id}-admin"
+		return f"atlas-admin:{self.region_id}"
 
 	@property
 	def proxy_audience_id(self) -> str:
 		"""Return the audience that a token for a regional proxy must carry."""
-		return f"atlas-{self.region_id}-proxy"
+		return f"atlas-proxy:{self.region_id}"
+
+	@property
+	def issuer(self) -> str:
+		"""Return this region's Atlas issuer."""
+		return f"atlas:{self.region_id}"
+
+	@property
+	def jwks_url(self) -> str:
+		"""Return the public regional JSON Web Key Set URL."""
+		from atlas.auth.jwks import JWKS_PATH
+
+		base_url = frappe.conf.atlas_base_url or frappe.utils.get_url()
+		return f"{base_url.rstrip('/')}{JWKS_PATH}"
 
 	@cached_property
 	def server_provider_controller(self) -> "ServerProvider":
@@ -150,8 +165,11 @@ class AtlasSettings(Document):
 		)
 
 	def before_validate(self) -> None:
-		"""Create the regional proxy password when it is missing."""
+		"""Create the regional credentials when they are missing."""
+		from atlas.auth.issuer import initialize_signing_key
+
 		self.initialize_proxy_cluster_password()
+		initialize_signing_key(self)
 
 	def validate(self) -> None:
 		"""Reject settings that would leave Atlas unable to reach a provider."""
@@ -195,6 +213,14 @@ class AtlasSettings(Document):
 		if any(self.has_value_changed(field) for field in self.dns_provider_controller.credential_fields):
 			self.dns_provider_controller.validate_credentials()
 
+		if self.has_value_changed("central_jwks_url"):
+			frappe.enqueue(
+				"atlas.auth.jwks.sync_central_jwks",
+				job_id="atlas-sync-central-jwks",
+				deduplicate=True,
+				enqueue_after_commit=True,
+			)
+
 		if any(self.has_value_changed(field) for field in PROXY_CONFIGURATION_FIELDS):
 			push_configuration_to_active_proxies()
 
@@ -206,6 +232,14 @@ class AtlasSettings(Document):
 			and not self.is_setup_completed
 		):
 			self.is_setup_completed = True
+
+	@frappe.whitelist(methods=["POST"])
+	def issue_cargo_credentials(self) -> dict[str, str]:
+		"""Return short-lived Atlas and Proxy credentials for Cargo."""
+		from atlas.auth.issuer import issue_cargo_tokens
+
+		frappe.only_for("System Manager")
+		return issue_cargo_tokens(self)
 
 	def validate_wildcard_certificate(self) -> None:
 		"""Keep the stored certificate, its private key, and the expiry consistent."""
@@ -392,6 +426,13 @@ def renew_expiring_wildcard_certificate() -> None:
 def initialize_proxy_cluster_password() -> None:
 	"""Create the regional proxy password after schema migration."""
 	frappe.get_single("Atlas Settings").initialize_proxy_cluster_password(persist=True)
+
+
+def initialize_jwt_signing_key() -> None:
+	"""Create the regional JSON Web Token signing key after schema migration."""
+	from atlas.auth.issuer import initialize_signing_key
+
+	initialize_signing_key(frappe.get_single("Atlas Settings"), persist=True)
 
 
 def rotate_proxy_cluster_password() -> None:

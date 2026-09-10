@@ -102,12 +102,14 @@ code_only_modules = {
 after_install = [
 	"atlas.auth.user.create_central_admin_user",
 	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_jwt_signing_key",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
 after_migrate = [
 	"atlas.auth.user.create_central_admin_user",
 	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
+	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_jwt_signing_key",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
@@ -219,6 +221,9 @@ has_permission = {
 
 scheduler_events = {
 	"cron": {
+		"*/5 * * * *": [
+			"atlas.auth.jwks.sync_central_jwks",
+		],
 		"* * * * * */10": [
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_terminating_virtual_machines",
 			"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.enqueue_pending_ip_address_reconcilation",

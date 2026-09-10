@@ -31,6 +31,24 @@ def to_unix_timestamp(value: str | datetime) -> int:
 	return int(moment.timestamp())
 
 
+class JSONWebKey(BaseModel):
+	"""One public Ed25519 signature key."""
+
+	kty: Literal["OKP"]
+	crv: Literal["Ed25519"]
+	x: str
+	kid: str
+	alg: Literal["EdDSA"]
+	use: Literal["sig"]
+	key_ops: list[Literal["verify"]] = Field(default_factory=lambda: ["verify"])
+
+
+class JSONWebKeySetResponse(BaseModel):
+	"""The public keys that this Atlas region trusts."""
+
+	keys: list[JSONWebKey]
+
+
 class ReserveIPAddressPayload(StrictModel):
 	"""Select the source of an IP address reservation."""
 

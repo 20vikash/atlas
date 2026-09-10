@@ -506,6 +506,74 @@
         "title": "ImageResponse",
         "type": "object"
       },
+      "JSONWebKey": {
+        "description": "One public Ed25519 signature key.",
+        "properties": {
+          "alg": {
+            "const": "EdDSA",
+            "title": "Alg",
+            "type": "string"
+          },
+          "crv": {
+            "const": "Ed25519",
+            "title": "Crv",
+            "type": "string"
+          },
+          "key_ops": {
+            "items": {
+              "const": "verify",
+              "type": "string"
+            },
+            "title": "Key Ops",
+            "type": "array"
+          },
+          "kid": {
+            "title": "Kid",
+            "type": "string"
+          },
+          "kty": {
+            "const": "OKP",
+            "title": "Kty",
+            "type": "string"
+          },
+          "use": {
+            "const": "sig",
+            "title": "Use",
+            "type": "string"
+          },
+          "x": {
+            "title": "X",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kty",
+          "crv",
+          "x",
+          "kid",
+          "alg",
+          "use"
+        ],
+        "title": "JSONWebKey",
+        "type": "object"
+      },
+      "JSONWebKeySetResponse": {
+        "description": "The public keys that this Atlas region trusts.",
+        "properties": {
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/JSONWebKey"
+            },
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys"
+        ],
+        "title": "JSONWebKeySetResponse",
+        "type": "object"
+      },
       "MetadataReplacementPayload": {
         "additionalProperties": false,
         "description": "The complete custom metadata map.",
@@ -982,11 +1050,11 @@
         "scheme": "bearer",
         "type": "http"
       },
-      "Central Token Authentication": {
-        "description": "Use: X-Atlas-Central-Token <token>.",
-        "in": "header",
-        "name": "X-Atlas-Central-Token",
-        "type": "apiKey"
+      "Service Token Authentication": {
+        "bearerFormat": "JWT",
+        "description": "Use a Central or regional Atlas service token.",
+        "scheme": "bearer",
+        "type": "http"
       },
       "Token Based Authentication": {
         "description": "Use: token api_key:api_secret. [Learn more](https://docs.frappe.io/framework/user/en/api/rest#1-token-based-authentication)",
@@ -1387,6 +1455,28 @@
         "summary": "Get IP address",
         "tags": [
           "IP Addresses"
+        ]
+      }
+    },
+    "/api/atlas/jwks.json": {
+      "get": {
+        "operationId": "get_jwks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JSONWebKeySetResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [],
+        "summary": "Return the public keys that this Atlas region trusts",
+        "tags": [
+          "Atlas"
         ]
       }
     },
@@ -2307,7 +2397,7 @@
       "Access Token Authentication": []
     },
     {
-      "Central Token Authentication": []
+      "Service Token Authentication": []
     }
   ],
   "tags": [

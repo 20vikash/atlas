@@ -12,7 +12,15 @@ def get_tenant_id() -> int:
 	"""Return the tenant of the current request."""
 	request = getattr(frappe.local, "request", None)
 	value = request.headers.get(TENANT_HEADER, "") if request else ""
-	return parse_tenant_id(value)
+	tenant_id = parse_tenant_id(value)
+
+	from atlas.auth.request import token_claims
+
+	claims = token_claims()
+	if claims is not None and claims.get("tenant") not in {"*", str(tenant_id)}:
+		raise invalid_tenant("The tenant ID does not match the service credential.")
+
+	return tenant_id
 
 
 def parse_tenant_id(value: str) -> int:

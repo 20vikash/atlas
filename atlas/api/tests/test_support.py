@@ -26,6 +26,7 @@ def api_request(
 ) -> Generator[Request]:
 	"""Run a block with frappe.local.request set and the in_test shortcut disabled."""
 	previous_request = getattr(frappe.local, "request", None)
+	previous_claims = getattr(frappe.local, "atlas_token_claims", None)
 	previous_flag = frappe.flags.in_test
 	headers = dict(builder_options.pop("headers", {}))
 	if tenant_id is not None:
@@ -33,6 +34,7 @@ def api_request(
 
 	environ = EnvironBuilder(method=method, path=path, headers=headers, **builder_options).get_environ()
 	frappe.local.request = Request(environ)
+	frappe.local.atlas_token_claims = {"scope": "*", "tenant": str(tenant_id or "*")}
 	frappe.flags.in_test = False
 	try:
 		with (
@@ -43,6 +45,7 @@ def api_request(
 			yield frappe.local.request
 	finally:
 		frappe.local.request = previous_request
+		frappe.local.atlas_token_claims = previous_claims
 		frappe.flags.in_test = previous_flag
 
 

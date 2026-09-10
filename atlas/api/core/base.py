@@ -25,11 +25,21 @@ from atlas.api.core.errors import (
 	ResourceNotFound,
 	describe_exception,
 )
+from atlas.auth.request import token_claims
 from atlas.auth.roles import has_role
 from atlas.auth.tenant import MAXIMUM_TENANT_ID, TENANT_HEADER
 
 DEFAULT_LIST_LIMIT = 20
 MAXIMUM_LIST_LIMIT = 100
+TENANT_PARAMETERS = (
+	{
+		"name": TENANT_HEADER,
+		"in": "header",
+		"required": True,
+		"description": "Tenant that owns the resource, from 1 through 4294967295.",
+		"schema": {"type": "integer", "minimum": 1, "maximum": MAXIMUM_TENANT_ID},
+	},
+)
 
 
 class StrictModel(PydanticBaseModel):
@@ -110,17 +120,8 @@ class RouteMeta:
 	payload: ParameterBinding | None = None
 	query: ParameterBinding | None = None
 	tag: str | None = None
-	parameters: tuple[dict[str, Any], ...] = field(
-		default_factory=lambda: (
-			{
-				"name": TENANT_HEADER,
-				"in": "header",
-				"required": True,
-				"description": "Tenant that owns the resource, from 1 through 4294967295.",
-				"schema": {"type": "integer", "minimum": 1, "maximum": MAXIMUM_TENANT_ID},
-			},
-		)
-	)
+	public: bool = False
+	parameters: tuple[dict[str, Any], ...] = field(default_factory=lambda: TENANT_PARAMETERS)
 
 	@property
 	def documentation(self) -> RouteDocs | None:
@@ -166,8 +167,8 @@ class Router:
 	def head(self, path: str = ""):
 		return self.request("HEAD", path)
 
-	def get(self, path: str = ""):
-		return self.request("GET", path)
+	def get(self, path: str = "", *, public: bool = False):
+		return register_route(self, self.join(path), ["GET"], public=public)
 
 	def post(self, path: str = ""):
 		return self.request("POST", path)
@@ -266,10 +267,11 @@ class Router:
 class RouteHandler:
 	"""Runs one route function for an HTTP request and turns its result into a response."""
 
-	def __init__(self, router: Router, function: Callable):
+	def __init__(self, router: Router, function: Callable, *, public: bool = False):
 		functools.update_wrapper(self, function)
 		self.router = router
 		self.function = function
+		self.public = public
 		self.shape = CallShape.of(function)
 		self.payload = resolve_binding(function, "payload")
 		self.query = resolve_binding(function, "query")
@@ -294,13 +296,13 @@ class RouteHandler:
 
 	def check_permission(self) -> None:
 		"""Require the configured authentication and Atlas role profile."""
-		if frappe.request.path.rstrip("/") in self.router.documentation_paths:
+		if self.public or frappe.request.path.rstrip("/") in self.router.documentation_paths:
 			return
 
 		if not frappe.session or frappe.session.user == "Guest":
 			raise frappe.AuthenticationError
 
-		if not (has_role("System Manager") or has_role("Atlas Admin")):
+		if not (has_role("System Manager") or (has_role("Atlas Admin") and token_claims() is not None)):
 			raise PermissionDenied("The Atlas Admin role profile is required.")
 
 	def read_parameters(self, request: Request, args: tuple, kwargs: dict) -> dict[str, Any]:
@@ -342,6 +344,8 @@ def register_route(
 	router: Router,
 	path: str,
 	methods: list[str],
+	*,
+	public: bool = False,
 ):
 	"""Return a decorator that adds one route to the Frappe API URL map."""
 	from frappe.api import API_URL_MAP
@@ -354,7 +358,7 @@ def register_route(
 		raise ValueError(f"Route {path} uses unsupported HTTP methods: {unsupported}")
 
 	def decorator(function: Callable) -> RouteHandler:
-		handler = RouteHandler(router, function)
+		handler = RouteHandler(router, function, public=public)
 		if handler.payload and set(methods) <= {"HEAD", "GET"}:
 			raise TypeError(f"{function.__name__} cannot accept a payload on {methods}")
 
@@ -367,6 +371,8 @@ def register_route(
 				payload=handler.payload,
 				query=handler.query,
 				tag=router.name,
+				public=public,
+				parameters=() if public else TENANT_PARAMETERS,
 			)
 		)
 		return handler

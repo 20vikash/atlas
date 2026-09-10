@@ -1,105 +1,191 @@
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import frappe
 import jwt
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from frappe.tests import UnitTestCase
+from jwt import PyJWK
+from jwt.algorithms import OKPAlgorithm
 
-from atlas.auth.request import authenticate_central_token
-from atlas.auth.token import CentralTokenValidator
+from atlas.auth.request import authenticate_token, token_claims
+from atlas.auth.token import TokenValidator
 from atlas.auth.user import CENTRAL_ADMIN_USER
 
-JWKS_URL = "https://issuer.example.com/jwks.json"
-AUDIENCE = "atlas-1-admin"
-KEY_ID = "key-1"
+AUDIENCE = "atlas-admin:42"
+ATLAS_ISSUER = "atlas:42"
 
 
-def build_token(private_key, audience: str = AUDIENCE, expires_in: int = 300) -> str:
-	"""Return one signed token for the central issuer."""
-	expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
-	return jwt.encode(
-		{"aud": audience, "exp": expires_at},
-		private_key,
-		algorithm="RS256",
-		headers={"kid": KEY_ID},
-	)
+def build_token(
+	private_key,
+	*,
+	key_id: str,
+	issuer: str,
+	subject: str,
+	tenant: str,
+	audience: str = AUDIENCE,
+	scope: str = "*",
+	expires_in: int = 300,
+	constraints: dict | None = None,
+) -> str:
+	"""Return one signed Atlas API token."""
+	now = datetime.now(UTC)
+	claims = {
+		"iss": issuer,
+		"sub": subject,
+		"aud": audience,
+		"scope": scope,
+		"tenant": tenant,
+		"iat": now,
+		"exp": now + timedelta(seconds=expires_in),
+	}
+	if constraints is not None:
+		claims["constraints"] = constraints
+	return jwt.encode(claims, private_key, algorithm="EdDSA", headers={"kid": key_id})
 
 
-class TestCentralToken(UnitTestCase):
-	@classmethod
-	def setUpClass(cls) -> None:
-		super().setUpClass()
-		cls.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+def public_jwk(private_key, key_id: str) -> PyJWK:
+	jwk = json.loads(OKPAlgorithm.to_jwk(private_key.public_key()))
+	jwk.update({"kid": key_id, "alg": "EdDSA", "use": "sig"})
+	return PyJWK.from_dict(jwk)
 
-	def validate(self, token: str, signing_key=None):
-		"""Run the validator against one signed token."""
-		settings = SimpleNamespace(central_jwks_url=JWKS_URL, admin_audience_id=AUDIENCE)
-		key = SimpleNamespace(key=signing_key or self.private_key.public_key())
+
+class TestToken(UnitTestCase):
+	def setUp(self) -> None:
+		self.private_key = Ed25519PrivateKey.generate()
+
+	def validate(self, token: str, key_id: str):
+		settings = SimpleNamespace(region_id=42, admin_audience_id=AUDIENCE)
 		with (
 			patch("frappe.get_cached_doc", return_value=settings),
-			patch.object(CentralTokenValidator, "get_client", return_value=Mock()),
-			patch("jwt.PyJWKClient.match_kid", return_value=key),
+			patch.object(TokenValidator, "_signing_key", return_value=public_jwk(self.private_key, key_id)),
 		):
-			return CentralTokenValidator().get_claims(token)
+			return TokenValidator().claims(token)
 
-	def test_a_signed_token_returns_its_claims(self) -> None:
-		claims = self.validate(build_token(self.private_key))
+	def test_central_has_unrestricted_tenant_authority(self) -> None:
+		key_id = "central:key-1"
+		token = build_token(
+			self.private_key,
+			key_id=key_id,
+			issuer="central",
+			subject="central",
+			tenant="*",
+		)
 
-		self.assertEqual(claims["aud"], AUDIENCE)
+		self.assertEqual(self.validate(token, key_id)["tenant"], "*")
 
-	def test_a_token_for_another_audience_is_refused(self) -> None:
-		self.assertIsNone(self.validate(build_token(self.private_key, audience="atlas-1-proxy")))
+	def test_atlas_can_limit_cargo_to_tenant_one(self) -> None:
+		key_id = "atlas:42:key-1"
+		token = build_token(
+			self.private_key,
+			key_id=key_id,
+			issuer=ATLAS_ISSUER,
+			subject="cargo",
+			tenant="1",
+		)
 
-	def test_an_expired_token_is_refused(self) -> None:
-		self.assertIsNone(self.validate(build_token(self.private_key, expires_in=-1)))
+		self.assertEqual(self.validate(token, key_id)["tenant"], "1")
 
-	def test_a_token_without_a_key_id_is_refused(self) -> None:
-		token = jwt.encode({"aud": AUDIENCE, "exp": 9999999999}, self.private_key, algorithm="RS256")
+	def test_an_atlas_key_cannot_claim_to_be_central(self) -> None:
+		key_id = "atlas:42:key-1"
+		token = build_token(
+			self.private_key,
+			key_id=key_id,
+			issuer="central",
+			subject="central",
+			tenant="*",
+		)
 
-		self.assertIsNone(self.validate(token))
+		self.assertIsNone(self.validate(token, key_id))
 
-	def test_a_token_signed_by_another_key_is_refused(self) -> None:
-		other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	def test_another_region_is_not_trusted(self) -> None:
+		key_id = "atlas:43:key-1"
+		token = build_token(
+			self.private_key,
+			key_id=key_id,
+			issuer="atlas:43",
+			subject="cargo",
+			tenant="1",
+		)
 
-		self.assertIsNone(self.validate(build_token(other_key)))
+		self.assertIsNone(self.validate(token, key_id))
+
+	def test_invalid_authority_is_refused(self) -> None:
+		key_id = "atlas:42:key-1"
+		for changes in (
+			{"scope": "image:*"},
+			{"tenant": "*"},
+			{"tenant": "0"},
+			{"constraints": {"site": {"suffix": "-svc"}}},
+		):
+			token = build_token(
+				self.private_key,
+				key_id=key_id,
+				issuer=ATLAS_ISSUER,
+				subject="cargo",
+				tenant=changes.get("tenant", "1"),
+				scope=changes.get("scope", "*"),
+				constraints=changes.get("constraints"),
+			)
+			self.assertIsNone(self.validate(token, key_id))
+
+	def test_wrong_multiple_audience_and_expired_tokens_are_refused(self) -> None:
+		key_id = "central:key-1"
+		for audience, expires_in in (
+			("atlas-proxy:42", 300),
+			([AUDIENCE, "atlas-proxy:42"], 300),
+			(AUDIENCE, -1),
+		):
+			token = build_token(
+				self.private_key,
+				key_id=key_id,
+				issuer="central",
+				subject="central",
+				tenant="*",
+				audience=audience,
+				expires_in=expires_in,
+			)
+			self.assertIsNone(self.validate(token, key_id))
 
 
-class TestCentralTokenSession(UnitTestCase):
+class TestTokenSession(UnitTestCase):
 	def setUp(self) -> None:
 		self.previous_user = frappe.session.user
+		self.previous_claims = getattr(frappe.local, "atlas_token_claims", None)
 		frappe.set_user("Guest")
+		frappe.local.atlas_token_claims = None
 
 	def tearDown(self) -> None:
+		frappe.local.atlas_token_claims = self.previous_claims
 		frappe.set_user(self.previous_user)
 
 	def test_a_valid_token_becomes_the_atlas_admin_user(self) -> None:
+		claims = {"iss": "central", "tenant": "*"}
 		with (
-			patch("frappe.get_request_header", return_value="a-token"),
-			patch.object(CentralTokenValidator, "get_claims", return_value={"aud": AUDIENCE}),
+			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch.object(TokenValidator, "claims", return_value=claims),
 			patch("atlas.auth.request.frappe.set_user") as set_user,
 		):
-			authenticate_central_token()
+			authenticate_token()
 
 		set_user.assert_called_once_with(CENTRAL_ADMIN_USER)
+		self.assertEqual(token_claims(), claims)
 
 	def test_an_invalid_token_keeps_the_guest_session(self) -> None:
 		with (
-			patch("frappe.get_request_header", return_value="a-token"),
-			patch.object(CentralTokenValidator, "get_claims", return_value=None),
+			patch("frappe.get_request_header", return_value="Bearer a-token"),
+			patch.object(TokenValidator, "claims", return_value=None),
 			patch("atlas.auth.request.frappe.set_user") as set_user,
 		):
-			authenticate_central_token()
+			authenticate_token()
 
 		set_user.assert_not_called()
 
 	def test_a_signed_in_session_is_never_replaced(self) -> None:
 		frappe.set_user("Administrator")
-		with (
-			patch("frappe.get_request_header", return_value="a-token"),
-			patch.object(CentralTokenValidator, "get_claims") as get_claims,
-		):
-			authenticate_central_token()
+		with patch.object(TokenValidator, "claims") as claims:
+			authenticate_token()
 
-		get_claims.assert_not_called()
+		claims.assert_not_called()

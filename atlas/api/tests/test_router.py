@@ -125,6 +125,26 @@ class TestRouteRegistration(unittest.TestCase):
 		with self.assertRaises(ValueError):
 			router.request("TRACE", "machines")
 
+	def test_a_public_get_route_needs_no_session_or_tenant_header(self):
+		router = make_router(docs=DocsConfig())
+
+		@router.get("keys", public=True)
+		def keys():
+			return {"keys": []}
+
+		previous_user = frappe.session.user
+		frappe.session.user = "Guest"
+		try:
+			with http_request("GET"):
+				status, body = call_route(keys)
+		finally:
+			frappe.session.user = previous_user
+
+		operation = router.openapi_specification["paths"][f"{router.prefix}/keys"]["get"]
+		self.assertEqual((status, body), (200, {"keys": []}))
+		self.assertEqual(operation["security"], [])
+		self.assertNotIn("parameters", operation)
+
 
 class TestRequestDecoding(unittest.TestCase):
 	def test_payload_is_validated_into_the_model(self):
