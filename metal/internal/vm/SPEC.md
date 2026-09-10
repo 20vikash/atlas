@@ -83,7 +83,7 @@ The target reserves compute only after the handshake supplies the config. Host c
 
 An abort before transfer removes the target staging, unlocks the source, and removes the migration records. A cleanup failure keeps the records and locks for a retry.
 
-At the copying phase, `MigrationManager` runs one background disk transfer per VM and waits for the transfers at shutdown. The reconciler starts or resumes the transfer through `AdvanceTarget` and never moves data itself. The transfer holds no VM lock while data moves.
+At the copying phase, `MigrationManager` runs one background disk transfer per VM and waits for the transfers at shutdown. The reconciler starts or resumes the transfer through `AdvanceTarget` and never moves data itself. The transfer holds no VM lock while data moves. One background transfer drives the copying, stopping, and starting phases in order, so `AdvanceTarget` resumes any of them from the saved phase.
 
 ```text
 next snapshot from source  (acknowledge the last completed sequence)
@@ -98,10 +98,40 @@ compare received GUID with the source GUID
 mark the interval complete, checkpoint bytes
         |
         v
-repeat until 16 intervals or 30 minutes, then wait for cutover
+copy or cut over  (see the cutover decision)
 ```
 
 The source keeps the acknowledged snapshot as the next incremental base and removes the one before it. A stopped source needs one full interval. A network break or a restart leaves the migration in copying and resumes the same sequence. A GUID mismatch, an invalid sequence or token, or an unrelated target dataset fails the migration and keeps the dataset and snapshots for inspection.
+
+### Cutover
+
+A running source always sends the first full interval while it runs. For each later delta the target compares its size with `migration.final_delta_mib`.
+
+```text
+delta larger than final_delta_mib -> copy it, limit the source disk (64, 32, 16, 8 MiB/s)
+delta at or below final_delta_mib -> stop the source
+16 intervals or 30 minutes        -> stop the source
+non-running source                -> stop the source before the first transfer
+```
+
+The target sends the temporary limit on the stream request. The source applies the lower of that limit and the configured disk limit, and never raises an existing limit.
+
+```text
+stopping: POST /stop -> source stops, removes its network, takes the final snapshot
+        |
+        v
+receive and verify the final snapshot (the sub-feature 4 path)
+        |
+        v
+starting: create the target network -> apply the original desired state (cold start)
+        |
+        v
+verify the target state -> status ready
+```
+
+The source normalizes to stopped before the final snapshot: a running VM stops, a paused VM resumes then stops, a created VM stops without guest work, and a stopped VM with saved state restores then stops. Saved memory is not transferred. The target cold-starts the received disk, so it never inherits the source guest memory. The target keeps the migration record in place at `ready`, so normal reconciliation stays blocked until Atlas commits.
+
+Each source stop, network removal, final snapshot, target network, and target state is checkpointed before the next external operation, so a restart repeats only idempotent work. A failure after the source stop marks the migration failed and keeps both hosts locked and the snapshots preserved for rollback.
 
 ## Boundaries
 

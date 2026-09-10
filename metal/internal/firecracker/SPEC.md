@@ -56,11 +56,14 @@ The runtime has explicit start operations:
 
 ```text
 Start         -> shared warm image -> failure -> cold boot
+ColdStart     -> cold boot, never a warm image
 Restore       -> VM saved state -> resume
 RestorePaused -> VM saved state -> stay paused
 ```
 
-`Start` uses a warm image only when the image and VM shape match. It cold boots if warm launch fails. `Restore` returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
+`Start` uses a warm image only when the image and VM shape match. It cold boots if warm launch fails. `ColdStart` always cold boots, so a migrated disk never inherits the source guest memory. `Restore` returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
+
+`RefreshDisk` applies the configured disk limits to a live guest. `LimitDiskThroughput` applies a temporary combined read and write bandwidth limit to a live drive during a migration, and `RefreshDisk` restores the configured limit. A value of zero or less does nothing, so a caller never clears the limit by accident. Both do nothing when the VM is not running or paused.
 
 A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
 
