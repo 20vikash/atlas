@@ -101,6 +101,9 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return Information{}, err
+	}
 
 	fingerprint, err := createFingerprint(specification)
 	if err != nil {

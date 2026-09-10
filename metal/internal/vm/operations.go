@@ -14,6 +14,9 @@ func (manager *Manager) RequestRestart(ctx context.Context, identifier string) e
 		return err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return err
+	}
 	record, err := manager.store.readDesired(identifier)
 	if err != nil {
 		return err
@@ -81,6 +84,9 @@ func (manager *Manager) SetNetwork(ctx context.Context, identifier string, confi
 		return err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return err
+	}
 	manager.allocationMutex.Lock()
 	defer manager.allocationMutex.Unlock()
 	record, err := manager.store.readDesired(identifier)
@@ -168,6 +174,9 @@ func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (
 		return StagedSnapshot{}, err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return StagedSnapshot{}, err
+	}
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
 		return StagedSnapshot{}, err
@@ -269,6 +278,9 @@ func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, 
 		return false, err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return false, err
+	}
 
 	record, err := manager.store.readDesired(identifier)
 	if err != nil {

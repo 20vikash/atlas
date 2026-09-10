@@ -39,6 +39,11 @@ func (manager *Manager) Reconcile(ctx context.Context, identifier string) error 
 	}
 	defer unlock()
 
+	// A migration source pauses normal reconciliation until the lock clears.
+	if manager.isSourceLocked(identifier) {
+		return nil
+	}
+
 	desired, observed, err := virtualMachine.records()
 	if err != nil {
 		return err
