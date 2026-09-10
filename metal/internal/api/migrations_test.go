@@ -145,6 +145,29 @@ func TestGetAndAbortMigration(t *testing.T) {
 	}
 }
 
+func TestGetMigrationReportsTransferProgress(t *testing.T) {
+	stub := &stubMigrationManager{record: vm.TargetMigrationRecord{
+		ID: "mig-1", VirtualMachineID: "vm-1", Status: vm.MigrationRunning, Phase: vm.PhaseCopying,
+		Intervals: []vm.IntervalProgress{
+			{Sequence: 1, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},
+			{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024},
+		},
+	}}
+	server := newMigrationTestServer(t, stub)
+
+	recorder := do(t, server, http.MethodGet, "/v1/migrations/mig-1", "", http.StatusOK)
+	var response migrationResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.BytesTransferred != 1280 || len(response.Snapshots) != 2 {
+		t.Fatalf("response = %+v", response)
+	}
+	if !response.Snapshots[0].Completed || response.Snapshots[0].DurationSeconds != 42 {
+		t.Fatalf("snapshot 0 = %+v", response.Snapshots[0])
+	}
+}
+
 func TestPrepareMigrationSourceUsesTheTokenClaims(t *testing.T) {
 	signer := newAtlasSigner(t)
 	stub := &stubMigrationManager{handshake: vm.SourceHandshake{

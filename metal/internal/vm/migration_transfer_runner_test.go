@@ -113,6 +113,31 @@ func TestRunTransferStopsAtTheIntervalLimit(t *testing.T) {
 	}
 }
 
+func TestAdvanceTargetResumesACopyingTransfer(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	source.nextSnapshot = SourceSnapshot{Sequence: 1, SizeBytes: 800, GUID: "g"}
+	source.streamBytes = 800
+	transfer.guid = "g"
+	store := writeCopyingTarget(t, machines, StateStopped)
+
+	// A reconcile pass over a copying migration resumes the transfer.
+	if err := migrationManager.AdvanceTarget(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Intervals) != 1 || !record.Intervals[0].Completed {
+		t.Fatalf("intervals = %+v", record.Intervals)
+	}
+}
+
 func TestStartTransferRunsOnceAndShutdownWaits(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)

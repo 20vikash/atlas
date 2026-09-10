@@ -7,9 +7,9 @@ import (
 	"os"
 )
 
-// AdvanceTarget runs the initial handshake for one target migration. It prepares
-// the source, reserves the shape, reconstructs the target records, and enters
-// the copying phase. A later sub-feature continues from copying.
+// AdvanceTarget runs the handshake for a preparing migration, then starts or
+// resumes the disk transfer. A copying migration only starts or resumes the
+// transfer. It returns at once and never runs the transfer itself.
 func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID string) error {
 	unlock, err := m.locks.lock(ctx, virtualMachineID)
 	if err != nil {
@@ -24,7 +24,11 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if err != nil {
 		return err
 	}
-	if record.Status != MigrationRunning || record.Phase != PhasePreparing {
+	if record.Status != MigrationRunning {
+		return nil
+	}
+	if record.Phase == PhaseCopying {
+		m.StartTransfer(virtualMachineID)
 		return nil
 	}
 	if m.now().Sub(record.CreatedAt) > reservationTimeout {
@@ -36,7 +40,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if err != nil {
 		return m.recordTargetError(record, err)
 	}
-	config, _, err := m.source.PrepareSource(ctx, record.Source, record.ID, virtualMachineID, token)
+	config, observedState, err := m.source.PrepareSource(ctx, record.Source, record.ID, virtualMachineID, token)
 	if err != nil {
 		return m.recordTargetError(record, err)
 	}
@@ -46,7 +50,11 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if err := m.reserveShape(ctx, config.Specification); err != nil {
 		return m.recordTargetError(record, err)
 	}
-	return m.reconstructTarget(record, config)
+	if err := m.reconstructTarget(record, config, observedState); err != nil {
+		return err
+	}
+	m.StartTransfer(virtualMachineID)
+	return nil
 }
 
 // ActiveTargetVirtualMachineIDs returns the VM IDs of running target migrations.
@@ -87,7 +95,7 @@ func (m *MigrationManager) reserveShape(ctx context.Context, specification Speci
 
 // reconstructTarget writes fresh target records with local IDs and moves the
 // migration to the copying phase. It reuses a placeholder from a prior attempt.
-func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, config PortableConfig) error {
+func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, config PortableConfig, observedState State) error {
 	m.machines.allocationMutex.Lock()
 	defer m.machines.allocationMutex.Unlock()
 
@@ -118,6 +126,8 @@ func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, confi
 	record.UserID = userID
 	record.GroupID = userID
 	record.Phase = PhaseCopying
+	record.SourceObservedState = observedState
+	record.CopyStartedAt = m.now()
 	record.Error = nil
 	return m.store.writeTarget(record)
 }

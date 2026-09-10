@@ -33,7 +33,17 @@ type migrationResponse struct {
 	VirtualMachineID string                  `json:"virtual_machine_id"`
 	Status           string                  `json:"status"`
 	Phase            string                  `json:"phase"`
+	BytesTransferred int64                   `json:"bytes_transferred,omitempty"`
+	Snapshots        []snapshotProgress      `json:"snapshots,omitempty"`
 	Error            *migrationErrorResponse `json:"error,omitempty"`
+}
+
+// snapshotProgress is the public transfer progress of one interval.
+type snapshotProgress struct {
+	DurationSeconds  int   `json:"duration_seconds"`
+	BytesTransferred int64 `json:"bytes_transferred"`
+	TotalBytes       int64 `json:"total_bytes"`
+	Completed        bool  `json:"completed"`
 }
 
 // migrationErrorResponse is the safe error detail of one migration.
@@ -96,6 +106,15 @@ func toMigration(record vm.TargetMigrationRecord) migrationResponse {
 		VirtualMachineID: record.VirtualMachineID,
 		Status:           string(record.Status),
 		Phase:            string(record.Phase),
+	}
+	for _, interval := range record.Intervals {
+		response.BytesTransferred += interval.BytesTransferred
+		response.Snapshots = append(response.Snapshots, snapshotProgress{
+			DurationSeconds:  interval.DurationSeconds,
+			BytesTransferred: interval.BytesTransferred,
+			TotalBytes:       interval.TotalBytes,
+			Completed:        interval.Completed,
+		})
 	}
 	if record.Error != nil {
 		response.Error = &migrationErrorResponse{Code: record.Error.Code, Message: record.Error.Message}

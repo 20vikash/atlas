@@ -343,6 +343,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconcileInterval,
 		reconciler.MigrationConfig{Logger: logger},
 	)
+	daemon.OwnMigrations(migrationManager)
 	trustedKeys, err := token.NewKeyStore(filepath.Join(options.baseDir, "atlas-jwt.json"))
 	if err != nil {
 		return fmt.Errorf("load Atlas trusted keys: %w", err)

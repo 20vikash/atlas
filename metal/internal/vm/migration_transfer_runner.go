@@ -109,6 +109,9 @@ func (m *MigrationManager) transferInterval(ctx context.Context, record TargetMi
 	if err != nil {
 		return false, err
 	}
+	if snapshot.Sequence < 1 {
+		return false, fmt.Errorf("source returned an invalid sequence %d", snapshot.Sequence)
+	}
 
 	resumeToken, err := m.transfer.ReceiveResumeToken(ctx, record.VirtualMachineID)
 	if err != nil {
