@@ -46,5 +46,7 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	// The target host drives these with an Atlas-signed token, not the static token.
 	sourceRoutes := router.Group("/v1/migrations")
 	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource, s.requireScopes(token.ScopeReadVirtualMachine, token.ScopeMigration))
+	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot, s.requireScopes(token.ScopeMigration))
+	sourceRoutes.POST("/:id/stream", s.streamMigrationSnapshot, s.requireScopes(token.ScopeMigration))
 	sourceRoutes.DELETE("/:id", s.deleteMigrationSource, s.requireScopes(token.ScopeMigration))
 }

@@ -29,6 +29,59 @@ func (s *Server) prepareMigrationSource(c echo.Context) error {
 	return c.JSON(http.StatusOK, migrationSourceResponse{Config: handshake.Config, ObservedState: handshake.ObservedState})
 }
 
+// nextSnapshotRequest acknowledges the last received sequence.
+type nextSnapshotRequest struct {
+	ReceivedSequence int `json:"received_sequence"`
+}
+
+// snapshotResponse describes the next snapshot the target can pull.
+type snapshotResponse struct {
+	Sequence  int    `json:"sequence"`
+	SizeBytes int64  `json:"size_bytes"`
+	GUID      string `json:"guid"`
+}
+
+// streamSnapshotRequest names the snapshot stream the target wants.
+type streamSnapshotRequest struct {
+	Sequence    int    `json:"sequence"`
+	ResumeToken string `json:"resume_token"`
+}
+
+// createMigrationSnapshot returns the next source snapshot for the target.
+func (s *Server) createMigrationSnapshot(c echo.Context) error {
+	identifier, err := migrationIdentifier(c)
+	if err != nil {
+		return err
+	}
+	var request nextSnapshotRequest
+	if err := decodeOptionalJSON(c, &request); err != nil {
+		return err
+	}
+	claims := tokenClaims(c)
+	snapshot, err := s.migrationManager.NextSourceSnapshot(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller, request.ReceivedSequence)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
+}
+
+// streamMigrationSnapshot streams one snapshot to the target. The handler writes
+// no status until the first byte, so a validation error still maps to a code.
+func (s *Server) streamMigrationSnapshot(c echo.Context) error {
+	identifier, err := migrationIdentifier(c)
+	if err != nil {
+		return err
+	}
+	var request streamSnapshotRequest
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
+	}
+	claims := tokenClaims(c)
+	c.Response().Header().Set(echo.HeaderContentType, "application/octet-stream")
+	_, err = s.migrationManager.SendSourceStream(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller, request.Sequence, request.ResumeToken, c.Response())
+	return err
+}
+
 // deleteMigrationSource unlocks the source VM and removes its migration state.
 func (s *Server) deleteMigrationSource(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)

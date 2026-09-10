@@ -71,11 +71,29 @@ type fakeSourceClient struct {
 	prepareConfig PortableConfig
 	prepareState  State
 	prepareError  error
+	nextSnapshot  SourceSnapshot
+	nextError     error
+	streamBytes   int64
+	streamError   error
 }
 
 func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string, string) (PortableConfig, State, error) {
 	c.prepareCalls++
 	return c.prepareConfig, c.prepareState, c.prepareError
+}
+
+func (c *fakeSourceClient) NextSnapshot(context.Context, string, string, string, int) (SourceSnapshot, error) {
+	return c.nextSnapshot, c.nextError
+}
+
+func (c *fakeSourceClient) StreamSnapshot(_ context.Context, _, _, _ string, _ int, _ string, w io.Writer) (int64, error) {
+	if c.streamError != nil {
+		return 0, c.streamError
+	}
+	if c.streamBytes > 0 {
+		_, _ = w.Write(make([]byte, c.streamBytes))
+	}
+	return c.streamBytes, nil
 }
 
 func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string) error {

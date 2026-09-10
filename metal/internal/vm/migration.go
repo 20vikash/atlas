@@ -16,6 +16,10 @@ import (
 type MigrationSourceClient interface {
 	// PrepareSource locks the source VM and returns its portable config and state.
 	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID, token string) (PortableConfig, State, error)
+	// NextSnapshot acknowledges the received sequence and asks for the next snapshot.
+	NextSnapshot(ctx context.Context, address, migrationID, token string, receivedSequence int) (SourceSnapshot, error)
+	// StreamSnapshot reads one snapshot stream into w and returns the byte count.
+	StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, w io.Writer) (int64, error)
 	// RemoveSource unlocks the source VM and removes its migration state.
 	RemoveSource(ctx context.Context, address, migrationID, token string) error
 }

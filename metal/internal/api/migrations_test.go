@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/host"
@@ -13,17 +15,25 @@ import (
 )
 
 type stubMigrationManager struct {
-	record     vm.TargetMigrationRecord
-	createErr  error
-	statusErr  error
-	abortErr   error
-	handshake  vm.SourceHandshake
-	lockErr    error
-	unlockErr  error
-	createArgs []string
-	lockArgs   []string
-	unlockArgs []string
-	abortedID  string
+	record            vm.TargetMigrationRecord
+	createErr         error
+	statusErr         error
+	abortErr          error
+	handshake         vm.SourceHandshake
+	lockErr           error
+	unlockErr         error
+	snapshot          vm.SourceSnapshot
+	snapshotErr       error
+	streamBytes       int64
+	streamErr         error
+	createArgs        []string
+	lockArgs          []string
+	unlockArgs        []string
+	snapshotArgs      []string
+	abortedID         string
+	receivedSequence  int
+	streamSequence    int
+	streamResumeToken string
 }
 
 func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error) {
@@ -43,6 +53,22 @@ func (m *stubMigrationManager) AbortTarget(_ context.Context, migrationID string
 func (m *stubMigrationManager) LockSource(_ context.Context, migrationID, virtualMachineID, caller string) (vm.SourceHandshake, error) {
 	m.lockArgs = []string{migrationID, virtualMachineID, caller}
 	return m.handshake, m.lockErr
+}
+
+func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID, virtualMachineID, caller string, receivedSequence int) (vm.SourceSnapshot, error) {
+	m.receivedSequence = receivedSequence
+	m.snapshotArgs = []string{migrationID, virtualMachineID, caller}
+	return m.snapshot, m.snapshotErr
+}
+
+func (m *stubMigrationManager) SendSourceStream(_ context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, w io.Writer) (int64, error) {
+	m.streamSequence = sequence
+	m.streamResumeToken = resumeToken
+	if m.streamErr != nil {
+		return 0, m.streamErr
+	}
+	_, _ = w.Write(make([]byte, m.streamBytes))
+	return m.streamBytes, nil
 }
 
 func (m *stubMigrationManager) UnlockSource(_ context.Context, migrationID, virtualMachineID, caller string) error {
@@ -153,6 +179,72 @@ func TestPrepareMigrationSourceRejectsTheStaticToken(t *testing.T) {
 
 	// The static token does not satisfy the JWT-only source route.
 	do(t, server, http.MethodPut, "/v1/migrations/mig-1/source", "", http.StatusUnauthorized)
+}
+
+func TestCreateMigrationSnapshotUsesTheClaims(t *testing.T) {
+	signer := newAtlasSigner(t)
+	stub := &stubMigrationManager{snapshot: vm.SourceSnapshot{Sequence: 2, SizeBytes: 1048576, GUID: "g2"}}
+	server := newMigrationTestServer(t, stub, signer.trusted)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/snapshot", strings.NewReader(`{"received_sequence":1}`))
+	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("snapshot = %d (%s)", recorder.Code, recorder.Body)
+	}
+	if stub.receivedSequence != 1 {
+		t.Fatalf("received sequence = %d", stub.receivedSequence)
+	}
+	if want := []string{"mig-1", "vm-00001", testCaller}; !equalStrings(stub.snapshotArgs, want) {
+		t.Fatalf("snapshot args = %v", stub.snapshotArgs)
+	}
+	var response snapshotResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Sequence != 2 || response.SizeBytes != 1048576 || response.GUID != "g2" {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestCreateMigrationSnapshotAcceptsNoBody(t *testing.T) {
+	signer := newAtlasSigner(t)
+	stub := &stubMigrationManager{snapshot: vm.SourceSnapshot{Sequence: 1}}
+	server := newMigrationTestServer(t, stub, signer.trusted)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/snapshot", nil)
+	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || stub.receivedSequence != 0 {
+		t.Fatalf("first snapshot = %d, received %d", recorder.Code, stub.receivedSequence)
+	}
+}
+
+func TestStreamMigrationSnapshotStreamsBytes(t *testing.T) {
+	signer := newAtlasSigner(t)
+	stub := &stubMigrationManager{streamBytes: 4096}
+	server := newMigrationTestServer(t, stub, signer.trusted)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/stream", strings.NewReader(`{"sequence":2,"resume_token":"rt"}`))
+	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("stream = %d (%s)", recorder.Code, recorder.Body)
+	}
+	if recorder.Body.Len() != 4096 || recorder.Header().Get("Content-Type") != "application/octet-stream" {
+		t.Fatalf("body = %d bytes, type %q", recorder.Body.Len(), recorder.Header().Get("Content-Type"))
+	}
+	if stub.streamSequence != 2 || stub.streamResumeToken != "rt" {
+		t.Fatalf("stream args = %d %q", stub.streamSequence, stub.streamResumeToken)
+	}
 }
 
 func TestDeleteMigrationSourceUnlocks(t *testing.T) {

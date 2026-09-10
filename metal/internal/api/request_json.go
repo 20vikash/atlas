@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,6 +28,31 @@ func decodeJSONRequest(c echo.Context, value any) error {
 	var trailing any
 	err := decoder.Decode(&trailing)
 	if !errors.Is(err, io.EOF) {
+		return badRequest("invalid JSON request")
+	}
+	return nil
+}
+
+// decodeOptionalJSON decodes a body like decodeJSONRequest, but an empty body
+// leaves the value unchanged. A request that omits its body is valid.
+func decodeOptionalJSON(c echo.Context, value any) error {
+	request := c.Request()
+	request.Body = http.MaxBytesReader(c.Response(), request.Body, maximumJSONBodyBytes)
+	data, err := io.ReadAll(request.Body)
+	if err != nil {
+		return badRequest("invalid JSON request")
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return badRequest("invalid JSON request")
+	}
+
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return badRequest("invalid JSON request")
 	}
 	return nil

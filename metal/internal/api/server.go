@@ -68,6 +68,8 @@ type MigrationManager interface {
 	TargetStatus(ctx context.Context, migrationID string) (vm.TargetMigrationRecord, error)
 	AbortTarget(ctx context.Context, migrationID string) error
 	LockSource(ctx context.Context, migrationID, virtualMachineID, caller string) (vm.SourceHandshake, error)
+	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID, caller string, receivedSequence int) (vm.SourceSnapshot, error)
+	SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, w io.Writer) (int64, error)
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID, caller string) error
 }
 
