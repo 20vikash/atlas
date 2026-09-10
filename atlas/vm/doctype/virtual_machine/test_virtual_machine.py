@@ -618,6 +618,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		virtual_machine.server = "node-1"
 		virtual_machine.is_draft = 0
 		virtual_machine.is_terminating = 0
+		virtual_machine.active_migration = None
 
 		response_value = {
 			**METAL_VIRTUAL_MACHINE_RESPONSE,
@@ -914,6 +915,7 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 		virtual_machine.is_privileged = is_privileged
 		virtual_machine.is_draft = 0
 		virtual_machine.is_terminating = 0
+		virtual_machine.active_migration = None
 		virtual_machine.save = Mock()
 		return virtual_machine
 
