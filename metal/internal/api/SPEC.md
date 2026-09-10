@@ -12,7 +12,7 @@ That is why this package is thin: it owns request validation, the public respons
 
 `New(Config, Dependencies)` validates configuration and dependencies, then returns a configured Echo router. `Server` holds the injected services and every handler.
 
-`Dependencies` carries the VM manager, snapshot store, host service, wake function, serial broker, and trusted key store. Each is an interface declared here, so this package depends on no implementation.
+`Dependencies` carries the VM manager, migration manager, snapshot store, host service, wake function, serial broker, and trusted key store. Each is an interface declared here, so this package depends on no implementation.
 
 ## Request flow
 
@@ -56,7 +56,15 @@ POST   /v1/vms/:id/snapshots
 POST   /v1/snapshots/:id/upload
 GET    /v1/snapshots/:id
 DELETE /v1/snapshots/:id
+
+PUT    /v1/migrations/:id          Atlas creates or resumes a target, static token
+GET    /v1/migrations/:id          Atlas reads target status, static token
+POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
+PUT    /v1/migrations/:id/source   the target locks the source, Atlas token
+DELETE /v1/migrations/:id          the target unlocks the source, Atlas token
 ```
+
+Atlas drives the first three routes with the static token. The target host drives the last two on another host with an Atlas-signed token. Each Atlas-token handler reads the VM ID and caller from the token claims and binds them to the source record.
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 

@@ -52,6 +52,37 @@ A valid saved state is authoritative when Firecracker is stopped. Restore failur
 
 The phase and operation ID are written before each host call. A failure stores a safe public message and local detail. Destroy records progress per resource so an interrupted destroy resumes safely.
 
+## Migration
+
+`MigrationManager` owns the migration records beside the VM manager. A host is the source or the target of one migration. The VM manager reads these records to lock a source and to hide a target, so it needs no reference to the migration manager.
+
+```text
+machines/<vm-id>/config.json            the VM's own records
+machines/<vm-id>/status.json
+machines/<vm-id>/migration/target.json  target reservation and state
+machines/<vm-id>/migration/source.json  source lock
+machines/<vm-id>/migration/token        the target-to-source token, mode 0600
+```
+
+One VM ID locates all of a VM's state. A source record blocks every VM mutation and pauses reconciliation. A target record reserves the VM ID, hides the VM from the list and get, and pauses reconciliation. A migration ID differs from a VM ID, so the target resolves a migration ID to its VM with a small scan.
+
+```text
+Atlas PUT -> target record (preparing), reserve the VM ID
+                 |
+                 v
+           lock the source and read its portable config
+                 |
+                 v
+           check capacity -> allocate local IDs -> reconstruct records
+                 |
+                 v
+           phase copying   (a later sub-feature transfers the data)
+```
+
+The target reserves compute only after the handshake supplies the config. Host capacity subtracts that reservation while the target stays out of the VM list. A target that never advances past preparing for 10 minutes is expired: the target aborts the source and releases the reservation.
+
+An abort before transfer removes the target staging, unlocks the source, and removes the migration records. A cleanup failure keeps the records and locks for a retry.
+
 ## Boundaries
 
 `Runtime`, `Network`, `Storage`, and `Snapshots` are consumed here and implemented by host packages. The manager uses `traffic.Monitor` for samples and watch operations. The daemon traffic listener passes each `traffic.Event` to `Manager.RestoreAfterTraffic`.
