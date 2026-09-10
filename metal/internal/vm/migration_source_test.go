@@ -217,6 +217,118 @@ func TestLimitSourceDiskNeverRaisesConfigured(t *testing.T) {
 	}
 }
 
+func TestUnlockSourceRemovesSnapshotsAndRestoresDiskLimit(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	seedSourceVM(t, migrationManager, machines, StateRunning, 2)
+	record, _ := migrationManager.store.readSource("vm-1")
+	record.TemporaryDiskLimitMiBps = 32
+	if err := migrationManager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+	runtime := machines.runtime.(*fakeRuntime)
+
+	if err := migrationManager.UnlockSource(context.Background(), "mig-1", "vm-1", "metal-1"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"migration-mig-1-1", "migration-mig-1-2"}; !equalStringSlices(transfer.removed, want) {
+		t.Fatalf("removed = %v", transfer.removed)
+	}
+	if runtime.diskRefresh != 1 {
+		t.Fatalf("disk refresh = %d, want the configured limit restored", runtime.diskRefresh)
+	}
+	if _, err := migrationManager.store.readSource("vm-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source record still present: %v", err)
+	}
+}
+
+func TestUnlockSourceRefusesAStoppedSourceBeforeRollback(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	seedSourceVM(t, migrationManager, machines, StateRunning, 1)
+	record, _ := migrationManager.store.readSource("vm-1")
+	record.Stopped = true
+	if err := migrationManager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.UnlockSource(context.Background(), "mig-1", "vm-1", "metal-1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("unlock a stopped source before rollback = %v, want ErrConflict", err)
+	}
+}
+
+func TestStartSourceRollbackRestoresNetworkAndState(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	seedSourceVM(t, migrationManager, machines, StateStopped, 1)
+	record, _ := migrationManager.store.readSource("vm-1")
+	record.Stopped = true
+	record.OriginalDesired = StateRunning
+	if err := migrationManager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+	runtime := machines.runtime.(*fakeRuntime)
+	network := machines.network.(*fakeNetwork)
+
+	if err := migrationManager.StartSourceRollback(context.Background(), "mig-1", "vm-1", "metal-1"); err != nil {
+		t.Fatal(err)
+	}
+	if network.ensures != 1 || runtime.coldStarts != 1 {
+		t.Fatalf("ensures = %d, cold starts = %d", network.ensures, runtime.coldStarts)
+	}
+	restored, _ := migrationManager.store.readSource("vm-1")
+	if !restored.RollbackComplete {
+		t.Fatal("rollback checkpoint was not written")
+	}
+}
+
+func TestDestroySourceDestroysAndRemoves(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	seedSourceVM(t, migrationManager, machines, StateStopped, 1)
+	record, _ := migrationManager.store.readSource("vm-1")
+	record.Stopped = true
+	record.NetworkRemoved = true
+	record.FinalSequence = 1
+	if err := migrationManager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+	runtime := machines.runtime.(*fakeRuntime)
+	storage := machines.storage.(*fakeStorage)
+
+	if err := migrationManager.DestroySource(context.Background(), "mig-1", "vm-1", "metal-1"); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.removes != 1 || storage.releases != 1 {
+		t.Fatalf("removes = %d, releases = %d", runtime.removes, storage.releases)
+	}
+	if _, err := machines.store.readDesired("vm-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("VM records still present: %v", err)
+	}
+}
+
+func TestDestroySourceRequiresAStoppedSource(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	seedSourceVM(t, migrationManager, machines, StateRunning, 1)
+	if err := migrationManager.DestroySource(context.Background(), "mig-1", "vm-1", "metal-1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("destroy a source that never stopped = %v, want ErrConflict", err)
+	}
+}
+
+func TestDestroySourceIsIdempotentWhenGone(t *testing.T) {
+	migrationManager, _, _ := newMigrationManager(t)
+	if err := migrationManager.DestroySource(context.Background(), "mig-1", "vm-1", "metal-1"); err != nil {
+		t.Fatalf("destroy an already-gone source = %v, want nil", err)
+	}
+}
+
+func TestDestroySourceRefusesARemnantWithoutASourceRecord(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	if _, err := machines.Create(context.Background(), "vm-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	setObservedState(t, machines, "vm-1", StateStopped)
+	if err := migrationManager.DestroySource(context.Background(), "mig-1", "vm-1", "metal-1"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("destroy a VM remnant with no source record = %v, want ErrConflict", err)
+	}
+}
+
 func equalStringSlices(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

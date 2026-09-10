@@ -75,8 +75,10 @@ func (m *MigrationManager) LockSource(ctx context.Context, migrationID, virtualM
 	return m.sourceHandshake(virtualMachineID)
 }
 
-// UnlockSource removes the source migration state and unlocks the VM. It does
-// not delete the VM. It is safe to repeat.
+// UnlockSource removes this migration's snapshots, restores the configured disk
+// limit when needed, and unlocks the VM. It refuses while the source is stopped
+// and the rollback is not complete. It does not delete the VM. It is safe to
+// repeat.
 func (m *MigrationManager) UnlockSource(ctx context.Context, migrationID, virtualMachineID, caller string) error {
 	if !validIdentifier(virtualMachineID) {
 		return ErrConflict
@@ -97,7 +99,118 @@ func (m *MigrationManager) UnlockSource(ctx context.Context, migrationID, virtua
 	if existing.ID != migrationID || existing.Caller != caller {
 		return ErrConflict
 	}
+	if existing.Stopped && !existing.RollbackComplete {
+		return ErrConflict
+	}
+	if err := m.removeMigrationSnapshots(ctx, existing); err != nil {
+		return err
+	}
+	if existing.TemporaryDiskLimitMiBps > 0 && !existing.Stopped {
+		if err := m.machines.RefreshSourceDisk(ctx, virtualMachineID); err != nil {
+			return err
+		}
+	}
 	return m.store.remove(virtualMachineID)
+}
+
+// StartSourceRollback restores the source network and its original desired state
+// during an abort after the source was stopped. It is idempotent.
+func (m *MigrationManager) StartSourceRollback(ctx context.Context, migrationID, virtualMachineID, caller string) error {
+	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	record, err := m.boundSourceRecord(virtualMachineID, migrationID, caller)
+	if err != nil {
+		return err
+	}
+	if record.RollbackComplete {
+		return nil
+	}
+	if err := m.machines.EnsureMigrationNetwork(ctx, virtualMachineID); err != nil {
+		return err
+	}
+	if err := m.machines.RestoreRuntimeState(ctx, virtualMachineID, record.OriginalDesired); err != nil {
+		return err
+	}
+	record.RollbackComplete = true
+	return m.store.writeSource(record)
+}
+
+// DestroySource destroys the stopped source VM and removes its migration state.
+// It requires a stopped, network-removed source with a final snapshot. It is
+// idempotent, and refuses to remove a VM remnant that has no source record.
+func (m *MigrationManager) DestroySource(ctx context.Context, migrationID, virtualMachineID, caller string) error {
+	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	record, err := m.store.readSource(virtualMachineID)
+	if errors.Is(err, ErrNotFound) {
+		return m.assertNoSourceRemnant(ctx, virtualMachineID)
+	}
+	if err != nil {
+		return err
+	}
+	if record.ID != migrationID || record.Caller != caller {
+		return ErrConflict
+	}
+	if !record.Stopped || !record.NetworkRemoved || record.FinalSequence < 1 {
+		return ErrConflict
+	}
+
+	if !record.DestroyRuntimeComplete {
+		if err := m.machines.RemoveMigratedRuntime(ctx, virtualMachineID); err != nil {
+			return err
+		}
+		record.DestroyRuntimeComplete = true
+		if err := m.store.writeSource(record); err != nil {
+			return err
+		}
+	}
+	if !record.DestroyStorageComplete {
+		if err := m.machines.storage.Release(ctx, virtualMachineID); err != nil {
+			return err
+		}
+		record.DestroyStorageComplete = true
+		if err := m.store.writeSource(record); err != nil {
+			return err
+		}
+	}
+	return m.machines.store.remove(virtualMachineID)
+}
+
+// assertNoSourceRemnant confirms no VM record or disk remains, so a repeated
+// finish for an already-destroyed source succeeds but a remnant is refused.
+func (m *MigrationManager) assertNoSourceRemnant(ctx context.Context, virtualMachineID string) error {
+	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
+		return ErrConflict
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	exists, err := m.transfer.TargetDatasetExists(ctx, virtualMachineID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrConflict
+	}
+	return nil
+}
+
+// removeMigrationSnapshots removes every snapshot this migration created.
+func (m *MigrationManager) removeMigrationSnapshots(ctx context.Context, record SourceMigrationRecord) error {
+	highest := max(record.Sequence, record.FinalSequence)
+	for sequence := 1; sequence <= highest; sequence++ {
+		if err := m.transfer.RemoveSnapshot(ctx, record.VirtualMachineID, migrationSnapshotName(record.ID, sequence)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NextSourceSnapshot records the acknowledged sequence, rotates old snapshots,

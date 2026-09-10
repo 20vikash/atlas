@@ -97,17 +97,27 @@ func (manager *Manager) EnsureMigrationNetwork(ctx context.Context, virtualMachi
 }
 
 // ApplyMigratedTargetState brings the target VM to its original desired state
-// with a cold start, verifies the result, and records the applied state and
-// generations. A migrated disk never starts from a warm-memory image. The
+// with a cold start. A migrated disk never starts from a warm-memory image. The
 // caller holds the VM operation lock.
 func (manager *Manager) ApplyMigratedTargetState(ctx context.Context, virtualMachineID string) error {
+	desired, err := manager.store.readDesired(virtualMachineID)
+	if err != nil {
+		return err
+	}
+	return manager.RestoreRuntimeState(ctx, virtualMachineID, desired.State)
+}
+
+// RestoreRuntimeState cold-starts the VM to the given state, verifies the result,
+// and records the applied state and generations. Running and paused states use a
+// cold start, and stopped stays stopped. The caller holds the VM operation lock.
+func (manager *Manager) RestoreRuntimeState(ctx context.Context, virtualMachineID string, desiredState State) error {
 	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
 	if err != nil {
 		return err
 	}
 	machine := runtimeMachine(desired, observed.NetworkInterface)
 
-	resultState, err := manager.coldStartForState(ctx, desired.State, machine)
+	resultState, err := manager.coldStartForState(ctx, desiredState, machine)
 	if err != nil {
 		return err
 	}
@@ -116,9 +126,38 @@ func (manager *Manager) ApplyMigratedTargetState(ctx context.Context, virtualMac
 		return err
 	}
 	if status.State != resultState {
-		return fmt.Errorf("migrated target %s is %s, want %s", virtualMachineID, status.State, resultState)
+		return fmt.Errorf("migrated VM %s is %s, want %s", virtualMachineID, status.State, resultState)
 	}
 	return manager.writeAppliedState(desired, &observed, resultState)
+}
+
+// RemoveMigratedRuntime removes the runtime process, jail, and network of a
+// migration VM. The caller holds the VM operation lock. A repeat is safe.
+func (manager *Manager) RemoveMigratedRuntime(ctx context.Context, virtualMachineID string) error {
+	desired, err := manager.store.readDesired(virtualMachineID)
+	if err != nil {
+		return err
+	}
+	machine := runtimeMachine(desired, NetworkInterface{})
+	if err := manager.runtime.Remove(ctx, machine); err != nil {
+		return err
+	}
+	return manager.network.Release(ctx, NetworkReleaseRequest{
+		VirtualMachineID:  desired.ID,
+		UserID:            desired.UserID,
+		WireGuardMeshIPv6: desired.Specification.Network.WireGuardMeshIPv6,
+	})
+}
+
+// RefreshSourceDisk reapplies the configured disk limit to a live source VM, so
+// a temporary migration limit does not outlast an abort. It does nothing when
+// the VM is not running or paused. The caller holds the VM operation lock.
+func (manager *Manager) RefreshSourceDisk(ctx context.Context, virtualMachineID string) error {
+	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
+	if err != nil {
+		return err
+	}
+	return manager.runtime.RefreshDisk(ctx, runtimeMachine(desired, observed.NetworkInterface))
 }
 
 // coldStartForState cold-starts the received disk for the desired state and
