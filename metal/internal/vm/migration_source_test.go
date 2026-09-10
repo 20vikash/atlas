@@ -99,6 +99,82 @@ func TestSendSourceStreamRejectsAnUnknownSequence(t *testing.T) {
 	}
 }
 
+// seedSourceVM creates a source VM, sets its observed state, and writes a source
+// lock record with the given acknowledged sequence.
+func seedSourceVM(t *testing.T, migrationManager *MigrationManager, machines *Manager, state State, acknowledged int) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := machines.Create(ctx, "vm-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+	setObservedState(t, machines, "vm-1", state)
+	machines.runtime.(*fakeRuntime).state = state
+	record := SourceMigrationRecord{
+		ID: "mig-1", VirtualMachineID: "vm-1", Caller: "metal-1",
+		Sequence: acknowledged, AcknowledgedSequence: acknowledged,
+	}
+	if err := migrationManager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStopSourceStopsAndCreatesFinalSnapshot(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer.guid = "final-guid"
+	transfer.sizeBytes = 500
+	seedSourceVM(t, migrationManager, machines, StateRunning, 2)
+	runtime := machines.runtime.(*fakeRuntime)
+	network := machines.network.(*fakeNetwork)
+
+	snapshot, err := migrationManager.StopSource(context.Background(), "mig-1", "vm-1", "metal-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Sequence != 3 || snapshot.SizeBytes != 500 || snapshot.GUID != "final-guid" {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if runtime.stops != 1 || runtime.state != StateStopped {
+		t.Fatalf("runtime stops = %d, state = %s", runtime.stops, runtime.state)
+	}
+	if network.releases != 1 {
+		t.Fatalf("network releases = %d, want 1", network.releases)
+	}
+	// The source removes the stale candidate, then takes the final snapshot.
+	if want := []string{"migration-mig-1-3"}; !equalStringSlices(transfer.removed, want) {
+		t.Fatalf("removed = %v", transfer.removed)
+	}
+	if want := []string{"migration-mig-1-3"}; !equalStringSlices(transfer.created, want) {
+		t.Fatalf("created = %v", transfer.created)
+	}
+}
+
+func TestStopSourceIsIdempotent(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	seedSourceVM(t, migrationManager, machines, StateRunning, 0)
+	runtime := machines.runtime.(*fakeRuntime)
+	network := machines.network.(*fakeNetwork)
+	ctx := context.Background()
+
+	first, err := migrationManager.StopSource(ctx, "mig-1", "vm-1", "metal-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := len(transfer.created)
+
+	second, err := migrationManager.StopSource(ctx, "mig-1", "vm-1", "metal-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Sequence != first.Sequence || first.Sequence != 1 {
+		t.Fatalf("first = %+v, second = %+v", first, second)
+	}
+	if runtime.stops != 1 || network.releases != 1 || len(transfer.created) != created {
+		t.Fatalf("repeat did work again: stops %d, releases %d, created %d", runtime.stops, network.releases, len(transfer.created))
+	}
+}
+
 func equalStringSlices(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

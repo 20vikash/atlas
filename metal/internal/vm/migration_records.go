@@ -126,6 +126,9 @@ type SourceMigrationRecord struct {
 	OriginalObserved     State     `json:"original_observed"`
 	Sequence             int       `json:"sequence,omitempty"`
 	AcknowledgedSequence int       `json:"acknowledged_sequence,omitempty"`
+	Stopped              bool      `json:"stopped,omitempty"`
+	NetworkRemoved       bool      `json:"network_removed,omitempty"`
+	FinalSequence        int       `json:"final_sequence,omitempty"`
 	LockedAt             time.Time `json:"locked_at"`
 }
 

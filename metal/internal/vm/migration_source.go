@@ -138,6 +138,59 @@ func (m *MigrationManager) NextSourceSnapshot(ctx context.Context, migrationID, 
 	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.Sequence)
 }
 
+// StopSource normalizes the source to stopped, removes its network, and creates
+// the final snapshot. It returns that snapshot in the same form as the snapshot
+// call. Each step is checkpointed, so a repeat resumes and returns the same
+// final snapshot.
+func (m *MigrationManager) StopSource(ctx context.Context, migrationID, virtualMachineID, caller string) (SourceSnapshot, error) {
+	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+	defer unlock()
+
+	record, err := m.boundSourceRecord(virtualMachineID, migrationID, caller)
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+
+	if !record.Stopped {
+		if err := m.machines.NormalizeSourceToStopped(ctx, virtualMachineID); err != nil {
+			return SourceSnapshot{}, err
+		}
+		record.Stopped = true
+		if err := m.store.writeSource(record); err != nil {
+			return SourceSnapshot{}, err
+		}
+	}
+	if !record.NetworkRemoved {
+		if err := m.machines.RemoveMigrationNetwork(ctx, virtualMachineID); err != nil {
+			return SourceSnapshot{}, err
+		}
+		record.NetworkRemoved = true
+		if err := m.store.writeSource(record); err != nil {
+			return SourceSnapshot{}, err
+		}
+	}
+	if record.FinalSequence == 0 {
+		final := record.AcknowledgedSequence + 1
+		name := migrationSnapshotName(migrationID, final)
+		// Replace any untransferred candidate with a snapshot taken after stop.
+		if err := m.transfer.RemoveSnapshot(ctx, virtualMachineID, name); err != nil {
+			return SourceSnapshot{}, err
+		}
+		if err := m.transfer.CreateSnapshot(ctx, virtualMachineID, name); err != nil {
+			return SourceSnapshot{}, err
+		}
+		record.Sequence = final
+		record.FinalSequence = final
+		if err := m.store.writeSource(record); err != nil {
+			return SourceSnapshot{}, err
+		}
+	}
+	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.FinalSequence)
+}
+
 // SendSourceStream streams one requested snapshot to the target. It does not
 // hold the VM lock while data moves. An unknown sequence is rejected.
 func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, w io.Writer) (int64, error) {
