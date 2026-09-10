@@ -102,6 +102,12 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) erro
 	return runtime.newMachine(input).Start(ctx)
 }
 
+// ColdStart boots the received disk fresh. It never restores a warm-memory
+// image, so a migrated VM does not inherit the source's guest memory.
+func (runtime *Runtime) ColdStart(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).coldBoot(ctx)
+}
+
 // Stop shuts down a VM and deletes its saved state.
 func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine) error {
 	return runtime.newMachine(input).Stop(ctx)
@@ -173,5 +179,28 @@ func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine
 		DriveID:     rootDriveIdentifier,
 		PathOnHost:  rootDrivePath,
 		RateLimiter: driveRateLimiter(input.Specification.Disk),
+	})
+}
+
+// LimitDiskThroughput applies a temporary combined read and write bandwidth
+// limit to the live drive. A value of zero or less does nothing, so a caller
+// never clears the limit by accident. It does nothing when the VM is not
+// running or paused.
+func (runtime *Runtime) LimitDiskThroughput(ctx context.Context, input vm.RuntimeMachine, throughputMiBps int) error {
+	if throughputMiBps <= 0 {
+		return nil
+	}
+	status, err := runtime.Inspect(ctx, input)
+	if err != nil {
+		return err
+	}
+	if status.State != vm.StateRunning && status.State != vm.StatePaused {
+		return nil
+	}
+
+	return api.New(runtime.configuration.socketPath(input.ID)).PatchDrive(ctx, api.PartialDrive{
+		DriveID:     rootDriveIdentifier,
+		PathOnHost:  rootDrivePath,
+		RateLimiter: driveRateLimiter(vm.Disk{ThroughputMiBps: throughputMiBps}),
 	})
 }

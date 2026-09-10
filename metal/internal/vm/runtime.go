@@ -6,6 +6,8 @@ import "context"
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
 	Start(context.Context, RuntimeMachine) error
+	// ColdStart boots the disk fresh and never restores a warm-memory image.
+	ColdStart(context.Context, RuntimeMachine) error
 	Stop(context.Context, RuntimeMachine) error
 	SaveAndStop(context.Context, RuntimeMachine) error
 	Restore(context.Context, RuntimeMachine) error
@@ -16,6 +18,9 @@ type Runtime interface {
 	Remove(context.Context, RuntimeMachine) error
 	RefreshMetadata(context.Context, RuntimeMachine) error
 	RefreshDisk(context.Context, RuntimeMachine) error
+	// LimitDiskThroughput applies a temporary combined read and write bandwidth
+	// limit to the live drive. RefreshDisk restores the configured limit.
+	LimitDiskThroughput(ctx context.Context, machine RuntimeMachine, throughputMiBps int) error
 	ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error)
 }
 
