@@ -83,6 +83,10 @@ type fakeSourceClient struct {
 	stopSnapshot  SourceSnapshot
 	stopError     error
 	stopCalls     int
+	startCalls    int
+	startError    error
+	finishCalls   int
+	finishError   error
 }
 
 func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string, string) (PortableConfig, State, error) {
@@ -124,6 +128,16 @@ func (c *fakeSourceClient) StreamSnapshot(ctx context.Context, _, _, _ string, _
 func (c *fakeSourceClient) StopSource(context.Context, string, string, string) (SourceSnapshot, error) {
 	c.stopCalls++
 	return c.stopSnapshot, c.stopError
+}
+
+func (c *fakeSourceClient) StartSource(context.Context, string, string, string) error {
+	c.startCalls++
+	return c.startError
+}
+
+func (c *fakeSourceClient) FinishSource(context.Context, string, string, string) error {
+	c.finishCalls++
+	return c.finishError
 }
 
 func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string) error {

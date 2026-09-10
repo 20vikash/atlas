@@ -158,6 +158,20 @@ func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID,
 	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
+// StartSource asks the source host to restore the VM to its original desired state.
+func (c *HTTPSourceClient) StartSource(ctx context.Context, address, migrationID, token string) error {
+	path := fmt.Sprintf("/v1/migrations/%s/start", url.PathEscape(migrationID))
+	_, err := c.call(ctx, http.MethodPost, address, path, token)
+	return err
+}
+
+// FinishSource asks the source host to destroy the stopped VM and its state.
+func (c *HTTPSourceClient) FinishSource(ctx context.Context, address, migrationID, token string) error {
+	path := fmt.Sprintf("/v1/migrations/%s/finish", url.PathEscape(migrationID))
+	_, err := c.call(ctx, http.MethodPost, address, path, token)
+	return err
+}
+
 // RemoveSource asks the source host to unlock the VM and drop its migration state.
 func (c *HTTPSourceClient) RemoveSource(ctx context.Context, address, migrationID, token string) error {
 	path := fmt.Sprintf("/v1/migrations/%s", url.PathEscape(migrationID))

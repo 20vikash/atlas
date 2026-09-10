@@ -24,6 +24,10 @@ type MigrationSourceClient interface {
 	StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
 	// StopSource stops the source, removes its network, and returns the final snapshot.
 	StopSource(ctx context.Context, address, migrationID, token string) (SourceSnapshot, error)
+	// StartSource restores the source to its original desired state during rollback.
+	StartSource(ctx context.Context, address, migrationID, token string) error
+	// FinishSource destroys the stopped source VM and its migration state.
+	FinishSource(ctx context.Context, address, migrationID, token string) error
 	// RemoveSource unlocks the source VM and removes its migration state.
 	RemoveSource(ctx context.Context, address, migrationID, token string) error
 }

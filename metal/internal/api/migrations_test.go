@@ -37,6 +37,10 @@ type stubMigrationManager struct {
 	streamThroughput  int
 	stopArgs          []string
 	stopErr           error
+	startArgs         []string
+	startErr          error
+	destroyArgs       []string
+	destroyErr        error
 }
 
 func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error) {
@@ -78,6 +82,16 @@ func (m *stubMigrationManager) SendSourceStream(_ context.Context, migrationID, 
 func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID, caller string) (vm.SourceSnapshot, error) {
 	m.stopArgs = []string{migrationID, virtualMachineID, caller}
 	return m.snapshot, m.stopErr
+}
+
+func (m *stubMigrationManager) StartSourceRollback(_ context.Context, migrationID, virtualMachineID, caller string) error {
+	m.startArgs = []string{migrationID, virtualMachineID, caller}
+	return m.startErr
+}
+
+func (m *stubMigrationManager) DestroySource(_ context.Context, migrationID, virtualMachineID, caller string) error {
+	m.destroyArgs = []string{migrationID, virtualMachineID, caller}
+	return m.destroyErr
 }
 
 func (m *stubMigrationManager) UnlockSource(_ context.Context, migrationID, virtualMachineID, caller string) error {
@@ -301,6 +315,42 @@ func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
 	}
 	if response.Sequence != 3 || response.SizeBytes != 2048 || response.GUID != "final" {
 		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestStartMigrationSourceRestores(t *testing.T) {
+	signer := newAtlasSigner(t)
+	stub := &stubMigrationManager{}
+	server := newMigrationTestServer(t, stub, signer.trusted)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/start", nil)
+	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("start = %d (%s)", recorder.Code, recorder.Body)
+	}
+	if want := []string{"mig-1", "vm-00001", testCaller}; !equalStrings(stub.startArgs, want) {
+		t.Fatalf("start args = %v", stub.startArgs)
+	}
+}
+
+func TestFinishMigrationSourceDestroys(t *testing.T) {
+	signer := newAtlasSigner(t)
+	stub := &stubMigrationManager{}
+	server := newMigrationTestServer(t, stub, signer.trusted)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/migrations/mig-1/finish", nil)
+	request.Header.Set("Authorization", "Bearer "+signer.sign(t, "vm-00001", token.ScopeMigration))
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("finish = %d (%s)", recorder.Code, recorder.Body)
+	}
+	if want := []string{"mig-1", "vm-00001", testCaller}; !equalStrings(stub.destroyArgs, want) {
+		t.Fatalf("destroy args = %v", stub.destroyArgs)
 	}
 }
 

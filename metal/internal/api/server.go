@@ -71,6 +71,8 @@ type MigrationManager interface {
 	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID, caller string, receivedSequence int) (vm.SourceSnapshot, error)
 	SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
 	StopSource(ctx context.Context, migrationID, virtualMachineID, caller string) (vm.SourceSnapshot, error)
+	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID, caller string) error
+	DestroySource(ctx context.Context, migrationID, virtualMachineID, caller string) error
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID, caller string) error
 }
 

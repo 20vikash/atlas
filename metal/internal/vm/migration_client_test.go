@@ -119,6 +119,26 @@ func TestStopSourceReturnsFinalSnapshot(t *testing.T) {
 	}
 }
 
+func TestStartAndFinishSourcePost(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	client := NewHTTPSourceClient(0)
+
+	if err := client.StartSource(context.Background(), server.URL, "mig-1", "tok-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.FinishSource(context.Background(), server.URL, "mig-1", "tok-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 2 || paths[0] != "POST /v1/migrations/mig-1/start" || paths[1] != "POST /v1/migrations/mig-1/finish" {
+		t.Fatalf("paths = %v", paths)
+	}
+}
+
 func TestSourceClientReportsErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/migrations/gone/source" {
