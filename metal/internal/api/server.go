@@ -62,10 +62,11 @@ type VirtualMachineManager interface {
 	ConnectSSH(context.Context, string) (vm.SSHConnection, error)
 }
 
-// TrustedKeyStore reports the Atlas issuer, receiver, and public keys that this
+// TrustedKeyStore owns the Atlas issuer, receiver, and public keys that this
 // host trusts.
 type TrustedKeyStore interface {
 	Keys() token.TrustedKeys
+	Replace(token.TrustedKeys) error
 }
 
 // Dependencies contains services used by the HTTP handlers.

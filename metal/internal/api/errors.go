@@ -80,8 +80,10 @@ func publicAPIError(err error) *apiError {
 		return unauthorized()
 	case errors.Is(err, token.ErrForbidden):
 		return forbidden()
-	case errors.Is(err, network.ErrInvalidPeers), errors.Is(err, storage.ErrInvalidUpload):
+	case errors.Is(err, network.ErrInvalidPeers), errors.Is(err, storage.ErrInvalidUpload), errors.Is(err, token.ErrInvalidKeys):
 		return newAPIError(http.StatusBadRequest, "invalid_request", err.Error())
+	case errors.Is(err, token.ErrKeyConflict):
+		return newAPIError(http.StatusConflict, "conflict", "the Atlas issuer and receiver cannot change")
 	case errors.Is(err, vm.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		return newAPIError(http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, storage.ErrImageConflict):

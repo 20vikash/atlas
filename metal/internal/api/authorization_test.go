@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -22,19 +23,27 @@ const (
 	testKeyID    = "key-1"
 )
 
-// fakeTrustedKeyStore serves fixed trust state to the middleware.
-type fakeTrustedKeyStore struct {
-	keys token.TrustedKeys
-}
+// newTrustedKeyStore returns a store that trusts the given keys.
+func newTrustedKeyStore(t *testing.T, trusted ...token.TrustedKeys) *token.KeyStore {
+	t.Helper()
 
-func (store fakeTrustedKeyStore) Keys() token.TrustedKeys {
-	return store.keys
+	store, err := token.NewKeyStore(filepath.Join(t.TempDir(), "atlas-jwt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, keys := range trusted {
+		if err := store.Replace(keys); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return store
 }
 
 // atlasSigner signs the tokens that a test presents.
 type atlasSigner struct {
 	privateKey ed25519.PrivateKey
-	store      fakeTrustedKeyStore
+	trusted    token.TrustedKeys
 }
 
 func newAtlasSigner(t *testing.T) atlasSigner {
@@ -45,11 +54,11 @@ func newAtlasSigner(t *testing.T) atlasSigner {
 		t.Fatal(err)
 	}
 
-	return atlasSigner{privateKey: privateKey, store: fakeTrustedKeyStore{keys: token.TrustedKeys{
+	return atlasSigner{privateKey: privateKey, trusted: token.TrustedKeys{
 		Issuer:     testIssuer,
 		Receiver:   testReceiver,
 		PublicKeys: []token.PublicKey{{ID: testKeyID, Key: base64.RawURLEncoding.EncodeToString(publicKey)}},
-	}}}
+	}}
 }
 
 func (signer atlasSigner) sign(t *testing.T, virtualMachineID string, scopes ...token.Scope) string {
@@ -110,7 +119,7 @@ func call(router http.Handler, bearer string) *httptest.ResponseRecorder {
 
 func TestProtectedRouteAcceptsACorrectToken(t *testing.T) {
 	signer := newAtlasSigner(t)
-	router := newProtectedRouter(signer.store, token.ScopeReadVirtualMachine, token.ScopeMigration)
+	router := newProtectedRouter(newTrustedKeyStore(t, signer.trusted), token.ScopeReadVirtualMachine, token.ScopeMigration)
 
 	recorder := call(router, signer.sign(t, "vm-00001", token.ScopeReadVirtualMachine, token.ScopeMigration))
 	if recorder.Code != http.StatusOK {
@@ -128,7 +137,7 @@ func TestProtectedRouteAcceptsACorrectToken(t *testing.T) {
 
 func TestProtectedRouteRejectsAStaticToken(t *testing.T) {
 	signer := newAtlasSigner(t)
-	router := newProtectedRouter(signer.store, token.ScopeMigration)
+	router := newProtectedRouter(newTrustedKeyStore(t, signer.trusted), token.ScopeMigration)
 
 	recorder := call(router, testToken)
 	if recorder.Code != http.StatusUnauthorized {
@@ -138,7 +147,7 @@ func TestProtectedRouteRejectsAStaticToken(t *testing.T) {
 
 func TestProtectedRouteRejectsAMissingToken(t *testing.T) {
 	signer := newAtlasSigner(t)
-	router := newProtectedRouter(signer.store, token.ScopeMigration)
+	router := newProtectedRouter(newTrustedKeyStore(t, signer.trusted), token.ScopeMigration)
 
 	if recorder := call(router, ""); recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", recorder.Code, recorder.Body)
@@ -147,7 +156,7 @@ func TestProtectedRouteRejectsAMissingToken(t *testing.T) {
 
 func TestProtectedRouteRejectsAMissingScope(t *testing.T) {
 	signer := newAtlasSigner(t)
-	router := newProtectedRouter(signer.store, token.ScopeMigration)
+	router := newProtectedRouter(newTrustedKeyStore(t, signer.trusted), token.ScopeMigration)
 
 	recorder := call(router, signer.sign(t, "vm-00001", token.ScopeReadVirtualMachine))
 	if recorder.Code != http.StatusForbidden {
@@ -165,7 +174,7 @@ func TestProtectedRouteRejectsAMissingScope(t *testing.T) {
 
 func TestProtectedRouteRejectsEveryTokenWithoutTrustedKeys(t *testing.T) {
 	signer := newAtlasSigner(t)
-	router := newProtectedRouter(fakeTrustedKeyStore{}, token.ScopeMigration)
+	router := newProtectedRouter(newTrustedKeyStore(t), token.ScopeMigration)
 
 	recorder := call(router, signer.sign(t, "vm-00001", token.ScopeMigration))
 	if recorder.Code != http.StatusUnauthorized {

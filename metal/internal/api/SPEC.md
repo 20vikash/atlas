@@ -90,7 +90,7 @@ A static token cannot pass `requireScopes`, and an Atlas token cannot pass `auth
 
 `requireScopes` puts the validated claims in the request context and `tokenClaims` returns them. The handler matches the claim VM identifier to the VM its own request addresses, because only the handler knows which VM that is.
 
-The `TrustedKeyStore` dependency reports the keys. [internal/token/SPEC.md](../token/SPEC.md) owns the trust state and the verification rules.
+The `TrustedKeyStore` dependency owns the keys. `POST /v1/sync` carries an optional `jwt` object that replaces them, and a sync without that object keeps the keys the host already holds. [internal/token/SPEC.md](../token/SPEC.md) owns the trust state and the verification rules.
 
 Group authentication makes the group answer every path below it. An unknown path and a wrong method under `/v1` both return `404`.
 
@@ -110,6 +110,8 @@ A domain error is mapped to one status and one safe message. An unrecognized err
 | `network.ErrInvalidPeers`, `storage.ErrInvalidUpload` | `400` | `invalid_request` |
 | `token.ErrUnauthorized` | `401` | `unauthorized` |
 | `token.ErrForbidden` | `403` | `forbidden` |
+| `token.ErrInvalidKeys` | `400` | `invalid_request` |
+| `token.ErrKeyConflict` | `409` | `conflict` |
 
 Every error body carries a `retryable` flag, so a caller does not have to know which statuses are worth another attempt. `501` is excluded: repeating it cannot change the answer.
 

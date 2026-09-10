@@ -10,6 +10,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
+	"github.com/frappe/atlas/metal/internal/token"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -19,6 +20,21 @@ type syncRequest struct {
 	WireGuardPeers        []wireGuardPeerRequest `json:"wireguard_peers"`
 	Images                []imageRequest         `json:"images"`
 	PrivilegedVMAddresses []string               `json:"privileged_vm_addresses"`
+	// JWT is optional. A missing object keeps the keys the host already trusts.
+	JWT *jwtRequest `json:"jwt,omitempty"`
+}
+
+// jwtRequest carries the Atlas keys that sign the tokens this host accepts.
+type jwtRequest struct {
+	Issuer     string                `json:"issuer"`
+	Receiver   string                `json:"receiver"`
+	PublicKeys []jwtPublicKeyRequest `json:"public_keys"`
+}
+
+// jwtPublicKeyRequest is one Atlas signing key in base64url without padding.
+type jwtPublicKeyRequest struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
 }
 
 // wireGuardPeerRequest is one desired WireGuard peer.
@@ -90,6 +106,12 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 		}
 	}
 
+	if request.JWT != nil {
+		if err := s.trustedKeys.Replace(request.JWT.trustedKeys()); err != nil {
+			return err
+		}
+	}
+
 	result, err := s.hostService.Synchronize(c.Request().Context(), host.DesiredState{
 		WireGuardPeers: request.wireGuardPeers(), Images: request.imagePolicies(),
 		PrivilegedVirtualMachineAddresses: request.PrivilegedVMAddresses,
@@ -113,6 +135,16 @@ func synchronizationFailure(err error) error {
 		return fmt.Errorf("%w: %w", unavailable, err)
 	}
 	return err
+}
+
+// trustedKeys converts the requested keys into the trust state form.
+func (request jwtRequest) trustedKeys() token.TrustedKeys {
+	publicKeys := make([]token.PublicKey, 0, len(request.PublicKeys))
+	for _, publicKey := range request.PublicKeys {
+		publicKeys = append(publicKeys, token.PublicKey{ID: publicKey.ID, Key: publicKey.Key})
+	}
+
+	return token.TrustedKeys{Issuer: request.Issuer, Receiver: request.Receiver, PublicKeys: publicKeys}
 }
 
 // imagePolicies converts the requested images into image policies.
