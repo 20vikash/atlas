@@ -33,6 +33,7 @@ class VirtualMachine(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		active_migration: DF.Link | None
 		disk_mib: DF.Int
 		is_draft: DF.Check
 		is_privileged: DF.Check

@@ -163,6 +163,7 @@ permission_query_conditions = {
 	"Proxy Server": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine Image": "atlas.auth.overrides.get_permission_query_conditions",
+	"Virtual Machine Migration": "atlas.auth.overrides.get_permission_query_conditions",
 }
 
 has_permission = {
@@ -177,6 +178,7 @@ has_permission = {
 	"Proxy Server": "atlas.auth.overrides.has_permission",
 	"Virtual Machine": "atlas.auth.overrides.has_permission",
 	"Virtual Machine Image": "atlas.auth.overrides.has_permission",
+	"Virtual Machine Migration": "atlas.auth.overrides.has_permission",
 }
 
 # Document Events
