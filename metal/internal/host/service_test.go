@@ -79,6 +79,38 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 	}
 }
 
+func TestCapacitySubtractsMigrationReservations(t *testing.T) {
+	dependencies := &testHostDependencies{
+		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, VirtualCPUCount: 2}},
+	}
+	reservations := func(context.Context) ([]vm.TargetReservation, error) {
+		return []vm.TargetReservation{{VirtualMachineID: "vm-00002", VirtualCPUCount: 3, MemoryMiB: 1024, DiskMiB: 2048}}, nil
+	}
+	service, err := NewService(Dependencies{
+		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,
+		VirtualMachines: dependencies, Storage: dependencies,
+		MigrationReservations: reservations, Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capacity, err := service.Capacity(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capacity.AvailableCPUCount != max(runtime.NumCPU()-2-3, 0) {
+		t.Fatalf("available CPU = %d", capacity.AvailableCPUCount)
+	}
+	if capacity.AvailableStorageMiB != 3072-2048 {
+		t.Fatalf("available storage = %d, want 1024", capacity.AvailableStorageMiB)
+	}
+	// The migration target is not counted as a running VM.
+	if capacity.VirtualMachineCount != 1 {
+		t.Fatalf("VM count = %d, want 1", capacity.VirtualMachineCount)
+	}
+}
+
 func TestSynchronizeAllowsMeshToBeDisabled(t *testing.T) {
 	dependencies := &testHostDependencies{}
 	service, err := NewService(Dependencies{

@@ -295,6 +295,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconciler.ImageConfig{Logger: logger},
 	)
 	var migrationReconciler *reconciler.MigrationReconciler
+	var migrationManager *vm.MigrationManager
 	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
@@ -302,9 +303,16 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			migrationReconciler.Wake()
 		}
 	}
+	migrationReservations := func(ctx context.Context) ([]vm.TargetReservation, error) {
+		if migrationManager == nil {
+			return nil, nil
+		}
+		return migrationManager.TargetReservations(ctx)
+	}
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
-		VirtualMachines: virtualMachineManager, Storage: stores.Pool, Wake: notifyReconcilers,
+		VirtualMachines: virtualMachineManager, Storage: stores.Pool,
+		MigrationReservations: migrationReservations, Wake: notifyReconcilers,
 	})
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
@@ -320,7 +328,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			StorageMiB: capacity.AvailableStorageMiB,
 		}, nil
 	}
-	migrationManager, err := vm.NewMigrationManager(
+	migrationManager, err = vm.NewMigrationManager(
 		virtualMachineManager,
 		vm.NewHTTPSourceClient(0),
 		migrationCapacity,
