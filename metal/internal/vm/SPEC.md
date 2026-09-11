@@ -56,105 +56,11 @@ The phase and operation ID are written before each host call. A failure stores a
 
 ## Migration
 
-`MigrationManager` owns the migration records beside the VM manager. A host is the source or the target of one migration. The VM manager reads these records to lock a source and to hide a target, so it needs no reference to the migration manager.
+The migration lifecycle lives in [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md). This package supports migration without importing that package.
 
-```text
-machines/<vm-id>/config.json            the VM's own records
-machines/<vm-id>/status.json
-machines/<vm-id>/migration/target.json  target reservation and state
-machines/<vm-id>/migration/source.json  source lock
-```
+The manager exposes the operations migration drives: read and write VM records, allocate IDs, take the per-VM and allocation locks, release storage, and the migration runtime and network operations (normalize the source to stopped, remove and create the migration network, apply the migrated state with a cold start, remove the migrated runtime, and limit or refresh the source disk).
 
-One VM ID locates all of a VM's state. A source record blocks every VM mutation and pauses reconciliation. A target record reserves the VM ID, hides the VM from the list and get, and pauses reconciliation. A migration ID differs from a VM ID, so the target resolves a migration ID to its VM with a small scan.
-
-```text
-Atlas PUT -> target record (preparing), reserve the VM ID
-                 |
-                 v
-           lock the source and read its portable config
-                 |
-                 v
-           check capacity -> allocate local IDs -> reconstruct records
-                 |
-                 v
-           phase copying   (a later sub-feature transfers the data)
-```
-
-The target reserves compute only after the handshake supplies the config. Host capacity subtracts that reservation while the target stays out of the VM list. A target that never advances past preparing for 10 minutes is expired: the target aborts the source and releases the reservation.
-
-An abort before transfer removes the target staging, unlocks the source, and removes the migration records. A cleanup failure keeps the records and locks for a retry.
-
-At the copying phase, `MigrationManager` runs one background disk transfer per VM and waits for the transfers at shutdown. The reconciler starts or resumes the transfer through `AdvanceTarget` and never moves data itself. The transfer holds no VM lock while data moves. One background transfer drives the copying, stopping, and starting phases in order, so `AdvanceTarget` resumes any of them from the saved phase.
-
-```text
-next snapshot from source  (acknowledge the last completed sequence)
-        |
-        v
-stream into zfs recv -s -> resume the same sequence after an interrupt
-        |
-        v
-compare received GUID with the source GUID
-        |
-        v
-mark the interval complete, checkpoint bytes
-        |
-        v
-copy or cut over  (see the cutover decision)
-```
-
-The source keeps the acknowledged snapshot as the next incremental base and removes the one before it. A stopped source needs one full interval. A network break or a restart leaves the migration in copying and resumes the same sequence. A GUID mismatch, an invalid sequence, or an unrelated target dataset fails the migration and keeps the dataset and snapshots for inspection.
-
-### Cutover
-
-A running source always sends the first full interval while it runs. For each later delta the target compares its size with `migration.final_delta_mib`.
-
-```text
-delta larger than final_delta_mib -> copy it, limit the source disk (64, 32, 16, 8 MiB/s)
-delta at or below final_delta_mib -> stop the source
-16 intervals or 30 minutes        -> stop the source
-non-running source                -> stop the source before the first transfer
-```
-
-The target sends the temporary limit on the stream request. The source applies the lower of that limit and the configured disk limit, and never raises an existing limit.
-
-```text
-stopping: POST /stop -> source stops, removes its network, takes the final snapshot
-        |
-        v
-receive and verify the final snapshot (the sub-feature 4 path)
-        |
-        v
-starting: create the target network -> apply the original desired state (cold start)
-        |
-        v
-verify the target state -> status ready
-```
-
-The source normalizes to stopped before the final snapshot: a running VM stops, a paused VM resumes then stops, a created VM stops without guest work, and a stopped VM with saved state restores then stops. Saved memory is not transferred. The target cold-starts the received disk, so it never inherits the source guest memory. The target keeps the migration record in place at `ready`, so normal reconciliation stays blocked until Atlas commits.
-
-Each source stop, network removal, final snapshot, target network, and target state is checkpointed before the next external operation, so a restart repeats only idempotent work. A failure after the source stop marks the migration failed and keeps both hosts locked and the snapshots preserved for rollback.
-
-### Completion and recovery
-
-One cancellable background worker per VM drives finish and abort as well as the transfer. Atlas records a request on the target, which wakes the worker.
-
-```text
-POST /finish (controller token, target ready) -> finishing -> destroy source -> remove received snapshots -> completed
-POST /abort  (controller token, nonterminal)  -> cancel transfer -> rollback -> aborted
-```
-
-A finish and an abort are mutually exclusive: the first request wins, and the other returns a conflict. A finish is valid only after the target reports ready.
-
-```text
-abort, source not stopped -> clean target -> unlock the still-available source
-abort, source stopped     -> clean target -> restore the source -> unlock the source
-```
-
-The rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before it removes the dataset. It creates the target network never before the source network is gone. A stopped source is restored to its original desired state with a cold start, then unlocked. A rollback failure keeps both records, both locks, and the source disk, and reports failed with phase rollback.
-
-The finish and abort records checkpoint source stop, target runtime removal, target network removal, target storage removal, source restoration, source unlock, and source destruction. The source record checkpoints rollback completion and each source destruction step. A restart requeues every nonterminal record, including failed, and repeats only idempotent work.
-
-A success or abort keeps a compact terminal record with only the schema version, migration ID, VM ID, terminal status, and finished time. A terminal record has no phase, does not hide the VM, and reserves no capacity. Every nonterminal record, including failed, keeps the VM hidden and its capacity reserved. A new target migration can replace an aborted record only when no VM record, source lock, or target dataset remains.
+The manager reads migration lock state through an injected `MigrationGuard`. A source lock blocks every VM mutation and pauses reconciliation. A target reservation hides the VM from get and list and pauses reconciliation. Without a guard, no VM is migrating. The daemon injects the guard with `SetMigrationGuard`.
 
 ## Boundaries
 
@@ -169,3 +75,4 @@ A success or abort keeps a compact terminal record with only the schema version,
 - [internal/network/SPEC.md](../network/SPEC.md) implements `Network`.
 - [internal/network/traffic/SPEC.md](../network/traffic/SPEC.md) owns packet tracking.
 - [internal/reconciler/SPEC.md](../reconciler/SPEC.md) drives reconciliation and traffic events.
+- [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md) owns the migration lifecycle this package supports.
