@@ -146,27 +146,51 @@ frappe.ui.form.on("Virtual Machine", {
 });
 
 function migrateVirtualMachine(frm) {
-	frappe.confirm(
-		__(
-			"Migrate {0} off {1}? Atlas selects another host, copies the disk, and moves the VM. It stays available until the short cutover.",
-			[frm.doc.name, frm.doc.server]
-		),
-		() =>
-			frm
-				.call({
-					method: "migrate",
-					doc: frm.doc,
-					freeze: true,
-					freeze_message: __("Starting migration..."),
-				})
-				.then((response) => {
-					if (response.message) {
-						frappe.set_route("Form", "Virtual Machine Migration", response.message);
-					} else {
-						frm.reload_doc();
-					}
-				})
-	);
+	const dialog = new frappe.ui.Dialog({
+		title: __("Migrate Virtual Machine"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				fieldname: "summary",
+				options: __(
+					"This copies the disk and moves {0} off {1}. It stays available until the short cutover.",
+					[frm.doc.name.bold(), (frm.doc.server || "").bold()]
+				),
+			},
+			{
+				fieldtype: "Link",
+				fieldname: "target_server",
+				label: __("Target Host"),
+				options: "Metal Server",
+				description: __("Leave empty to let Atlas choose a host."),
+				get_query: () => ({
+					filters: {
+						status: "Running",
+						is_provisioning_completed: 1,
+						name: ["!=", frm.doc.server],
+					},
+				}),
+			},
+		],
+		primary_action_label: __("Migrate"),
+		primary_action(values) {
+			dialog.hide();
+			frm.call({
+				method: "migrate",
+				doc: frm.doc,
+				args: { target_server: values.target_server || null },
+				freeze: true,
+				freeze_message: __("Starting migration..."),
+			}).then((response) => {
+				if (response.message) {
+					frappe.set_route("Form", "Virtual Machine Migration", response.message);
+				} else {
+					frm.reload_doc();
+				}
+			});
+		},
+	});
+	dialog.show();
 }
 
 function showPrivilegeDialog(frm) {

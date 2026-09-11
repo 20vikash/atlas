@@ -5,6 +5,7 @@ from unittest.mock import Mock, call, patch
 import frappe
 from frappe.tests import UnitTestCase
 
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementCapacity, PlacementService
 
@@ -184,3 +185,33 @@ class TestPlacementService(UnitTestCase):
 			service.select_server(request, "amd64")
 
 		service.lock_server.assert_called_once_with("server-1")
+
+	def test_target_selection_confirms_the_chosen_host(self) -> None:
+		request = VirtualMachineCreateRequest("image", 2, 2048, 10240, 7)
+		capacity = PlacementCapacity("server-2", "amd64", datetime.now(), 4, 4096, 20480)
+		locked_server = SimpleNamespace(
+			name="server-2", architecture="amd64", status="Running", is_provisioning_completed=1
+		)
+		service = PlacementService()
+		service.lock_server = Mock(return_value=locked_server)
+		service.get_latest_capacities = Mock(return_value={"server-2": capacity})
+		service.subtract_local_reservations = Mock(return_value=capacity)
+
+		selected_server = service.select_target_server(request, "amd64", "server-2")
+
+		self.assertIs(selected_server, locked_server)
+		service.lock_server.assert_called_once_with("server-2")
+
+	def test_target_selection_rejects_a_host_without_capacity(self) -> None:
+		request = VirtualMachineCreateRequest("image", 8, 8192, 40960, 7)
+		capacity = PlacementCapacity("server-2", "amd64", datetime.now(), 1, 1024, 5120)
+		locked_server = SimpleNamespace(
+			name="server-2", architecture="amd64", status="Running", is_provisioning_completed=1
+		)
+		service = PlacementService()
+		service.lock_server = Mock(return_value=locked_server)
+		service.get_latest_capacities = Mock(return_value={"server-2": capacity})
+		service.subtract_local_reservations = Mock(return_value=capacity)
+
+		with self.assertRaises(AtlasUserError):
+			service.select_target_server(request, "amd64", "server-2")

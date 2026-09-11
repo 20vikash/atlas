@@ -219,12 +219,13 @@ class VirtualMachine(Document):
 		VirtualMachineService(self).terminate()
 
 	@frappe.whitelist(methods=["POST"])
-	def migrate(self) -> str:
-		"""Move this VM to another host that Atlas selects. Return the migration ID."""
+	def migrate(self, target_server: str | None = None) -> str:
+		"""Move this VM to another host. Atlas selects the host when target_server
+		is empty. Return the migration ID."""
 		self.check_permission("write")
 		from atlas.vm.core.vm_migration import MigrationService
 
-		return MigrationService.create(self)
+		return MigrationService.create(self, target_server=target_server or None)
 
 	def ensure_not_migrating(self) -> None:
 		"""Reject a mutable action while a migration owns this VM."""

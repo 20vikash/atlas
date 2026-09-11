@@ -100,6 +100,62 @@ class TestMigrationCreation(UnitTestCase):
 		self.assertEqual(inserted_fields["status"], "running")
 		locked.db_set.assert_called_once_with("active_migration", "mig-00001")
 
+	def test_create_uses_a_chosen_target(self) -> None:
+		locked = source_vm(
+			server="metal-1",
+			vcpus=2,
+			memory_mib=2048,
+			disk_mib=10240,
+			tenant_id=7,
+			virtual_machine_image="Ubuntu",
+			db_set=Mock(),
+		)
+		inserted = Mock()
+		inserted.insert.return_value = SimpleNamespace(name="mig-00001")
+
+		def fake_get_doc(*args: object, **kwargs: object) -> object:
+			return locked if args and args[0] == "Virtual Machine" else inserted
+
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc) as get_doc,
+			patch(
+				"atlas.vm.core.vm_migration.PlacementService.select_target_server",
+				return_value=SimpleNamespace(name="metal-3"),
+			) as select_target,
+			patch("atlas.vm.core.vm_migration.PlacementService.select_server") as select_server,
+			patch("atlas.vm.core.vm_migration.frappe.db.get_value", return_value="amd64"),
+			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-10 00:00:00"),
+		):
+			migration_id = MigrationService.create(
+				SimpleNamespace(name="vm-00001"), target_server="metal-3"
+			)
+
+		self.assertEqual(migration_id, "mig-00001")
+		select_server.assert_not_called()
+		self.assertEqual(select_target.call_args.args[2], "metal-3")
+		inserted_fields = next(
+			call.args[0] for call in get_doc.call_args_list if call.args and isinstance(call.args[0], dict)
+		)
+		self.assertEqual(inserted_fields["target_server"], "metal-3")
+
+	def test_create_rejects_the_source_as_the_target(self) -> None:
+		locked = source_vm(
+			server="metal-1",
+			vcpus=2,
+			memory_mib=2048,
+			disk_mib=10240,
+			tenant_id=7,
+			virtual_machine_image="Ubuntu",
+			db_set=Mock(),
+		)
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=locked),
+			patch("atlas.vm.core.vm_migration.frappe.db.get_value", return_value="amd64"),
+			self.assertRaisesRegex(AtlasUserError, "other than metal-1"),
+		):
+			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-1")
+
 	def test_migrate_delegates_to_the_service(self) -> None:
 		virtual_machine = frappe.new_doc("Virtual Machine")
 		virtual_machine.check_permission = Mock()
@@ -110,7 +166,18 @@ class TestMigrationCreation(UnitTestCase):
 			result = virtual_machine.migrate()
 
 		self.assertEqual(result, "mig-00001")
-		create.assert_called_once_with(virtual_machine)
+		create.assert_called_once_with(virtual_machine, target_server=None)
+
+	def test_migrate_passes_a_chosen_target(self) -> None:
+		virtual_machine = frappe.new_doc("Virtual Machine")
+		virtual_machine.check_permission = Mock()
+
+		with patch(
+			"atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001"
+		) as create:
+			virtual_machine.migrate(target_server="metal-3")
+
+		create.assert_called_once_with(virtual_machine, target_server="metal-3")
 
 
 class TestMigrationActionLock(UnitTestCase):

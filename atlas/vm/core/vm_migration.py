@@ -42,19 +42,30 @@ class MigrationService:
 		self.migration = migration
 
 	@classmethod
-	def create(cls, virtual_machine: VirtualMachine) -> str:
-		"""Lock the VM, reserve a target, and open one migration. Return its ID."""
+	def create(cls, virtual_machine: VirtualMachine, target_server: str | None = None) -> str:
+		"""Lock the VM, reserve a target, and open one migration. Return its ID.
+
+		With no target_server, Atlas selects a host. With one, it uses that host
+		after it confirms the host is eligible and has capacity.
+		"""
 		locked = cast(
 			"VirtualMachine",
 			frappe.get_doc("Virtual Machine", virtual_machine.name, for_update=True),
 		)
 		cls.validate_source(locked)
 
-		target = PlacementService().select_server(
-			cls.get_shape(locked),
-			cls.get_architecture(locked),
-			exclude_servers={locked.server},
-		)
+		shape = cls.get_shape(locked)
+		architecture = cls.get_architecture(locked)
+		placement = PlacementService()
+		if target_server:
+			if target_server == locked.server:
+				frappe.throw(
+					_("Choose a target host other than {0}.").format(locked.server),
+					exc=AtlasUserError,
+				)
+			target = placement.select_target_server(shape, architecture, target_server)
+		else:
+			target = placement.select_server(shape, architecture, exclude_servers={locked.server})
 		migration = frappe.get_doc(
 			{
 				"doctype": "Virtual Machine Migration",

@@ -104,6 +104,34 @@ class PlacementService:
 		frappe.throw(_("No Metal Server has current capacity for this Virtual Machine."), exc=AtlasUserError)
 		raise AssertionError
 
+	def select_target_server(
+		self,
+		request: VirtualMachineCreateRequest,
+		architecture: str,
+		server_name: str,
+	) -> MetalServer:
+		"""Return one chosen Server after it confirms current capacity for the request."""
+		server = self.lock_server(server_name)
+		if not self.is_ready_server(server, architecture):
+			frappe.throw(
+				_("Metal Server {0} is not ready for this Virtual Machine.").format(server_name),
+				exc=AtlasUserError,
+			)
+		capacity = self.get_latest_capacities({server_name: architecture}).get(server_name)
+		if capacity is None:
+			frappe.throw(
+				_("No current capacity sample for Metal Server {0}. Check Server synchronization.").format(
+					server_name
+				),
+				exc=AtlasUserError,
+			)
+		if not self.subtract_local_reservations(capacity).can_host(request, architecture):
+			frappe.throw(
+				_("Metal Server {0} has no current capacity for this Virtual Machine.").format(server_name),
+				exc=AtlasUserError,
+			)
+		return server
+
 	def get_ready_servers(self) -> list[frappe._dict]:
 		"""Return Servers that are ready to host virtual machines."""
 		return frappe.get_all(
