@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// writeCopyingTarget sets up a target record in the copying phase with a token.
+// writeCopyingTarget sets up a copying target with a token.
 func writeCopyingTarget(t *testing.T, machines *Manager, sourceState State) *migrationStore {
 	t.Helper()
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
@@ -32,7 +32,7 @@ func writeCopyingTarget(t *testing.T, machines *Manager, sourceState State) *mig
 func TestRunTransferCopiesAFullInterval(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
-	// The queue holds one snapshot, so the copy loop stops after the full interval.
+	// One queued snapshot stops the loop after the full interval.
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "g"}}
 	source.streamBytes = 1000
 	transfer.guid = "g"
@@ -107,7 +107,7 @@ func TestRunTransferCutsOverAtTheIntervalLimit(t *testing.T) {
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}
-	// Fail the source stop, so the run halts in the stopping phase for inspection.
+	// Fail source stop so the run remains in stopping.
 	source.stopError = errors.New("stop refused")
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
@@ -154,8 +154,7 @@ func TestRunTransferThrottlesThenCutsOverToReady(t *testing.T) {
 	if record.Status != MigrationReady {
 		t.Fatalf("status = %s (%+v)", record.Status, record.Error)
 	}
-	// The first full interval is unthrottled, the large delta uses 64 MiB/s, and
-	// the final snapshot after stop is unthrottled.
+	// The first and final intervals are unthrottled; the large delta uses 64 MiB/s.
 	if want := []int{0, 64, 0}; !equalInts(source.streamMiBps, want) {
 		t.Fatalf("throttle steps = %v", source.streamMiBps)
 	}
@@ -219,7 +218,7 @@ func TestRunTransferKeepsLockedOnTargetStartFailure(t *testing.T) {
 	if record.Status != MigrationFailed {
 		t.Fatalf("status = %s, want failed", record.Status)
 	}
-	// A failure after source stop must not unlock the source.
+	// A post-stop failure must not unlock the source.
 	if source.removeCalls != 0 {
 		t.Fatalf("remove calls = %d, want the source kept locked", source.removeCalls)
 	}
@@ -233,7 +232,7 @@ func TestAdvanceTargetResumesACopyingTransfer(t *testing.T) {
 	transfer.guid = "g"
 	store := writeCopyingTarget(t, machines, StateRunning)
 
-	// A reconcile pass over a copying migration resumes the transfer.
+	// Reconciliation resumes a copying migration.
 	if err := migrationManager.AdvanceTarget(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +279,7 @@ func TestCancelTransferStopsABlockedWorker(t *testing.T) {
 	writeCopyingTarget(t, machines, StateRunning)
 
 	migrationManager.StartTransfer("vm-1")
-	// The worker blocks in the stream, so a cancel must return once it exits.
+	// Cancellation returns after the blocked stream exits.
 	if err := migrationManager.CancelTransfer(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
 	}

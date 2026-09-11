@@ -59,8 +59,7 @@ func TestNormalizeSourceToStoppedRefusesFailedState(t *testing.T) {
 	}
 }
 
-// seedTargetVM writes the reconstructed desired and observed records of a
-// migration target VM in the given original desired state.
+// seedTargetVM writes reconstructed target records in the original state.
 func seedTargetVM(t *testing.T, machines *Manager, desiredState State) {
 	t.Helper()
 	desired := DesiredRecord{

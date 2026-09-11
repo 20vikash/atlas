@@ -7,9 +7,8 @@ import (
 	"os"
 )
 
-// AdvanceTarget runs the handshake for a preparing migration, then starts or
-// resumes the disk transfer. A copying migration only starts or resumes the
-// transfer. It returns at once and never runs the transfer itself.
+// AdvanceTarget runs the handshake and starts or resumes transfer. It returns
+// without running transfer itself.
 func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID string) error {
 	unlock, err := m.locks.lock(ctx, virtualMachineID)
 	if err != nil {
@@ -24,7 +23,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	if err != nil {
 		return err
 	}
-	// A pending abort takes priority over every other phase.
+	// Abort takes priority over every phase.
 	if record.AbortRequested && !isTerminalStatus(record.Status) {
 		m.StartTransfer(virtualMachineID)
 		return nil
@@ -42,7 +41,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 		m.StartTransfer(virtualMachineID)
 		return nil
 	}
-	// A target that never advanced past preparing is expired: roll it back.
+	// Expire targets that never advanced past preparing.
 	if m.now().Sub(record.CreatedAt) > reservationTimeout {
 		m.logger.Warn("migration target expired before the handshake started", "migration_id", record.ID)
 		record.AbortRequested = true
@@ -74,9 +73,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 	return nil
 }
 
-// ActiveTargetVirtualMachineIDs returns the VM IDs of every nonterminal target
-// migration, so the reconciler advances handshakes, transfers, finishes, and
-// rollbacks, and requeues pending work after a restart.
+// ActiveTargetVirtualMachineIDs returns VM IDs for nonterminal target migrations.
 func (m *MigrationManager) ActiveTargetVirtualMachineIDs(_ context.Context) ([]string, error) {
 	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
 	if err != nil {
@@ -98,7 +95,7 @@ func (m *MigrationManager) ActiveTargetVirtualMachineIDs(_ context.Context) ([]s
 	return active, nil
 }
 
-// reserveShape rejects a migration that the current host capacity cannot hold.
+// reserveShape rejects migrations that exceed host capacity.
 func (m *MigrationManager) reserveShape(ctx context.Context, specification Specification) error {
 	available, err := m.capacity(ctx)
 	if err != nil {
@@ -112,8 +109,7 @@ func (m *MigrationManager) reserveShape(ctx context.Context, specification Speci
 	return nil
 }
 
-// reconstructTarget writes fresh target records with local IDs and moves the
-// migration to the copying phase. It reuses a placeholder from a prior attempt.
+// reconstructTarget writes local target records and enters copying.
 func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, config PortableConfig, observedState State) error {
 	m.machines.allocationMutex.Lock()
 	defer m.machines.allocationMutex.Unlock()
@@ -151,7 +147,7 @@ func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, confi
 	return m.store.writeTarget(record)
 }
 
-// reuseOrAllocateUserID keeps the local ID of a placeholder from a prior attempt.
+// reuseOrAllocateUserID reuses a placeholder ID when possible.
 func (m *MigrationManager) reuseOrAllocateUserID(virtualMachineID string) (uint32, error) {
 	if existing, err := m.machines.store.readDesired(virtualMachineID); err == nil {
 		return existing.UserID, nil
@@ -161,7 +157,7 @@ func (m *MigrationManager) reuseOrAllocateUserID(virtualMachineID string) (uint3
 	return m.machines.allocateUserID()
 }
 
-// recordTargetError stores a visible error and returns the cause.
+// recordTargetError stores and returns the cause.
 func (m *MigrationManager) recordTargetError(record TargetMigrationRecord, cause error) error {
 	record.Error = &OperationError{Code: "migration_error", Message: cause.Error(), UpdatedAt: m.now()}
 	if writeError := m.store.writeTarget(record); writeError != nil {

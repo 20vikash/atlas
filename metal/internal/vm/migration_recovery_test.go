@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// writeTerminalTarget writes a compact terminal target record for one VM.
+// writeTerminalTarget writes a terminal target record.
 func writeTerminalTarget(t *testing.T, machines *Manager, status MigrationStatus) *migrationStore {
 	t.Helper()
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
@@ -62,8 +62,7 @@ func TestCreateTargetRefusesReplacingACompletedRecord(t *testing.T) {
 func TestActiveTargetsIncludeFinishAndAbortWork(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
-	// A ready migration awaiting finish and a failed migration awaiting abort are
-	// both pending work that the reconciler must requeue.
+	// Ready finish and failed abort requests are both requeued.
 	if err := store.writeTarget(TargetMigrationRecord{
 		ID: "mig-1", VirtualMachineID: "vm-1", Status: MigrationReady, Phase: PhaseStarting,
 		FinishRequested: true, CreatedAt: time.Now().UTC(),

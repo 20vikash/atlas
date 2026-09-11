@@ -39,7 +39,7 @@ func (manager *Manager) Reconcile(ctx context.Context, identifier string) error 
 	}
 	defer unlock()
 
-	// A migration source or an incoming target pauses normal reconciliation.
+	// Migration sources and incoming targets pause normal reconciliation.
 	if manager.isMigrating(identifier) {
 		return nil
 	}

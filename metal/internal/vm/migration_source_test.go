@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// writeSourceRecord sets up a source lock record for the transfer tests.
+// writeSourceRecord sets up a source lock for transfer tests.
 func writeSourceRecord(t *testing.T, machines *Manager) {
 	t.Helper()
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
@@ -42,7 +42,7 @@ func TestNextSourceSnapshotWalksSequences(t *testing.T) {
 	if want := []string{"migration-mig-1-1", "migration-mig-1-2", "migration-mig-1-3"}; !equalStringSlices(transfer.created, want) {
 		t.Fatalf("created = %v", transfer.created)
 	}
-	// Acknowledging sequence 2 removes sequence 1 and keeps 2 as the base.
+	// Acknowledging 2 removes 1 and keeps 2 as the base.
 	if want := []string{"migration-mig-1-1"}; !equalStringSlices(transfer.removed, want) {
 		t.Fatalf("removed = %v", transfer.removed)
 	}
@@ -99,8 +99,7 @@ func TestSendSourceStreamRejectsAnUnknownSequence(t *testing.T) {
 	}
 }
 
-// seedSourceVM creates a source VM, sets its observed state, and writes a source
-// lock record with the given acknowledged sequence.
+// seedSourceVM creates a source VM and lock with the given observed state.
 func seedSourceVM(t *testing.T, migrationManager *MigrationManager, machines *Manager, state State, acknowledged int) {
 	t.Helper()
 	ctx := context.Background()
@@ -140,7 +139,7 @@ func TestStopSourceStopsAndCreatesFinalSnapshot(t *testing.T) {
 	if network.releases != 1 {
 		t.Fatalf("network releases = %d, want 1", network.releases)
 	}
-	// The source removes the stale candidate, then takes the final snapshot.
+	// The source removes the stale candidate before the final snapshot.
 	if want := []string{"migration-mig-1-3"}; !equalStringSlices(transfer.removed, want) {
 		t.Fatalf("removed = %v", transfer.removed)
 	}
@@ -387,7 +386,7 @@ func TestLockSourceRejectsFailedOrUnknownStates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fresh VM still reports the unknown state.
+	// A fresh VM reports unknown state.
 	if _, err := migrationManager.LockSource(ctx, "mig-1", "vm-1", "metal-1"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unknown state = %v, want ErrConflict", err)
 	}

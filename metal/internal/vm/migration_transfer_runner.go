@@ -10,17 +10,15 @@ import (
 )
 
 const (
-	// maxTransferIntervals bounds the incremental rounds before cutover.
+	// maxTransferIntervals bounds incremental rounds before cutover.
 	maxTransferIntervals = 16
-	// maxTransferDuration bounds the copy time before cutover.
+	// maxTransferDuration bounds copy time before cutover.
 	maxTransferDuration = 30 * time.Minute
-	// progressCheckpointInterval is how often the active byte count is saved.
+	// progressCheckpointInterval controls active-byte checkpoints.
 	progressCheckpointInterval = 5 * time.Second
 )
 
-// throttleSteps are the source disk limits, in MiB/s, for successive large
-// deltas. Each large delta lowers the limit to the next step and holds at the
-// last one.
+// throttleSteps are source disk limits in MiB/s for large deltas.
 var throttleSteps = []int{64, 32, 16, 8}
 
 // errTransferFailed marks a definite failure that already updated the record.
@@ -32,8 +30,7 @@ type transferHandle struct {
 	done   chan struct{}
 }
 
-// StartTransfer runs one background worker for a VM. A second call for a VM that
-// already has a running worker does nothing.
+// StartTransfer starts one worker per VM. A running worker is unchanged.
 func (m *MigrationManager) StartTransfer(virtualMachineID string) {
 	m.transfersMutex.Lock()
 	defer m.transfersMutex.Unlock()
@@ -55,8 +52,7 @@ func (m *MigrationManager) StartTransfer(virtualMachineID string) {
 	}()
 }
 
-// CancelTransfer cancels a VM's worker and waits for it to exit, so an abort can
-// stop an active stream before it cleans up. It returns when no worker runs.
+// CancelTransfer stops a VM worker and waits for active streams to exit.
 func (m *MigrationManager) CancelTransfer(ctx context.Context, virtualMachineID string) error {
 	m.transfersMutex.Lock()
 	handle := m.transfers[virtualMachineID]
@@ -102,9 +98,8 @@ func (m *MigrationManager) forgetTransfer(virtualMachineID string) {
 	m.transfersMutex.Unlock()
 }
 
-// runTransfer drives one migration from copying to ready. It advances the saved
-// phase until the migration settles or an error stops it. A transient error
-// leaves the migration to resume on the next pass.
+// runTransfer advances one migration from copying to ready. Transient errors
+// leave it for the next pass.
 func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID string) {
 	for {
 		record, err := m.store.readTarget(virtualMachineID)
@@ -138,9 +133,8 @@ func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID str
 	}
 }
 
-// advanceCopying copies one interval or moves to the stopping phase. A running
-// source always sends the first full interval. A non-running source cuts over
-// before its first transfer.
+// advanceCopying copies an interval or enters stopping. Running sources send a
+// full first interval; other sources cut over first.
 func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigrationRecord) error {
 	token, err := m.store.readToken(record.VirtualMachineID)
 	if err != nil {
@@ -167,8 +161,7 @@ func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigr
 	return m.receiveSnapshot(ctx, record, token, snapshot, m.intervalThroughput(record))
 }
 
-// advanceStopping stops the source, pulls the final snapshot, verifies it, and
-// moves to the starting phase.
+// advanceStopping pulls and verifies the final snapshot, then enters starting.
 func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMigrationRecord) error {
 	token, err := m.store.readToken(record.VirtualMachineID)
 	if err != nil {
@@ -200,10 +193,8 @@ func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMig
 	return m.store.writeTarget(current)
 }
 
-// advanceStarting creates the target network, applies the original VM state, and
-// marks the migration ready. It holds the VM operation lock for the runtime work
-// and skips a step that a prior attempt completed. A failure keeps both hosts
-// locked for rollback.
+// advanceStarting creates the target network, applies VM state, and marks ready.
+// A failure keeps both hosts locked for rollback.
 func (m *MigrationManager) advanceStarting(ctx context.Context, record TargetMigrationRecord) error {
 	unlock, err := m.machines.operationLocks.lock(ctx, record.VirtualMachineID)
 	if err != nil {
@@ -240,14 +231,13 @@ func (m *MigrationManager) enterStopping(record TargetMigrationRecord) error {
 	return m.store.writeTarget(record)
 }
 
-// isSmallDelta reports whether a delta is small enough to stop the source
-// instead of copying it.
+// isSmallDelta reports whether the source can stop instead of copying.
 func (m *MigrationManager) isSmallDelta(snapshot SourceSnapshot) bool {
 	return snapshot.SizeBytes <= int64(m.settings.FinalDeltaMiB)*1024*1024
 }
 
-// intervalThroughput returns the source disk limit for the next interval. The
-// first full interval has no limit. Each later delta lowers the limit one step.
+// intervalThroughput returns the next source disk limit. The first interval is
+// unlimited; each later delta lowers the limit one step.
 func (m *MigrationManager) intervalThroughput(record TargetMigrationRecord) int {
 	if lastCompletedSequence(record) == 0 {
 		return 0
@@ -298,8 +288,7 @@ func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMig
 	return nil
 }
 
-// streamInterval streams the source snapshot into the target receive and reports
-// the received byte count. It checkpoints active progress while it runs.
+// streamInterval streams one snapshot and checkpoints received bytes.
 func (m *MigrationManager) streamInterval(ctx context.Context, record TargetMigrationRecord, token string, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
 	var received atomic.Int64
 	reader, writer := io.Pipe()

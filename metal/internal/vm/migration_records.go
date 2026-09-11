@@ -13,11 +13,10 @@ import (
 )
 
 const (
-	// migrationSchemaVersion is the on-disk format for migration records.
+	// migrationSchemaVersion is the on-disk record format.
 	migrationSchemaVersion = 1
 
-	// migrationSubdirectory holds a VM's migration records next to its own
-	// records, so one VM ID locates all of its state.
+	// migrationSubdirectory stores migration records beside VM records.
 	migrationSubdirectory = "migration"
 
 	targetFileName = "target.json"
@@ -25,19 +24,19 @@ const (
 	tokenFileName  = "token"
 )
 
-// MigrationStatus is the lifecycle status of one migration.
+// MigrationStatus is a migration lifecycle status.
 type MigrationStatus string
 
 const (
-	// MigrationRunning means the migration is in progress.
+	// MigrationRunning means migration is in progress.
 	MigrationRunning MigrationStatus = "running"
-	// MigrationReady means the target holds a complete copy and can cut over.
+	// MigrationReady means the target can cut over.
 	MigrationReady MigrationStatus = "ready"
-	// MigrationCompleted means the target now owns the VM.
+	// MigrationCompleted means the target owns the VM.
 	MigrationCompleted MigrationStatus = "completed"
-	// MigrationFailed means the migration stopped with an error.
+	// MigrationFailed means migration stopped with an error.
 	MigrationFailed MigrationStatus = "failed"
-	// MigrationAborted means the migration was canceled and cleaned up.
+	// MigrationAborted means migration was canceled and cleaned up.
 	MigrationAborted MigrationStatus = "aborted"
 )
 
@@ -51,9 +50,8 @@ func isValidMigrationStatus(status MigrationStatus) bool {
 	}
 }
 
-// isTerminalStatus reports whether a status is a final result that no longer
-// hides the VM or reserves capacity. A failed migration is not terminal: it
-// stays locked for recovery.
+// isTerminalStatus reports a final status that releases the VM. Failed remains
+// nonterminal for recovery.
 func isTerminalStatus(status MigrationStatus) bool {
 	return status == MigrationCompleted || status == MigrationAborted
 }
@@ -62,15 +60,15 @@ func isTerminalStatus(status MigrationStatus) bool {
 type MigrationPhase string
 
 const (
-	// PhasePreparing means the target reserved the VM ID and is running the handshake.
+	// PhasePreparing means the target reserved the VM ID and runs the handshake.
 	PhasePreparing MigrationPhase = "preparing"
-	// PhaseCopying means the target holds the VM config and copies disk intervals.
+	// PhaseCopying means the target holds config and copies disk intervals.
 	PhaseCopying MigrationPhase = "copying"
-	// PhaseStopping means the target stops the source and pulls the final snapshot.
+	// PhaseStopping means the target stops the source and pulls its final snapshot.
 	PhaseStopping MigrationPhase = "stopping"
-	// PhaseStarting means the target creates its network and applies the VM state.
+	// PhaseStarting means the target creates its network and applies VM state.
 	PhaseStarting MigrationPhase = "starting"
-	// PhaseFinishing means the target commits and destroys the source.
+	// PhaseFinishing means the target commits and removes the source.
 	PhaseFinishing MigrationPhase = "finishing"
 	// PhaseRollback means the target cleans up and restores the source.
 	PhaseRollback MigrationPhase = "rollback"
@@ -86,8 +84,8 @@ func isValidMigrationPhase(phase MigrationPhase) bool {
 	}
 }
 
-// PortableConfig is the source VM state that the target can safely reconstruct.
-// It never carries host paths, sockets, jail files, saved memory, or local IDs.
+// PortableConfig is source state the target can reconstruct without host-local
+// paths, sockets, jail files, saved memory, or IDs.
 type PortableConfig struct {
 	VirtualMachineID        string        `json:"virtual_machine_id"`
 	CreateFingerprint       string        `json:"create_fingerprint"`
@@ -110,8 +108,7 @@ type IntervalProgress struct {
 	Completed        bool      `json:"completed"`
 }
 
-// TargetMigrationRecord is the target host's durable state for one migration.
-// The JWT lives in a sibling file, never in this record.
+// TargetMigrationRecord is durable target state. Its JWT is stored separately.
 type TargetMigrationRecord struct {
 	SchemaVersion       int                `json:"schema_version"`
 	ID                  string             `json:"id"`
@@ -130,8 +127,8 @@ type TargetMigrationRecord struct {
 	TargetNetworkReady  bool               `json:"target_network_ready,omitempty"`
 	TargetStateApplied  bool               `json:"target_state_applied,omitempty"`
 
-	// Completion and recovery. FinishRequested and AbortRequested record the
-	// selected terminal request. The others are cleanup checkpoints.
+	// FinishRequested and AbortRequested record the terminal request. Other fields
+	// are cleanup checkpoints.
 	FinishRequested      bool `json:"finish_requested,omitempty"`
 	AbortRequested       bool `json:"abort_requested,omitempty"`
 	SourceStopped        bool `json:"source_stopped,omitempty"`
@@ -147,8 +144,7 @@ type TargetMigrationRecord struct {
 	FinishedAt time.Time       `json:"finished_at,omitempty"`
 }
 
-// SourceMigrationRecord is the source host's durable lock for one migration. Its
-// presence in the VM directory is the source lock.
+// SourceMigrationRecord is the source lock for one migration.
 type SourceMigrationRecord struct {
 	SchemaVersion           int       `json:"schema_version"`
 	ID                      string    `json:"id"`
@@ -168,8 +164,7 @@ type SourceMigrationRecord struct {
 	LockedAt                time.Time `json:"locked_at"`
 }
 
-// migrationStore reads and writes the migration records that live under each VM
-// directory. Records are keyed by VM ID, because a VM has at most one migration.
+// migrationStore reads migration records under each VM directory.
 type migrationStore struct {
 	machinesDirectory string
 }
@@ -222,8 +217,7 @@ func (store *migrationStore) listVirtualMachineIDs() ([]string, error) {
 	return virtualMachineIDs, nil
 }
 
-// findTarget returns the VM ID and record for one migration ID. The scan is
-// small, because a host runs few migrations at once.
+// findTarget returns the VM ID and record for a migration ID.
 func (store *migrationStore) findTarget(migrationID string) (string, TargetMigrationRecord, error) {
 	virtualMachineIDs, err := store.listVirtualMachineIDs()
 	if err != nil {
@@ -253,7 +247,7 @@ func (store *migrationStore) readTarget(virtualMachineID string) (TargetMigratio
 	if record.SchemaVersion != migrationSchemaVersion {
 		return TargetMigrationRecord{}, fmt.Errorf("read %s: unsupported schema version %d", store.targetPath(virtualMachineID), record.SchemaVersion)
 	}
-	// A terminal record has no phase. Every other record needs a valid phase.
+	// Terminal records have no phase; other records need a valid phase.
 	validPhase := isValidMigrationPhase(record.Phase) || (record.Phase == "" && isTerminalStatus(record.Status))
 	if record.VirtualMachineID != virtualMachineID || record.ID == "" ||
 		!isValidMigrationStatus(record.Status) || !validPhase {
@@ -262,8 +256,7 @@ func (store *migrationStore) readTarget(virtualMachineID string) (TargetMigratio
 	return record, nil
 }
 
-// terminalTargetRecord returns the compact record kept after success or abort.
-// It drops secrets, copied config, progress, and cleanup fields.
+// terminalTargetRecord returns the compact post-success or post-abort record.
 func terminalTargetRecord(record TargetMigrationRecord, status MigrationStatus, finishedAt time.Time) TargetMigrationRecord {
 	return TargetMigrationRecord{
 		SchemaVersion:    migrationSchemaVersion,
@@ -325,7 +318,7 @@ func (store *migrationStore) readToken(virtualMachineID string) (string, error) 
 	return string(data), nil
 }
 
-// removeToken deletes the stored migration JWT. A missing token is not an error.
+// removeToken deletes the migration JWT. Missing tokens are safe.
 func (store *migrationStore) removeToken(virtualMachineID string) error {
 	if err := os.Remove(store.tokenPath(virtualMachineID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove migration token: %w", err)
@@ -333,8 +326,7 @@ func (store *migrationStore) removeToken(virtualMachineID string) error {
 	return nil
 }
 
-// remove deletes every migration record of one VM. It leaves the VM's own
-// records in place.
+// remove deletes migration records but leaves VM records.
 func (store *migrationStore) remove(virtualMachineID string) error {
 	return os.RemoveAll(store.migrationDirectory(virtualMachineID))
 }

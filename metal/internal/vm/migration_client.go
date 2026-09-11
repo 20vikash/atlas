@@ -12,17 +12,16 @@ import (
 	"time"
 )
 
-// defaultSourceClientTimeout bounds one control call from the target to the source.
+// defaultSourceClientTimeout bounds one target-to-source control call.
 const defaultSourceClientTimeout = 60 * time.Second
 
-// HTTPSourceClient calls the source host over HTTP with an Atlas-signed token.
+// HTTPSourceClient calls the source over HTTP with an Atlas token.
 type HTTPSourceClient struct {
 	client       *http.Client
 	streamClient *http.Client
 }
 
-// NewHTTPSourceClient returns a source client. Control calls use a per-call
-// timeout. A stream has no whole-request timeout and stops with the context.
+// NewHTTPSourceClient returns a client with per-call control timeouts.
 func NewHTTPSourceClient(timeout time.Duration) *HTTPSourceClient {
 	if timeout <= 0 {
 		timeout = defaultSourceClientTimeout
@@ -33,26 +32,26 @@ func NewHTTPSourceClient(timeout time.Duration) *HTTPSourceClient {
 	}
 }
 
-// nextSnapshotRequest asks the source for the next snapshot.
+// nextSnapshotRequest asks for the next snapshot.
 type nextSnapshotRequest struct {
 	ReceivedSequence int `json:"received_sequence,omitempty"`
 }
 
-// nextSnapshotResponse is the source reply to a snapshot request.
+// nextSnapshotResponse is a snapshot reply.
 type nextSnapshotResponse struct {
 	Sequence  int    `json:"sequence"`
 	SizeBytes int64  `json:"size_bytes"`
 	GUID      string `json:"guid"`
 }
 
-// streamRequest asks the source for one snapshot stream.
+// streamRequest asks for one snapshot stream.
 type streamRequest struct {
 	Sequence        int    `json:"sequence"`
 	ResumeToken     string `json:"resume_token,omitempty"`
 	ThroughputMiBps int    `json:"throughput_mibps,omitempty"`
 }
 
-// NextSnapshot acknowledges the received sequence and asks for the next snapshot.
+// NextSnapshot acknowledges a sequence and asks for the next snapshot.
 func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationID, token string, receivedSequence int) (SourceSnapshot, error) {
 	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
 	if err != nil {
@@ -70,7 +69,7 @@ func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationI
 	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
-// StreamSnapshot reads one snapshot stream into w and returns the byte count.
+// StreamSnapshot reads one snapshot into w and returns its byte count.
 func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
 	body, err := json.Marshal(streamRequest{Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps})
 	if err != nil {
@@ -96,7 +95,7 @@ func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migratio
 	return io.Copy(w, response.Body)
 }
 
-// postJSON sends one JSON control request and returns the response body.
+// postJSON sends a JSON control request and returns its body.
 func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path, token string, body []byte) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address+path, bytes.NewReader(body))
 	if err != nil {
@@ -123,13 +122,13 @@ func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path, token st
 	return responseBody, nil
 }
 
-// sourceHandshakeResponse is the source reply to a prepare call.
+// sourceHandshakeResponse is a prepare reply.
 type sourceHandshakeResponse struct {
 	Config        PortableConfig `json:"config"`
 	ObservedState State          `json:"observed_state"`
 }
 
-// PrepareSource asks the source host to lock the VM and return its portable state.
+// PrepareSource asks the source to lock the VM and return portable state.
 func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migrationID, _, token string) (PortableConfig, State, error) {
 	path := fmt.Sprintf("/v1/migrations/%s/source", url.PathEscape(migrationID))
 	body, err := c.call(ctx, http.MethodPut, address, path, token)
@@ -143,8 +142,8 @@ func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migration
 	return response.Config, response.ObservedState, nil
 }
 
-// StopSource asks the source host to stop the VM, remove its network, and create
-// the final snapshot. It returns that snapshot.
+// StopSource asks the source to stop the VM, remove its network, and create the
+// final snapshot.
 func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID, token string) (SourceSnapshot, error) {
 	path := fmt.Sprintf("/v1/migrations/%s/stop", url.PathEscape(migrationID))
 	responseBody, err := c.postJSON(ctx, address, path, token, nil)
@@ -158,28 +157,28 @@ func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID,
 	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
-// StartSource asks the source host to restore the VM to its original desired state.
+// StartSource asks the source to restore its original desired state.
 func (c *HTTPSourceClient) StartSource(ctx context.Context, address, migrationID, token string) error {
 	path := fmt.Sprintf("/v1/migrations/%s/start", url.PathEscape(migrationID))
 	_, err := c.call(ctx, http.MethodPost, address, path, token)
 	return err
 }
 
-// FinishSource asks the source host to destroy the stopped VM and its state.
+// FinishSource asks the source to destroy the stopped VM and state.
 func (c *HTTPSourceClient) FinishSource(ctx context.Context, address, migrationID, token string) error {
 	path := fmt.Sprintf("/v1/migrations/%s/finish", url.PathEscape(migrationID))
 	_, err := c.call(ctx, http.MethodPost, address, path, token)
 	return err
 }
 
-// RemoveSource asks the source host to unlock the VM and drop its migration state.
+// RemoveSource asks the source to unlock the VM and drop migration state.
 func (c *HTTPSourceClient) RemoveSource(ctx context.Context, address, migrationID, token string) error {
 	path := fmt.Sprintf("/v1/migrations/%s", url.PathEscape(migrationID))
 	_, err := c.call(ctx, http.MethodDelete, address, path, token)
 	return err
 }
 
-// call sends one authorized request and returns the response body.
+// call sends an authorized request and returns its body.
 func (c *HTTPSourceClient) call(ctx context.Context, method, address, path, token string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, method, address+path, nil)
 	if err != nil {

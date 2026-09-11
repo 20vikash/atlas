@@ -265,7 +265,7 @@ func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	if err := migrationManager.AbortTarget(ctx, "mig-1"); err != nil {
 		t.Fatal(err)
 	}
-	// The worker performs the rollback; drive and wait for it.
+	// Let the worker roll back, then wait for it.
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
 		t.Fatal(err)
 	}

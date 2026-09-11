@@ -12,28 +12,26 @@ import (
 	"time"
 )
 
-// MigrationSourceClient talks to the source host during a migration. The target
-// host holds one, so the interface lives with its consumer.
+// MigrationSourceClient calls the source host during migration.
 type MigrationSourceClient interface {
-	// PrepareSource locks the source VM and returns its portable config and state.
+	// PrepareSource locks the source and returns portable state.
 	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID, token string) (PortableConfig, State, error)
-	// NextSnapshot acknowledges the received sequence and asks for the next snapshot.
+	// NextSnapshot acknowledges a sequence and asks for the next snapshot.
 	NextSnapshot(ctx context.Context, address, migrationID, token string, receivedSequence int) (SourceSnapshot, error)
-	// StreamSnapshot reads one snapshot stream into w and returns the byte count.
-	// A positive throughputMiBps limits the source disk during the interval.
+	// StreamSnapshot reads one snapshot into w and returns its byte count.
+	// A positive throughputMiBps limits source disk throughput.
 	StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
-	// StopSource stops the source, removes its network, and returns the final snapshot.
+	// StopSource stops the source, removes its network, and returns its final snapshot.
 	StopSource(ctx context.Context, address, migrationID, token string) (SourceSnapshot, error)
-	// StartSource restores the source to its original desired state during rollback.
+	// StartSource restores the source during rollback.
 	StartSource(ctx context.Context, address, migrationID, token string) error
-	// FinishSource destroys the stopped source VM and its migration state.
+	// FinishSource destroys the stopped source and migration state.
 	FinishSource(ctx context.Context, address, migrationID, token string) error
-	// RemoveSource unlocks the source VM and removes its migration state.
+	// RemoveSource unlocks the source and removes migration state.
 	RemoveSource(ctx context.Context, address, migrationID, token string) error
 }
 
-// DiskTransfer runs the ZFS operations of one migration. The source host uses
-// the snapshot and send calls; the target host uses the receive calls.
+// DiskTransfer runs ZFS operations for one migration.
 type DiskTransfer interface {
 	CreateSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
 	RemoveSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
@@ -46,22 +44,19 @@ type DiskTransfer interface {
 	AbortReceive(ctx context.Context, virtualMachineID string) error
 }
 
-// reservationTimeout removes a target reservation whose worker never supplies a
-// config, so a lost handshake does not hold capacity forever.
+// reservationTimeout releases a target reservation after a lost handshake.
 const reservationTimeout = 10 * time.Minute
 
-// defaultFinalDeltaMiB is the incremental size at or below which the target cuts
-// over when the configuration sets no value.
+// defaultFinalDeltaMiB is the default cutover threshold.
 const defaultFinalDeltaMiB = 512
 
-// MigrationSettings holds the tunable limits of a migration on this host.
+// MigrationSettings holds host migration limits.
 type MigrationSettings struct {
-	// FinalDeltaMiB is the incremental size at or below which the target stops
-	// the source and takes the final snapshot.
+	// FinalDeltaMiB is the cutover threshold for the final snapshot.
 	FinalDeltaMiB int
 }
 
-// TargetReservation is the host capacity that one migration target holds.
+// TargetReservation is capacity held by one migration target.
 type TargetReservation struct {
 	VirtualMachineID string
 	VirtualCPUCount  int
@@ -69,18 +64,17 @@ type TargetReservation struct {
 	DiskMiB          int
 }
 
-// AvailableCapacity is the free host capacity that a target reservation checks.
+// AvailableCapacity is free host capacity checked by a target reservation.
 type AvailableCapacity struct {
 	CPUCount   int
 	MemoryMiB  int
 	StorageMiB int
 }
 
-// CapacitySource reports the free host capacity at the target.
+// CapacitySource reports free target-host capacity.
 type CapacitySource func(ctx context.Context) (AvailableCapacity, error)
 
-// MigrationManager owns the migration records and reservations on this host. The
-// VM manager owns the VM records that a migration reads and reconstructs.
+// MigrationManager owns host migration records and reservations.
 type MigrationManager struct {
 	machines *Manager
 	store    *migrationStore
@@ -92,7 +86,7 @@ type MigrationManager struct {
 	logger   *slog.Logger
 	now      func() time.Time
 
-	// The manager owns one cancellable background worker per VM.
+	// The manager owns one cancellable worker per VM.
 	transfersMutex     sync.Mutex
 	transfers          map[string]*transferHandle
 	transfersWaitGroup sync.WaitGroup
@@ -101,8 +95,7 @@ type MigrationManager struct {
 	closed             bool
 }
 
-// NewMigrationManager validates the stored records and returns a migration
-// manager for one host.
+// NewMigrationManager validates records and returns a host migration manager.
 func NewMigrationManager(machines *Manager, source MigrationSourceClient, transfer DiskTransfer, capacity CapacitySource, settings MigrationSettings, logger *slog.Logger) (*MigrationManager, error) {
 	if machines == nil || source == nil || transfer == nil || capacity == nil {
 		return nil, fmt.Errorf("migration manager dependencies are required")
@@ -133,8 +126,7 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 	}, nil
 }
 
-// CreateTarget reserves the VM ID for an incoming migration, or refreshes the
-// token of a matching retry. A different VM, source, or migration ID conflicts.
+// CreateTarget reserves a VM ID or refreshes a matching retry token.
 func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source, token string) (TargetMigrationRecord, error) {
 	if !validIdentifier(migrationID) || !validIdentifier(virtualMachineID) || source == "" || token == "" {
 		return TargetMigrationRecord{}, ErrConflict
@@ -156,8 +148,7 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 	existing, err := m.store.readTarget(virtualMachineID)
 	if err == nil {
 		if existing.ID == migrationID {
-			// Same migration: refresh the token of an active retry, or return a
-			// settled result unchanged.
+			// Refresh an active retry or return a settled result unchanged.
 			if isTerminalStatus(existing.Status) {
 				return existing, nil
 			}
@@ -169,8 +160,7 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 			}
 			return existing, nil
 		}
-		// A different migration for this VM ID may replace only a clean aborted
-		// remnant. An active or completed record conflicts.
+		// Replace only a clean aborted remnant. Active and completed records conflict.
 		if existing.Status != MigrationAborted {
 			return TargetMigrationRecord{}, ErrConflict
 		}
@@ -206,15 +196,13 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 	return record, nil
 }
 
-// TargetStatus returns the target record for one migration ID.
+// TargetStatus returns a target record by migration ID.
 func (m *MigrationManager) TargetStatus(_ context.Context, migrationID string) (TargetMigrationRecord, error) {
 	_, record, err := m.store.findTarget(migrationID)
 	return record, err
 }
 
-// AbortTarget records an abort request and cancels an active transfer. The
-// background worker performs the rollback. A finish request or a completed
-// migration conflicts. A repeat is safe.
+// AbortTarget records an abort and cancels active transfer. The worker rolls back.
 func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) error {
 	virtualMachineID, _, err := m.store.findTarget(migrationID)
 	if errors.Is(err, ErrNotFound) {
@@ -229,7 +217,7 @@ func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) 
 	return m.CancelTransfer(ctx, virtualMachineID)
 }
 
-// requestAbort records the abort intent under the migration lock.
+// requestAbort records abort intent under the migration lock.
 func (m *MigrationManager) requestAbort(ctx context.Context, virtualMachineID string) error {
 	unlock, err := m.locks.lock(ctx, virtualMachineID)
 	if err != nil {
@@ -257,7 +245,7 @@ func (m *MigrationManager) requestAbort(ctx context.Context, virtualMachineID st
 	return m.store.writeTarget(record)
 }
 
-// TargetReservations returns the capacity that active migration targets hold.
+// TargetReservations returns capacity held by active targets.
 // A target reserves compute only after the handshake supplies its config.
 func (m *MigrationManager) TargetReservations(_ context.Context) ([]TargetReservation, error) {
 	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
@@ -287,8 +275,8 @@ func (m *MigrationManager) TargetReservations(_ context.Context) ([]TargetReserv
 	return reservations, nil
 }
 
-// assertReplaceableAborted confirms an aborted remnant left no VM record, source
-// lock, or target dataset, so a new migration can reuse the VM ID.
+// assertReplaceableAborted confirms an aborted remnant left no VM, source lock,
+// or target dataset.
 func (m *MigrationManager) assertReplaceableAborted(ctx context.Context, virtualMachineID string) error {
 	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
 		return ErrConflict
@@ -308,8 +296,7 @@ func (m *MigrationManager) assertReplaceableAborted(ctx context.Context, virtual
 	return nil
 }
 
-// assertVirtualMachineIDFree rejects a reservation when a live VM or another
-// migration already holds the VM ID.
+// assertVirtualMachineIDFree rejects IDs held by a VM or migration.
 func (m *MigrationManager) assertVirtualMachineIDFree(virtualMachineID string) error {
 	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
 		return ErrConflict
@@ -322,8 +309,7 @@ func (m *MigrationManager) assertVirtualMachineIDFree(virtualMachineID string) e
 	return nil
 }
 
-// removeTargetStaging removes the reconstructed placeholder records, if the
-// handshake wrote them. It keeps the migration records for the abort steps.
+// removeTargetStaging removes reconstructed placeholders but keeps migration records.
 func (m *MigrationManager) removeTargetStaging(virtualMachineID string) error {
 	for _, path := range []string{m.machines.store.desiredPath(virtualMachineID), m.machines.store.observedPath(virtualMachineID)} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {

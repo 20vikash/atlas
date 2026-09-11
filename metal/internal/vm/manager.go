@@ -170,7 +170,7 @@ func (manager *Manager) Information(ctx context.Context, identifier string) (Inf
 		return Information{}, err
 	}
 	defer unlock()
-	// An incoming migration target is not a normal VM yet.
+	// Incoming migration targets are not normal VMs.
 	if manager.isTargetReserved(identifier) {
 		return Information{}, ErrNotFound
 	}
@@ -187,7 +187,7 @@ func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	}
 	information := make([]Information, 0, len(identifiers))
 	for _, identifier := range identifiers {
-		// An incoming migration target is hidden from the normal VM list.
+		// Hide incoming migration targets from the VM list.
 		if manager.isTargetReserved(identifier) {
 			continue
 		}
