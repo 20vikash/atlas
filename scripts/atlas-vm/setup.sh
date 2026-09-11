@@ -137,10 +137,7 @@ fi
 say "stage 7: the atlas app from $ATLAS_BRANCH"
 as_bench "pilot get-app $ATLAS_REPOSITORY --branch $ATLAS_BRANCH --bench $BENCH_NAME"
 
-say "stage 8: install atlas on $SITE_NAME"
-as_bench "pilot install-app $SITE_NAME atlas --bench $BENCH_NAME"
-
-say "stage 9: production"
+say "stage 8: production"
 production_arguments="--admin-domain $ADMIN_DOMAIN"
 production_arguments+="${LETSENCRYPT_EMAIL:+ --tls --letsencrypt-email $LETSENCRYPT_EMAIL}"
 as_bench "pilot setup production --bench $BENCH_NAME $production_arguments"
@@ -149,6 +146,10 @@ as_bench "pilot setup production --bench $BENCH_NAME $production_arguments"
 systemctl enable nginx
 systemctl reload nginx
 as_bench "pilot build --force --bench $BENCH_NAME"
+
+# Production runs Redis and the workers, which an install hook can reach.
+say "stage 9: install atlas on $SITE_NAME"
+as_bench "pilot install-app $SITE_NAME atlas --bench $BENCH_NAME"
 
 # The image builder runs its root file system build through sudo on every build.
 say "stage 10: sudo grant for the image builder"
