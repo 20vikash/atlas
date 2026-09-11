@@ -14,12 +14,20 @@
 
 The host needs root, KVM, an IPv4 default route, a Secure Shell key pair, and these commands: `curl`, `ip`, `iptables`, `unsquashfs`, `mkfs.ext4`, `truncate`, `ssh`, `scp`, `ssh-keygen`. The VM trusts the key it finds in `/root/.ssh` or in the home directory of the user behind `sudo`.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/frappe/atlas/develop/scripts/atlas-vm/atlas_deployer.py |
+	sudo install -m 0755 /dev/stdin /usr/local/bin/atlas-deployer
+```
+
 ## Create the VM
 
 ```sh
-cp atlas-deployer.example.toml atlas-deployer.toml
+curl -fsSLO https://raw.githubusercontent.com/frappe/atlas/develop/scripts/atlas-vm/atlas-deployer.example.toml
+mv atlas-deployer.example.toml atlas-deployer.toml
 # Set pilot.site and pilot.password.
-sudo ./atlas_deployer.py create
+sudo atlas-deployer create
 ```
 
 `create` downloads the Ubuntu 24.04 cloud image and the guest kernel, builds the guest disk, starts `atlas-pilot-vm.service`, waits for Secure Shell, and runs `setup.sh` in the VM.
