@@ -38,7 +38,6 @@ class TestVirtualMachineImage(UnitTestCase):
 			"platform": "amd64",
 			"status": "Available",
 			"title": "Machine image",
-			"supports_cloud_init": 1,
 			"cache_image": 0,
 			"memory_snapshot": 0,
 			"memory_snapshot_virtual_cpu_count": 0,
@@ -70,11 +69,8 @@ class TestVirtualMachineImage(UnitTestCase):
 	def test_metal_request_contains_immutable_image_data(self) -> None:
 		image = self.make_image()
 
-		with (
-			patch.object(VirtualMachineImage, "validate_user_data"),
-			patch.object(VirtualMachineImage, "get_artifact_url", artifact_url),
-		):
-			request = image.get_metal_image_request("#cloud-config")
+		with patch.object(VirtualMachineImage, "get_artifact_url", artifact_url):
+			request = image.get_metal_image_request()
 
 		identity = f"amd64\0{'a' * 64}\0{'b' * 64}"
 		expected_reference = hashlib.sha256(identity.encode()).hexdigest()
@@ -231,7 +227,6 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			platform="amd64",
 			operating_system="Ubuntu",
 			operating_system_version="24.04",
-			supports_cloud_init=1,
 		)
 		server = SimpleNamespace(name="server-1")
 		image = Mock()

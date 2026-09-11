@@ -405,7 +405,6 @@
             "platform": "amd64",
             "rootfs_size_mib": 20480,
             "status": "available",
-            "supports_cloud_init": true,
             "tenant_id": 7,
             "title": "Worker snapshot",
             "transfer_error": null,
@@ -461,10 +460,6 @@
             "title": "Status",
             "type": "string"
           },
-          "supports_cloud_init": {
-            "title": "Supports Cloud Init",
-            "type": "boolean"
-          },
           "tenant_id": {
             "title": "Tenant Id",
             "type": "integer"
@@ -499,7 +494,6 @@
           "operating_system_version",
           "status",
           "enabled",
-          "supports_cloud_init",
           "cache_image",
           "memory_snapshot",
           "rootfs_size_mib",

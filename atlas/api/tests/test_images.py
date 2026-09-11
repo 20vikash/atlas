@@ -55,7 +55,6 @@ class TestImageView(UnitTestCase):
 				operating_system_version="24.04",
 				status="Available",
 				enabled=1,
-				supports_cloud_init=1,
 				cache_image=0,
 				memory_snapshot=0,
 				image_size_mib=1024,

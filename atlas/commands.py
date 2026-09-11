@@ -118,8 +118,8 @@ def build_ubuntu_base_image(
 	if minimal and version != "24.04":
 		raise click.UsageError("minimal images are available only for Ubuntu 24.04")
 
-	image_type = "minimal " if minimal else ""
-	click.echo(f"Building Ubuntu {version} {image_type}image for {architecture}")
+	title = title or f"ubuntu-{version}" + ("-minimal" if minimal else "")
+	click.echo(f"Building {title} for {architecture}")
 	image_path, kernel_path = build_ubuntu_image(version, architecture, minimal, output_directory)
 	for site in context.sites:
 		try:
@@ -128,7 +128,7 @@ def build_ubuntu_base_image(
 			click.echo(f"Publishing files to {site}")
 			try:
 				publish_ubuntu_image(
-					title or f"Ubuntu {version}" + (" minimal" if minimal else ""),
+					title,
 					version,
 					architecture,
 					image_path,

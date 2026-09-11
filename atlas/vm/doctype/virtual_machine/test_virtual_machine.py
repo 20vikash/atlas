@@ -251,7 +251,7 @@ class TestVirtualMachineService(UnitTestCase):
 			metal_request = VirtualMachineService(virtual_machine).get_metal_request(request, image, None)
 
 		self.assertEqual(metal_request["image"], image_request)
-		image.get_metal_image_request.assert_called_once_with("")
+		image.get_metal_image_request.assert_called_once_with()
 
 	def test_metal_request_carries_throughput_limits(self) -> None:
 		request = VirtualMachineCreateRequest(
