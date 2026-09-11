@@ -252,7 +252,7 @@ class MetalClient:
 		return self._request(
 			"PUT",
 			f"/v1/migrations/{quote(migration_id, safe='')}",
-			json={"virtual_machine_id": virtual_machine_id, "source": source, "jwt": token},
+			json={"virtual_machine_id": virtual_machine_id, "source": source, "token": token},
 			expected_status=202,
 			uncertain_on_failure=True,
 			timeout=self.create_timeout_seconds,

@@ -172,9 +172,10 @@ class TestMetalClientMigrations(UnitTestCase):
 		self.assertEqual(
 			request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/migrations/mig-00001")
 		)
+		# The keys must match Metal's createMigrationRequest, which decodes strictly.
 		self.assertEqual(
 			request.call_args.kwargs["json"],
-			{"virtual_machine_id": "vm-00001", "source": "http://10.0.0.3:9000", "jwt": "jwt-token"},
+			{"virtual_machine_id": "vm-00001", "source": "http://10.0.0.3:9000", "token": "jwt-token"},
 		)
 
 	def test_get_migration_reads_status(self) -> None:
