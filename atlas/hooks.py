@@ -225,6 +225,7 @@ scheduler_events = {
 		"* * * * *": [
 			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
+			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_cargo_provisioning",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
 			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],

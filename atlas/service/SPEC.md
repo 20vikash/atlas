@@ -9,3 +9,4 @@ The Service module owns Atlas services that run on virtual machines. A service i
 ## Components
 
 - [Proxy Server](doctype/proxy_server/SPEC.md): Creates and configures the regional HTTP proxy.
+- [Cargo Server](doctype/cargo_server/SPEC.md): Creates and operates the regional Cargo service.
