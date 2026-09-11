@@ -7,7 +7,10 @@ import argparse
 import hashlib
 import json
 import os
+import secrets
+import shlex
 import shutil
+import string
 import subprocess
 import sys
 import time
@@ -87,6 +90,8 @@ class Settings:
 	"""The configuration this host runs. `create` copies the file, and every later command reads the copy."""
 
 	path: Path
+	site: str = ""
+	bench_user: str = "frappe"
 	vcpu_count: int = 4
 	memory_mib: int = 8192
 	disk_gib: int = 24
@@ -110,6 +115,8 @@ class Settings:
 		branch = atlas.get("branch", "develop")
 		return cls(
 			path=path,
+			site=pilot["site"],
+			bench_user=pilot.get("user", "frappe"),
 			vcpu_count=int(vm.get("vcpu_count", 4)),
 			memory_mib=int(vm.get("memory_mib", 8192)),
 			disk_gib=int(vm.get("disk_gib", 24)),
@@ -130,6 +137,17 @@ class Settings:
 			setattr(self, key, value)
 		self.path.write_text("\n".join(lines) + "\n")
 
+	def update_password(self, password: str) -> None:
+		"""Keep the file honest about the password the VM answers to."""
+		lines = self.path.read_text().splitlines()
+		for index, line in enumerate(lines):
+			if line.split("=", 1)[0].strip() == "password":
+				lines[index] = f"password = {json.dumps(password)}"
+				break
+		else:
+			lines.insert(lines.index("[pilot]") + 1, f"password = {json.dumps(password)}")
+		self.path.write_text("\n".join(lines) + "\n")
+
 
 def validate_images(images: list[dict], path: Path) -> None:
 	"""Refuse an image the builder cannot make, before the VM boots."""
@@ -142,6 +160,16 @@ def validate_images(images: list[dict], path: Path) -> None:
 			raise AtlasVmError(f"{path} asks for {architecture}; only amd64 is supported")
 		if image.get("minimal") and version != "24.04":
 			raise AtlasVmError(f"{path} asks for a minimal Ubuntu {version}; only 24.04 has one")
+
+
+def generate_password(length: int = 24) -> str:
+	"""One password with every character class, which Frappe and Pilot both accept."""
+	classes = (string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%^&*-_=+")
+	alphabet = "".join(classes)
+	while True:
+		password = "".join(secrets.choice(alphabet) for _ in range(length))
+		if all(any(character in group for character in password) for group in classes):
+			return password
 
 
 def find_host_key() -> Path:
@@ -433,6 +461,9 @@ class VirtualMachine:
 
 	def write_in_guest(self, target: str, content: str) -> None:
 		run(self.ssh_arguments([f"install -m 600 /dev/stdin {target}"]), input=content, text=True)
+
+	def run_as_bench(self, command: str) -> int:
+		return self.run_in_guest(f"su - {self.settings.bench_user} -c {shlex.quote(command)}")
 
 	def run_in_guest(self, command: str) -> int:
 		return subprocess.run(self.ssh_arguments([command])).returncode
@@ -738,6 +769,30 @@ def command_setup(machine: VirtualMachine, arguments: argparse.Namespace) -> Non
 	machine.run_setup(arguments.script)
 
 
+def command_reset_password(machine: VirtualMachine, arguments: argparse.Namespace) -> None:
+	"""Set one new password on the Pilot admin panel, the site, or both."""
+	if not machine.is_running:
+		raise AtlasVmError(f"{SERVICE_NAME} is not running; start it with: atlas-vm start")
+
+	password = generate_password()
+	quoted = shlex.quote(password)
+	if arguments.target in ("pilot", "both"):
+		step("reset the Pilot admin password")
+		if machine.run_as_bench(f"pilot set-admin-password --password {quoted}") != 0:
+			raise AtlasVmError("pilot set-admin-password failed; the old password still works")
+	if arguments.target in ("site", "both"):
+		step(f"reset Administrator on {machine.settings.site}")
+		command = (
+			f"pilot --bench {BENCH_NAME} --site {machine.settings.site}"
+			f" set-password Administrator {quoted}"
+		)
+		if machine.run_as_bench(command) != 0:
+			raise AtlasVmError("pilot set-password failed; the old password still works")
+
+	machine.settings.update_password(password)
+	print(password)
+
+
 def command_destroy(machine: VirtualMachine, arguments: argparse.Namespace) -> None:
 	paths = machine.paths
 	if not paths.vm_directory.exists():
@@ -843,6 +898,15 @@ def build_parser() -> argparse.ArgumentParser:
 	setup = subparsers.add_parser("setup", help="run setup.py again in a running VM")
 	setup.add_argument("--script", type=Path, help="run this local setup.py instead of the one in the repository")
 	setup.set_defaults(handler=command_setup)
+	reset_password = subparsers.add_parser(
+		"reset-password", help="set a new random password and print it"
+	)
+	reset_password.add_argument(
+		"target", nargs="?", default="both", choices=("pilot", "site", "both"),
+		help="the Pilot admin panel, the site Administrator, or both",
+	)
+	reset_password.set_defaults(handler=command_reset_password)
+
 	resize = subparsers.add_parser("resize", help="change the vCPU count, the memory, or the disk size")
 	resize.add_argument("--vcpu", type=int, help="new vCPU count")
 	resize.add_argument("--memory", type=int, help="new memory size in MiB")
