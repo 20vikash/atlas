@@ -1,0 +1,94 @@
+{
+ "actions": [],
+ "creation": "2026-09-11 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "status",
+  "column_break_status",
+  "virtual_machine",
+  "installation_task",
+  "failure_section",
+  "failure_message"
+ ],
+ "fields": [
+  {
+   "default": "Not Provisioned",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Not Provisioned\nPending\nProvisioning\nActive\nFailed\nArchived",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "virtual_machine",
+   "fieldtype": "Link",
+   "label": "Virtual Machine",
+   "options": "Virtual Machine",
+   "read_only": 1
+  },
+  {
+   "fieldname": "installation_task",
+   "fieldtype": "Link",
+   "label": "Installation Task",
+   "options": "SSH Task",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval: doc.failure_message",
+   "fieldname": "failure_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "failure_message",
+   "fieldtype": "Small Text",
+   "label": "Failure",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-11 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Service",
+ "name": "Cargo Server",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "states": [
+  {
+   "color": "Gray",
+   "title": "Not Provisioned"
+  },
+  {
+   "color": "Orange",
+   "title": "Pending"
+  },
+  {
+   "color": "Blue",
+   "title": "Provisioning"
+  },
+  {
+   "color": "Green",
+   "title": "Active"
+  },
+  {
+   "color": "Red",
+   "title": "Failed"
+  },
+  {
+   "color": "Gray",
+   "title": "Archived"
+  }
+ ]
+}

@@ -25,6 +25,7 @@ Each guide covers one topic. Use [SPEC.md](../SPEC.md) for the app layout, the o
 | [Image lifecycle](images.md)                         | System and Machine image creation, transfer, caching, and deletion. |
 | [Metal Server lifecycle](metal-server-lifecycle.md)  | Host creation, setup phases, and provider intent.                   |
 | [Proxy Server](proxy-server.md)                      | The regional HTTP proxy cluster and its DNS names.                  |
+| [Cargo Server](cargo-server.md)                      | The regional Cargo service lifecycle and network paths.            |
 | [Wildcard TLS certificate](wildcard-tls.md)          | The regional certificate and its dns-01 issuance.                   |
 
 ## Running Atlas
