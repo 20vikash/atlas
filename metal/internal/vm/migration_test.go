@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -165,6 +167,26 @@ func newMigrationManager(t *testing.T) (*MigrationManager, *Manager, *fakeSource
 		t.Fatal(err)
 	}
 	return migrationManager, machines, source
+}
+
+func TestNewMigrationManagerCleansACorruptRecord(t *testing.T) {
+	machines, _, _, _ := newTestManager(t)
+	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	migrationDirectory := store.migrationDirectory("vm-1")
+	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// A record left by a crashed or older-schema migration must not block startup.
+	if err := os.WriteFile(filepath.Join(migrationDirectory, sourceFileName), []byte(`{"schema_version":1,"id":"mig-1"}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewMigrationManager(machines, &fakeSourceClient{}, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil); err != nil {
+		t.Fatalf("manager did not start over a corrupt record: %v", err)
+	}
+	if store.has(store.sourcePath("vm-1")) {
+		t.Fatal("the corrupt source record was not cleaned at startup")
+	}
 }
 
 func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {

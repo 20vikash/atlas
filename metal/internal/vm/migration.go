@@ -108,8 +108,8 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 		settings.FinalDeltaMiB = defaultFinalDeltaMiB
 	}
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
-	if err := store.validateAll(); err != nil {
-		return nil, fmt.Errorf("validate migration records: %w", err)
+	if err := store.dropUnreadableRecords(logger); err != nil {
+		return nil, fmt.Errorf("clean migration records: %w", err)
 	}
 	rootContext, rootCancel := context.WithCancel(context.Background())
 	return &MigrationManager{

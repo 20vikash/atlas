@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -170,23 +172,59 @@ func newMigrationStore(machinesDirectory string) *migrationStore {
 	return &migrationStore{machinesDirectory: machinesDirectory}
 }
 
-// validateAll rejects corrupt migration records at startup.
-func (store *migrationStore) validateAll() error {
+// dropUnreadableRecords removes migration records that cannot be decoded, so a
+// schema change or a corrupt file never blocks startup. A readable record is
+// left in place for the normal migration lifecycle to finish or roll back. It
+// returns only an error that stops it from inspecting the records at all.
+func (store *migrationStore) dropUnreadableRecords(logger *slog.Logger) error {
 	virtualMachineIDs, err := store.listVirtualMachineIDs()
 	if err != nil {
 		return err
 	}
 	for _, virtualMachineID := range virtualMachineIDs {
-		if store.has(store.targetPath(virtualMachineID)) {
-			if _, err := store.readTarget(virtualMachineID); err != nil {
-				return err
-			}
+		unreadable := store.firstUnreadable(virtualMachineID)
+		if unreadable == nil {
+			continue
 		}
-		if store.has(store.sourcePath(virtualMachineID)) {
-			if _, err := store.readSource(virtualMachineID); err != nil {
-				return err
-			}
+
+		logger.Error("removing an unreadable migration record",
+			"vm_id", virtualMachineID, "error", unreadable)
+		if err := store.remove(virtualMachineID); err != nil {
+			return fmt.Errorf("remove unreadable migration record for %s: %w", virtualMachineID, err)
 		}
+	}
+	return nil
+}
+
+// firstUnreadable returns the first migration record of one VM that fails to
+// decode, or nil when both records read.
+func (store *migrationStore) firstUnreadable(virtualMachineID string) error {
+	if store.has(store.targetPath(virtualMachineID)) {
+		if _, err := store.readTarget(virtualMachineID); err != nil {
+			return err
+		}
+	}
+	if store.has(store.sourcePath(virtualMachineID)) {
+		if _, err := store.readSource(virtualMachineID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readMigrationRecord decodes a persisted migration record. It ignores an
+// unknown field, so a record written by a different schema still loads and the
+// daemon can finish or clean up the migration instead of failing to start.
+func readMigrationRecord(path string, value any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("read %s: %w", path, ErrNotFound)
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, value); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
 	}
 	return nil
 }
@@ -237,7 +275,7 @@ func (store *migrationStore) findTarget(migrationID string) (string, TargetMigra
 // readTarget reads and validates the target record of one VM.
 func (store *migrationStore) readTarget(virtualMachineID string) (TargetMigrationRecord, error) {
 	var record TargetMigrationRecord
-	if err := readRecord(store.targetPath(virtualMachineID), &record); err != nil {
+	if err := readMigrationRecord(store.targetPath(virtualMachineID), &record); err != nil {
 		return TargetMigrationRecord{}, err
 	}
 	if record.SchemaVersion != migrationSchemaVersion {
@@ -267,7 +305,7 @@ func terminalTargetRecord(record TargetMigrationRecord, status MigrationStatus, 
 // readSource reads and validates the source record of one VM.
 func (store *migrationStore) readSource(virtualMachineID string) (SourceMigrationRecord, error) {
 	var record SourceMigrationRecord
-	if err := readRecord(store.sourcePath(virtualMachineID), &record); err != nil {
+	if err := readMigrationRecord(store.sourcePath(virtualMachineID), &record); err != nil {
 		return SourceMigrationRecord{}, err
 	}
 	if record.SchemaVersion != migrationSchemaVersion {

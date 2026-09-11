@@ -2,6 +2,7 @@ package vm
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,32 +163,43 @@ func TestListVirtualMachineIDsFindsTargetAndSource(t *testing.T) {
 	}
 }
 
-func TestValidateAllRejectsACorruptRecord(t *testing.T) {
+func TestDropUnreadableRecordsRemovesACorruptRecord(t *testing.T) {
 	directory := t.TempDir()
 	migrationDirectory := filepath.Join(directory, "vm-1", migrationSubdirectory)
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
 	}
+	// A record missing required fields cannot drive a migration.
 	if err := os.WriteFile(filepath.Join(migrationDirectory, targetFileName), []byte(`{"schema_version":1,"id":"mig-1"}`), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := newMigrationStore(directory).validateAll(); err == nil {
-		t.Fatal("want an invalid target record error")
+	store := newMigrationStore(directory)
+
+	if err := store.dropUnreadableRecords(slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("startup cleanup failed instead of removing the record: %v", err)
+	}
+	if store.has(store.targetPath("vm-1")) {
+		t.Fatal("the corrupt migration record was not removed at startup")
 	}
 }
 
-func TestReadTargetRejectsAnUnknownField(t *testing.T) {
+func TestReadTargetIgnoresAnUnknownField(t *testing.T) {
 	directory := t.TempDir()
 	migrationDirectory := filepath.Join(directory, "vm-1", migrationSubdirectory)
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"schema_version":1,"id":"mig-1","virtual_machine_id":"vm-1","source":"x","status":"running","phase":"preparing","created_at":"2026-01-01T00:00:00Z","extra":true}`
+	// A record from another schema still loads, so a schema change cannot brick the daemon.
+	body := `{"schema_version":1,"id":"mig-1","virtual_machine_id":"vm-1","source":"x","status":"running","phase":"preparing","created_at":"2026-01-01T00:00:00Z","caller":"gone"}`
 	if err := os.WriteFile(filepath.Join(migrationDirectory, targetFileName), []byte(body), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newMigrationStore(directory).readTarget("vm-1"); err == nil {
-		t.Fatal("want an unknown field error")
+	record, err := newMigrationStore(directory).readTarget("vm-1")
+	if err != nil {
+		t.Fatalf("an unknown field was rejected: %v", err)
+	}
+	if record.ID != "mig-1" || record.Status != MigrationRunning {
+		t.Fatalf("record = %+v", record)
 	}
 }
 
