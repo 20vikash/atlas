@@ -1,9 +1,11 @@
-package vm
+package vmmigration
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	platform "github.com/frappe/atlas/metal/internal/platform"
+	"github.com/frappe/atlas/metal/internal/vm"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -86,13 +88,13 @@ func isValidMigrationPhase(phase MigrationPhase) bool {
 // PortableConfig is source state the target can reconstruct without host-local
 // paths, sockets, jail files, saved memory, or IDs.
 type PortableConfig struct {
-	VirtualMachineID        string        `json:"virtual_machine_id"`
-	CreateFingerprint       string        `json:"create_fingerprint"`
-	Generation              uint64        `json:"generation"`
-	SpecificationGeneration uint64        `json:"specification_generation"`
-	RestartGeneration       uint64        `json:"restart_generation"`
-	DesiredState            State         `json:"desired_state"`
-	Specification           Specification `json:"specification"`
+	VirtualMachineID        string           `json:"virtual_machine_id"`
+	CreateFingerprint       string           `json:"create_fingerprint"`
+	Generation              uint64           `json:"generation"`
+	SpecificationGeneration uint64           `json:"specification_generation"`
+	RestartGeneration       uint64           `json:"restart_generation"`
+	DesiredState            vm.State         `json:"desired_state"`
+	Specification           vm.Specification `json:"specification"`
 }
 
 // IntervalProgress records the transfer of one snapshot interval on the target.
@@ -118,7 +120,7 @@ type TargetMigrationRecord struct {
 	Config              *PortableConfig    `json:"config,omitempty"`
 	UserID              uint32             `json:"user_id,omitempty"`
 	GroupID             uint32             `json:"group_id,omitempty"`
-	SourceObservedState State              `json:"source_observed_state,omitempty"`
+	SourceObservedState vm.State           `json:"source_observed_state,omitempty"`
 	CopyStartedAt       time.Time          `json:"copy_started_at,omitempty"`
 	ActiveSequence      int                `json:"active_sequence,omitempty"`
 	FinalSequence       int                `json:"final_sequence,omitempty"`
@@ -138,9 +140,9 @@ type TargetMigrationRecord struct {
 	SourceUnlocked       bool `json:"source_unlocked,omitempty"`
 	SourceDestroyed      bool `json:"source_destroyed,omitempty"`
 
-	Error      *OperationError `json:"error,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
-	FinishedAt time.Time       `json:"finished_at,omitempty"`
+	Error      *vm.OperationError `json:"error,omitempty"`
+	CreatedAt  time.Time          `json:"created_at"`
+	FinishedAt time.Time          `json:"finished_at,omitempty"`
 }
 
 // SourceMigrationRecord is the source lock for one migration.
@@ -148,8 +150,8 @@ type SourceMigrationRecord struct {
 	SchemaVersion           int       `json:"schema_version"`
 	ID                      string    `json:"id"`
 	VirtualMachineID        string    `json:"virtual_machine_id"`
-	OriginalDesired         State     `json:"original_desired"`
-	OriginalObserved        State     `json:"original_observed"`
+	OriginalDesired         vm.State  `json:"original_desired"`
+	OriginalObserved        vm.State  `json:"original_observed"`
 	Sequence                int       `json:"sequence,omitempty"`
 	AcknowledgedSequence    int       `json:"acknowledged_sequence,omitempty"`
 	Stopped                 bool      `json:"stopped,omitempty"`
@@ -212,6 +214,21 @@ func (store *migrationStore) firstUnreadable(virtualMachineID string) error {
 	return nil
 }
 
+// writeMigrationRecord publishes one migration record with an atomic write.
+func writeMigrationRecord(path string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return fmt.Errorf("create record directory: %w", err)
+	}
+	if err := platform.WriteFile(path, data, 0o640); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // readMigrationRecord decodes a persisted migration record. It ignores an
 // unknown field, so a record written by a different schema still loads and the
 // daemon can finish or clean up the migration instead of failing to start.
@@ -219,7 +236,7 @@ func readMigrationRecord(path string, value any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("read %s: %w", path, ErrNotFound)
+			return fmt.Errorf("read %s: %w", path, vm.ErrNotFound)
 		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
@@ -269,7 +286,7 @@ func (store *migrationStore) findTarget(migrationID string) (string, TargetMigra
 			return virtualMachineID, record, nil
 		}
 	}
-	return "", TargetMigrationRecord{}, fmt.Errorf("find migration %s: %w", migrationID, ErrNotFound)
+	return "", TargetMigrationRecord{}, fmt.Errorf("find migration %s: %w", migrationID, vm.ErrNotFound)
 }
 
 // readTarget reads and validates the target record of one VM.
@@ -320,13 +337,13 @@ func (store *migrationStore) readSource(virtualMachineID string) (SourceMigratio
 // writeTarget stamps the schema version and replaces the target record.
 func (store *migrationStore) writeTarget(record TargetMigrationRecord) error {
 	record.SchemaVersion = migrationSchemaVersion
-	return writeRecord(store.targetPath(record.VirtualMachineID), record)
+	return writeMigrationRecord(store.targetPath(record.VirtualMachineID), record)
 }
 
 // writeSource stamps the schema version and replaces the source record.
 func (store *migrationStore) writeSource(record SourceMigrationRecord) error {
 	record.SchemaVersion = migrationSchemaVersion
-	return writeRecord(store.sourcePath(record.VirtualMachineID), record)
+	return writeMigrationRecord(store.sourcePath(record.VirtualMachineID), record)
 }
 
 // remove deletes migration records but leaves VM records.

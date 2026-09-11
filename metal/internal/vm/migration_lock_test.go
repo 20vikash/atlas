@@ -6,14 +6,29 @@ import (
 	"testing"
 )
 
-// lockSource writes a source migration record, which is the source lock.
-func lockSource(t *testing.T, manager *Manager, virtualMachineID string) {
+// fakeMigrationGuard answers the migration lock questions in a test.
+type fakeMigrationGuard struct {
+	sourceLocked   map[string]bool
+	targetReserved map[string]bool
+}
+
+func (g *fakeMigrationGuard) IsSourceLocked(virtualMachineID string) bool {
+	return g.sourceLocked[virtualMachineID]
+}
+
+func (g *fakeMigrationGuard) IsTargetReserved(virtualMachineID string) bool {
+	return g.targetReserved[virtualMachineID]
+}
+
+// lockSource installs a guard that reports one VM as a migration source.
+func lockSource(t *testing.T, manager *Manager, virtualMachineID string) *fakeMigrationGuard {
 	t.Helper()
-	store := newMigrationStore(manager.configuration.MachinesDirectory)
-	record := SourceMigrationRecord{ID: "mig-1", VirtualMachineID: virtualMachineID}
-	if err := store.writeSource(record); err != nil {
-		t.Fatal(err)
+	guard := &fakeMigrationGuard{
+		sourceLocked:   map[string]bool{virtualMachineID: true},
+		targetReserved: map[string]bool{},
 	}
+	manager.SetMigrationGuard(guard)
+	return guard
 }
 
 func TestSourceLockBlocksMutationsButAllowsReads(t *testing.T) {
@@ -62,10 +77,8 @@ func TestClearedSourceLockRestoresMutations(t *testing.T) {
 	if _, err := manager.Create(ctx, "vm-1", testSpecification()); err != nil {
 		t.Fatal(err)
 	}
-	lockSource(t, manager, "vm-1")
-	if err := newMigrationStore(manager.configuration.MachinesDirectory).remove("vm-1"); err != nil {
-		t.Fatal(err)
-	}
+	guard := lockSource(t, manager, "vm-1")
+	guard.sourceLocked["vm-1"] = false
 
 	if err := manager.SetPowerState(ctx, "vm-1", StateStopped); err != nil {
 		t.Fatalf("power change after unlock = %v, want nil", err)

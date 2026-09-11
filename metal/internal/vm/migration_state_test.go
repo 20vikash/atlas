@@ -4,7 +4,17 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
+
+// setObservedState writes one VM's observed state for a migration test.
+func setObservedState(t *testing.T, machines *Manager, virtualMachineID string, state State) {
+	t.Helper()
+	record := ObservedRecord{State: state, Generation: 1, UpdatedAt: time.Now().UTC()}
+	if err := machines.store.writeObserved(virtualMachineID, record); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNormalizeSourceToStopped(t *testing.T) {
 	cases := []struct {

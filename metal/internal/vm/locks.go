@@ -12,15 +12,15 @@ type keyedLock struct {
 	references int
 }
 
-// keyedLocks serializes operations per virtual machine identifier. Entries exist
+// KeyedLocks serializes operations per virtual machine identifier. Entries exist
 // only while an operation holds or waits for one, so an idle host holds no locks.
-type keyedLocks struct {
+type KeyedLocks struct {
 	mutex sync.Mutex
 	locks map[string]*keyedLock
 }
 
 // lock blocks until identifier is free and returns the function that frees it.
-func (locks *keyedLocks) lock(ctx context.Context, identifier string) (func(), error) {
+func (locks *KeyedLocks) Lock(ctx context.Context, identifier string) (func(), error) {
 	entry := locks.reference(identifier)
 
 	select {
@@ -36,7 +36,7 @@ func (locks *keyedLocks) lock(ctx context.Context, identifier string) (func(), e
 }
 
 // reference returns the entry for identifier and counts one more user of it.
-func (locks *keyedLocks) reference(identifier string) *keyedLock {
+func (locks *KeyedLocks) reference(identifier string) *keyedLock {
 	locks.mutex.Lock()
 	defer locks.mutex.Unlock()
 
@@ -56,7 +56,7 @@ func (locks *keyedLocks) reference(identifier string) *keyedLock {
 }
 
 // release drops one user of an entry and forgets the entry when none remain.
-func (locks *keyedLocks) release(identifier string, entry *keyedLock) {
+func (locks *KeyedLocks) release(identifier string, entry *keyedLock) {
 	locks.mutex.Lock()
 	defer locks.mutex.Unlock()
 

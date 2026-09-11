@@ -1,9 +1,10 @@
-package vm
+package vmmigration
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/frappe/atlas/metal/internal/vm"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -16,7 +17,7 @@ import (
 // carries the VM ID so the source can resolve the migration over the mesh.
 type MigrationSourceClient interface {
 	// PrepareSource locks the source and returns portable state.
-	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, State, error)
+	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, vm.State, error)
 	// NextSnapshot acknowledges a sequence and asks for the next snapshot.
 	NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error)
 	// StreamSnapshot reads one snapshot into w and returns its byte count.
@@ -43,6 +44,32 @@ type DiskTransfer interface {
 	ReceiveResumeToken(ctx context.Context, virtualMachineID string) (string, error)
 	ReceiveSnapshot(ctx context.Context, virtualMachineID string, r io.Reader) error
 	AbortReceive(ctx context.Context, virtualMachineID string) error
+}
+
+// Machines is the VM manager behavior that migration drives. The vm.Manager
+// satisfies it, so the daemon passes the concrete manager while this package
+// stays testable with a fake.
+type Machines interface {
+	ReadDesired(virtualMachineID string) (vm.DesiredRecord, error)
+	ReadObserved(virtualMachineID string) (vm.ObservedRecord, error)
+	WriteDesired(record vm.DesiredRecord) error
+	WriteObserved(virtualMachineID string, record vm.ObservedRecord) error
+	RemoveRecords(virtualMachineID string) error
+	DesiredPath(virtualMachineID string) string
+	ObservedPath(virtualMachineID string) string
+	AllocateUserID() (uint32, error)
+	LockAllocation() func()
+	LockOperation(ctx context.Context, virtualMachineID string) (func(), error)
+	ReleaseStorage(ctx context.Context, virtualMachineID string) error
+	MachinesDirectory() string
+	NormalizeSourceToStopped(ctx context.Context, virtualMachineID string) error
+	RemoveMigrationNetwork(ctx context.Context, virtualMachineID string) error
+	EnsureMigrationNetwork(ctx context.Context, virtualMachineID string) error
+	ApplyMigratedTargetState(ctx context.Context, virtualMachineID string) error
+	RestoreRuntimeState(ctx context.Context, virtualMachineID string, desiredState vm.State) error
+	RemoveMigratedRuntime(ctx context.Context, virtualMachineID string) error
+	RefreshSourceDisk(ctx context.Context, virtualMachineID string) error
+	LimitSourceDisk(ctx context.Context, virtualMachineID string, throughputMiBps int) (int, error)
 }
 
 // reservationTimeout releases a target reservation after a lost handshake.
@@ -75,15 +102,15 @@ type AvailableCapacity struct {
 // CapacitySource reports free target-host capacity.
 type CapacitySource func(ctx context.Context) (AvailableCapacity, error)
 
-// MigrationManager owns host migration records and reservations.
-type MigrationManager struct {
-	machines *Manager
+// VMMigration owns host migration records and reservations.
+type VMMigration struct {
+	machines Machines
 	store    *migrationStore
 	source   MigrationSourceClient
 	transfer DiskTransfer
 	capacity CapacitySource
 	settings MigrationSettings
-	locks    keyedLocks
+	locks    vm.KeyedLocks
 	logger   *slog.Logger
 	now      func() time.Time
 
@@ -96,8 +123,8 @@ type MigrationManager struct {
 	closed             bool
 }
 
-// NewMigrationManager validates records and returns a host migration manager.
-func NewMigrationManager(machines *Manager, source MigrationSourceClient, transfer DiskTransfer, capacity CapacitySource, settings MigrationSettings, logger *slog.Logger) (*MigrationManager, error) {
+// NewVMMigration validates records and returns a host migration manager.
+func NewVMMigration(machines Machines, source MigrationSourceClient, transfer DiskTransfer, capacity CapacitySource, settings MigrationSettings, logger *slog.Logger) (*VMMigration, error) {
 	if machines == nil || source == nil || transfer == nil || capacity == nil {
 		return nil, fmt.Errorf("migration manager dependencies are required")
 	}
@@ -107,12 +134,12 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 	if settings.FinalDeltaMiB <= 0 {
 		settings.FinalDeltaMiB = defaultFinalDeltaMiB
 	}
-	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	store := newMigrationStore(machines.MachinesDirectory())
 	if err := store.dropUnreadableRecords(logger); err != nil {
 		return nil, fmt.Errorf("clean migration records: %w", err)
 	}
 	rootContext, rootCancel := context.WithCancel(context.Background())
-	return &MigrationManager{
+	return &VMMigration{
 		machines:    machines,
 		store:       store,
 		source:      source,
@@ -128,11 +155,11 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 }
 
 // CreateTarget reserves a VM ID or returns a matching in-progress record.
-func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (TargetMigrationRecord, error) {
-	if !validIdentifier(migrationID) || !validIdentifier(virtualMachineID) || source == "" {
-		return TargetMigrationRecord{}, ErrConflict
+func (m *VMMigration) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (TargetMigrationRecord, error) {
+	if !vm.ValidIdentifier(migrationID) || !vm.ValidIdentifier(virtualMachineID) || source == "" {
+		return TargetMigrationRecord{}, vm.ErrConflict
 	}
-	unlock, err := m.locks.lock(ctx, virtualMachineID)
+	unlock, err := m.locks.Lock(ctx, virtualMachineID)
 	if err != nil {
 		return TargetMigrationRecord{}, err
 	}
@@ -140,9 +167,9 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 
 	if otherVirtualMachineID, _, err := m.store.findTarget(migrationID); err == nil {
 		if otherVirtualMachineID != virtualMachineID {
-			return TargetMigrationRecord{}, ErrConflict
+			return TargetMigrationRecord{}, vm.ErrConflict
 		}
-	} else if !errors.Is(err, ErrNotFound) {
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return TargetMigrationRecord{}, err
 	}
 
@@ -154,13 +181,13 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 				return existing, nil
 			}
 			if existing.Source != source {
-				return TargetMigrationRecord{}, ErrConflict
+				return TargetMigrationRecord{}, vm.ErrConflict
 			}
 			return existing, nil
 		}
 		// Replace only a clean aborted remnant. Active and completed records conflict.
 		if existing.Status != MigrationAborted {
-			return TargetMigrationRecord{}, ErrConflict
+			return TargetMigrationRecord{}, vm.ErrConflict
 		}
 		if err := m.assertReplaceableAborted(ctx, virtualMachineID); err != nil {
 			return TargetMigrationRecord{}, err
@@ -168,12 +195,12 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 		if err := m.store.remove(virtualMachineID); err != nil {
 			return TargetMigrationRecord{}, err
 		}
-	} else if !errors.Is(err, ErrNotFound) {
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return TargetMigrationRecord{}, err
 	}
 
-	m.machines.allocationMutex.Lock()
-	defer m.machines.allocationMutex.Unlock()
+	unlockAllocation := m.machines.LockAllocation()
+	defer unlockAllocation()
 	if err := m.assertVirtualMachineIDFree(virtualMachineID); err != nil {
 		return TargetMigrationRecord{}, err
 	}
@@ -192,15 +219,15 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 }
 
 // TargetStatus returns a target record by migration ID.
-func (m *MigrationManager) TargetStatus(_ context.Context, migrationID string) (TargetMigrationRecord, error) {
+func (m *VMMigration) TargetStatus(_ context.Context, migrationID string) (TargetMigrationRecord, error) {
 	_, record, err := m.store.findTarget(migrationID)
 	return record, err
 }
 
 // AbortTarget records an abort and cancels active transfer. The worker rolls back.
-func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) error {
+func (m *VMMigration) AbortTarget(ctx context.Context, migrationID string) error {
 	virtualMachineID, _, err := m.store.findTarget(migrationID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, vm.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -213,15 +240,15 @@ func (m *MigrationManager) AbortTarget(ctx context.Context, migrationID string) 
 }
 
 // requestAbort records abort intent under the migration lock.
-func (m *MigrationManager) requestAbort(ctx context.Context, virtualMachineID string) error {
-	unlock, err := m.locks.lock(ctx, virtualMachineID)
+func (m *VMMigration) requestAbort(ctx context.Context, virtualMachineID string) error {
+	unlock, err := m.locks.Lock(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
 	record, err := m.store.readTarget(virtualMachineID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, vm.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -231,7 +258,7 @@ func (m *MigrationManager) requestAbort(ctx context.Context, virtualMachineID st
 		return nil
 	}
 	if record.FinishRequested || record.Status == MigrationCompleted {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	if record.AbortRequested {
 		return nil
@@ -242,7 +269,7 @@ func (m *MigrationManager) requestAbort(ctx context.Context, virtualMachineID st
 
 // TargetReservations returns capacity held by active targets.
 // A target reserves compute only after the handshake supplies its config.
-func (m *MigrationManager) TargetReservations(_ context.Context) ([]TargetReservation, error) {
+func (m *VMMigration) TargetReservations(_ context.Context) ([]TargetReservation, error) {
 	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
 	if err != nil {
 		return nil, err
@@ -272,41 +299,41 @@ func (m *MigrationManager) TargetReservations(_ context.Context) ([]TargetReserv
 
 // assertReplaceableAborted confirms an aborted remnant left no VM, source lock,
 // or target dataset.
-func (m *MigrationManager) assertReplaceableAborted(ctx context.Context, virtualMachineID string) error {
-	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
-		return ErrConflict
-	} else if !errors.Is(err, ErrNotFound) {
+func (m *VMMigration) assertReplaceableAborted(ctx context.Context, virtualMachineID string) error {
+	if _, err := m.machines.ReadDesired(virtualMachineID); err == nil {
+		return vm.ErrConflict
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return err
 	}
-	if m.machines.isSourceLocked(virtualMachineID) {
-		return ErrConflict
+	if m.IsSourceLocked(virtualMachineID) {
+		return vm.ErrConflict
 	}
 	exists, err := m.transfer.TargetDatasetExists(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	return nil
 }
 
 // assertVirtualMachineIDFree rejects IDs held by a VM or migration.
-func (m *MigrationManager) assertVirtualMachineIDFree(virtualMachineID string) error {
-	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
-		return ErrConflict
-	} else if !errors.Is(err, ErrNotFound) {
+func (m *VMMigration) assertVirtualMachineIDFree(virtualMachineID string) error {
+	if _, err := m.machines.ReadDesired(virtualMachineID); err == nil {
+		return vm.ErrConflict
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return err
 	}
-	if m.machines.isSourceLocked(virtualMachineID) {
-		return ErrConflict
+	if m.IsSourceLocked(virtualMachineID) {
+		return vm.ErrConflict
 	}
 	return nil
 }
 
 // removeTargetStaging removes reconstructed placeholders but keeps migration records.
-func (m *MigrationManager) removeTargetStaging(virtualMachineID string) error {
-	for _, path := range []string{m.machines.store.desiredPath(virtualMachineID), m.machines.store.observedPath(virtualMachineID)} {
+func (m *VMMigration) removeTargetStaging(virtualMachineID string) error {
+	for _, path := range []string{m.machines.DesiredPath(virtualMachineID), m.machines.ObservedPath(virtualMachineID)} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("remove target staging: %w", err)
 		}

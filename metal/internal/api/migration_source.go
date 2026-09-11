@@ -1,6 +1,7 @@
 package api
 
 import (
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -10,8 +11,8 @@ import (
 
 // migrationSourceResponse is portable source state for the target.
 type migrationSourceResponse struct {
-	Config        vm.PortableConfig `json:"config"`
-	ObservedState vm.State          `json:"observed_state"`
+	Config        vmmigration.PortableConfig `json:"config"`
+	ObservedState vm.State                   `json:"observed_state"`
 }
 
 // prepareMigrationSource locks the source and returns portable state.

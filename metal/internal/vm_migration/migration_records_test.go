@@ -1,4 +1,4 @@
-package vm
+package vmmigration
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 func newTargetRecord() TargetMigrationRecord {
@@ -23,7 +25,7 @@ func newTargetRecord() TargetMigrationRecord {
 func TestTargetRecordRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	record := newTargetRecord()
-	record.Config = &PortableConfig{VirtualMachineID: "vm-1", Specification: Specification{VirtualCPUCount: 2, MemoryMiB: 2048}}
+	record.Config = &PortableConfig{VirtualMachineID: "vm-1", Specification: vm.Specification{VirtualCPUCount: 2, MemoryMiB: 2048}}
 	record.UserID = 100001
 	record.GroupID = 100001
 
@@ -73,7 +75,7 @@ func TestTransferStateRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	target := newTargetRecord()
 	target.Phase = PhaseCopying
-	target.SourceObservedState = StateRunning
+	target.SourceObservedState = vm.StateRunning
 	target.CopyStartedAt = time.Now().UTC()
 	target.ActiveSequence = 2
 	target.Intervals = []IntervalProgress{
@@ -112,8 +114,8 @@ func TestSourceRecordRoundTrips(t *testing.T) {
 	record := SourceMigrationRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
-		OriginalDesired:  StateRunning,
-		OriginalObserved: StateRunning,
+		OriginalDesired:  vm.StateRunning,
+		OriginalObserved: vm.StateRunning,
 		LockedAt:         time.Now().UTC(),
 	}
 	if err := store.writeSource(record); err != nil {
@@ -123,7 +125,7 @@ func TestSourceRecordRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.OriginalDesired != StateRunning {
+	if got.OriginalDesired != vm.StateRunning {
 		t.Fatalf("source record = %+v", got)
 	}
 }
@@ -140,7 +142,7 @@ func TestFindTargetResolvesTheMigrationID(t *testing.T) {
 	if virtualMachineID != "vm-1" || record.ID != "mig-1" {
 		t.Fatalf("found %s -> %+v", virtualMachineID, record)
 	}
-	if _, _, err := store.findTarget("mig-missing"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := store.findTarget("mig-missing"); !errors.Is(err, vm.ErrNotFound) {
 		t.Fatalf("find missing migration = %v, want ErrNotFound", err)
 	}
 }
@@ -206,7 +208,7 @@ func TestReadTargetIgnoresAnUnknownField(t *testing.T) {
 func TestRemoveKeepsTheVirtualMachineRecords(t *testing.T) {
 	directory := t.TempDir()
 	store := newMigrationStore(directory)
-	virtualMachineRecord := filepath.Join(directory, "vm-1", desiredFileName)
+	virtualMachineRecord := filepath.Join(directory, "vm-1", "config.json")
 	if err := os.MkdirAll(filepath.Dir(virtualMachineRecord), 0o750); err != nil {
 		t.Fatal(err)
 	}

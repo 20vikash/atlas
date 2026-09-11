@@ -310,7 +310,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconciler.ImageConfig{Logger: logger},
 	)
 	var migrationReconciler *reconciler.MigrationReconciler
-	var migrationManager *vm.MigrationManager
+	var migrationManager *vmmigration.VMMigration
 	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
@@ -318,7 +318,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			migrationReconciler.Wake()
 		}
 	}
-	migrationReservations := func(ctx context.Context) ([]vm.TargetReservation, error) {
+	migrationReservations := func(ctx context.Context) ([]vmmigration.TargetReservation, error) {
 		if migrationManager == nil {
 			return nil, nil
 		}
@@ -332,28 +332,31 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
-	migrationCapacity := func(ctx context.Context) (vm.AvailableCapacity, error) {
+	migrationCapacity := func(ctx context.Context) (vmmigration.AvailableCapacity, error) {
 		capacity, err := hostService.Capacity(ctx)
 		if err != nil {
-			return vm.AvailableCapacity{}, err
+			return vmmigration.AvailableCapacity{}, err
 		}
-		return vm.AvailableCapacity{
+		return vmmigration.AvailableCapacity{
 			CPUCount:   capacity.AvailableCPUCount,
 			MemoryMiB:  capacity.AvailableMemoryMiB,
 			StorageMiB: capacity.AvailableStorageMiB,
 		}, nil
 	}
-	migrationManager, err = vm.NewMigrationManager(
+	migrationManager, err = vmmigration.NewVMMigration(
 		virtualMachineManager,
 		vmmigration.NewSourceClient(0, options.migration.transferPort),
 		storage.NewMigrationTransfer(stores.Pool),
 		migrationCapacity,
-		vm.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
+		vmmigration.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
 		logger,
 	)
 	if err != nil {
 		return fmt.Errorf("configure migration manager: %w", err)
 	}
+	// The manager pauses mutation and reconciliation for a migrating VM through
+	// this guard, so it never imports the migration package.
+	virtualMachineManager.SetMigrationGuard(migrationManager)
 	migrationReconciler = reconciler.NewMigrationReconciler(
 		migrationManager,
 		reconcileInterval,

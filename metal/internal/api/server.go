@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"io"
 	"log/slog"
 	"strings"
@@ -63,13 +64,13 @@ type VirtualMachineManager interface {
 
 // MigrationManager owns this host's migration records and reservations.
 type MigrationManager interface {
-	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (vm.TargetMigrationRecord, error)
-	TargetStatus(ctx context.Context, migrationID string) (vm.TargetMigrationRecord, error)
+	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (vmmigration.TargetMigrationRecord, error)
+	TargetStatus(ctx context.Context, migrationID string) (vmmigration.TargetMigrationRecord, error)
 	RequestFinish(ctx context.Context, migrationID string) error
 	AbortTarget(ctx context.Context, migrationID string) error
-	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vm.SourceHandshake, error)
-	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vm.SourceSnapshot, error)
-	StopSource(ctx context.Context, migrationID, virtualMachineID string) (vm.SourceSnapshot, error)
+	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error)
+	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
+	StopSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceSnapshot, error)
 	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
 	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error

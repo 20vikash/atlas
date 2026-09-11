@@ -1,23 +1,24 @@
-package vm
+package vmmigration
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/frappe/atlas/metal/internal/vm"
 	"os"
 )
 
 // AdvanceTarget runs the handshake and starts or resumes transfer. It returns
 // without running transfer itself.
-func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID string) error {
-	unlock, err := m.locks.lock(ctx, virtualMachineID)
+func (m *VMMigration) AdvanceTarget(ctx context.Context, virtualMachineID string) error {
+	unlock, err := m.locks.Lock(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
 	record, err := m.store.readTarget(virtualMachineID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, vm.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
@@ -70,7 +71,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 }
 
 // ActiveTargetVirtualMachineIDs returns VM IDs for nonterminal target migrations.
-func (m *MigrationManager) ActiveTargetVirtualMachineIDs(_ context.Context) ([]string, error) {
+func (m *VMMigration) ActiveTargetVirtualMachineIDs(_ context.Context) ([]string, error) {
 	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
 	if err != nil {
 		return nil, err
@@ -92,7 +93,7 @@ func (m *MigrationManager) ActiveTargetVirtualMachineIDs(_ context.Context) ([]s
 }
 
 // reserveShape rejects migrations that exceed host capacity.
-func (m *MigrationManager) reserveShape(ctx context.Context, specification Specification) error {
+func (m *VMMigration) reserveShape(ctx context.Context, specification vm.Specification) error {
 	available, err := m.capacity(ctx)
 	if err != nil {
 		return err
@@ -100,21 +101,21 @@ func (m *MigrationManager) reserveShape(ctx context.Context, specification Speci
 	if specification.VirtualCPUCount > available.CPUCount ||
 		specification.MemoryMiB > available.MemoryMiB ||
 		specification.DiskMiB > available.StorageMiB {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	return nil
 }
 
 // reconstructTarget writes local target records and enters copying.
-func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, config PortableConfig, observedState State) error {
-	m.machines.allocationMutex.Lock()
-	defer m.machines.allocationMutex.Unlock()
+func (m *VMMigration) reconstructTarget(record TargetMigrationRecord, config PortableConfig, observedState vm.State) error {
+	unlockAllocation := m.machines.LockAllocation()
+	defer unlockAllocation()
 
 	userID, err := m.reuseOrAllocateUserID(config.VirtualMachineID)
 	if err != nil {
 		return m.recordTargetError(record, err)
 	}
-	desired := DesiredRecord{
+	desired := vm.DesiredRecord{
 		ID:                      config.VirtualMachineID,
 		UserID:                  userID,
 		GroupID:                 userID,
@@ -123,14 +124,14 @@ func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, confi
 		SpecificationGeneration: config.SpecificationGeneration,
 		RestartGeneration:       config.RestartGeneration,
 		State:                   config.DesiredState,
-		Specification:           cloneSpecification(config.Specification),
+		Specification:           vm.CloneSpecification(config.Specification),
 	}
-	observed := ObservedRecord{State: StateUnknown, UpdatedAt: m.now()}
-	if err := m.machines.store.writeDesired(desired); err != nil {
+	observed := vm.ObservedRecord{State: vm.StateUnknown, UpdatedAt: m.now()}
+	if err := m.machines.WriteDesired(desired); err != nil {
 		return m.recordTargetError(record, err)
 	}
-	if err := m.machines.store.writeObserved(config.VirtualMachineID, observed); err != nil {
-		return errors.Join(m.recordTargetError(record, err), os.Remove(m.machines.store.desiredPath(config.VirtualMachineID)))
+	if err := m.machines.WriteObserved(config.VirtualMachineID, observed); err != nil {
+		return errors.Join(m.recordTargetError(record, err), os.Remove(m.machines.DesiredPath(config.VirtualMachineID)))
 	}
 
 	record.Config = &config
@@ -144,18 +145,18 @@ func (m *MigrationManager) reconstructTarget(record TargetMigrationRecord, confi
 }
 
 // reuseOrAllocateUserID reuses a placeholder ID when possible.
-func (m *MigrationManager) reuseOrAllocateUserID(virtualMachineID string) (uint32, error) {
-	if existing, err := m.machines.store.readDesired(virtualMachineID); err == nil {
+func (m *VMMigration) reuseOrAllocateUserID(virtualMachineID string) (uint32, error) {
+	if existing, err := m.machines.ReadDesired(virtualMachineID); err == nil {
 		return existing.UserID, nil
-	} else if !errors.Is(err, ErrNotFound) {
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return 0, err
 	}
-	return m.machines.allocateUserID()
+	return m.machines.AllocateUserID()
 }
 
 // recordTargetError stores and returns the cause.
-func (m *MigrationManager) recordTargetError(record TargetMigrationRecord, cause error) error {
-	record.Error = &OperationError{Code: "migration_error", Message: cause.Error(), UpdatedAt: m.now()}
+func (m *VMMigration) recordTargetError(record TargetMigrationRecord, cause error) error {
+	record.Error = &vm.OperationError{Code: "migration_error", Message: cause.Error(), UpdatedAt: m.now()}
 	if writeError := m.store.writeTarget(record); writeError != nil {
 		return errors.Join(cause, writeError)
 	}

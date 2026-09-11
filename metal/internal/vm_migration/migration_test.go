@@ -1,4 +1,4 @@
-package vm
+package vmmigration
 
 import (
 	"context"
@@ -6,8 +6,170 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
+
+// fakeMachines implements Machines with in-memory records and call counters.
+type fakeMachines struct {
+	dir      string
+	desired  map[string]vm.DesiredRecord
+	observed map[string]vm.ObservedRecord
+
+	nextUserID   uint32
+	limitDiskCap int
+
+	normalizeCalls      int
+	removeNetworkCalls  int
+	ensureNetworkCalls  int
+	applyStateCalls     int
+	restoreCalls        int
+	removeRuntimeCalls  int
+	releaseStorageCalls int
+	refreshDiskCalls    int
+	limitDiskCalls      int
+	limitDiskValue      int
+
+	applyStateError error
+}
+
+func newFakeMachines(t *testing.T) *fakeMachines {
+	t.Helper()
+	return &fakeMachines{
+		dir:        t.TempDir(),
+		desired:    make(map[string]vm.DesiredRecord),
+		observed:   make(map[string]vm.ObservedRecord),
+		nextUserID: 100001,
+	}
+}
+
+// create seeds a running source VM with a valid create fingerprint.
+func (f *fakeMachines) create(id string, specification vm.Specification) {
+	f.desired[id] = vm.DesiredRecord{
+		ID:                id,
+		UserID:            1000,
+		GroupID:           1000,
+		CreateFingerprint: strings.Repeat("a", 64),
+		Generation:        1,
+		State:             vm.StateRunning,
+		Specification:     specification,
+	}
+	f.observed[id] = vm.ObservedRecord{State: vm.StateUnknown, UpdatedAt: time.Now().UTC()}
+}
+
+func (f *fakeMachines) ReadDesired(virtualMachineID string) (vm.DesiredRecord, error) {
+	record, ok := f.desired[virtualMachineID]
+	if !ok {
+		return vm.DesiredRecord{}, vm.ErrNotFound
+	}
+	return record, nil
+}
+
+func (f *fakeMachines) ReadObserved(virtualMachineID string) (vm.ObservedRecord, error) {
+	record, ok := f.observed[virtualMachineID]
+	if !ok {
+		return vm.ObservedRecord{}, vm.ErrNotFound
+	}
+	return record, nil
+}
+
+func (f *fakeMachines) WriteDesired(record vm.DesiredRecord) error {
+	f.desired[record.ID] = record
+	return nil
+}
+
+func (f *fakeMachines) WriteObserved(virtualMachineID string, record vm.ObservedRecord) error {
+	f.observed[virtualMachineID] = record
+	return nil
+}
+
+func (f *fakeMachines) RemoveRecords(virtualMachineID string) error {
+	delete(f.desired, virtualMachineID)
+	delete(f.observed, virtualMachineID)
+	return nil
+}
+
+func (f *fakeMachines) DesiredPath(virtualMachineID string) string {
+	return filepath.Join(f.dir, virtualMachineID, "config.json")
+}
+
+func (f *fakeMachines) ObservedPath(virtualMachineID string) string {
+	return filepath.Join(f.dir, virtualMachineID, "status.json")
+}
+
+func (f *fakeMachines) AllocateUserID() (uint32, error) {
+	userID := f.nextUserID
+	f.nextUserID++
+	return userID, nil
+}
+
+func (f *fakeMachines) LockAllocation() func() { return func() {} }
+
+func (f *fakeMachines) LockOperation(context.Context, string) (func(), error) {
+	return func() {}, nil
+}
+
+func (f *fakeMachines) ReleaseStorage(context.Context, string) error {
+	f.releaseStorageCalls++
+	return nil
+}
+
+func (f *fakeMachines) MachinesDirectory() string { return f.dir }
+
+func (f *fakeMachines) NormalizeSourceToStopped(context.Context, string) error {
+	f.normalizeCalls++
+	return nil
+}
+
+func (f *fakeMachines) RemoveMigrationNetwork(context.Context, string) error {
+	f.removeNetworkCalls++
+	return nil
+}
+
+func (f *fakeMachines) EnsureMigrationNetwork(context.Context, string) error {
+	f.ensureNetworkCalls++
+	return nil
+}
+
+func (f *fakeMachines) ApplyMigratedTargetState(context.Context, string) error {
+	f.applyStateCalls++
+	return f.applyStateError
+}
+
+func (f *fakeMachines) RestoreRuntimeState(context.Context, string, vm.State) error {
+	f.restoreCalls++
+	return nil
+}
+
+func (f *fakeMachines) RemoveMigratedRuntime(context.Context, string) error {
+	f.removeRuntimeCalls++
+	return nil
+}
+
+func (f *fakeMachines) RefreshSourceDisk(context.Context, string) error {
+	f.refreshDiskCalls++
+	return nil
+}
+
+func (f *fakeMachines) LimitSourceDisk(_ context.Context, _ string, throughputMiBps int) (int, error) {
+	f.limitDiskCalls++
+	if f.limitDiskCap > 0 && throughputMiBps > f.limitDiskCap {
+		throughputMiBps = f.limitDiskCap
+	}
+	f.limitDiskValue = throughputMiBps
+	return throughputMiBps, nil
+}
+
+func testSpecification() vm.Specification {
+	return vm.Specification{
+		VirtualCPUCount: 2,
+		MemoryMiB:       2048,
+		DiskMiB:         4096,
+	}
+}
 
 type fakeTransfer struct {
 	created       []string
@@ -78,7 +240,7 @@ type fakeSourceClient struct {
 	removeCalls   int
 	removeError   error
 	prepareConfig PortableConfig
-	prepareState  State
+	prepareState  vm.State
 	prepareError  error
 	nextSnapshot  SourceSnapshot
 	nextQueue     []SourceSnapshot
@@ -98,7 +260,7 @@ type fakeSourceClient struct {
 	finishError   error
 }
 
-func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string) (PortableConfig, State, error) {
+func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string) (PortableConfig, vm.State, error) {
 	c.prepareCalls++
 	return c.prepareConfig, c.prepareState, c.prepareError
 }
@@ -158,20 +320,20 @@ func ampleCapacity(context.Context) (AvailableCapacity, error) {
 	return AvailableCapacity{CPUCount: 64, MemoryMiB: 262144, StorageMiB: 4194304}, nil
 }
 
-func newMigrationManager(t *testing.T) (*MigrationManager, *Manager, *fakeSourceClient) {
+func newMigrationManager(t *testing.T) (*VMMigration, *fakeMachines, *fakeSourceClient) {
 	t.Helper()
-	machines, _, _, _ := newTestManager(t)
+	machines := newFakeMachines(t)
 	source := &fakeSourceClient{}
-	migrationManager, err := NewMigrationManager(machines, source, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil)
+	migrationManager, err := NewVMMigration(machines, source, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return migrationManager, machines, source
 }
 
-func TestNewMigrationManagerCleansACorruptRecord(t *testing.T) {
-	machines, _, _, _ := newTestManager(t)
-	store := newMigrationStore(machines.configuration.MachinesDirectory)
+func TestNewVMMigrationCleansACorruptRecord(t *testing.T) {
+	machines := newFakeMachines(t)
+	store := newMigrationStore(machines.MachinesDirectory())
 	migrationDirectory := store.migrationDirectory("vm-1")
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
@@ -181,7 +343,7 @@ func TestNewMigrationManagerCleansACorruptRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewMigrationManager(machines, &fakeSourceClient{}, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil); err != nil {
+	if _, err := NewVMMigration(machines, &fakeSourceClient{}, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil); err != nil {
 		t.Fatalf("manager did not start over a corrupt record: %v", err)
 	}
 	if store.has(store.sourcePath("vm-1")) {
@@ -190,7 +352,7 @@ func TestNewMigrationManagerCleansACorruptRecord(t *testing.T) {
 }
 
 func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
-	migrationManager, machines, _ := newMigrationManager(t)
+	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
 
 	record, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000")
@@ -200,7 +362,7 @@ func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
 	if record.Status != MigrationRunning || record.Phase != PhasePreparing {
 		t.Fatalf("record = %+v", record)
 	}
-	if !machines.isTargetReserved("vm-1") {
+	if !migrationManager.IsTargetReserved("vm-1") {
 		t.Fatal("VM ID was not reserved")
 	}
 
@@ -216,13 +378,13 @@ func TestCreateTargetRejectsChangedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.9:9000"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.9:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("changed source = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("changed migration ID = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "http://10.0.0.3:9000"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "http://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("reused migration ID for another VM = %v, want ErrConflict", err)
 	}
 }
@@ -230,24 +392,10 @@ func TestCreateTargetRejectsChangedValues(t *testing.T) {
 func TestCreateTargetRejectsALiveVirtualMachineID(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := machines.Create(ctx, "vm-1", testSpecification()); err != nil {
-		t.Fatal(err)
-	}
+	machines.create("vm-1", testSpecification())
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("reserve a live VM ID = %v, want ErrConflict", err)
-	}
-}
-
-func TestCreateRejectsATargetReservedID(t *testing.T) {
-	migrationManager, machines, _ := newMigrationManager(t)
-	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-9", "http://10.0.0.3:9000"); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := machines.Create(ctx, "vm-9", testSpecification()); !errors.Is(err, ErrConflict) {
-		t.Fatalf("create a target-reserved ID = %v, want ErrConflict", err)
 	}
 }
 
@@ -265,13 +413,13 @@ func TestTargetStatusResolvesTheMigrationID(t *testing.T) {
 	if record.VirtualMachineID != "vm-1" {
 		t.Fatalf("status = %+v", record)
 	}
-	if _, err := migrationManager.TargetStatus(ctx, "mig-missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := migrationManager.TargetStatus(ctx, "mig-missing"); !errors.Is(err, vm.ErrNotFound) {
 		t.Fatalf("missing status = %v, want ErrNotFound", err)
 	}
 }
 
 func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
-	migrationManager, machines, source := newMigrationManager(t)
+	migrationManager, _, source := newMigrationManager(t)
 	ctx := context.Background()
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
@@ -290,13 +438,13 @@ func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	if source.removeCalls != 1 {
 		t.Fatalf("RemoveSource calls = %d, want 1", source.removeCalls)
 	}
-	if machines.isTargetReserved("vm-1") {
+	if migrationManager.IsTargetReserved("vm-1") {
 		t.Fatal("reservation still present after abort")
 	}
 }
 
 func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
-	migrationManager, machines, source := newMigrationManager(t)
+	migrationManager, _, source := newMigrationManager(t)
 	source.removeError = errors.New("source unreachable")
 	ctx := context.Background()
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
@@ -312,7 +460,7 @@ func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 	if err := migrationManager.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !machines.isTargetReserved("vm-1") {
+	if !migrationManager.IsTargetReserved("vm-1") {
 		t.Fatal("reservation was cleared despite a rollback failure")
 	}
 }
@@ -332,13 +480,13 @@ func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 		t.Fatalf("preparing migration reserved capacity: %+v", reservations)
 	}
 
-	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	store := newMigrationStore(machines.MachinesDirectory())
 	record, err := store.readTarget("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	record.Phase = PhaseCopying
-	record.Config = &PortableConfig{Specification: Specification{VirtualCPUCount: 3, MemoryMiB: 3072, DiskMiB: 8192}}
+	record.Config = &PortableConfig{Specification: vm.Specification{VirtualCPUCount: 3, MemoryMiB: 3072, DiskMiB: 8192}}
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}

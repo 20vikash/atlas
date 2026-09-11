@@ -49,10 +49,11 @@ type Manager struct {
 	snapshots            Snapshots
 	traffic              *traffic.Monitor
 	logger               *slog.Logger
-	operationLocks       keyedLocks
+	operationLocks       KeyedLocks
 	allocationMutex      sync.Mutex
 	temporaryUserIDs     map[uint32]bool
 	temporaryIdentifiers map[string]bool
+	migrationGuard       MigrationGuard
 }
 
 // NewManager validates all records and returns one host VM manager.
@@ -96,7 +97,7 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
 	}
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return Information{}, err
 	}

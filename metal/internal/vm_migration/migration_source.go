@@ -1,16 +1,17 @@
-package vm
+package vmmigration
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/frappe/atlas/metal/internal/vm"
 	"io"
 )
 
 // SourceHandshake is the portable state that the source returns to the target.
 type SourceHandshake struct {
 	Config        PortableConfig
-	ObservedState State
+	ObservedState vm.State
 }
 
 // SourceSnapshot is the source reply to a snapshot request.
@@ -27,11 +28,11 @@ func migrationSnapshotName(migrationID string, sequence int) string {
 
 // LockSource locks the source and returns portable config and observed state.
 // Missing, failed, unknown, or already-migrating VMs are rejected.
-func (m *MigrationManager) LockSource(ctx context.Context, migrationID, virtualMachineID string) (SourceHandshake, error) {
-	if !validIdentifier(migrationID) || !validIdentifier(virtualMachineID) {
-		return SourceHandshake{}, ErrConflict
+func (m *VMMigration) LockSource(ctx context.Context, migrationID, virtualMachineID string) (SourceHandshake, error) {
+	if !vm.ValidIdentifier(migrationID) || !vm.ValidIdentifier(virtualMachineID) {
+		return SourceHandshake{}, vm.ErrConflict
 	}
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return SourceHandshake{}, err
 	}
@@ -39,23 +40,23 @@ func (m *MigrationManager) LockSource(ctx context.Context, migrationID, virtualM
 
 	if existing, err := m.store.readSource(virtualMachineID); err == nil {
 		if existing.ID != migrationID {
-			return SourceHandshake{}, ErrConflict
+			return SourceHandshake{}, vm.ErrConflict
 		}
 		return m.sourceHandshake(virtualMachineID)
-	} else if !errors.Is(err, ErrNotFound) {
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return SourceHandshake{}, err
 	}
 
-	desired, err := m.machines.store.readDesired(virtualMachineID)
+	desired, err := m.machines.ReadDesired(virtualMachineID)
 	if err != nil {
 		return SourceHandshake{}, err
 	}
-	observed, err := m.machines.store.readObserved(virtualMachineID)
+	observed, err := m.machines.ReadObserved(virtualMachineID)
 	if err != nil {
 		return SourceHandshake{}, err
 	}
-	if observed.State == StateFailed || observed.State == StateUnknown {
-		return SourceHandshake{}, ErrConflict
+	if observed.State == vm.StateFailed || observed.State == vm.StateUnknown {
+		return SourceHandshake{}, vm.ErrConflict
 	}
 
 	record := SourceMigrationRecord{
@@ -73,28 +74,28 @@ func (m *MigrationManager) LockSource(ctx context.Context, migrationID, virtualM
 
 // UnlockSource removes snapshots, restores the disk limit, and unlocks the VM.
 // It refuses a stopped source before rollback completes.
-func (m *MigrationManager) UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error {
-	if !validIdentifier(virtualMachineID) {
-		return ErrConflict
+func (m *VMMigration) UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error {
+	if !vm.ValidIdentifier(virtualMachineID) {
+		return vm.ErrConflict
 	}
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
 	existing, err := m.store.readSource(virtualMachineID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, vm.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	if existing.ID != migrationID {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	if existing.Stopped && !existing.RollbackComplete {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	if err := m.removeMigrationSnapshots(ctx, existing); err != nil {
 		return err
@@ -108,8 +109,8 @@ func (m *MigrationManager) UnlockSource(ctx context.Context, migrationID, virtua
 }
 
 // StartSourceRollback restores a stopped source during abort.
-func (m *MigrationManager) StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error {
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+func (m *VMMigration) StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error {
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -134,25 +135,25 @@ func (m *MigrationManager) StartSourceRollback(ctx context.Context, migrationID,
 
 // DestroySource removes a stopped source and its migration state. It requires a
 // stopped, network-removed source with a final snapshot.
-func (m *MigrationManager) DestroySource(ctx context.Context, migrationID, virtualMachineID string) error {
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+func (m *VMMigration) DestroySource(ctx context.Context, migrationID, virtualMachineID string) error {
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
 	record, err := m.store.readSource(virtualMachineID)
-	if errors.Is(err, ErrNotFound) {
+	if errors.Is(err, vm.ErrNotFound) {
 		return m.assertNoSourceRemnant(ctx, virtualMachineID)
 	}
 	if err != nil {
 		return err
 	}
 	if record.ID != migrationID {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	if !record.Stopped || !record.NetworkRemoved || record.FinalSequence < 1 {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 
 	if !record.DestroyRuntimeComplete {
@@ -165,7 +166,7 @@ func (m *MigrationManager) DestroySource(ctx context.Context, migrationID, virtu
 		}
 	}
 	if !record.DestroyStorageComplete {
-		if err := m.machines.storage.Release(ctx, virtualMachineID); err != nil {
+		if err := m.machines.ReleaseStorage(ctx, virtualMachineID); err != nil {
 			return err
 		}
 		record.DestroyStorageComplete = true
@@ -173,14 +174,14 @@ func (m *MigrationManager) DestroySource(ctx context.Context, migrationID, virtu
 			return err
 		}
 	}
-	return m.machines.store.remove(virtualMachineID)
+	return m.machines.RemoveRecords(virtualMachineID)
 }
 
 // assertNoSourceRemnant rejects leftover VM records or disks.
-func (m *MigrationManager) assertNoSourceRemnant(ctx context.Context, virtualMachineID string) error {
-	if _, err := m.machines.store.readDesired(virtualMachineID); err == nil {
-		return ErrConflict
-	} else if !errors.Is(err, ErrNotFound) {
+func (m *VMMigration) assertNoSourceRemnant(ctx context.Context, virtualMachineID string) error {
+	if _, err := m.machines.ReadDesired(virtualMachineID); err == nil {
+		return vm.ErrConflict
+	} else if !errors.Is(err, vm.ErrNotFound) {
 		return err
 	}
 	exists, err := m.transfer.TargetDatasetExists(ctx, virtualMachineID)
@@ -188,13 +189,13 @@ func (m *MigrationManager) assertNoSourceRemnant(ctx context.Context, virtualMac
 		return err
 	}
 	if exists {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	return nil
 }
 
 // removeMigrationSnapshots removes every snapshot this migration created.
-func (m *MigrationManager) removeMigrationSnapshots(ctx context.Context, record SourceMigrationRecord) error {
+func (m *VMMigration) removeMigrationSnapshots(ctx context.Context, record SourceMigrationRecord) error {
 	highest := max(record.Sequence, record.FinalSequence)
 	for sequence := 1; sequence <= highest; sequence++ {
 		if err := m.transfer.RemoveSnapshot(ctx, record.VirtualMachineID, migrationSnapshotName(record.ID, sequence)); err != nil {
@@ -206,8 +207,8 @@ func (m *MigrationManager) removeMigrationSnapshots(ctx context.Context, record 
 
 // NextSourceSnapshot records the acknowledged sequence and returns the next
 // snapshot. A repeat returns the same unacknowledged snapshot.
-func (m *MigrationManager) NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+func (m *VMMigration) NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -243,8 +244,8 @@ func (m *MigrationManager) NextSourceSnapshot(ctx context.Context, migrationID, 
 
 // StopSource stops the source, removes its network, and creates the final
 // snapshot. Checkpoints make repeats safe.
-func (m *MigrationManager) StopSource(ctx context.Context, migrationID, virtualMachineID string) (SourceSnapshot, error) {
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachineID string) (SourceSnapshot, error) {
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -293,13 +294,13 @@ func (m *MigrationManager) StopSource(ctx context.Context, migrationID, virtualM
 }
 
 // SendSourceStream applies the disk limit and streams a requested snapshot.
-func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
+func (m *VMMigration) SendSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
 	record, err := m.boundSourceRecord(virtualMachineID, migrationID)
 	if err != nil {
 		return 0, err
 	}
 	if sequence != record.Sequence {
-		return 0, ErrConflict
+		return 0, vm.ErrConflict
 	}
 	if err := m.applySourceDiskLimit(ctx, migrationID, virtualMachineID, throughputMiBps); err != nil {
 		return 0, err
@@ -313,11 +314,11 @@ func (m *MigrationManager) SendSourceStream(ctx context.Context, migrationID, vi
 }
 
 // applySourceDiskLimit saves a stream limit under the VM lock, then releases it.
-func (m *MigrationManager) applySourceDiskLimit(ctx context.Context, migrationID, virtualMachineID string, throughputMiBps int) error {
+func (m *VMMigration) applySourceDiskLimit(ctx context.Context, migrationID, virtualMachineID string, throughputMiBps int) error {
 	if throughputMiBps <= 0 {
 		return nil
 	}
-	unlock, err := m.machines.operationLocks.lock(ctx, virtualMachineID)
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -339,7 +340,7 @@ func (m *MigrationManager) applySourceDiskLimit(ctx context.Context, migrationID
 }
 
 // describeSnapshot returns the sequence, estimated size, and GUID of one snapshot.
-func (m *MigrationManager) describeSnapshot(ctx context.Context, virtualMachineID, migrationID string, sequence int) (SourceSnapshot, error) {
+func (m *VMMigration) describeSnapshot(ctx context.Context, virtualMachineID, migrationID string, sequence int) (SourceSnapshot, error) {
 	name := migrationSnapshotName(migrationID, sequence)
 	base := ""
 	if sequence > 1 {
@@ -357,24 +358,24 @@ func (m *MigrationManager) describeSnapshot(ctx context.Context, virtualMachineI
 }
 
 // boundSourceRecord verifies the migration before returning the source record.
-func (m *MigrationManager) boundSourceRecord(virtualMachineID, migrationID string) (SourceMigrationRecord, error) {
+func (m *VMMigration) boundSourceRecord(virtualMachineID, migrationID string) (SourceMigrationRecord, error) {
 	record, err := m.store.readSource(virtualMachineID)
 	if err != nil {
 		return SourceMigrationRecord{}, err
 	}
 	if record.ID != migrationID {
-		return SourceMigrationRecord{}, ErrConflict
+		return SourceMigrationRecord{}, vm.ErrConflict
 	}
 	return record, nil
 }
 
 // sourceHandshake reads the current VM records into the portable response.
-func (m *MigrationManager) sourceHandshake(virtualMachineID string) (SourceHandshake, error) {
-	desired, err := m.machines.store.readDesired(virtualMachineID)
+func (m *VMMigration) sourceHandshake(virtualMachineID string) (SourceHandshake, error) {
+	desired, err := m.machines.ReadDesired(virtualMachineID)
 	if err != nil {
 		return SourceHandshake{}, err
 	}
-	observed, err := m.machines.store.readObserved(virtualMachineID)
+	observed, err := m.machines.ReadObserved(virtualMachineID)
 	if err != nil {
 		return SourceHandshake{}, err
 	}
@@ -386,7 +387,7 @@ func (m *MigrationManager) sourceHandshake(virtualMachineID string) (SourceHands
 			SpecificationGeneration: desired.SpecificationGeneration,
 			RestartGeneration:       desired.RestartGeneration,
 			DesiredState:            desired.State,
-			Specification:           cloneSpecification(desired.Specification),
+			Specification:           vm.CloneSpecification(desired.Specification),
 		},
 		ObservedState: observed.State,
 	}, nil

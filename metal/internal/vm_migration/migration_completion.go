@@ -1,17 +1,18 @@
-package vm
+package vmmigration
 
 import (
 	"context"
 	"errors"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // RequestFinish records finish intent for a ready migration. A pending abort wins.
-func (m *MigrationManager) RequestFinish(ctx context.Context, migrationID string) error {
+func (m *VMMigration) RequestFinish(ctx context.Context, migrationID string) error {
 	virtualMachineID, _, err := m.store.findTarget(migrationID)
 	if err != nil {
 		return err
 	}
-	unlock, err := m.locks.lock(ctx, virtualMachineID)
+	unlock, err := m.locks.Lock(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -25,7 +26,7 @@ func (m *MigrationManager) RequestFinish(ctx context.Context, migrationID string
 		return nil
 	}
 	if record.AbortRequested || record.Status != MigrationReady {
-		return ErrConflict
+		return vm.ErrConflict
 	}
 	if record.FinishRequested {
 		return nil
@@ -36,7 +37,7 @@ func (m *MigrationManager) RequestFinish(ctx context.Context, migrationID string
 
 // advanceFinish destroys the source and writes a completed record. Each step is
 // idempotent, so a retry after the source is gone still completes.
-func (m *MigrationManager) advanceFinish(ctx context.Context, record TargetMigrationRecord) error {
+func (m *VMMigration) advanceFinish(ctx context.Context, record TargetMigrationRecord) error {
 	if record.Phase != PhaseFinishing {
 		record.Phase = PhaseFinishing
 		if err := m.store.writeTarget(record); err != nil {
@@ -57,7 +58,7 @@ func (m *MigrationManager) advanceFinish(ctx context.Context, record TargetMigra
 // removeReceivedSnapshots destroys the migration snapshots left on the received
 // dataset after a successful migration. The live volume keeps its data. Repeats
 // are safe.
-func (m *MigrationManager) removeReceivedSnapshots(ctx context.Context, record TargetMigrationRecord) error {
+func (m *VMMigration) removeReceivedSnapshots(ctx context.Context, record TargetMigrationRecord) error {
 	for _, interval := range record.Intervals {
 		name := migrationSnapshotName(record.ID, interval.Sequence)
 		if err := m.transfer.RemoveSnapshot(ctx, record.VirtualMachineID, name); err != nil {
@@ -69,7 +70,7 @@ func (m *MigrationManager) removeReceivedSnapshots(ctx context.Context, record T
 
 // advanceAbort cleans the target, then unlocks or restores the source. Errors
 // keep both hosts locked for the next pass.
-func (m *MigrationManager) advanceAbort(ctx context.Context, record TargetMigrationRecord) error {
+func (m *VMMigration) advanceAbort(ctx context.Context, record TargetMigrationRecord) error {
 	if record.Phase != PhaseRollback {
 		record.Phase = PhaseRollback
 		if err := m.store.writeTarget(record); err != nil {
@@ -106,9 +107,9 @@ func (m *MigrationManager) advanceAbort(ctx context.Context, record TargetMigrat
 }
 
 // cleanAbortTarget removes target runtime, network, dataset, and staging records.
-func (m *MigrationManager) cleanAbortTarget(ctx context.Context, record TargetMigrationRecord) (TargetMigrationRecord, error) {
+func (m *VMMigration) cleanAbortTarget(ctx context.Context, record TargetMigrationRecord) (TargetMigrationRecord, error) {
 	if !record.TargetRuntimeRemoved {
-		if err := m.machines.RemoveMigratedRuntime(ctx, record.VirtualMachineID); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := m.machines.RemoveMigratedRuntime(ctx, record.VirtualMachineID); err != nil && !errors.Is(err, vm.ErrNotFound) {
 			return record, err
 		}
 		record.TargetRuntimeRemoved = true

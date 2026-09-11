@@ -1,16 +1,18 @@
-package vm
+package vmmigration
 
 import (
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // writeReadyTarget writes a ready target record for finish tests.
-func writeReadyTarget(t *testing.T, machines *Manager, mutate func(*TargetMigrationRecord)) *migrationStore {
+func writeReadyTarget(t *testing.T, machines *fakeMachines, mutate func(*TargetMigrationRecord)) *migrationStore {
 	t.Helper()
-	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	store := newMigrationStore(machines.MachinesDirectory())
 	record := TargetMigrationRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
@@ -73,9 +75,9 @@ func TestRequestFinishRecordsIntent(t *testing.T) {
 
 func TestRequestFinishRequiresReady(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	writeCopyingTarget(t, machines, StateRunning)
+	writeCopyingTarget(t, machines, vm.StateRunning)
 
-	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, ErrConflict) {
+	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("finish before ready = %v, want ErrConflict", err)
 	}
 }
@@ -84,7 +86,7 @@ func TestRequestFinishConflictsWithAbort(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	writeReadyTarget(t, machines, func(r *TargetMigrationRecord) { r.AbortRequested = true })
 
-	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, ErrConflict) {
+	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("finish after abort = %v, want ErrConflict", err)
 	}
 }
@@ -92,7 +94,7 @@ func TestRequestFinishConflictsWithAbort(t *testing.T) {
 func TestRunTransferAbortsBeforeStop(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
-	store := writeCopyingTarget(t, machines, StateRunning)
+	store := writeCopyingTarget(t, machines, vm.StateRunning)
 	record, _ := store.readTarget("vm-1")
 	record.AbortRequested = true
 	if err := store.writeTarget(record); err != nil {
@@ -119,7 +121,7 @@ func TestRunTransferAbortsBeforeStop(t *testing.T) {
 
 func TestRunTransferAbortsAfterStop(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
-	store := writeCopyingTarget(t, machines, StateRunning)
+	store := writeCopyingTarget(t, machines, vm.StateRunning)
 	record, _ := store.readTarget("vm-1")
 	record.SourceStopped = true
 	record.FinalSequence = 2
@@ -146,7 +148,7 @@ func TestRunTransferAbortsAfterStop(t *testing.T) {
 func TestRunTransferKeepsLockedWhenRollbackFails(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	source.removeError = errors.New("source unreachable")
-	store := writeCopyingTarget(t, machines, StateRunning)
+	store := writeCopyingTarget(t, machines, vm.StateRunning)
 	record, _ := store.readTarget("vm-1")
 	record.AbortRequested = true
 	if err := store.writeTarget(record); err != nil {

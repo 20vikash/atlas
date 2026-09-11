@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"net/http"
 	"testing"
 
@@ -11,14 +12,14 @@ import (
 )
 
 type stubMigrationManager struct {
-	record           vm.TargetMigrationRecord
+	record           vmmigration.TargetMigrationRecord
 	createErr        error
 	statusErr        error
 	abortErr         error
-	handshake        vm.SourceHandshake
+	handshake        vmmigration.SourceHandshake
 	lockErr          error
 	unlockErr        error
-	snapshot         vm.SourceSnapshot
+	snapshot         vmmigration.SourceSnapshot
 	snapshotErr      error
 	createArgs       []string
 	lockArgs         []string
@@ -36,12 +37,12 @@ type stubMigrationManager struct {
 	destroyErr       error
 }
 
-func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source string) (vm.TargetMigrationRecord, error) {
+func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source string) (vmmigration.TargetMigrationRecord, error) {
 	m.createArgs = []string{migrationID, virtualMachineID, source}
 	return m.record, m.createErr
 }
 
-func (m *stubMigrationManager) TargetStatus(context.Context, string) (vm.TargetMigrationRecord, error) {
+func (m *stubMigrationManager) TargetStatus(context.Context, string) (vmmigration.TargetMigrationRecord, error) {
 	return m.record, m.statusErr
 }
 
@@ -55,18 +56,18 @@ func (m *stubMigrationManager) AbortTarget(_ context.Context, migrationID string
 	return m.abortErr
 }
 
-func (m *stubMigrationManager) LockSource(_ context.Context, migrationID, virtualMachineID string) (vm.SourceHandshake, error) {
+func (m *stubMigrationManager) LockSource(_ context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error) {
 	m.lockArgs = []string{migrationID, virtualMachineID}
 	return m.handshake, m.lockErr
 }
 
-func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (vm.SourceSnapshot, error) {
+func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error) {
 	m.receivedSequence = receivedSequence
 	m.snapshotArgs = []string{migrationID, virtualMachineID}
 	return m.snapshot, m.snapshotErr
 }
 
-func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string) (vm.SourceSnapshot, error) {
+func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string) (vmmigration.SourceSnapshot, error) {
 	m.stopArgs = []string{migrationID, virtualMachineID}
 	return m.snapshot, m.stopErr
 }
@@ -112,7 +113,7 @@ func newMigrationTestServer(t *testing.T, migrations MigrationManager) http.Hand
 }
 
 func TestCreateMigrationDrivesTheTarget(t *testing.T) {
-	stub := &stubMigrationManager{record: vm.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vm.MigrationRunning, Phase: vm.PhasePreparing}}
+	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationRunning, Phase: vmmigration.PhasePreparing}}
 	server := newMigrationTestServer(t, stub)
 
 	body := `{"virtual_machine_id":"vm-1","source":"http://10.0.0.3:9000"}`
@@ -136,7 +137,7 @@ func TestCreateMigrationRejectsAMissingField(t *testing.T) {
 }
 
 func TestGetAndAbortMigration(t *testing.T) {
-	stub := &stubMigrationManager{record: vm.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vm.MigrationReady, Phase: vm.PhaseCopying}}
+	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationReady, Phase: vmmigration.PhaseCopying}}
 	server := newMigrationTestServer(t, stub)
 
 	recorder := do(t, server, http.MethodGet, "/v1/migrations/mig-1", "", http.StatusOK)
@@ -155,9 +156,9 @@ func TestGetAndAbortMigration(t *testing.T) {
 }
 
 func TestGetMigrationReportsTransferProgress(t *testing.T) {
-	stub := &stubMigrationManager{record: vm.TargetMigrationRecord{
-		ID: "mig-1", VirtualMachineID: "vm-1", Status: vm.MigrationRunning, Phase: vm.PhaseCopying,
-		Intervals: []vm.IntervalProgress{
+	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{
+		ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationRunning, Phase: vmmigration.PhaseCopying,
+		Intervals: []vmmigration.IntervalProgress{
 			{Sequence: 1, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},
 			{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024, ThroughputMiBps: 64},
 		},
@@ -182,8 +183,8 @@ func TestGetMigrationReportsTransferProgress(t *testing.T) {
 }
 
 func TestPrepareMigrationSourceLocksTheSource(t *testing.T) {
-	stub := &stubMigrationManager{handshake: vm.SourceHandshake{
-		Config:        vm.PortableConfig{VirtualMachineID: "vm-00001"},
+	stub := &stubMigrationManager{handshake: vmmigration.SourceHandshake{
+		Config:        vmmigration.PortableConfig{VirtualMachineID: "vm-00001"},
 		ObservedState: vm.StateRunning,
 	}}
 	server := newMigrationTestServer(t, stub)
@@ -209,7 +210,7 @@ func TestPrepareMigrationSourceRequiresTheVirtualMachineID(t *testing.T) {
 }
 
 func TestCreateMigrationSnapshotReturnsTheNextSnapshot(t *testing.T) {
-	stub := &stubMigrationManager{snapshot: vm.SourceSnapshot{Sequence: 2, SizeBytes: 1048576, GUID: "g2"}}
+	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 2, SizeBytes: 1048576, GUID: "g2"}}
 	server := newMigrationTestServer(t, stub)
 
 	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/snapshot?virtual_machine_id=vm-00001", `{"received_sequence":1}`, http.StatusOK)
@@ -230,7 +231,7 @@ func TestCreateMigrationSnapshotReturnsTheNextSnapshot(t *testing.T) {
 }
 
 func TestCreateMigrationSnapshotAcceptsNoBody(t *testing.T) {
-	stub := &stubMigrationManager{snapshot: vm.SourceSnapshot{Sequence: 1}}
+	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 1}}
 	server := newMigrationTestServer(t, stub)
 
 	do(t, server, http.MethodPost, "/v1/migrations/mig-1/snapshot?virtual_machine_id=vm-00001", "", http.StatusOK)
@@ -240,7 +241,7 @@ func TestCreateMigrationSnapshotAcceptsNoBody(t *testing.T) {
 }
 
 func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
-	stub := &stubMigrationManager{snapshot: vm.SourceSnapshot{Sequence: 3, SizeBytes: 2048, GUID: "final"}}
+	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 3, SizeBytes: 2048, GUID: "final"}}
 	server := newMigrationTestServer(t, stub)
 
 	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/stop?virtual_machine_id=vm-00001", "", http.StatusOK)

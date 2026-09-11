@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"runtime"
 	"testing"
 
@@ -83,8 +84,8 @@ func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	dependencies := &testHostDependencies{
 		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, VirtualCPUCount: 2}},
 	}
-	reservations := func(context.Context) ([]vm.TargetReservation, error) {
-		return []vm.TargetReservation{{VirtualMachineID: "vm-00002", VirtualCPUCount: 3, MemoryMiB: 1024, DiskMiB: 2048}}, nil
+	reservations := func(context.Context) ([]vmmigration.TargetReservation, error) {
+		return []vmmigration.TargetReservation{{VirtualMachineID: "vm-00002", VirtualCPUCount: 3, MemoryMiB: 1024, DiskMiB: 2048}}, nil
 	}
 	service, err := NewService(Dependencies{
 		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,

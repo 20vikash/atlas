@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 // errInvalidMigrationRequest reports a target request missing a field.
@@ -114,7 +114,7 @@ func (s *Server) abortMigration(c echo.Context) error {
 }
 
 // toMigration maps a target record to its public response.
-func toMigration(record vm.TargetMigrationRecord) migrationResponse {
+func toMigration(record vmmigration.TargetMigrationRecord) migrationResponse {
 	response := migrationResponse{
 		ID:               record.ID,
 		VirtualMachineID: record.VirtualMachineID,

@@ -1,4 +1,4 @@
-package vm
+package vmmigration
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 )
 
 // writeTerminalTarget writes a terminal target record.
-func writeTerminalTarget(t *testing.T, machines *Manager, status MigrationStatus) *migrationStore {
+func writeTerminalTarget(t *testing.T, machines *fakeMachines, status MigrationStatus) *migrationStore {
 	t.Helper()
-	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	store := newMigrationStore(machines.MachinesDirectory())
 	record := TargetMigrationRecord{
 		ID: "mig-1", VirtualMachineID: "vm-1", Status: status,
 		CreatedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(),
@@ -24,7 +24,7 @@ func TestTerminalTargetDoesNotHideOrReserve(t *testing.T) {
 	for _, status := range []MigrationStatus{MigrationCompleted, MigrationAborted} {
 		migrationManager, machines, _ := newMigrationManager(t)
 		writeTerminalTarget(t, machines, status)
-		if machines.isTargetReserved("vm-1") {
+		if migrationManager.IsTargetReserved("vm-1") {
 			t.Fatalf("%s record still reserves the VM", status)
 		}
 		reservations, err := migrationManager.TargetReservations(context.Background())
@@ -61,7 +61,7 @@ func TestCreateTargetRefusesReplacingACompletedRecord(t *testing.T) {
 
 func TestActiveTargetsIncludeFinishAndAbortWork(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	store := newMigrationStore(machines.configuration.MachinesDirectory)
+	store := newMigrationStore(machines.MachinesDirectory())
 	// Ready finish and failed abort requests are both requeued.
 	if err := store.writeTarget(TargetMigrationRecord{
 		ID: "mig-1", VirtualMachineID: "vm-1", Status: MigrationReady, Phase: PhaseStarting,

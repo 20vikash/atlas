@@ -54,20 +54,20 @@ type nextSnapshotResponse struct {
 }
 
 // NextSnapshot acknowledges a sequence and asks for the next snapshot.
-func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (vm.SourceSnapshot, error) {
+func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
 	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
 	if err != nil {
-		return vm.SourceSnapshot{}, err
+		return SourceSnapshot{}, err
 	}
 	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/snapshot"), body)
 	if err != nil {
-		return vm.SourceSnapshot{}, err
+		return SourceSnapshot{}, err
 	}
 	var response nextSnapshotResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return vm.SourceSnapshot{}, fmt.Errorf("decode snapshot response: %w", err)
+		return SourceSnapshot{}, fmt.Errorf("decode snapshot response: %w", err)
 	}
-	return vm.SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
+	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
 // StreamSnapshot dials the source transfer port, requests one snapshot, and
@@ -154,35 +154,35 @@ func (c *SourceClient) postJSON(ctx context.Context, address, path string, body 
 
 // sourceHandshakeResponse is a prepare reply.
 type sourceHandshakeResponse struct {
-	Config        vm.PortableConfig `json:"config"`
-	ObservedState vm.State          `json:"observed_state"`
+	Config        PortableConfig `json:"config"`
+	ObservedState vm.State       `json:"observed_state"`
 }
 
 // PrepareSource asks the source to lock the VM and return portable state.
-func (c *SourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (vm.PortableConfig, vm.State, error) {
+func (c *SourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, vm.State, error) {
 	body, err := c.call(ctx, http.MethodPut, address, sourcePath(migrationID, virtualMachineID, "/source"))
 	if err != nil {
-		return vm.PortableConfig{}, "", err
+		return PortableConfig{}, "", err
 	}
 	var response sourceHandshakeResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return vm.PortableConfig{}, "", fmt.Errorf("decode source handshake: %w", err)
+		return PortableConfig{}, "", fmt.Errorf("decode source handshake: %w", err)
 	}
 	return response.Config, response.ObservedState, nil
 }
 
 // StopSource asks the source to stop the VM, remove its network, and create the
 // final snapshot.
-func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (vm.SourceSnapshot, error) {
+func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (SourceSnapshot, error) {
 	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/stop"), nil)
 	if err != nil {
-		return vm.SourceSnapshot{}, err
+		return SourceSnapshot{}, err
 	}
 	var response nextSnapshotResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return vm.SourceSnapshot{}, fmt.Errorf("decode stop response: %w", err)
+		return SourceSnapshot{}, fmt.Errorf("decode stop response: %w", err)
 	}
-	return vm.SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
+	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
 // StartSource asks the source to restore its original desired state.

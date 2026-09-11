@@ -1,9 +1,10 @@
-package vm
+package vmmigration
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/frappe/atlas/metal/internal/vm"
 	"io"
 	"sync/atomic"
 	"time"
@@ -31,7 +32,7 @@ type transferHandle struct {
 }
 
 // StartTransfer starts one worker per VM. A running worker is unchanged.
-func (m *MigrationManager) StartTransfer(virtualMachineID string) {
+func (m *VMMigration) StartTransfer(virtualMachineID string) {
 	m.transfersMutex.Lock()
 	defer m.transfersMutex.Unlock()
 	if m.closed {
@@ -53,7 +54,7 @@ func (m *MigrationManager) StartTransfer(virtualMachineID string) {
 }
 
 // CancelTransfer stops a VM worker and waits for active streams to exit.
-func (m *MigrationManager) CancelTransfer(ctx context.Context, virtualMachineID string) error {
+func (m *VMMigration) CancelTransfer(ctx context.Context, virtualMachineID string) error {
 	m.transfersMutex.Lock()
 	handle := m.transfers[virtualMachineID]
 	m.transfersMutex.Unlock()
@@ -70,7 +71,7 @@ func (m *MigrationManager) CancelTransfer(ctx context.Context, virtualMachineID 
 }
 
 // Shutdown stops accepting workers and waits for the active ones to stop.
-func (m *MigrationManager) Shutdown(shutdownContext context.Context) error {
+func (m *VMMigration) Shutdown(shutdownContext context.Context) error {
 	m.transfersMutex.Lock()
 	if !m.closed {
 		m.closed = true
@@ -92,7 +93,7 @@ func (m *MigrationManager) Shutdown(shutdownContext context.Context) error {
 }
 
 // forgetTransfer clears the active-worker handle for a VM.
-func (m *MigrationManager) forgetTransfer(virtualMachineID string) {
+func (m *VMMigration) forgetTransfer(virtualMachineID string) {
 	m.transfersMutex.Lock()
 	delete(m.transfers, virtualMachineID)
 	m.transfersMutex.Unlock()
@@ -100,7 +101,7 @@ func (m *MigrationManager) forgetTransfer(virtualMachineID string) {
 
 // runTransfer advances one migration from copying to ready. Transient errors
 // leave it for the next pass.
-func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID string) {
+func (m *VMMigration) runTransfer(ctx context.Context, virtualMachineID string) {
 	for {
 		record, err := m.store.readTarget(virtualMachineID)
 		if err != nil {
@@ -135,9 +136,9 @@ func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID str
 
 // advanceCopying copies an interval or enters stopping. Running sources send a
 // full first interval; other sources cut over first.
-func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigrationRecord) error {
+func (m *VMMigration) advanceCopying(ctx context.Context, record TargetMigrationRecord) error {
 	last := lastCompletedSequence(record)
-	if last == 0 && record.SourceObservedState != StateRunning {
+	if last == 0 && record.SourceObservedState != vm.StateRunning {
 		return m.enterStopping(record)
 	}
 	if last >= 1 && m.transferLimitReached(record) {
@@ -158,7 +159,7 @@ func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigr
 }
 
 // advanceStopping pulls and verifies the final snapshot, then enters starting.
-func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMigrationRecord) error {
+func (m *VMMigration) advanceStopping(ctx context.Context, record TargetMigrationRecord) error {
 	final, err := m.source.StopSource(ctx, record.Source, record.ID, record.VirtualMachineID)
 	if err != nil {
 		return err
@@ -167,7 +168,7 @@ func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMig
 		return m.failTransfer(record, "source returned an invalid final sequence")
 	}
 
-	record.SourceObservedState = StateStopped
+	record.SourceObservedState = vm.StateStopped
 	record.SourceStopped = true
 	record.FinalSequence = final.Sequence
 	if err := m.store.writeTarget(record); err != nil {
@@ -187,8 +188,8 @@ func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMig
 
 // advanceStarting creates the target network, applies VM state, and marks ready.
 // A failure keeps both hosts locked for rollback.
-func (m *MigrationManager) advanceStarting(ctx context.Context, record TargetMigrationRecord) error {
-	unlock, err := m.machines.operationLocks.lock(ctx, record.VirtualMachineID)
+func (m *VMMigration) advanceStarting(ctx context.Context, record TargetMigrationRecord) error {
+	unlock, err := m.machines.LockOperation(ctx, record.VirtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -218,19 +219,19 @@ func (m *MigrationManager) advanceStarting(ctx context.Context, record TargetMig
 }
 
 // enterStopping records the move from copying to the stopping phase.
-func (m *MigrationManager) enterStopping(record TargetMigrationRecord) error {
+func (m *VMMigration) enterStopping(record TargetMigrationRecord) error {
 	record.Phase = PhaseStopping
 	return m.store.writeTarget(record)
 }
 
 // isSmallDelta reports whether the source can stop instead of copying.
-func (m *MigrationManager) isSmallDelta(snapshot SourceSnapshot) bool {
+func (m *VMMigration) isSmallDelta(snapshot SourceSnapshot) bool {
 	return snapshot.SizeBytes <= int64(m.settings.FinalDeltaMiB)*1024*1024
 }
 
 // intervalThroughput returns the next source disk limit. The first interval is
 // unlimited; each later delta lowers the limit one step.
-func (m *MigrationManager) intervalThroughput(record TargetMigrationRecord) int {
+func (m *VMMigration) intervalThroughput(record TargetMigrationRecord) int {
 	if lastCompletedSequence(record) == 0 {
 		return 0
 	}
@@ -247,7 +248,7 @@ func (m *MigrationManager) intervalThroughput(record TargetMigrationRecord) int 
 }
 
 // receiveSnapshot pulls one snapshot into the target dataset and verifies it.
-func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) error {
+func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) error {
 	resumeToken, err := m.transfer.ReceiveResumeToken(ctx, record.VirtualMachineID)
 	if err != nil {
 		return err
@@ -281,7 +282,7 @@ func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMig
 }
 
 // streamInterval streams one snapshot and checkpoints received bytes.
-func (m *MigrationManager) streamInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
+func (m *VMMigration) streamInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
 	var received atomic.Int64
 	reader, writer := io.Pipe()
 	streamContext, cancelStream := context.WithCancel(ctx)
@@ -305,7 +306,7 @@ func (m *MigrationManager) streamInterval(ctx context.Context, record TargetMigr
 }
 
 // checkpointProgress saves the active interval byte count until the stream ends.
-func (m *MigrationManager) checkpointProgress(ctx context.Context, virtualMachineID string, sequence int, received *atomic.Int64) {
+func (m *VMMigration) checkpointProgress(ctx context.Context, virtualMachineID string, sequence int, received *atomic.Int64) {
 	ticker := time.NewTicker(progressCheckpointInterval)
 	defer ticker.Stop()
 	for {
@@ -319,7 +320,7 @@ func (m *MigrationManager) checkpointProgress(ctx context.Context, virtualMachin
 }
 
 // saveIntervalBytes records the bytes received for the active interval.
-func (m *MigrationManager) saveIntervalBytes(virtualMachineID string, sequence int, bytesReceived int64) {
+func (m *VMMigration) saveIntervalBytes(virtualMachineID string, sequence int, bytesReceived int64) {
 	record, err := m.store.readTarget(virtualMachineID)
 	if err != nil {
 		return
@@ -334,7 +335,7 @@ func (m *MigrationManager) saveIntervalBytes(virtualMachineID string, sequence i
 }
 
 // beginInterval records the start of one interval and returns the saved record.
-func (m *MigrationManager) beginInterval(record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) TargetMigrationRecord {
+func (m *VMMigration) beginInterval(record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) TargetMigrationRecord {
 	record.ActiveSequence = snapshot.Sequence
 	if !hasInterval(record.Intervals, snapshot.Sequence) {
 		record.Intervals = append(record.Intervals, IntervalProgress{
@@ -349,7 +350,7 @@ func (m *MigrationManager) beginInterval(record TargetMigrationRecord, snapshot 
 }
 
 // completeInterval marks one interval done with its byte count and GUID.
-func (m *MigrationManager) completeInterval(record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) {
+func (m *VMMigration) completeInterval(record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) {
 	current, err := m.store.readTarget(record.VirtualMachineID)
 	if err != nil {
 		return
@@ -367,13 +368,13 @@ func (m *MigrationManager) completeInterval(record TargetMigrationRecord, sequen
 }
 
 // failTransfer marks the migration failed and keeps the dataset and snapshots.
-func (m *MigrationManager) failTransfer(record TargetMigrationRecord, message string) error {
+func (m *VMMigration) failTransfer(record TargetMigrationRecord, message string) error {
 	current, err := m.store.readTarget(record.VirtualMachineID)
 	if err != nil {
 		return err
 	}
 	current.Status = MigrationFailed
-	current.Error = &OperationError{Code: "transfer_failed", Message: message, UpdatedAt: m.now()}
+	current.Error = &vm.OperationError{Code: "transfer_failed", Message: message, UpdatedAt: m.now()}
 	if err := m.store.writeTarget(current); err != nil {
 		return err
 	}
@@ -381,7 +382,7 @@ func (m *MigrationManager) failTransfer(record TargetMigrationRecord, message st
 }
 
 // transferLimitReached reports whether the copy hit the interval or time limit.
-func (m *MigrationManager) transferLimitReached(record TargetMigrationRecord) bool {
+func (m *VMMigration) transferLimitReached(record TargetMigrationRecord) bool {
 	completed := 0
 	for _, interval := range record.Intervals {
 		if interval.Completed {

@@ -9,6 +9,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 // DesiredState contains the complete controller-owned host sets.
@@ -62,7 +63,7 @@ type StorageCapacitySource interface {
 
 // MigrationReservations returns capacity held by incoming migration targets.
 // Targets are absent from the VM list until reconstructed.
-type MigrationReservations func(context.Context) ([]vm.TargetReservation, error)
+type MigrationReservations func(context.Context) ([]vmmigration.TargetReservation, error)
 
 // Dependencies contains host synchronization services.
 type Dependencies struct {
