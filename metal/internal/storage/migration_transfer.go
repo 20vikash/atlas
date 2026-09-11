@@ -114,14 +114,27 @@ func (transfer *MigrationTransfer) SendSnapshot(ctx context.Context, virtualMach
 	if err := command.Start(); err != nil {
 		return 0, err
 	}
+	return copySendStream(command, stdout, w, &sendError)
+}
+
+// copySendStream copies a started zfs send to w and reaps the process. A failed
+// copy kills the send first, so it cannot block writing to an unread pipe and
+// become an orphan that holds the snapshot busy.
+func copySendStream(command *exec.Cmd, stdout io.Reader, w io.Writer, sendError *strings.Builder) (int64, error) {
 	written, copyError := io.Copy(w, stdout)
-	if waitError := command.Wait(); waitError != nil {
-		return written, fmt.Errorf("zfs send: %w: %s", waitError, strings.TrimSpace(sendError.String()))
-	}
 	if copyError != nil {
-		return written, copyError
+		_ = command.Process.Kill()
 	}
-	return written, nil
+
+	waitError := command.Wait()
+	switch {
+	case copyError != nil:
+		return written, copyError
+	case waitError != nil:
+		return written, fmt.Errorf("zfs send: %w: %s", waitError, strings.TrimSpace(sendError.String()))
+	default:
+		return written, nil
+	}
 }
 
 // ReceiveSnapshot receives a stream and saves a resume token on interruption.

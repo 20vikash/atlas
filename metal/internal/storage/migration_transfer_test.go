@@ -8,9 +8,15 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
+
+// failingWriter fails on the first write, like a target that went away mid-stream.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("writer closed") }
 
 type fakeRunner struct {
 	runErr   map[string]error
@@ -185,6 +191,37 @@ func TestVerifyResumeTokenChecksTheTargetSnapshot(t *testing.T) {
 func TestParseSendSizeBytesRejectsMissingSize(t *testing.T) {
 	if _, err := parseSendSizeBytes("full\tsnap\t10\n"); err == nil {
 		t.Fatal("want an error when no size line is present")
+	}
+}
+
+// TestCopySendStreamKillsTheSendWhenTheWriterFails confirms a failed copy stops
+// the send instead of leaving it blocked on an unread pipe.
+func TestCopySendStreamKillsTheSendWhenTheWriterFails(t *testing.T) {
+	// cat /dev/zero produces an endless stream that fills the pipe.
+	command := exec.Command("cat", "/dev/zero")
+	var sendError strings.Builder
+	command.Stderr = &sendError
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, copyError := copySendStream(command, stdout, failingWriter{}, &sendError)
+		done <- copyError
+	}()
+
+	select {
+	case copyError := <-done:
+		if copyError == nil {
+			t.Fatal("copy into a failing writer returned nil, want an error")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("copySendStream blocked after the writer failed")
 	}
 }
 
