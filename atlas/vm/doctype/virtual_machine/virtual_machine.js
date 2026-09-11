@@ -48,6 +48,23 @@ frappe.ui.form.on("Virtual Machine", {
 			);
 		});
 
+		const is_migrating = Boolean(frm.doc.active_migration);
+		if ((is_running || is_stopped || is_paused) && !is_migrating) {
+			frm.add_custom_button(__("Migrate VM"), () => migrateVirtualMachine(frm), __("Actions"));
+		}
+		if (is_migrating) {
+			frm.add_custom_button(
+				__("View Migration"),
+				() =>
+					frappe.set_route(
+						"Form",
+						"Virtual Machine Migration",
+						frm.doc.active_migration
+					),
+				__("Actions")
+			);
+		}
+
 		frm.add_custom_button(
 			__("Snapshot VM"),
 			() => showCreateMachineImageDialog(frm),
@@ -127,6 +144,30 @@ frappe.ui.form.on("Virtual Machine", {
 		);
 	},
 });
+
+function migrateVirtualMachine(frm) {
+	frappe.confirm(
+		__(
+			"Migrate {0} off {1}? Atlas selects another host, copies the disk, and moves the VM. It stays available until the short cutover.",
+			[frm.doc.name, frm.doc.server]
+		),
+		() =>
+			frm
+				.call({
+					method: "migrate",
+					doc: frm.doc,
+					freeze: true,
+					freeze_message: __("Starting migration..."),
+				})
+				.then((response) => {
+					if (response.message) {
+						frappe.set_route("Form", "Virtual Machine Migration", response.message);
+					} else {
+						frm.reload_doc();
+					}
+				})
+	);
+}
 
 function showPrivilegeDialog(frm) {
 	const granting = !frm.doc.is_privileged;
