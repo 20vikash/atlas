@@ -103,7 +103,6 @@ def publish_ubuntu_image(
 			"platform": platform,
 			"operating_system": "Ubuntu",
 			"operating_system_version": version,
-			"supports_cloud_init": 1,
 			**file_values,
 		}
 	).insert()

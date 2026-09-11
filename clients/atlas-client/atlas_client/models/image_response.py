@@ -36,7 +36,6 @@ class ImageResponse:
             platform (str):
             rootfs_size_mib (int):
             status (str):
-            supports_cloud_init (bool):
             tenant_id (int):
             title (str):
             transfer_error (None | str):
@@ -55,7 +54,6 @@ class ImageResponse:
     platform: str
     rootfs_size_mib: int
     status: str
-    supports_cloud_init: bool
     tenant_id: int
     title: str
     transfer_error: None | str
@@ -91,8 +89,6 @@ class ImageResponse:
 
         status = self.status
 
-        supports_cloud_init = self.supports_cloud_init
-
         tenant_id = self.tenant_id
 
         title = self.title
@@ -118,7 +114,6 @@ class ImageResponse:
             "platform": platform,
             "rootfs_size_mib": rootfs_size_mib,
             "status": status,
-            "supports_cloud_init": supports_cloud_init,
             "tenant_id": tenant_id,
             "title": title,
             "transfer_error": transfer_error,
@@ -156,8 +151,6 @@ class ImageResponse:
 
         status = d.pop("status")
 
-        supports_cloud_init = d.pop("supports_cloud_init")
-
         tenant_id = d.pop("tenant_id")
 
         title = d.pop("title")
@@ -185,7 +178,6 @@ class ImageResponse:
             platform=platform,
             rootfs_size_mib=rootfs_size_mib,
             status=status,
-            supports_cloud_init=supports_cloud_init,
             tenant_id=tenant_id,
             title=title,
             transfer_error=transfer_error,

@@ -49,7 +49,6 @@ def list_images(query: ListQuery) -> Page[ImageResponse]:
 			"operating_system_version",
 			"status",
 			"enabled",
-			"supports_cloud_init",
 			"cache_image",
 			"memory_snapshot",
 			"image_size_mib",

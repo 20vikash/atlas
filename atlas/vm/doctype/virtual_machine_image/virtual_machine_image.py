@@ -78,7 +78,6 @@ class VirtualMachineImage(Document):
 			"Failed",
 			"Deleting",
 		]
-		supports_cloud_init: DF.Check
 		tenant_id: DF.Int
 		title: DF.Data
 		transfer_error: DF.SmallText | None
@@ -98,9 +97,8 @@ class VirtualMachineImage(Document):
 			if file_name:
 				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
 
-	def get_metal_image_request(self, user_data: str = "") -> dict[str, Any]:
+	def get_metal_image_request(self) -> dict[str, Any]:
 		"""Return the image object for a Metal create request."""
-		self.validate_user_data(user_data)
 		self.validate_is_available()
 		if self.cache_image:
 			return self.get_desired_image()
@@ -242,13 +240,6 @@ class VirtualMachineImage(Document):
 			frappe.throw(
 				_("Disk must be at least {0} MiB for image {1}.").format(self.image_size_mib, self.title),
 				exc=AtlasUserError,
-			)
-
-	def validate_user_data(self, user_data: str) -> None:
-		"""Reject user data that the guest cannot accept."""
-		if user_data and not self.supports_cloud_init:
-			frappe.throw(
-				_("This Virtual Machine Image does not support cloud-init user data."), exc=AtlasUserError
 			)
 
 	def get_object_url(self, object_key: str | None, expiry_seconds: int) -> str:

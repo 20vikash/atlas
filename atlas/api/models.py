@@ -110,7 +110,6 @@ class ImageResponse(BaseModel):
 					"operating_system_version": "24.04",
 					"status": "available",
 					"enabled": True,
-					"supports_cloud_init": True,
 					"cache_image": False,
 					"memory_snapshot": False,
 					"rootfs_size_mib": 20480,
@@ -132,7 +131,6 @@ class ImageResponse(BaseModel):
 	operating_system_version: str
 	status: str
 	enabled: bool
-	supports_cloud_init: bool
 	cache_image: bool
 	memory_snapshot: bool
 	rootfs_size_mib: int
@@ -154,7 +152,6 @@ class ImageResponse(BaseModel):
 			operating_system_version=image.operating_system_version,
 			status=image.status.lower(),
 			enabled=bool(image.enabled),
-			supports_cloud_init=bool(image.supports_cloud_init),
 			cache_image=bool(image.cache_image),
 			memory_snapshot=bool(image.memory_snapshot),
 			rootfs_size_mib=image.image_size_mib,

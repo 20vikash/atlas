@@ -138,7 +138,7 @@ class VirtualMachineService:
 				"throughput_mibps": request.disk_throughput_mibps,
 				"iops": request.disk_iops,
 			},
-			"image": image.get_metal_image_request(request.user_data),
+			"image": image.get_metal_image_request(),
 			"network": {
 				"public_ipv4": server_ip_address.address if server_ip_address else "",
 				"wireguard_mesh_ipv6": get_virtual_machine_mesh_address(self.virtual_machine),

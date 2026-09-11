@@ -65,7 +65,6 @@ class VirtualMachineImageTransferService:
 				"platform": original_image.platform,
 				"operating_system": original_image.operating_system,
 				"operating_system_version": original_image.operating_system_version,
-				"supports_cloud_init": original_image.supports_cloud_init,
 				"cache_image": int(cache_image),
 				"memory_snapshot": int(memory_snapshot),
 				"memory_snapshot_virtual_cpu_count": memory_snapshot_configuration[0],

@@ -10,7 +10,6 @@
   "title",
   "image_type",
   "tenant_id",
-  "supports_cloud_init",
   "column_break_identity",
   "operating_system",
   "operating_system_version",
@@ -104,12 +103,6 @@
    "label": "Operating System Version",
    "reqd": 1,
    "set_only_once": 1
-  },
-  {
-   "default": "1",
-   "fieldname": "supports_cloud_init",
-   "fieldtype": "Check",
-   "label": "Supports Cloud-Init"
   },
   {
    "fieldname": "column_break_identity",
