@@ -126,6 +126,11 @@ class AtlasSettings(Document):
 		return f"atlas-proxy:{self.region_id}"
 
 	@property
+	def cargo_audience_id(self) -> str:
+		"""Return the audience that a token for the regional Cargo API must carry."""
+		return f"atlas-cargo:{self.region_id}"
+
+	@property
 	def issuer(self) -> str:
 		"""Return this region's Atlas issuer."""
 		return f"atlas:{self.region_id}"

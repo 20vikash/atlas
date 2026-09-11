@@ -20,6 +20,14 @@ Atlas creates the virtual machine and sets Pending. A Pending service can stay i
 
 Atlas changes the status to Provisioning when the virtual machine is ready. It waits for SSH on the public IPv4 address, installs Cargo with `cargo-pilot.<wildcard-domain>` as the Pilot administration domain, maps both public domains to the mesh IPv6 address, and checks the Cargo ping route. A successful check sets Active.
 
+## Object storage
+
+Cargo brings up its Garage object storage cluster after it activates. Atlas waits for this and then asks Cargo for one bucket named `atlas-<region-name>`.
+
+The job runs every minute until it succeeds, so no operator action is needed. Atlas writes the bucket and its credentials to Atlas Settings. Look at the Object Storage section of Atlas Settings to confirm the result. A configured Atlas starts the bootstrap image migrations by itself.
+
+Atlas does not replace object storage that is already set. To provision another bucket, clear the Object Storage fields in Atlas Settings first. The objects under the old bucket become unreachable when its key is replaced.
+
 ## Investigate a failure
 
 Read Failure on Cargo Server. The value starts with the failed phase, such as `installation`, `proxy-routes`, or `readiness`.

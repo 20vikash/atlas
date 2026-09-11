@@ -43,6 +43,16 @@ Atlas sends `PATCH /v1/sites/cargo` and `PATCH /v1/sites/cargo-pilot` to `https:
 
 Atlas sets the service to Active only after `https://cargo.<wildcard-domain>/api/method/ping` returns HTTP 200 with `pong`.
 
+## Object storage bucket
+
+After Cargo Server becomes Active, Atlas queues bucket creation. A scheduled job repeats it every minute while Atlas has no object storage and Cargo Server is Active.
+
+The job stops quietly until `https://s3-admin-svc.<wildcard-domain>/health` answers. Garage serves this route through the Proxy after Cargo activates its object storage cluster. Atlas then sends `POST /api/method/cargo.object_storage.api.bucket.create_bucket` to `https://cargo.<wildcard-domain>` with the bucket name `atlas-<region-name>` and this region name. The request carries a 5-minute token in the `X-Cargo-Access-Token` header with audience `atlas-cargo:<region-id>`, subject `atlas`, scope `*`, and tenant `0`.
+
+Cargo returns the secret key one time and keeps no copy. Atlas writes the bucket, endpoint `https://s3-svc.<wildcard-domain>`, region, and both credentials to Atlas Settings, then commits. This save starts the pending bootstrap image migrations.
+
+Atlas never replaces object storage that is already configured. A second attempt writes an Error Log entry instead, because a replaced key makes the objects under the current bucket unreachable. Clear the Atlas Settings object storage fields to provision another bucket.
+
 ## Access and failures
 
 Only System Managers with System User accounts can operate Cargo Server. Atlas stores the failed phase and the failure message. The phase is one of `secure-shell`, `installation`, `proxy-routes`, `readiness`, `virtual-machine`, or `archive`. System Managers can read the installation secrets and output in the linked SSH Task.

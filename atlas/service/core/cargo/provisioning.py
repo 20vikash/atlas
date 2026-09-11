@@ -16,6 +16,7 @@ from frappe import _
 from atlas.atlas.core.ssh import wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.auth.issuer import issue_token
+from atlas.service.core.cargo.bucket import enqueue_bucket_provisioning
 from atlas.service.doctype.cargo_server.cargo_server import cargo_lifecycle_lock
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ class CargoServerProvisioner:
 
 				self.cargo_server.status = "Active"
 				self.save()
+				enqueue_bucket_provisioning()
 			except Exception as error:
 				self.cargo_server.status = "Failed"
 				self.cargo_server.failure_message = f"{phase}: {error}"
