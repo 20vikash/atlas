@@ -49,7 +49,7 @@ The network constructor receives optional mesh and traffic monitor services. The
 
 The host service receives an optional mesh service, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
 
-The Atlas trusted keys load from `<base_dir>/atlas-jwt.json`. A missing file is permitted and leaves the host trusting no Atlas key. A file that metald cannot use stops startup.
+The source migration listener binds the migration `transfer_port` (default 9001) on the API host address. The target dials it to pull the disk. Every host in a region uses the same port.
 
 `connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 
@@ -74,6 +74,7 @@ The Atlas trusted keys load from `<base_dir>/atlas-jwt.json`. A missing file is 
 | `wg_mesh.uplink` | none | Discovery uplink. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
 | `migration.final_delta_mib` | `512` | Incremental size at or below which the target stops the source and takes the final snapshot. |
+| `migration.transfer_port` | `9001` | TCP port the source listens on for the disk stream. Use the same value on every host in the region. |
 
 See `config.example.toml` for the complete file format.
 
@@ -81,7 +82,7 @@ See `config.example.toml` for the complete file format.
 
 The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data. When traffic monitoring is enabled, one traffic listener dispatches each restoration in a separate daemon-owned goroutine.
 
-The daemon owns all reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for workers, closes the enabled traffic monitor, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
+The daemon owns all reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for workers, closes the enabled traffic monitor, stops the migration transfer listener and active transfers, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
 
 The daemon writes structured JSON logs. Log records include request and operation correlation fields when the operation comes from the API.
 

@@ -25,7 +25,6 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
 ├── snapshots/<id>/                 temporary Machine image staging
 │   ├── metadata.json
 │   └── vmlinux
-├── atlas-jwt.json                  Atlas issuer, receiver, and trusted public keys
 ├── image-policies.json             desired cached images from the controller
 ├── wireguard-peers.json            atomically saved managed peer set
 └── machines/                       derived from metald.base_dir

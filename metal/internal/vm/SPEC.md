@@ -63,7 +63,6 @@ machines/<vm-id>/config.json            the VM's own records
 machines/<vm-id>/status.json
 machines/<vm-id>/migration/target.json  target reservation and state
 machines/<vm-id>/migration/source.json  source lock
-machines/<vm-id>/migration/token        the target-to-source token, mode 0600
 ```
 
 One VM ID locates all of a VM's state. A source record blocks every VM mutation and pauses reconciliation. A target record reserves the VM ID, hides the VM from the list and get, and pauses reconciliation. A migration ID differs from a VM ID, so the target resolves a migration ID to its VM with a small scan.
@@ -103,7 +102,7 @@ mark the interval complete, checkpoint bytes
 copy or cut over  (see the cutover decision)
 ```
 
-The source keeps the acknowledged snapshot as the next incremental base and removes the one before it. A stopped source needs one full interval. A network break or a restart leaves the migration in copying and resumes the same sequence. A GUID mismatch, an invalid sequence or token, or an unrelated target dataset fails the migration and keeps the dataset and snapshots for inspection.
+The source keeps the acknowledged snapshot as the next incremental base and removes the one before it. A stopped source needs one full interval. A network break or a restart leaves the migration in copying and resumes the same sequence. A GUID mismatch, an invalid sequence, or an unrelated target dataset fails the migration and keeps the dataset and snapshots for inspection.
 
 ### Cutover
 

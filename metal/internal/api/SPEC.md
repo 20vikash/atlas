@@ -62,22 +62,20 @@ DELETE /v1/snapshots/:id
 PUT    /v1/migrations/:id          Atlas creates or resumes a target, static token
 GET    /v1/migrations/:id          Atlas reads target status, static token
 POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
-POST   /v1/migrations/:id/finish   Atlas commits the target (static), or one host destroys the source (Atlas token)
-PUT    /v1/migrations/:id/source   the target locks the source, Atlas token
-POST   /v1/migrations/:id/snapshot the target asks for the next snapshot, Atlas token
-POST   /v1/migrations/:id/stream   the target reads one snapshot stream, Atlas token
-POST   /v1/migrations/:id/stop     the target stops the source and gets the final snapshot, Atlas token
-POST   /v1/migrations/:id/start    the target restores the source during rollback, Atlas token
-DELETE /v1/migrations/:id          the target unlocks the source, Atlas token
+POST   /v1/migrations/:id/finish   Atlas records the target finish, static token
+PUT    /v1/migrations/:id/source   the target locks the source, mesh
+POST   /v1/migrations/:id/snapshot the target asks for the next snapshot, mesh
+POST   /v1/migrations/:id/stop     the target stops the source and gets the final snapshot, mesh
+POST   /v1/migrations/:id/start    the target restores the source during rollback, mesh
+POST   /v1/migrations/:id/destroy  the target destroys the stopped source, mesh
+DELETE /v1/migrations/:id          the target unlocks the source, mesh
 ```
 
-Atlas drives create, get, abort, and finish with the static token. The target host drives source, snapshot, stream, stop, start, finish, and delete on another host with an Atlas-signed token. Finish shares one path across both callers. Each Atlas-token handler reads the VM ID and caller from the token claims and binds them to the source record.
-
-The stream route returns `application/octet-stream`. It writes no status code until the first byte, so a validation error still maps to a code, and it streams with the request context and no whole-request timeout. Its optional `throughput_mibps` field applies a temporary combined read and write limit to the source disk for that interval, and never raises the configured limit.
+Atlas drives create, get, abort, and finish with the static token. The target host drives source, snapshot, stop, start, destroy, and delete on the source host over the trusted mesh with no credential. Every source route carries the VM ID as the `virtual_machine_id` query value, so the source resolves the migration without a token. The disk itself moves over a separate TCP connection, not an HTTP route. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
 
 The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
-The finish route serves two callers on one path. The static controller token records a finish request on the target and returns `202`. A migration-scoped Atlas token destroys the stopped source on another host and returns `204`. The `authenticateControllerOrMigration` middleware accepts either credential and the handler dispatches on which one authenticated the request. The start route restores the source to its original desired state during a rollback and returns `204`.
+The finish route records the target finish request and returns `202`. Atlas calls it with the static token. The target then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 
@@ -105,13 +103,9 @@ Each route group names the middleware it needs, so a route cannot inherit the wr
 | Middleware | Credential | Routes |
 |---|---|---|
 | `authenticate` | The static bearer token. Only its SHA-256 digest is configured, so the plain token never reaches this package, and the comparison is constant time. | The `/v1` controller group. |
-| `requireScopes` | An Atlas-signed token that carries every scope the route names. | Routes that one Metal host calls on another. |
+| none | The trusted WireGuard mesh. | The source-side migration routes that one Metal host calls on another. |
 
-A static token cannot pass `requireScopes`, and an Atlas token cannot pass `authenticate`.
-
-`requireScopes` puts the validated claims in the request context and `tokenClaims` returns them. The handler matches the claim VM identifier to the VM its own request addresses, because only the handler knows which VM that is.
-
-The `TrustedKeyStore` dependency owns the keys. `POST /v1/sync` carries an optional `jwt` object that replaces them, and a sync without that object keeps the keys the host already holds. [internal/token/SPEC.md](../token/SPEC.md) owns the trust state and the verification rules.
+The source-side migration routes carry no credential. Metal hosts reach each other only over the trusted mesh, so a source route trusts its caller and reads the VM ID from the `virtual_machine_id` query value.
 
 Group authentication makes the group answer every path below it. An unknown path and a wrong method under `/v1` both return `404`.
 
@@ -151,5 +145,5 @@ A response omits what the controller must not see or cannot use: transport URLs,
 - [docs/api.md](../../docs/api.md) gives request and response details.
 - [internal/vm/SPEC.md](../vm/SPEC.md) defines the VM contracts and the generation model.
 - [internal/console/SPEC.md](../console/SPEC.md) owns the serial console the tty mode attaches to.
-- [internal/token/SPEC.md](../token/SPEC.md) owns the Atlas trust state and token verification.
+- [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md) owns the host-to-host migration transport.
 - [cmd/metald/SPEC.md](../../cmd/metald/SPEC.md) injects server dependencies.
