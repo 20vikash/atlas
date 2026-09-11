@@ -93,6 +93,20 @@ func TestLoadMigrationFinalDelta(t *testing.T) {
 	}
 }
 
+func TestLoadMigrationTransferPort(t *testing.T) {
+	if got := defaultOptions().migration.transferPort; got != 9001 {
+		t.Fatalf("default transfer_port = %d, want 9001", got)
+	}
+	path := writeConfig(t, "[migration]\ntransfer_port = 9100\n")
+	options, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.migration.transferPort != 9100 {
+		t.Errorf("transfer_port = %d, want the file value", options.migration.transferPort)
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	if _, err := load("/no/such/config.toml"); err == nil {
 		t.Error("explicit missing path: want error, got nil")
