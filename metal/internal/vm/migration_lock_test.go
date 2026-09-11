@@ -10,7 +10,7 @@ import (
 func lockSource(t *testing.T, manager *Manager, virtualMachineID string) {
 	t.Helper()
 	store := newMigrationStore(manager.configuration.MachinesDirectory)
-	record := SourceMigrationRecord{ID: "mig-1", VirtualMachineID: virtualMachineID, Caller: "metal-2"}
+	record := SourceMigrationRecord{ID: "mig-1", VirtualMachineID: virtualMachineID}
 	if err := store.writeSource(record); err != nil {
 		t.Fatal(err)
 	}

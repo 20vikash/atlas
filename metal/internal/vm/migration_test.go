@@ -96,7 +96,7 @@ type fakeSourceClient struct {
 	finishError   error
 }
 
-func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string, string) (PortableConfig, State, error) {
+func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string) (PortableConfig, State, error) {
 	c.prepareCalls++
 	return c.prepareConfig, c.prepareState, c.prepareError
 }
@@ -167,11 +167,11 @@ func newMigrationManager(t *testing.T) (*MigrationManager, *Manager, *fakeSource
 	return migrationManager, machines, source
 }
 
-func TestCreateTargetReservesAndRefreshesTheToken(t *testing.T) {
+func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
 
-	record, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1")
+	record, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,32 +182,25 @@ func TestCreateTargetReservesAndRefreshesTheToken(t *testing.T) {
 		t.Fatal("VM ID was not reserved")
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-2"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatalf("idempotent retry = %v", err)
-	}
-	token, err := newMigrationStore(machines.configuration.MachinesDirectory).readToken("vm-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token != "tok-2" {
-		t.Fatalf("token = %q, want the refreshed value", token)
 	}
 }
 
 func TestCreateTargetRejectsChangedValues(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.9:9000", "tok-1"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.9:9000"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed source = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "http://10.0.0.3:9000", "tok-1"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed migration ID = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "http://10.0.0.3:9000", "tok-1"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "http://10.0.0.3:9000"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("reused migration ID for another VM = %v, want ErrConflict", err)
 	}
 }
@@ -219,7 +212,7 @@ func TestCreateTargetRejectsALiveVirtualMachineID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); !errors.Is(err, ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("reserve a live VM ID = %v, want ErrConflict", err)
 	}
 }
@@ -227,7 +220,7 @@ func TestCreateTargetRejectsALiveVirtualMachineID(t *testing.T) {
 func TestCreateRejectsATargetReservedID(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-9", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-9", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -239,7 +232,7 @@ func TestCreateRejectsATargetReservedID(t *testing.T) {
 func TestTargetStatusResolvesTheMigrationID(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -258,7 +251,7 @@ func TestTargetStatusResolvesTheMigrationID(t *testing.T) {
 func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,7 +277,7 @@ func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	source.removeError = errors.New("source unreachable")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -305,7 +298,7 @@ func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 

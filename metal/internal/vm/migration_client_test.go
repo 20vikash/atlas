@@ -12,20 +12,20 @@ import (
 )
 
 func TestPrepareSourceReadsTheHandshake(t *testing.T) {
-	var gotAuthorization, gotPath string
+	var gotVirtualMachineID, gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuthorization = r.Header.Get("Authorization")
+		gotVirtualMachineID = r.URL.Query().Get("virtual_machine_id")
 		gotPath = r.Method + " " + r.URL.Path
 		w.Write([]byte(`{"config":{"virtual_machine_id":"vm-1","specification":{"memory_mib":2048}},"observed_state":"running"}`))
 	}))
 	defer server.Close()
 
-	config, state, err := NewHTTPSourceClient(0).PrepareSource(context.Background(), server.URL, "mig-1", "vm-1", "tok-1")
+	config, state, err := NewHTTPSourceClient(0).PrepareSource(context.Background(), server.URL, "mig-1", "vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotAuthorization != "Bearer tok-1" {
-		t.Fatalf("authorization = %q", gotAuthorization)
+	if gotVirtualMachineID != "vm-1" {
+		t.Fatalf("virtual_machine_id = %q", gotVirtualMachineID)
 	}
 	if gotPath != "PUT /v1/migrations/mig-1/source" {
 		t.Fatalf("path = %q", gotPath)
@@ -36,18 +36,19 @@ func TestPrepareSourceReadsTheHandshake(t *testing.T) {
 }
 
 func TestRemoveSourceUsesTheMigrationPath(t *testing.T) {
-	var gotPath string
+	var gotPath, gotVirtualMachineID string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.Method + " " + r.URL.Path
+		gotVirtualMachineID = r.URL.Query().Get("virtual_machine_id")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
 
-	if err := NewHTTPSourceClient(0).RemoveSource(context.Background(), server.URL, "mig-1", "tok-1"); err != nil {
+	if err := NewHTTPSourceClient(0).RemoveSource(context.Background(), server.URL, "mig-1", "vm-1"); err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "DELETE /v1/migrations/mig-1" {
-		t.Fatalf("path = %q", gotPath)
+	if gotPath != "DELETE /v1/migrations/mig-1" || gotVirtualMachineID != "vm-1" {
+		t.Fatalf("path = %q vm = %q", gotPath, gotVirtualMachineID)
 	}
 }
 
@@ -61,7 +62,7 @@ func TestNextSnapshotSendsTheAcknowledgedSequence(t *testing.T) {
 	}))
 	defer server.Close()
 
-	snapshot, err := NewHTTPSourceClient(0).NextSnapshot(context.Background(), server.URL, "mig-1", "tok-1", 1)
+	snapshot, err := NewHTTPSourceClient(0).NextSnapshot(context.Background(), server.URL, "mig-1", "vm-1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestStreamSnapshotCopiesTheResponse(t *testing.T) {
 	defer server.Close()
 
 	var sink bytes.Buffer
-	written, err := NewHTTPSourceClient(0).StreamSnapshot(context.Background(), server.URL, "mig-1", "tok-1", 2, "resume-abc", 32, &sink)
+	written, err := NewHTTPSourceClient(0).StreamSnapshot(context.Background(), server.URL, "mig-1", "vm-1", 2, "resume-abc", 32, &sink)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestStopSourceReturnsFinalSnapshot(t *testing.T) {
 	}))
 	defer server.Close()
 
-	snapshot, err := NewHTTPSourceClient(0).StopSource(context.Background(), server.URL, "mig-1", "tok-1")
+	snapshot, err := NewHTTPSourceClient(0).StopSource(context.Background(), server.URL, "mig-1", "vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,13 +129,13 @@ func TestStartAndFinishSourcePost(t *testing.T) {
 	defer server.Close()
 	client := NewHTTPSourceClient(0)
 
-	if err := client.StartSource(context.Background(), server.URL, "mig-1", "tok-1"); err != nil {
+	if err := client.StartSource(context.Background(), server.URL, "mig-1", "vm-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.FinishSource(context.Background(), server.URL, "mig-1", "tok-1"); err != nil {
+	if err := client.FinishSource(context.Background(), server.URL, "mig-1", "vm-1"); err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 2 || paths[0] != "POST /v1/migrations/mig-1/start" || paths[1] != "POST /v1/migrations/mig-1/finish" {
+	if len(paths) != 2 || paths[0] != "POST /v1/migrations/mig-1/start" || paths[1] != "POST /v1/migrations/mig-1/destroy" {
 		t.Fatalf("paths = %v", paths)
 	}
 }
@@ -150,10 +151,10 @@ func TestSourceClientReportsErrors(t *testing.T) {
 	defer server.Close()
 	client := NewHTTPSourceClient(0)
 
-	if _, _, err := client.PrepareSource(context.Background(), server.URL, "gone", "vm-1", "tok-1"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := client.PrepareSource(context.Background(), server.URL, "gone", "vm-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing source = %v, want ErrNotFound", err)
 	}
-	if _, _, err := client.PrepareSource(context.Background(), server.URL, "mig-1", "vm-1", "tok-1"); err == nil {
+	if _, _, err := client.PrepareSource(context.Background(), server.URL, "mig-1", "vm-1"); err == nil {
 		t.Fatal("want an error for HTTP 500")
 	}
 }

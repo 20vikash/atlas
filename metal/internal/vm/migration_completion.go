@@ -34,8 +34,8 @@ func (m *MigrationManager) RequestFinish(ctx context.Context, migrationID string
 	return m.store.writeTarget(record)
 }
 
-// advanceFinish destroys the source, writes a completed record, and removes the
-// token. Each step is idempotent.
+// advanceFinish destroys the source and writes a completed record. Each step is
+// idempotent, so a retry after the source is gone still completes.
 func (m *MigrationManager) advanceFinish(ctx context.Context, record TargetMigrationRecord) error {
 	if record.Phase != PhaseFinishing {
 		record.Phase = PhaseFinishing
@@ -44,19 +44,11 @@ func (m *MigrationManager) advanceFinish(ctx context.Context, record TargetMigra
 		}
 	}
 
-	token, err := m.store.readToken(record.VirtualMachineID)
-	if err == nil {
-		if err := m.source.FinishSource(ctx, record.Source, record.ID, token); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, ErrNotFound) {
+	if err := m.source.FinishSource(ctx, record.Source, record.ID, record.VirtualMachineID); err != nil {
 		return err
 	}
 
-	if err := m.store.writeTarget(terminalTargetRecord(record, MigrationCompleted, m.now())); err != nil {
-		return err
-	}
-	return m.store.removeToken(record.VirtualMachineID)
+	return m.store.writeTarget(terminalTargetRecord(record, MigrationCompleted, m.now()))
 }
 
 // advanceAbort cleans the target, then unlocks or restores the source. Errors
@@ -74,14 +66,9 @@ func (m *MigrationManager) advanceAbort(ctx context.Context, record TargetMigrat
 		return err
 	}
 
-	token, err := m.store.readToken(record.VirtualMachineID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-
 	// Restore a stopped source before unlocking it.
 	if record.SourceStopped && !record.SourceRestored {
-		if err := m.source.StartSource(ctx, record.Source, record.ID, token); err != nil {
+		if err := m.source.StartSource(ctx, record.Source, record.ID, record.VirtualMachineID); err != nil {
 			return err
 		}
 		record.SourceRestored = true
@@ -90,7 +77,7 @@ func (m *MigrationManager) advanceAbort(ctx context.Context, record TargetMigrat
 		}
 	}
 	if !record.SourceUnlocked {
-		if err := m.source.RemoveSource(ctx, record.Source, record.ID, token); err != nil {
+		if err := m.source.RemoveSource(ctx, record.Source, record.ID, record.VirtualMachineID); err != nil {
 			return err
 		}
 		record.SourceUnlocked = true
@@ -99,10 +86,7 @@ func (m *MigrationManager) advanceAbort(ctx context.Context, record TargetMigrat
 		}
 	}
 
-	if err := m.store.writeTarget(terminalTargetRecord(record, MigrationAborted, m.now())); err != nil {
-		return err
-	}
-	return m.store.removeToken(record.VirtualMachineID)
+	return m.store.writeTarget(terminalTargetRecord(record, MigrationAborted, m.now()))
 }
 
 // cleanAbortTarget removes target runtime, network, dataset, and staging records.

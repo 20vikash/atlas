@@ -24,7 +24,7 @@ func TestAdvanceTargetRunsTheHandshakeAndHides(t *testing.T) {
 	source.prepareConfig = portableConfig("vm-1")
 	source.prepareState = StateRunning
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -66,7 +66,7 @@ func TestAdvanceTargetIsANoOpWhileCopying(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareConfig = portableConfig("vm-1")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
@@ -84,7 +84,7 @@ func TestAdvanceTargetIsANoOpWhileCopying(t *testing.T) {
 func TestAdvanceTargetExpiresAStaleReservation(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
@@ -116,7 +116,7 @@ func TestAdvanceTargetRecordsHandshakeErrors(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareError = errors.New("source unreachable")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,7 +136,7 @@ func TestAdvanceTargetRejectsAWrongConfig(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareConfig = portableConfig("vm-other")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,7 +154,7 @@ func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -166,7 +166,7 @@ func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
 func TestActiveTargetVirtualMachineIDsListsRunningTargets(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000", "tok-1"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 

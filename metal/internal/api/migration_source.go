@@ -14,15 +14,13 @@ type migrationSourceResponse struct {
 	ObservedState vm.State          `json:"observed_state"`
 }
 
-// prepareMigrationSource locks the source and returns portable state. The token
-// binds the caller and VM ID.
+// prepareMigrationSource locks the source and returns portable state.
 func (s *Server) prepareMigrationSource(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
-	claims := tokenClaims(c)
-	handshake, err := s.migrationManager.LockSource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller)
+	handshake, err := s.migrationManager.LockSource(c.Request().Context(), identifier, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -50,7 +48,7 @@ type streamSnapshotRequest struct {
 
 // createMigrationSnapshot returns the next source snapshot.
 func (s *Server) createMigrationSnapshot(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
@@ -58,8 +56,7 @@ func (s *Server) createMigrationSnapshot(c echo.Context) error {
 	if err := decodeOptionalJSON(c, &request); err != nil {
 		return err
 	}
-	claims := tokenClaims(c)
-	snapshot, err := s.migrationManager.NextSourceSnapshot(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller, request.ReceivedSequence)
+	snapshot, err := s.migrationManager.NextSourceSnapshot(c.Request().Context(), identifier, virtualMachineID, request.ReceivedSequence)
 	if err != nil {
 		return err
 	}
@@ -68,7 +65,7 @@ func (s *Server) createMigrationSnapshot(c echo.Context) error {
 
 // streamMigrationSnapshot streams one snapshot. It writes no status until data.
 func (s *Server) streamMigrationSnapshot(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
@@ -76,21 +73,19 @@ func (s *Server) streamMigrationSnapshot(c echo.Context) error {
 	if err := decodeJSONRequest(c, &request); err != nil {
 		return err
 	}
-	claims := tokenClaims(c)
 	c.Response().Header().Set(echo.HeaderContentType, "application/octet-stream")
-	_, err = s.migrationManager.SendSourceStream(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller, request.Sequence, request.ResumeToken, request.ThroughputMiBps, c.Response())
+	_, err = s.migrationManager.SendSourceStream(c.Request().Context(), identifier, virtualMachineID, request.Sequence, request.ResumeToken, request.ThroughputMiBps, c.Response())
 	return err
 }
 
 // stopMigrationSource stops the source, removes its network, and returns its
 // final snapshot.
 func (s *Server) stopMigrationSource(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
-	claims := tokenClaims(c)
-	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller)
+	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -99,12 +94,23 @@ func (s *Server) stopMigrationSource(c echo.Context) error {
 
 // startMigrationSource restores the source during rollback.
 func (s *Server) startMigrationSource(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
-	claims := tokenClaims(c)
-	if err := s.migrationManager.StartSourceRollback(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller); err != nil {
+	if err := s.migrationManager.StartSourceRollback(c.Request().Context(), identifier, virtualMachineID); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// destroyMigrationSource destroys the stopped source and its migration state.
+func (s *Server) destroyMigrationSource(c echo.Context) error {
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
+	if err != nil {
+		return err
+	}
+	if err := s.migrationManager.DestroySource(c.Request().Context(), identifier, virtualMachineID); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -112,13 +118,26 @@ func (s *Server) startMigrationSource(c echo.Context) error {
 
 // deleteMigrationSource unlocks the source and removes migration state.
 func (s *Server) deleteMigrationSource(c echo.Context) error {
-	identifier, err := migrationIdentifier(c)
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
-	claims := tokenClaims(c)
-	if err := s.migrationManager.UnlockSource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller); err != nil {
+	if err := s.migrationManager.UnlockSource(c.Request().Context(), identifier, virtualMachineID); err != nil {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// migrationSourceIdentifiers reads the migration ID and the VM ID the target
+// sends. The target and source hold the same VM ID across a migration.
+func migrationSourceIdentifiers(c echo.Context) (string, string, error) {
+	identifier, err := migrationIdentifier(c)
+	if err != nil {
+		return "", "", err
+	}
+	virtualMachineID := c.QueryParam("virtual_machine_id")
+	if !validResourceID(virtualMachineID) {
+		return "", "", badRequest("invalid virtual_machine_id")
+	}
+	return identifier, virtualMachineID, nil
 }

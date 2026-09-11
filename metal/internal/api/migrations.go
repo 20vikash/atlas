@@ -10,18 +10,17 @@ import (
 )
 
 // errInvalidMigrationRequest reports a target request missing a field.
-var errInvalidMigrationRequest = errors.New("virtual_machine_id, source, and token are required")
+var errInvalidMigrationRequest = errors.New("virtual_machine_id and source are required")
 
 // createMigrationRequest is Atlas's target-pull request.
 type createMigrationRequest struct {
 	VirtualMachineID string `json:"virtual_machine_id"`
 	Source           string `json:"source"`
-	Token            string `json:"token"`
 }
 
 // validate rejects a request missing a required field.
 func (r createMigrationRequest) validate() error {
-	if r.VirtualMachineID == "" || r.Source == "" || r.Token == "" {
+	if r.VirtualMachineID == "" || r.Source == "" {
 		return errInvalidMigrationRequest
 	}
 	return nil
@@ -67,7 +66,7 @@ func (s *Server) createMigration(c echo.Context) error {
 		return badRequest(err.Error())
 	}
 
-	record, err := s.migrationManager.CreateTarget(c.Request().Context(), identifier, request.VirtualMachineID, request.Source, request.Token)
+	record, err := s.migrationManager.CreateTarget(c.Request().Context(), identifier, request.VirtualMachineID, request.Source)
 	if err != nil {
 		return err
 	}
@@ -88,25 +87,18 @@ func (s *Server) getMigration(c echo.Context) error {
 	return c.JSON(http.StatusOK, toMigration(record))
 }
 
-// finishMigration serves both finish calls. The static token records the target
-// request; a migration token destroys the remote source.
+// finishMigration records the target's finish request. Atlas calls it with the
+// static token. The target then destroys the source over the mesh.
 func (s *Server) finishMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
 		return err
 	}
-	if controller, _ := c.Get(isControllerTokenKey).(bool); controller {
-		if err := s.migrationManager.RequestFinish(c.Request().Context(), identifier); err != nil {
-			return err
-		}
-		s.wakeReconciler()
-		return c.NoContent(http.StatusAccepted)
-	}
-	claims := tokenClaims(c)
-	if err := s.migrationManager.DestroySource(c.Request().Context(), identifier, claims.VirtualMachineID, claims.Caller); err != nil {
+	if err := s.migrationManager.RequestFinish(c.Request().Context(), identifier); err != nil {
 		return err
 	}
-	return c.NoContent(http.StatusNoContent)
+	s.wakeReconciler()
+	return c.NoContent(http.StatusAccepted)
 }
 
 // abortMigration removes an unfinished target migration.

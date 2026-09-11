@@ -52,11 +52,7 @@ func (m *MigrationManager) AdvanceTarget(ctx context.Context, virtualMachineID s
 		return nil
 	}
 
-	token, err := m.store.readToken(virtualMachineID)
-	if err != nil {
-		return m.recordTargetError(record, err)
-	}
-	config, observedState, err := m.source.PrepareSource(ctx, record.Source, record.ID, virtualMachineID, token)
+	config, observedState, err := m.source.PrepareSource(ctx, record.Source, record.ID, virtualMachineID)
 	if err != nil {
 		return m.recordTargetError(record, err)
 	}

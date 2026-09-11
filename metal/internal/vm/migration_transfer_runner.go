@@ -136,10 +136,6 @@ func (m *MigrationManager) runTransfer(ctx context.Context, virtualMachineID str
 // advanceCopying copies an interval or enters stopping. Running sources send a
 // full first interval; other sources cut over first.
 func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigrationRecord) error {
-	token, err := m.store.readToken(record.VirtualMachineID)
-	if err != nil {
-		return err
-	}
 	last := lastCompletedSequence(record)
 	if last == 0 && record.SourceObservedState != StateRunning {
 		return m.enterStopping(record)
@@ -148,7 +144,7 @@ func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigr
 		return m.enterStopping(record)
 	}
 
-	snapshot, err := m.source.NextSnapshot(ctx, record.Source, record.ID, token, last)
+	snapshot, err := m.source.NextSnapshot(ctx, record.Source, record.ID, record.VirtualMachineID, last)
 	if err != nil {
 		return err
 	}
@@ -158,16 +154,12 @@ func (m *MigrationManager) advanceCopying(ctx context.Context, record TargetMigr
 	if last >= 1 && m.isSmallDelta(snapshot) {
 		return m.enterStopping(record)
 	}
-	return m.receiveSnapshot(ctx, record, token, snapshot, m.intervalThroughput(record))
+	return m.receiveSnapshot(ctx, record, snapshot, m.intervalThroughput(record))
 }
 
 // advanceStopping pulls and verifies the final snapshot, then enters starting.
 func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMigrationRecord) error {
-	token, err := m.store.readToken(record.VirtualMachineID)
-	if err != nil {
-		return err
-	}
-	final, err := m.source.StopSource(ctx, record.Source, record.ID, token)
+	final, err := m.source.StopSource(ctx, record.Source, record.ID, record.VirtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -181,7 +173,7 @@ func (m *MigrationManager) advanceStopping(ctx context.Context, record TargetMig
 	if err := m.store.writeTarget(record); err != nil {
 		return err
 	}
-	if err := m.receiveSnapshot(ctx, record, token, final, 0); err != nil {
+	if err := m.receiveSnapshot(ctx, record, final, 0); err != nil {
 		return err
 	}
 
@@ -255,7 +247,7 @@ func (m *MigrationManager) intervalThroughput(record TargetMigrationRecord) int 
 }
 
 // receiveSnapshot pulls one snapshot into the target dataset and verifies it.
-func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMigrationRecord, token string, snapshot SourceSnapshot, throughputMiBps int) error {
+func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) error {
 	resumeToken, err := m.transfer.ReceiveResumeToken(ctx, record.VirtualMachineID)
 	if err != nil {
 		return err
@@ -271,7 +263,7 @@ func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMig
 	}
 
 	record = m.beginInterval(record, snapshot, throughputMiBps)
-	received, err := m.streamInterval(ctx, record, token, snapshot, resumeToken, throughputMiBps)
+	received, err := m.streamInterval(ctx, record, snapshot, resumeToken, throughputMiBps)
 	if err != nil {
 		return err
 	}
@@ -289,14 +281,14 @@ func (m *MigrationManager) receiveSnapshot(ctx context.Context, record TargetMig
 }
 
 // streamInterval streams one snapshot and checkpoints received bytes.
-func (m *MigrationManager) streamInterval(ctx context.Context, record TargetMigrationRecord, token string, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
+func (m *MigrationManager) streamInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
 	var received atomic.Int64
 	reader, writer := io.Pipe()
 	streamContext, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
 
 	go func() {
-		_, sendError := m.source.StreamSnapshot(streamContext, record.Source, record.ID, token, snapshot.Sequence, resumeToken, throughputMiBps, writer)
+		_, sendError := m.source.StreamSnapshot(streamContext, record.Source, record.ID, record.VirtualMachineID, snapshot.Sequence, resumeToken, throughputMiBps, writer)
 		writer.CloseWithError(sendError)
 	}()
 

@@ -12,23 +12,24 @@ import (
 	"time"
 )
 
-// MigrationSourceClient calls the source host during migration.
+// MigrationSourceClient calls the source host during migration. Every call
+// carries the VM ID so the source can resolve the migration over the mesh.
 type MigrationSourceClient interface {
 	// PrepareSource locks the source and returns portable state.
-	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID, token string) (PortableConfig, State, error)
+	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, State, error)
 	// NextSnapshot acknowledges a sequence and asks for the next snapshot.
-	NextSnapshot(ctx context.Context, address, migrationID, token string, receivedSequence int) (SourceSnapshot, error)
+	NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error)
 	// StreamSnapshot reads one snapshot into w and returns its byte count.
 	// A positive throughputMiBps limits source disk throughput.
-	StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
+	StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
 	// StopSource stops the source, removes its network, and returns its final snapshot.
-	StopSource(ctx context.Context, address, migrationID, token string) (SourceSnapshot, error)
+	StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (SourceSnapshot, error)
 	// StartSource restores the source during rollback.
-	StartSource(ctx context.Context, address, migrationID, token string) error
+	StartSource(ctx context.Context, address, migrationID, virtualMachineID string) error
 	// FinishSource destroys the stopped source and migration state.
-	FinishSource(ctx context.Context, address, migrationID, token string) error
+	FinishSource(ctx context.Context, address, migrationID, virtualMachineID string) error
 	// RemoveSource unlocks the source and removes migration state.
-	RemoveSource(ctx context.Context, address, migrationID, token string) error
+	RemoveSource(ctx context.Context, address, migrationID, virtualMachineID string) error
 }
 
 // DiskTransfer runs ZFS operations for one migration.
@@ -126,9 +127,9 @@ func NewMigrationManager(machines *Manager, source MigrationSourceClient, transf
 	}, nil
 }
 
-// CreateTarget reserves a VM ID or refreshes a matching retry token.
-func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source, token string) (TargetMigrationRecord, error) {
-	if !validIdentifier(migrationID) || !validIdentifier(virtualMachineID) || source == "" || token == "" {
+// CreateTarget reserves a VM ID or returns a matching in-progress record.
+func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (TargetMigrationRecord, error) {
+	if !validIdentifier(migrationID) || !validIdentifier(virtualMachineID) || source == "" {
 		return TargetMigrationRecord{}, ErrConflict
 	}
 	unlock, err := m.locks.lock(ctx, virtualMachineID)
@@ -148,15 +149,12 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 	existing, err := m.store.readTarget(virtualMachineID)
 	if err == nil {
 		if existing.ID == migrationID {
-			// Refresh an active retry or return a settled result unchanged.
+			// Return an active retry or a settled result unchanged.
 			if isTerminalStatus(existing.Status) {
 				return existing, nil
 			}
 			if existing.Source != source {
 				return TargetMigrationRecord{}, ErrConflict
-			}
-			if err := m.store.writeToken(virtualMachineID, token); err != nil {
-				return TargetMigrationRecord{}, err
 			}
 			return existing, nil
 		}
@@ -177,9 +175,6 @@ func (m *MigrationManager) CreateTarget(ctx context.Context, migrationID, virtua
 	m.machines.allocationMutex.Lock()
 	defer m.machines.allocationMutex.Unlock()
 	if err := m.assertVirtualMachineIDFree(virtualMachineID); err != nil {
-		return TargetMigrationRecord{}, err
-	}
-	if err := m.store.writeToken(virtualMachineID, token); err != nil {
 		return TargetMigrationRecord{}, err
 	}
 	record := TargetMigrationRecord{

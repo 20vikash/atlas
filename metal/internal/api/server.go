@@ -16,7 +16,6 @@ import (
 	"github.com/frappe/atlas/metal/internal/console"
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/token"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -64,23 +63,17 @@ type VirtualMachineManager interface {
 
 // MigrationManager owns this host's migration records and reservations.
 type MigrationManager interface {
-	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error)
+	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (vm.TargetMigrationRecord, error)
 	TargetStatus(ctx context.Context, migrationID string) (vm.TargetMigrationRecord, error)
 	RequestFinish(ctx context.Context, migrationID string) error
 	AbortTarget(ctx context.Context, migrationID string) error
-	LockSource(ctx context.Context, migrationID, virtualMachineID, caller string) (vm.SourceHandshake, error)
-	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID, caller string, receivedSequence int) (vm.SourceSnapshot, error)
-	SendSourceStream(ctx context.Context, migrationID, virtualMachineID, caller string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
-	StopSource(ctx context.Context, migrationID, virtualMachineID, caller string) (vm.SourceSnapshot, error)
-	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID, caller string) error
-	DestroySource(ctx context.Context, migrationID, virtualMachineID, caller string) error
-	UnlockSource(ctx context.Context, migrationID, virtualMachineID, caller string) error
-}
-
-// TrustedKeyStore owns this host's Atlas issuer, receiver, and trusted keys.
-type TrustedKeyStore interface {
-	Keys() token.TrustedKeys
-	Replace(token.TrustedKeys) error
+	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vm.SourceHandshake, error)
+	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vm.SourceSnapshot, error)
+	SendSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
+	StopSource(ctx context.Context, migrationID, virtualMachineID string) (vm.SourceSnapshot, error)
+	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
+	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
+	UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error
 }
 
 // Dependencies contains services used by the HTTP handlers.
@@ -91,7 +84,6 @@ type Dependencies struct {
 	WakeReconciler        func()
 	HostService           HostService
 	SerialBroker          SerialBroker
-	TrustedKeys           TrustedKeyStore
 }
 
 // Server owns the HTTP handlers and their dependencies.
@@ -102,7 +94,6 @@ type Server struct {
 	wakeReconciler        func()
 	hostService           HostService
 	serialBroker          SerialBroker
-	trustedKeys           TrustedKeyStore
 	authTokenHash         []byte
 	logger                *slog.Logger
 }
@@ -120,7 +111,6 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 		wakeReconciler:        dependencies.WakeReconciler,
 		hostService:           dependencies.HostService,
 		serialBroker:          dependencies.SerialBroker,
-		trustedKeys:           dependencies.TrustedKeys,
 		authTokenHash:         []byte(configuration.AuthTokenHash),
 	}
 	if configuration.Logger == nil {
@@ -169,7 +159,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineManager == nil || dependencies.MigrationManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil || dependencies.TrustedKeys == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.MigrationManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil
@@ -189,31 +179,6 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 			return unauthorized()
 		}
 
-		return next(c)
-	}
-}
-
-// isControllerTokenKey marks a request authenticated by the static token.
-const isControllerTokenKey = "atlas_controller_token"
-
-// authenticateControllerOrMigration accepts the static token or a migration
-// token. Finish uses both credentials across the two hosts.
-func (s *Server) authenticateControllerOrMigration(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		presented, found := bearerToken(c)
-		if !found {
-			return unauthorized()
-		}
-		digest := sha256.Sum256([]byte(presented))
-		if subtle.ConstantTimeCompare(s.authTokenHash, []byte(hex.EncodeToString(digest[:]))) == 1 {
-			c.Set(isControllerTokenKey, true)
-			return next(c)
-		}
-		claims, err := token.Verify(s.trustedKeys.Keys(), presented, token.ScopeMigration)
-		if err != nil {
-			return err
-		}
-		c.Set(claimsContextKey, claims)
 		return next(c)
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// writeReadyTarget writes a ready target record with a token for finish tests.
+// writeReadyTarget writes a ready target record for finish tests.
 func writeReadyTarget(t *testing.T, machines *Manager, mutate func(*TargetMigrationRecord)) *migrationStore {
 	t.Helper()
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
@@ -23,9 +23,6 @@ func writeReadyTarget(t *testing.T, machines *Manager, mutate func(*TargetMigrat
 		mutate(&record)
 	}
 	if err := store.writeTarget(record); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.writeToken("vm-1", "tok-1"); err != nil {
 		t.Fatal(err)
 	}
 	return store
@@ -46,9 +43,6 @@ func TestRunTransferFinishesToCompleted(t *testing.T) {
 	}
 	if source.finishCalls != 1 {
 		t.Fatalf("source finish calls = %d, want 1", source.finishCalls)
-	}
-	if _, err := store.readToken("vm-1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("token still present: %v", err)
 	}
 }
 
@@ -108,9 +102,6 @@ func TestRunTransferAbortsBeforeStop(t *testing.T) {
 	}
 	if transfer.aborts != 1 {
 		t.Fatalf("receive aborts = %d, want 1", transfer.aborts)
-	}
-	if _, err := store.readToken("vm-1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("token still present: %v", err)
 	}
 }
 

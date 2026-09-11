@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// writeCopyingTarget sets up a copying target with a token.
+// writeCopyingTarget sets up a copying target.
 func writeCopyingTarget(t *testing.T, machines *Manager, sourceState State) *migrationStore {
 	t.Helper()
 	store := newMigrationStore(machines.configuration.MachinesDirectory)
@@ -21,9 +21,6 @@ func writeCopyingTarget(t *testing.T, machines *Manager, sourceState State) *mig
 		CopyStartedAt:       time.Now().UTC(),
 	}
 	if err := store.writeTarget(record); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.writeToken("vm-1", "tok-1"); err != nil {
 		t.Fatal(err)
 	}
 	return store

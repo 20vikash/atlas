@@ -15,7 +15,6 @@ import (
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/token"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -308,23 +307,9 @@ func newServerWithServices(
 ) http.Handler {
 	t.Helper()
 
-	server, _ := newServerWithTrustedKeys(t, virtualMachineManager, services, wireGuardManager)
-	return server
-}
-
-// newServerWithTrustedKeys also returns the key-sync store.
-func newServerWithTrustedKeys(
-	t *testing.T,
-	virtualMachineManager VirtualMachineManager,
-	services *fakeRuntimeServices,
-	wireGuardManager *fakeWireGuardManager,
-) (http.Handler, *token.KeyStore) {
-	t.Helper()
-
 	if manager, ok := virtualMachineManager.(*fakeVirtualMachineManager); ok {
 		manager.services = services
 	}
-	trustedKeys := newTrustedKeyStore(t)
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: services, WireGuard: wireGuardManager, Images: services,
 		VirtualMachines: virtualMachineManager, Storage: fakeCapacityProvider{}, Wake: func() {},
@@ -339,13 +324,12 @@ func newServerWithTrustedKeys(
 		WakeReconciler:        func() {},
 		HostService:           hostService,
 		SerialBroker:          stubSerialBroker{},
-		TrustedKeys:           trustedKeys,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return server, trustedKeys
+	return server
 }
 
 func TestCorrelationHeadersAreGeneratedAndPreserveSafeValues(t *testing.T) {

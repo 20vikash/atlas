@@ -41,7 +41,7 @@ func TestCreateTargetReplacesACleanAbortedRemnant(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	writeTerminalTarget(t, machines, MigrationAborted)
 
-	record, err := migrationManager.CreateTarget(context.Background(), "mig-2", "vm-1", "http://10.0.0.9:9000", "tok-2")
+	record, err := migrationManager.CreateTarget(context.Background(), "mig-2", "vm-1", "http://10.0.0.9:9000")
 	if err != nil {
 		t.Fatalf("replace a clean aborted remnant = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestCreateTargetRefusesReplacingACompletedRecord(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	writeTerminalTarget(t, machines, MigrationCompleted)
 
-	if _, err := migrationManager.CreateTarget(context.Background(), "mig-2", "vm-1", "http://10.0.0.9:9000", "tok-2"); err == nil {
+	if _, err := migrationManager.CreateTarget(context.Background(), "mig-2", "vm-1", "http://10.0.0.9:9000"); err == nil {
 		t.Fatal("a completed migration must not be replaced")
 	}
 }

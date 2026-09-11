@@ -83,7 +83,7 @@ func TestTransferStateRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := SourceMigrationRecord{
-		ID: "mig-1", VirtualMachineID: "vm-2", Caller: "metal-1",
+		ID: "mig-1", VirtualMachineID: "vm-2",
 		Sequence: 2, AcknowledgedSequence: 1,
 	}
 	if err := store.writeSource(source); err != nil {
@@ -111,7 +111,6 @@ func TestSourceRecordRoundTrips(t *testing.T) {
 	record := SourceMigrationRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
-		Caller:           "metal-2",
 		OriginalDesired:  StateRunning,
 		OriginalObserved: StateRunning,
 		LockedAt:         time.Now().UTC(),
@@ -123,29 +122,8 @@ func TestSourceRecordRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Caller != "metal-2" || got.OriginalDesired != StateRunning {
+	if got.OriginalDesired != StateRunning {
 		t.Fatalf("source record = %+v", got)
-	}
-}
-
-func TestTokenFileIsOwnerOnly(t *testing.T) {
-	store := newMigrationStore(t.TempDir())
-	if err := store.writeToken("vm-1", "signed-token"); err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.readToken("vm-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "signed-token" {
-		t.Fatalf("token = %q", got)
-	}
-	info, err := os.Stat(store.tokenPath("vm-1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("token mode = %o", info.Mode().Perm())
 	}
 }
 
@@ -171,7 +149,7 @@ func TestListVirtualMachineIDsFindsTargetAndSource(t *testing.T) {
 	if err := store.writeTarget(newTargetRecord()); err != nil {
 		t.Fatal(err)
 	}
-	source := SourceMigrationRecord{ID: "mig-2", VirtualMachineID: "vm-2", Caller: "metal-1"}
+	source := SourceMigrationRecord{ID: "mig-2", VirtualMachineID: "vm-2"}
 	if err := store.writeSource(source); err != nil {
 		t.Fatal(err)
 	}

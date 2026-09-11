@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
-
-	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 const (
@@ -21,7 +19,6 @@ const (
 
 	targetFileName = "target.json"
 	sourceFileName = "source.json"
-	tokenFileName  = "token"
 )
 
 // MigrationStatus is a migration lifecycle status.
@@ -108,7 +105,7 @@ type IntervalProgress struct {
 	Completed        bool      `json:"completed"`
 }
 
-// TargetMigrationRecord is durable target state. Its JWT is stored separately.
+// TargetMigrationRecord is durable target state.
 type TargetMigrationRecord struct {
 	SchemaVersion       int                `json:"schema_version"`
 	ID                  string             `json:"id"`
@@ -149,7 +146,6 @@ type SourceMigrationRecord struct {
 	SchemaVersion           int       `json:"schema_version"`
 	ID                      string    `json:"id"`
 	VirtualMachineID        string    `json:"virtual_machine_id"`
-	Caller                  string    `json:"caller"`
 	OriginalDesired         State     `json:"original_desired"`
 	OriginalObserved        State     `json:"original_observed"`
 	Sequence                int       `json:"sequence,omitempty"`
@@ -277,7 +273,7 @@ func (store *migrationStore) readSource(virtualMachineID string) (SourceMigratio
 	if record.SchemaVersion != migrationSchemaVersion {
 		return SourceMigrationRecord{}, fmt.Errorf("read %s: unsupported schema version %d", store.sourcePath(virtualMachineID), record.SchemaVersion)
 	}
-	if record.VirtualMachineID != virtualMachineID || record.ID == "" || record.Caller == "" {
+	if record.VirtualMachineID != virtualMachineID || record.ID == "" {
 		return SourceMigrationRecord{}, fmt.Errorf("read %s: invalid source record", store.sourcePath(virtualMachineID))
 	}
 	return record, nil
@@ -293,37 +289,6 @@ func (store *migrationStore) writeTarget(record TargetMigrationRecord) error {
 func (store *migrationStore) writeSource(record SourceMigrationRecord) error {
 	record.SchemaVersion = migrationSchemaVersion
 	return writeRecord(store.sourcePath(record.VirtualMachineID), record)
-}
-
-// writeToken stores the migration JWT with owner-only permission.
-func (store *migrationStore) writeToken(virtualMachineID, signedToken string) error {
-	if err := os.MkdirAll(store.migrationDirectory(virtualMachineID), 0o750); err != nil {
-		return fmt.Errorf("create migration directory: %w", err)
-	}
-	if err := platform.WriteFile(store.tokenPath(virtualMachineID), []byte(signedToken), 0o600); err != nil {
-		return fmt.Errorf("write migration token: %w", err)
-	}
-	return nil
-}
-
-// readToken returns the stored migration JWT.
-func (store *migrationStore) readToken(virtualMachineID string) (string, error) {
-	data, err := os.ReadFile(store.tokenPath(virtualMachineID))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("read migration token: %w", ErrNotFound)
-		}
-		return "", fmt.Errorf("read migration token: %w", err)
-	}
-	return string(data), nil
-}
-
-// removeToken deletes the migration JWT. Missing tokens are safe.
-func (store *migrationStore) removeToken(virtualMachineID string) error {
-	if err := os.Remove(store.tokenPath(virtualMachineID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove migration token: %w", err)
-	}
-	return nil
 }
 
 // remove deletes migration records but leaves VM records.
@@ -347,10 +312,6 @@ func (store *migrationStore) targetPath(virtualMachineID string) string {
 
 func (store *migrationStore) sourcePath(virtualMachineID string) string {
 	return filepath.Join(store.migrationDirectory(virtualMachineID), sourceFileName)
-}
-
-func (store *migrationStore) tokenPath(virtualMachineID string) string {
-	return filepath.Join(store.migrationDirectory(virtualMachineID), tokenFileName)
 }
 
 // migrationDirectory is where one VM keeps its migration records.

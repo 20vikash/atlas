@@ -10,7 +10,6 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
-	"github.com/frappe/atlas/metal/internal/token"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -76,14 +75,8 @@ func publicAPIError(err error) *apiError {
 	}
 
 	switch {
-	case errors.Is(err, token.ErrUnauthorized):
-		return unauthorized()
-	case errors.Is(err, token.ErrForbidden):
-		return forbidden()
-	case errors.Is(err, network.ErrInvalidPeers), errors.Is(err, storage.ErrInvalidUpload), errors.Is(err, token.ErrInvalidKeys):
+	case errors.Is(err, network.ErrInvalidPeers), errors.Is(err, storage.ErrInvalidUpload):
 		return newAPIError(http.StatusBadRequest, "invalid_request", err.Error())
-	case errors.Is(err, token.ErrKeyConflict):
-		return newAPIError(http.StatusConflict, "conflict", "the Atlas issuer and receiver cannot change")
 	case errors.Is(err, vm.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		return newAPIError(http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, storage.ErrImageConflict):
@@ -146,9 +139,4 @@ func badRequest(message string) error {
 // unauthorized reports a missing or wrong API token.
 func unauthorized() *apiError {
 	return newAPIError(http.StatusUnauthorized, "unauthorized", "invalid API token")
-}
-
-// forbidden reports a valid token without permission.
-func forbidden() *apiError {
-	return newAPIError(http.StatusForbidden, "forbidden", "token does not allow this request")
 }

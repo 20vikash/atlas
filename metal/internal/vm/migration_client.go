@@ -15,7 +15,7 @@ import (
 // defaultSourceClientTimeout bounds one target-to-source control call.
 const defaultSourceClientTimeout = 60 * time.Second
 
-// HTTPSourceClient calls the source over HTTP with an Atlas token.
+// HTTPSourceClient calls the source over the trusted mesh.
 type HTTPSourceClient struct {
 	client       *http.Client
 	streamClient *http.Client
@@ -52,13 +52,12 @@ type streamRequest struct {
 }
 
 // NextSnapshot acknowledges a sequence and asks for the next snapshot.
-func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationID, token string, receivedSequence int) (SourceSnapshot, error) {
+func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
 	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
-	path := fmt.Sprintf("/v1/migrations/%s/snapshot", url.PathEscape(migrationID))
-	responseBody, err := c.postJSON(ctx, address, path, token, body)
+	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/snapshot"), body)
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -70,17 +69,16 @@ func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationI
 }
 
 // StreamSnapshot reads one snapshot into w and returns its byte count.
-func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migrationID, token string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
+func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
 	body, err := json.Marshal(streamRequest{Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps})
 	if err != nil {
 		return 0, err
 	}
-	path := fmt.Sprintf("/v1/migrations/%s/stream", url.PathEscape(migrationID))
+	path := sourcePath(migrationID, virtualMachineID, "/stream")
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, fmt.Errorf("build stream request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 
 	response, err := c.streamClient.Do(request)
@@ -96,12 +94,11 @@ func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migratio
 }
 
 // postJSON sends a JSON control request and returns its body.
-func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path, token string, body []byte) ([]byte, error) {
+func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path string, body []byte) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build source request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
 
 	response, err := c.client.Do(request)
@@ -129,9 +126,8 @@ type sourceHandshakeResponse struct {
 }
 
 // PrepareSource asks the source to lock the VM and return portable state.
-func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migrationID, _, token string) (PortableConfig, State, error) {
-	path := fmt.Sprintf("/v1/migrations/%s/source", url.PathEscape(migrationID))
-	body, err := c.call(ctx, http.MethodPut, address, path, token)
+func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, State, error) {
+	body, err := c.call(ctx, http.MethodPut, address, sourcePath(migrationID, virtualMachineID, "/source"))
 	if err != nil {
 		return PortableConfig{}, "", err
 	}
@@ -144,9 +140,8 @@ func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migration
 
 // StopSource asks the source to stop the VM, remove its network, and create the
 // final snapshot.
-func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID, token string) (SourceSnapshot, error) {
-	path := fmt.Sprintf("/v1/migrations/%s/stop", url.PathEscape(migrationID))
-	responseBody, err := c.postJSON(ctx, address, path, token, nil)
+func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (SourceSnapshot, error) {
+	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/stop"), nil)
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -158,33 +153,29 @@ func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID,
 }
 
 // StartSource asks the source to restore its original desired state.
-func (c *HTTPSourceClient) StartSource(ctx context.Context, address, migrationID, token string) error {
-	path := fmt.Sprintf("/v1/migrations/%s/start", url.PathEscape(migrationID))
-	_, err := c.call(ctx, http.MethodPost, address, path, token)
+func (c *HTTPSourceClient) StartSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
+	_, err := c.call(ctx, http.MethodPost, address, sourcePath(migrationID, virtualMachineID, "/start"))
 	return err
 }
 
 // FinishSource asks the source to destroy the stopped VM and state.
-func (c *HTTPSourceClient) FinishSource(ctx context.Context, address, migrationID, token string) error {
-	path := fmt.Sprintf("/v1/migrations/%s/finish", url.PathEscape(migrationID))
-	_, err := c.call(ctx, http.MethodPost, address, path, token)
+func (c *HTTPSourceClient) FinishSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
+	_, err := c.call(ctx, http.MethodPost, address, sourcePath(migrationID, virtualMachineID, "/destroy"))
 	return err
 }
 
 // RemoveSource asks the source to unlock the VM and drop migration state.
-func (c *HTTPSourceClient) RemoveSource(ctx context.Context, address, migrationID, token string) error {
-	path := fmt.Sprintf("/v1/migrations/%s", url.PathEscape(migrationID))
-	_, err := c.call(ctx, http.MethodDelete, address, path, token)
+func (c *HTTPSourceClient) RemoveSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
+	_, err := c.call(ctx, http.MethodDelete, address, sourcePath(migrationID, virtualMachineID, ""))
 	return err
 }
 
-// call sends an authorized request and returns its body.
-func (c *HTTPSourceClient) call(ctx context.Context, method, address, path, token string) ([]byte, error) {
+// call sends a request over the mesh and returns its body.
+func (c *HTTPSourceClient) call(ctx context.Context, method, address, path string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, method, address+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build source request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
 
 	response, err := c.client.Do(request)
 	if err != nil {
@@ -203,4 +194,12 @@ func (c *HTTPSourceClient) call(ctx context.Context, method, address, path, toke
 		return nil, fmt.Errorf("source %s %s returned HTTP %d", method, path, response.StatusCode)
 	}
 	return body, nil
+}
+
+// sourcePath builds a source route with the VM ID query the source needs to
+// resolve the migration.
+func sourcePath(migrationID, virtualMachineID, suffix string) string {
+	path := "/v1/migrations/" + url.PathEscape(migrationID) + suffix
+	query := url.Values{"virtual_machine_id": {virtualMachineID}}
+	return path + "?" + query.Encode()
 }

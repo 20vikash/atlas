@@ -2,8 +2,6 @@ package api
 
 import (
 	"github.com/labstack/echo/v4"
-
-	"github.com/frappe/atlas/metal/internal/token"
 )
 
 // registerRoutes binds handlers. PUT mutations are idempotent; POST is for
@@ -41,17 +39,15 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	migrationRoutes.PUT("/:id", s.createMigration)
 	migrationRoutes.GET("/:id", s.getMigration)
 	migrationRoutes.POST("/:id/abort", s.abortMigration)
+	migrationRoutes.POST("/:id/finish", s.finishMigration)
 
-	// Finish serves Atlas on the target and another host, so it accepts the static
-	// controller token or a migration-scoped Atlas token.
-	router.POST("/v1/migrations/:id/finish", s.finishMigration, s.authenticateControllerOrMigration)
-
-	// The target host calls these with an Atlas-signed token.
+	// The target host calls these over the trusted mesh with no credential.
 	sourceRoutes := router.Group("/v1/migrations")
-	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource, s.requireScopes(token.ScopeReadVirtualMachine, token.ScopeMigration))
-	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot, s.requireScopes(token.ScopeMigration))
-	sourceRoutes.POST("/:id/stream", s.streamMigrationSnapshot, s.requireScopes(token.ScopeMigration))
-	sourceRoutes.POST("/:id/stop", s.stopMigrationSource, s.requireScopes(token.ScopeMigration))
-	sourceRoutes.POST("/:id/start", s.startMigrationSource, s.requireScopes(token.ScopeMigration))
-	sourceRoutes.DELETE("/:id", s.deleteMigrationSource, s.requireScopes(token.ScopeMigration))
+	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource)
+	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot)
+	sourceRoutes.POST("/:id/stream", s.streamMigrationSnapshot)
+	sourceRoutes.POST("/:id/stop", s.stopMigrationSource)
+	sourceRoutes.POST("/:id/start", s.startMigrationSource)
+	sourceRoutes.POST("/:id/destroy", s.destroyMigrationSource)
+	sourceRoutes.DELETE("/:id", s.deleteMigrationSource)
 }
