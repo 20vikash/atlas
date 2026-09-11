@@ -34,6 +34,7 @@ force=false
 say() { echo "==> $*"; }
 fail() { echo "error: $*" >&2; exit 1; }
 as_bench() { su - "$BENCH_USER" -c "$1"; }
+quoted_password() { printf %q "$PASSWORD"; }
 
 # `su -` sets no user bus, so `systemctl --user` needs both addresses.
 as_bench_systemctl() {
@@ -128,7 +129,7 @@ as_bench "PILOT_DEV=1 PILOT_BRANCH=$PILOT_BRANCH bash -c 'curl -fsSL $PILOT_INST
 say "stage 6: bench $BENCH_NAME"
 # Guard each step on what it produces, so a stopped run continues here.
 if [[ ! -f $BENCH_PATH/bench.toml ]]; then
-	as_bench "pilot new $BENCH_NAME --admin-password '$PASSWORD' --admin-domain $ADMIN_DOMAIN --database mariadb"
+	as_bench "pilot new $BENCH_NAME --admin-password $(quoted_password) --admin-domain $ADMIN_DOMAIN --database mariadb"
 fi
 if [[ ! -x $BENCH_PATH/env/bin/python ]]; then
 	as_bench "pilot init --bench $BENCH_NAME"
@@ -136,7 +137,7 @@ fi
 
 say "stage 7: site $SITE_NAME"
 if [[ ! -f $BENCH_PATH/sites/$SITE_NAME/site_config.json ]]; then
-	as_bench "pilot new-site $SITE_NAME --admin-password '$PASSWORD' --bench $BENCH_NAME"
+	as_bench "pilot new-site $SITE_NAME --admin-password $(quoted_password) --bench $BENCH_NAME"
 fi
 
 # Pilot skips an app that is already there, so both stages are safe to repeat.

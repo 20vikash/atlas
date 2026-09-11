@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -127,8 +128,9 @@ class Settings:
 		)
 
 	def guest_environment_text(self) -> str:
-		"""setup.sh reads shell assignments."""
-		return "\n".join(f"{key}={value}" for key, value in self.guest_environment.items()) + "\n"
+		"""setup.sh sources the file, so every value is quoted shell."""
+		lines = [f"{key}={shlex.quote(value)}" for key, value in self.guest_environment.items()]
+		return "\n".join(lines) + "\n"
 
 	@classmethod
 	def load(cls, path: Path = STATE_FILE) -> Settings:
