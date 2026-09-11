@@ -26,6 +26,11 @@ type snapshotUploadOwner interface {
 	Shutdown(context.Context) error
 }
 
+// migrationShutdownOwner stops transfers at shutdown.
+type migrationShutdownOwner interface {
+	Shutdown(context.Context) error
+}
+
 type serialBroker interface {
 	Shutdown()
 }
@@ -40,16 +45,29 @@ type trafficMonitorResource interface {
 }
 
 type daemon struct {
-	context          context.Context
-	cancel           context.CancelFunc
-	logger           *slog.Logger
-	snapshotUploads  snapshotUploadOwner
-	serialBroker     serialBroker
-	systemd          systemdConnection
-	trafficMonitor   trafficMonitorResource
-	workers          sync.WaitGroup
-	httpServer       daemonHTTPServer
-	httpServerErrors chan error
+	context           context.Context
+	cancel            context.CancelFunc
+	logger            *slog.Logger
+	snapshotUploads   snapshotUploadOwner
+	serialBroker      serialBroker
+	systemd           systemdConnection
+	trafficMonitor    trafficMonitorResource
+	workers           sync.WaitGroup
+	httpServer        daemonHTTPServer
+	httpServerErrors  chan error
+	migrations        migrationShutdownOwner
+	migrationListener migrationShutdownOwner
+}
+
+// OwnMigrations makes the daemon stop migration transfers at shutdown.
+func (daemon *daemon) OwnMigrations(migrations migrationShutdownOwner) {
+	daemon.migrations = migrations
+}
+
+// OwnMigrationListener makes the daemon stop the source transfer listener at
+// shutdown.
+func (daemon *daemon) OwnMigrationListener(listener migrationShutdownOwner) {
+	daemon.migrationListener = listener
 }
 
 func newDaemon(
@@ -144,6 +162,16 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 	if daemon.trafficMonitor != nil {
 		if err := daemon.trafficMonitor.Close(); err != nil {
 			shutdownErrors = append(shutdownErrors, fmt.Errorf("close traffic monitor: %w", err))
+		}
+	}
+	if daemon.migrationListener != nil {
+		if err := daemon.migrationListener.Shutdown(shutdownContext); err != nil {
+			shutdownErrors = append(shutdownErrors, err)
+		}
+	}
+	if daemon.migrations != nil {
+		if err := daemon.migrations.Shutdown(shutdownContext); err != nil {
+			shutdownErrors = append(shutdownErrors, err)
 		}
 	}
 	if err := daemon.snapshotUploads.Shutdown(shutdownContext); err != nil {

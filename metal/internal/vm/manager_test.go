@@ -22,12 +22,15 @@ type fakeRuntime struct {
 	pauses         int
 	resumes        int
 	removes        int
+	coldStarts     int
 	metadata       int
 	diskRefresh    int
+	diskLimitMiBps int
 	inspectError   error
 	restoreError   error
 	saveError      error
 	deleteError    error
+	coldStartError error
 }
 
 func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error) {
@@ -37,6 +40,16 @@ func (runtime *fakeRuntime) Inspect(context.Context, RuntimeMachine) (RuntimeSta
 func (runtime *fakeRuntime) Start(context.Context, RuntimeMachine) error {
 	runtime.starts++
 	runtime.state = StateRunning
+	return nil
+}
+
+func (runtime *fakeRuntime) ColdStart(context.Context, RuntimeMachine) error {
+	runtime.coldStarts++
+	if runtime.coldStartError != nil {
+		return runtime.coldStartError
+	}
+	runtime.state = StateRunning
+	runtime.hasSavedState = false
 	return nil
 }
 
@@ -109,8 +122,9 @@ func (runtime *fakeRuntime) RefreshMetadata(context.Context, RuntimeMachine) err
 	return nil
 }
 
-func (runtime *fakeRuntime) RefreshDisk(context.Context, RuntimeMachine) error {
+func (runtime *fakeRuntime) RefreshDisk(_ context.Context, machine RuntimeMachine) error {
 	runtime.diskRefresh++
+	runtime.diskLimitMiBps = machine.Specification.Disk.ThroughputMiBps
 	return nil
 }
 

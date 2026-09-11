@@ -16,6 +16,7 @@ Package `storage` imports images, creates fast virtual machine disk clones, mana
 | `VirtualMachineStore` | VM disk preparation, usage, growth, and release. |
 | `ImageStore` | Image directory, HTTP client, image locks, manifests, policy, pruning, and warm artifacts. |
 | `SnapshotStore` | Snapshot directory, HTTP client, snapshot locks, staging, upload, deletion, and pruning. |
+| `MigrationTransfer` | ZFS snapshot, estimate, resumable send and receive, resume token, GUID, and cleanup for a disk migration. |
 | `Stores` | The four services created by `NewStores`. |
 
 Consumers define the interfaces that they need. The storage package does not export one broad storage interface.
@@ -78,6 +79,14 @@ A successful VM start records image use. Metal keeps an image when a dependent V
 Durable upload state lives in the staging metadata. Live byte progress stays in memory. An upload recorded as running with no goroutine behind it did not survive a restart, so `UploadStatus` reports it as pending and the controller starts it again.
 
 `DeleteSnapshot` cancels a running upload and waits for it to stop before it removes the data that upload is reading. It removes the staging clone before the source snapshot, because ZFS keeps a snapshot alive while a clone of it exists.
+
+## Migration transfer
+
+`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>`, estimates the full or incremental stream, and sends it. The target receives with `zfs recv -s`, which saves a resume token when a receive is interrupted. The target then compares the received snapshot GUID with the source GUID, so only a verified copy counts.
+
+Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send and receive use `exec` and are covered by a host-guarded integration test. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
+
+`AbortReceive` cancels an interrupted resumable receive and removes the target dataset. An abort calls it before it removes the target VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
 
 ## Concurrency
 

@@ -9,6 +9,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 // DesiredState contains the complete controller-owned host sets.
@@ -60,13 +61,18 @@ type StorageCapacitySource interface {
 	Capacity(context.Context) (storage.Capacity, error)
 }
 
+// MigrationReservations returns capacity held by incoming migration targets.
+// Targets are absent from the VM list until reconstructed.
+type MigrationReservations func(context.Context) ([]vmmigration.TargetReservation, error)
+
 // Dependencies contains host synchronization services.
 type Dependencies struct {
-	Mesh            PrivilegedMesh
-	WireGuard       WireGuardManager
-	Images          ImagePolicyStore
-	VirtualMachines VirtualMachineSource
-	Storage         StorageCapacitySource
+	Mesh                  PrivilegedMesh
+	WireGuard             WireGuardManager
+	Images                ImagePolicyStore
+	VirtualMachines       VirtualMachineSource
+	Storage               StorageCapacitySource
+	MigrationReservations MigrationReservations
 	// Wake starts a reconcile pass, so new controller state is applied at once
 	// instead of at the next tick.
 	Wake func()
@@ -74,12 +80,13 @@ type Dependencies struct {
 
 // Service owns controller synchronization and host capacity calculation.
 type Service struct {
-	mesh            PrivilegedMesh
-	wireGuard       WireGuardManager
-	images          ImagePolicyStore
-	virtualMachines VirtualMachineSource
-	storage         StorageCapacitySource
-	wake            func()
+	mesh                  PrivilegedMesh
+	wireGuard             WireGuardManager
+	images                ImagePolicyStore
+	virtualMachines       VirtualMachineSource
+	storage               StorageCapacitySource
+	migrationReservations MigrationReservations
+	wake                  func()
 }
 
 // NewService returns a host service with explicit dependencies.
@@ -90,12 +97,13 @@ func NewService(dependencies Dependencies) (*Service, error) {
 	}
 
 	return &Service{
-		mesh:            dependencies.Mesh,
-		wireGuard:       dependencies.WireGuard,
-		images:          dependencies.Images,
-		virtualMachines: dependencies.VirtualMachines,
-		storage:         dependencies.Storage,
-		wake:            dependencies.Wake,
+		mesh:                  dependencies.Mesh,
+		wireGuard:             dependencies.WireGuard,
+		images:                dependencies.Images,
+		virtualMachines:       dependencies.VirtualMachines,
+		storage:               dependencies.Storage,
+		migrationReservations: dependencies.MigrationReservations,
+		wake:                  dependencies.Wake,
 	}, nil
 }
 
@@ -147,10 +155,24 @@ func (service *Service) Capacity(ctx context.Context) (Capacity, error) {
 }
 
 // capacityOf reports capacity against reservations the caller already listed.
+// Incoming targets reserve capacity before their data arrives.
 func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Information) (Capacity, error) {
 	reservedCPUCount := 0
 	for _, information := range virtualMachines {
 		reservedCPUCount += information.VirtualCPUCount
+	}
+
+	reservedMemoryMiB, reservedStorageMiB := 0, 0
+	if service.migrationReservations != nil {
+		reservations, err := service.migrationReservations(ctx)
+		if err != nil {
+			return Capacity{}, fmt.Errorf("list migration reservations: %w", err)
+		}
+		for _, reservation := range reservations {
+			reservedCPUCount += reservation.VirtualCPUCount
+			reservedMemoryMiB += reservation.MemoryMiB
+			reservedStorageMiB += reservation.DiskMiB
+		}
 	}
 
 	totalMemoryMiB, availableMemoryMiB, err := memoryCapacityMiB()
@@ -170,8 +192,8 @@ func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Inf
 		AvailableCPUCount:   max(totalCPUCount-reservedCPUCount, 0),
 		VirtualMachineCount: len(virtualMachines),
 		TotalMemoryMiB:      totalMemoryMiB,
-		AvailableMemoryMiB:  availableMemoryMiB,
+		AvailableMemoryMiB:  max(availableMemoryMiB-reservedMemoryMiB, 0),
 		TotalStorageMiB:     int(storageCapacity.TotalMiB),
-		AvailableStorageMiB: int(storageCapacity.AvailableMiB),
+		AvailableStorageMiB: max(int(storageCapacity.AvailableMiB)-reservedStorageMiB, 0),
 	}, nil
 }

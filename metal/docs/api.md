@@ -16,7 +16,7 @@ Each VM response nests `desired` and `observed`, so one read shows both what was
 
 `PUT /v1/vms/{id}/compute` sets `virtual_cpu_count`, `memory_mib`, and `sleep_after_idle_seconds`. A shape change needs a stopped VM. An idle timeout change is accepted in any state. `0` disables automatic idle shutdown. The response reports the value in `desired.compute`.
 
-Every `/v1` route needs a bearer token. Only liveness and the documentation are public.
+Every `/v1` controller route needs the static Metal bearer token. The source-side migration routes that one Metal host calls on another carry no credential and trust the WireGuard mesh. Only liveness and the documentation are public.
 
 Routes, status codes, and error mapping: [internal/api/SPEC.md](../internal/api/SPEC.md).
 

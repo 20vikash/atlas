@@ -60,9 +60,15 @@ class PlacementCapacity:
 class PlacementService:
 	"""Select and lock one Server with current effective capacity."""
 
-	def select_server(self, request: VirtualMachineCreateRequest, architecture: str) -> MetalServer:
-		"""Return one locked Server that can hold the request."""
-		servers = self.get_ready_servers()
+	def select_server(
+		self,
+		request: VirtualMachineCreateRequest,
+		architecture: str,
+		exclude_servers: set[str] | None = None,
+	) -> MetalServer:
+		"""Return one locked Server that can hold the request, minus excluded hosts."""
+		excluded = exclude_servers or set()
+		servers = [server for server in self.get_ready_servers() if server.name not in excluded]
 		if not servers:
 			frappe.throw(_("No running Metal Server is ready for Virtual Machines."), exc=AtlasUserError)
 
@@ -97,6 +103,34 @@ class PlacementService:
 
 		frappe.throw(_("No Metal Server has current capacity for this Virtual Machine."), exc=AtlasUserError)
 		raise AssertionError
+
+	def select_target_server(
+		self,
+		request: VirtualMachineCreateRequest,
+		architecture: str,
+		server_name: str,
+	) -> MetalServer:
+		"""Return one chosen Server after it confirms current capacity for the request."""
+		server = self.lock_server(server_name)
+		if not self.is_ready_server(server, architecture):
+			frappe.throw(
+				_("Metal Server {0} is not ready for this Virtual Machine.").format(server_name),
+				exc=AtlasUserError,
+			)
+		capacity = self.get_latest_capacities({server_name: architecture}).get(server_name)
+		if capacity is None:
+			frappe.throw(
+				_("No current capacity sample for Metal Server {0}. Check Server synchronization.").format(
+					server_name
+				),
+				exc=AtlasUserError,
+			)
+		if not self.subtract_local_reservations(capacity).can_host(request, architecture):
+			frappe.throw(
+				_("Metal Server {0} has no current capacity for this Virtual Machine.").format(server_name),
+				exc=AtlasUserError,
+			)
+		return server
 
 	def get_ready_servers(self) -> list[frappe._dict]:
 		"""Return Servers that are ready to host virtual machines."""
@@ -159,7 +193,28 @@ class PlacementService:
 				memory_mib=reservation.memory_mib,
 				disk_mib=reservation.disk_mib,
 			)
+		for shape in self.get_target_migration_reservations(capacity.server):
+			capacity = capacity.reserve(
+				virtual_cpu_count=shape.vcpus,
+				memory_mib=shape.memory_mib,
+				disk_mib=shape.disk_mib,
+			)
 		return capacity
+
+	def get_target_migration_reservations(self, server_name: str) -> list[frappe._dict]:
+		"""Return the VM shapes that active migrations reserve on this target Server."""
+		virtual_machine_names = frappe.get_all(
+			"Virtual Machine Migration",
+			filters={"target_server": server_name, "status": ["in", ["running", "ready"]]},
+			pluck="virtual_machine",
+		)
+		if not virtual_machine_names:
+			return []
+		return frappe.get_all(
+			"Virtual Machine",
+			filters={"name": ["in", virtual_machine_names]},
+			fields=["vcpus", "memory_mib", "disk_mib"],
+		)
 
 	def lock_server(self, server_name: str) -> MetalServer:
 		"""Lock one Server row for the current database transaction."""

@@ -263,6 +263,38 @@ class TestServer(UnitTestCase):
 
 		create_for_command.assert_not_called()
 
+	def test_sync_state_queues_one_host_exchange(self) -> None:
+		server = self._server(status="Running")
+		server.is_provisioning_completed = True
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.enqueue_server_sync"
+			) as enqueue_server_sync,
+		):
+			MetalServer.sync_state(server)
+
+		enqueue_server_sync.assert_called_once_with(server.name)
+
+	# An unprovisioned host has no Metal token.
+	def test_sync_state_rejects_a_server_that_is_not_ready(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.enqueue_server_sync"
+			) as enqueue_server_sync,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.sync_state(server)
+
+		enqueue_server_sync.assert_not_called()
+
 	def test_install_metald_queues_the_install_job(self) -> None:
 		server = self._server(status="Running")
 
@@ -451,6 +483,56 @@ class TestServer(UnitTestCase):
 			{"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64"},
 		)
 
+	def test_upgrade_metald_reports_the_reason_the_script_printed(self) -> None:
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		task = SimpleNamespace(
+			result=SimpleNamespace(
+				is_success=False,
+				exit_code=1,
+				output="==> restart metal.service\n    metal.service did not start; restoring fd6a6eb\n",
+			)
+		)
+
+		with (
+			patch(
+				"atlas.metal_server.core.host_installation.get_download_url",
+				return_value="https://atlas.test/files/metald-linux-amd64",
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
+				return_value=task,
+			),
+			self.assertRaises(frappe.ValidationError) as raised,
+		):
+			MetalServer._upgrade_metald(server)
+
+		message = str(raised.exception)
+		self.assertIn("Exit code 1", message)
+		self.assertIn("metal.service did not start", message)
+
+	def test_a_script_failure_reports_the_last_printed_lines(self) -> None:
+		from atlas.metal_server.core.host_installation import get_failure_reason
+
+		reason = get_failure_reason(
+			"==> download metald\n\ncurl: (22) The requested URL returned error: 404\n"
+		)
+
+		self.assertEqual(reason, "==> download metald curl: (22) The requested URL returned error: 404")
+
+	def test_a_script_that_printed_nothing_is_reported(self) -> None:
+		from atlas.metal_server.core.host_installation import get_failure_reason
+
+		self.assertIn("no output", get_failure_reason(""))
+
+	def test_a_script_that_did_not_run_is_reported(self) -> None:
+		from atlas.metal_server.core.host_installation import throw_script_failure
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			throw_script_failure("Could not upgrade metald on server node-test-00007.", None)
+
+		self.assertIn("did not run", str(raised.exception))
+
 	def test_install_metald_worker_needs_a_private_network_interface(self) -> None:
 		"""Atlas WG Mesh hooks this interface, so metald cannot guess it."""
 		server = self._server(status="Running")
@@ -589,19 +671,20 @@ class TestServer(UnitTestCase):
 
 	def test_configure_wireguard_job_rejects_a_failed_run(self) -> None:
 		server = self._server(status="Running")
-		task = SimpleNamespace(result=SimpleNamespace(output="wg: command not found", is_success=False))
+		task = SimpleNamespace(
+			result=SimpleNamespace(output="wg: command not found", is_success=False, exit_code=127)
+		)
 
 		with (
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
-			),
 			patch(
 				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 				return_value=task,
 			),
+			self.assertRaises(frappe.ValidationError) as raised,
 		):
-			with self.assertRaises(ValueError):
-				MetalServer._configure_wireguard(server)
+			MetalServer._configure_wireguard(server)
+
+		self.assertIn("wg: command not found", str(raised.exception))
 
 	def test_configure_wireguard_rejects_a_server_that_is_not_running(self) -> None:
 		server = self._server(status="Stopped")

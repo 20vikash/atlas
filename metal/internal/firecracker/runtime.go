@@ -102,6 +102,11 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) erro
 	return runtime.newMachine(input).Start(ctx)
 }
 
+// ColdStart boots the received disk without restoring source guest memory.
+func (runtime *Runtime) ColdStart(ctx context.Context, input vm.RuntimeMachine) error {
+	return runtime.newMachine(input).coldBoot(ctx)
+}
+
 // Stop shuts down a VM and deletes its saved state.
 func (runtime *Runtime) Stop(ctx context.Context, input vm.RuntimeMachine) error {
 	return runtime.newMachine(input).Stop(ctx)
@@ -159,7 +164,9 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	return nil
 }
 
-// RefreshDisk applies current disk limits to a live guest.
+// RefreshDisk applies the machine's disk limits to a live guest. A caller may
+// lower the limit in the machine specification for a temporary throttle. A VM
+// that is neither running nor paused is unchanged.
 func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine) error {
 	status, err := runtime.Inspect(ctx, input)
 	if err != nil {

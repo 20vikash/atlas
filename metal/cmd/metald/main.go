@@ -29,6 +29,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 const (
@@ -110,6 +111,21 @@ func listen(addr string) (net.Listener, error) {
 		return ln, err
 	}
 	return net.Listen("tcp", addr)
+}
+
+// transferListenAddress derives the migration transfer address from the API
+// listen address, keeping its host but using the transfer port. A unix socket
+// API address falls back to every interface.
+func transferListenAddress(apiAddress string, transferPort int) string {
+	port := fmt.Sprintf("%d", transferPort)
+	if strings.HasPrefix(apiAddress, "unix:") {
+		return ":" + port
+	}
+	host, _, err := net.SplitHostPort(apiAddress)
+	if err != nil {
+		return ":" + port
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func makeDirs(options options) error {
@@ -293,19 +309,68 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		imageReconcileInterval,
 		reconciler.ImageConfig{Logger: logger},
 	)
+	var migrationReconciler *reconciler.MigrationReconciler
+	var migrationManager *vmmigration.VMMigration
 	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
+		if migrationReconciler != nil {
+			migrationReconciler.Wake()
+		}
+	}
+	migrationReservations := func(ctx context.Context) ([]vmmigration.TargetReservation, error) {
+		if migrationManager == nil {
+			return nil, nil
+		}
+		return migrationManager.TargetReservations(ctx)
 	}
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
-		VirtualMachines: virtualMachineManager, Storage: stores.Pool, Wake: notifyReconcilers,
+		VirtualMachines: virtualMachineManager, Storage: stores.Pool,
+		MigrationReservations: migrationReservations, Wake: notifyReconcilers,
 	})
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
+	migrationCapacity := func(ctx context.Context) (vmmigration.AvailableCapacity, error) {
+		capacity, err := hostService.Capacity(ctx)
+		if err != nil {
+			return vmmigration.AvailableCapacity{}, err
+		}
+		return vmmigration.AvailableCapacity{
+			CPUCount:   capacity.AvailableCPUCount,
+			MemoryMiB:  capacity.AvailableMemoryMiB,
+			StorageMiB: capacity.AvailableStorageMiB,
+		}, nil
+	}
+	migrationManager, err = vmmigration.NewVMMigration(
+		virtualMachineManager,
+		vmmigration.NewSourceClient(0, options.migration.transferPort),
+		storage.NewMigrationTransfer(stores.Pool),
+		migrationCapacity,
+		vmmigration.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("configure migration manager: %w", err)
+	}
+	// The manager pauses mutation and reconciliation for a migrating VM through
+	// this guard, so it never imports the migration package.
+	virtualMachineManager.SetMigrationGuard(migrationManager)
+	migrationReconciler = reconciler.NewMigrationReconciler(
+		migrationManager,
+		reconcileInterval,
+		reconciler.MigrationConfig{Logger: logger},
+	)
+	daemon.OwnMigrations(migrationManager)
+	migrationListener, err := vmmigration.Listen(transferListenAddress(options.listen, options.migration.transferPort), migrationManager, logger)
+	if err != nil {
+		return fmt.Errorf("start migration transfer listener: %w", err)
+	}
+	daemon.OwnMigrationListener(migrationListener)
 	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
+		MigrationManager:      migrationManager,
 		SnapshotStore:         stores.Snapshots,
 		WakeReconciler:        notifyReconcilers,
 		HostService:           hostService,
@@ -324,6 +389,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	server.Listener = listener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
+	daemon.StartWorker(migrationReconciler.Run)
 	if trafficMonitor != nil {
 		daemon.StartTrafficListener(trafficMonitor.Events(), virtualMachineManager.RestoreAfterTraffic)
 	}

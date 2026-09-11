@@ -319,6 +319,7 @@ func newServerWithServices(
 	}
 	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
 		VirtualMachineManager: virtualMachineManager,
+		MigrationManager:      &stubMigrationManager{},
 		SnapshotStore:         services,
 		WakeReconciler:        func() {},
 		HostService:           hostService,
@@ -1039,10 +1040,6 @@ func TestRemovedSnapshotAndImageRoutesReturnNotFound(t *testing.T) {
 		{http.MethodGet, "/v1/vms/vm1/snapshots"},
 		{http.MethodPost, "/v1/vms/vm1/snapshots/snapshot-1/restore"},
 	} {
-		expectedStatus := http.StatusNotFound
-		if request.path == "/v1/vms/vm1/snapshots" {
-			expectedStatus = http.StatusMethodNotAllowed
-		}
-		do(t, server, request.method, request.path, "", expectedStatus)
+		do(t, server, request.method, request.path, "", http.StatusNotFound)
 	}
 }

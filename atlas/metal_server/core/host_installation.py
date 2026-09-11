@@ -12,8 +12,11 @@ from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
 if TYPE_CHECKING:
+	from atlas.atlas.core.ssh import SSHResult
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
+FAILURE_REASON_LINES = 3
+FAILURE_REASON_LENGTH = 500
 WIREGUARD_OVERHEAD_BYTES = 60
 WIREGUARD_CONFIGURE_TIMEOUT_SECONDS = 300
 METALD_INSTALL_TIMEOUT_SECONDS = 1_200
@@ -41,7 +44,9 @@ class HostInstallation:
 			run_in_background=False,
 		).result
 		if not result or not result.is_success:
-			frappe.throw(_("Could not configure WireGuard on server {0}.").format(self.server.name))
+			throw_script_failure(
+				_("Could not configure WireGuard on server {0}.").format(self.server.name), result
+			)
 
 		public_key = result.output.partition("===PUBLIC_KEY_START===")[2]
 		public_key = public_key.partition("===PUBLIC_KEY_END===")[0].strip()
@@ -86,7 +91,9 @@ class HostInstallation:
 			run_in_background=False,
 		).result
 		if not result or not result.is_success:
-			frappe.throw(_("Could not install metald on server {0}.").format(self.server.name))
+			throw_script_failure(
+				_("Could not install metald on server {0}.").format(self.server.name), result
+			)
 
 	def upgrade_metald(self) -> None:
 		"""Replace the metald binary and restart its daemon."""
@@ -105,7 +112,9 @@ class HostInstallation:
 			run_in_background=False,
 		).result
 		if not result or not result.is_success:
-			frappe.throw(_("Could not upgrade metald on server {0}.").format(self.server.name))
+			throw_script_failure(
+				_("Could not upgrade metald on server {0}.").format(self.server.name), result
+			)
 
 	def set_wireguard_ip_address(self) -> None:
 		"""Set the WireGuard IP address if it is empty."""
@@ -123,3 +132,22 @@ class HostInstallation:
 		if not 0 <= region_id <= 0xFFFF:
 			frappe.throw(_("Atlas Settings region ID must fit in one IPv6 field."))
 		return str(ipaddress.IPv6Address((0xFDAB << 112) | (region_id << 96) | int(node_number)))
+
+
+def throw_script_failure(message: str, result: "SSHResult | None") -> None:
+	"""Report a failed host script with the reason the script printed."""
+	if not result:
+		frappe.throw(_("{0} The script did not run.").format(message))
+
+	frappe.throw(
+		_("{0} Exit code {1}. {2}").format(message, result.exit_code, get_failure_reason(result.output))
+	)
+
+
+def get_failure_reason(output: str) -> str:
+	"""Return the last lines a host script printed. A script prints its reason last."""
+	printed_lines = [line.strip() for line in (output or "").splitlines() if line.strip()]
+	if not printed_lines:
+		return _("The script printed no output.")
+
+	return " ".join(printed_lines[-FAILURE_REASON_LINES:])[:FAILURE_REASON_LENGTH]

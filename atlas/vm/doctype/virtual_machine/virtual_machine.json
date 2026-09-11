@@ -7,6 +7,7 @@
  "field_order": [
   "is_draft",
   "is_terminating",
+  "active_migration",
   "current_state",
   "desired_state",
   "tenant_id",
@@ -51,6 +52,15 @@
    "fieldtype": "Check",
    "hidden": 1,
    "label": "Terminating",
+   "read_only": 1
+  },
+  {
+   "description": "Set while a migration owns this VM. Blocks mutable actions.",
+   "fieldname": "active_migration",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Active Migration",
+   "options": "Virtual Machine Migration",
    "read_only": 1
   },
   {
@@ -264,6 +274,10 @@
   },
   {
    "link_doctype": "Virtual Machine State",
+   "link_fieldname": "virtual_machine"
+  },
+  {
+   "link_doctype": "Virtual Machine Migration",
    "link_fieldname": "virtual_machine"
   }
  ],

@@ -9,11 +9,14 @@ import (
 
 // RequestRestart stores durable restart intent.
 func (manager *Manager) RequestRestart(ctx context.Context, identifier string) error {
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return err
+	}
 	record, err := manager.store.readDesired(identifier)
 	if err != nil {
 		return err
@@ -76,11 +79,14 @@ func (manager *Manager) SetDisk(ctx context.Context, identifier string, diskMiB 
 
 // SetNetwork stores the complete requested network configuration.
 func (manager *Manager) SetNetwork(ctx context.Context, identifier string, configuration NetworkConfiguration) error {
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return err
+	}
 	manager.allocationMutex.Lock()
 	defer manager.allocationMutex.Unlock()
 	record, err := manager.store.readDesired(identifier)
@@ -163,11 +169,14 @@ func (manager *Manager) ConnectSSH(ctx context.Context, identifier string) (SSHC
 
 // CreateSnapshot stages one machine image snapshot.
 func (manager *Manager) CreateSnapshot(ctx context.Context, identifier string) (StagedSnapshot, error) {
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return StagedSnapshot{}, err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return StagedSnapshot{}, err
+	}
 	desired, err := manager.store.readDesired(identifier)
 	if err != nil {
 		return StagedSnapshot{}, err
@@ -264,11 +273,14 @@ func (manager *Manager) mutate(ctx context.Context, identifier string, change fu
 
 // mutateAndReport applies one change and reports whether the record changed.
 func (manager *Manager) mutateAndReport(ctx context.Context, identifier string, change func(*DesiredRecord) (bool, error)) (bool, error) {
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return false, err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return false, err
+	}
 
 	record, err := manager.store.readDesired(identifier)
 	if err != nil {

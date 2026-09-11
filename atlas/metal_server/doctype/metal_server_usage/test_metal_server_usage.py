@@ -6,6 +6,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.metal_server.usage import (
 	delete_old_usage_samples,
+	enqueue_server_sync,
 	enqueue_server_syncs,
 	get_desired_images,
 	get_privileged_vm_addresses,
@@ -94,6 +95,21 @@ class TestServerUsage(UnitTestCase):
 			deduplicate=True,
 		)
 
+	# The queued sync reads the shared sets itself.
+	def test_one_server_exchange_reads_the_shared_sets(self) -> None:
+		peers = [{"node": "server-1"}]
+		addresses = ["fdaa:1::1"]
+		with (
+			patch("atlas.metal_server.usage.get_wireguard_peers", return_value=peers),
+			patch("atlas.metal_server.usage.get_privileged_vm_addresses", return_value=addresses),
+			patch("atlas.metal_server.usage.frappe.enqueue") as enqueue,
+		):
+			enqueue_server_sync("server-1")
+
+		self.assertEqual(enqueue.call_args.kwargs["wireguard_peers"], peers)
+		self.assertEqual(enqueue.call_args.kwargs["privileged_vm_addresses"], addresses)
+		self.assertEqual(enqueue.call_args.kwargs["job_id"], "atlas||server-sync||server-1")
+
 	def test_privileged_addresses_select_live_privileged_vms(self) -> None:
 		"""Every host holds the same whitelist, so one region-wide set goes out."""
 		rows = [{"name": "vm-00001", "tenant_id": 0}]
@@ -112,7 +128,7 @@ class TestServerUsage(UnitTestCase):
 			get_all.call_args.kwargs["filters"],
 			{"is_privileged": 1, "is_draft": 0, "is_terminating": 0},
 		)
-		# One query, so the address list does not scale its queries with the VMs.
+		# One query keeps address lookup independent of VM count.
 		self.assertEqual(get_all.call_args.kwargs["fields"], ["name", "tenant_id"])
 		get_doc.assert_not_called()
 

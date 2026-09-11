@@ -227,6 +227,20 @@ The response contains current host capacity. CPU, memory, storage, and virtual m
 
 The response also contains `virtual_machines`. It maps each VM identifier on the host to an object with its last observed `status`. Metal reads the stored observed record of each VM, so the status is as fresh as the last reconcile pass.
 
+The request carries an optional `jwt` object with the Atlas keys that sign the tokens one Metal host presents to another:
+
+```json
+{
+  "jwt": {
+    "issuer": "atlas-1",
+    "receiver": "node-fra-00001",
+    "public_keys": [{"id": "<key-id>", "key": "<base64url-public-key>"}]
+  }
+}
+```
+
+A sync without the object keeps the keys the host already holds. A repeated object is safe, and two keys let Atlas rotate one without a gap. Invalid key data returns `400`. The issuer and the receiver are fixed after the first successful sync, and a change returns `409`. A failed key update keeps the stored keys.
+
 ## Errors
 
 Every HTTP error uses one safe object:
@@ -246,6 +260,7 @@ Every HTTP error uses one safe object:
 |---|---|---|
 | `400` | `invalid_request` | The request syntax or value is invalid. |
 | `401` | `unauthorized` | Authentication failed. |
+| `403` | `forbidden` | A valid Atlas token does not allow the request. |
 | `404` | `not_found` | The resource does not exist. |
 | `409` | `conflict` | Current state or immutable identity blocks the request. |
 | `409` | `image_content_conflict` | An image reference identifies different content. |

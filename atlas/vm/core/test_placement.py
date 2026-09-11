@@ -5,6 +5,7 @@ from unittest.mock import Mock, call, patch
 import frappe
 from frappe.tests import UnitTestCase
 
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementCapacity, PlacementService
 
@@ -77,9 +78,11 @@ class TestPlacementService(UnitTestCase):
 			SimpleNamespace(vcpus=2, memory_mib=2048, disk_mib=10240, is_draft=1),
 			SimpleNamespace(vcpus=1, memory_mib=1024, disk_mib=5120, is_draft=0),
 		]
+		service = PlacementService()
+		service.get_target_migration_reservations = Mock(return_value=[])
 
 		with patch("atlas.vm.core.placement.frappe.get_all", return_value=reservations) as get_all:
-			remaining = PlacementService().subtract_local_reservations(capacity)
+			remaining = service.subtract_local_reservations(capacity)
 
 		self.assertEqual(remaining.available_cpu_count, 5)
 		self.assertEqual(remaining.available_memory_mib, 13312)
@@ -90,6 +93,49 @@ class TestPlacementService(UnitTestCase):
 			or_filters={"creation": [">", created_at], "is_draft": 1},
 			fields=["vcpus", "memory_mib", "disk_mib"],
 		)
+
+	def test_active_migrations_reserve_target_capacity(self) -> None:
+		created_at = datetime.now()
+		capacity = PlacementCapacity("server-1", "amd64", created_at, 8, 16384, 102400)
+		incoming = SimpleNamespace(vcpus=3, memory_mib=3072, disk_mib=15360)
+
+		with patch(
+			"atlas.vm.core.placement.frappe.get_all",
+			side_effect=[[], ["vm-00001"], [incoming]],
+		) as get_all:
+			remaining = PlacementService().subtract_local_reservations(capacity)
+
+		self.assertEqual(remaining.available_cpu_count, 5)
+		self.assertEqual(remaining.available_memory_mib, 13312)
+		self.assertEqual(remaining.available_storage_mib, 87040)
+		self.assertEqual(get_all.call_args_list[1].args[0], "Virtual Machine Migration")
+		self.assertEqual(
+			get_all.call_args_list[1].kwargs["filters"],
+			{"target_server": "server-1", "status": ["in", ["running", "ready"]]},
+		)
+
+	def test_no_active_migration_reserves_nothing(self) -> None:
+		with patch("atlas.vm.core.placement.frappe.get_all", return_value=[]) as get_all:
+			shapes = PlacementService().get_target_migration_reservations("server-1")
+
+		self.assertEqual(shapes, [])
+		get_all.assert_called_once()
+
+	def test_selection_excludes_the_source_server(self) -> None:
+		service = PlacementService()
+		service.get_ready_servers = Mock(
+			return_value=[SimpleNamespace(name="server-1", architecture="amd64")]
+		)
+		service.get_latest_capacities = Mock()
+
+		with self.assertRaisesRegex(frappe.ValidationError, "ready"):
+			service.select_server(
+				VirtualMachineCreateRequest("image", 2, 2048, 10240, 7),
+				"amd64",
+				exclude_servers={"server-1"},
+			)
+
+		service.get_latest_capacities.assert_not_called()
 
 	def test_selection_locks_and_rechecks_the_candidate(self) -> None:
 		request = VirtualMachineCreateRequest("image", 2, 2048, 10240, 7)
@@ -139,3 +185,33 @@ class TestPlacementService(UnitTestCase):
 			service.select_server(request, "amd64")
 
 		service.lock_server.assert_called_once_with("server-1")
+
+	def test_target_selection_confirms_the_chosen_host(self) -> None:
+		request = VirtualMachineCreateRequest("image", 2, 2048, 10240, 7)
+		capacity = PlacementCapacity("server-2", "amd64", datetime.now(), 4, 4096, 20480)
+		locked_server = SimpleNamespace(
+			name="server-2", architecture="amd64", status="Running", is_provisioning_completed=1
+		)
+		service = PlacementService()
+		service.lock_server = Mock(return_value=locked_server)
+		service.get_latest_capacities = Mock(return_value={"server-2": capacity})
+		service.subtract_local_reservations = Mock(return_value=capacity)
+
+		selected_server = service.select_target_server(request, "amd64", "server-2")
+
+		self.assertIs(selected_server, locked_server)
+		service.lock_server.assert_called_once_with("server-2")
+
+	def test_target_selection_rejects_a_host_without_capacity(self) -> None:
+		request = VirtualMachineCreateRequest("image", 8, 8192, 40960, 7)
+		capacity = PlacementCapacity("server-2", "amd64", datetime.now(), 1, 1024, 5120)
+		locked_server = SimpleNamespace(
+			name="server-2", architecture="amd64", status="Running", is_provisioning_completed=1
+		)
+		service = PlacementService()
+		service.lock_server = Mock(return_value=locked_server)
+		service.get_latest_capacities = Mock(return_value={"server-2": capacity})
+		service.subtract_local_reservations = Mock(return_value=capacity)
+
+		with self.assertRaises(AtlasUserError):
+			service.select_target_server(request, "amd64", "server-2")

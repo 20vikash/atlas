@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"runtime"
 	"testing"
 
@@ -76,6 +77,38 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 	}
 	if result.VirtualMachineStates["vm-00001"] != vm.StateRunning {
 		t.Fatalf("virtual machine states = %+v", result.VirtualMachineStates)
+	}
+}
+
+func TestCapacitySubtractsMigrationReservations(t *testing.T) {
+	dependencies := &testHostDependencies{
+		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, VirtualCPUCount: 2}},
+	}
+	reservations := func(context.Context) ([]vmmigration.TargetReservation, error) {
+		return []vmmigration.TargetReservation{{VirtualMachineID: "vm-00002", VirtualCPUCount: 3, MemoryMiB: 1024, DiskMiB: 2048}}, nil
+	}
+	service, err := NewService(Dependencies{
+		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,
+		VirtualMachines: dependencies, Storage: dependencies,
+		MigrationReservations: reservations, Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capacity, err := service.Capacity(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capacity.AvailableCPUCount != max(runtime.NumCPU()-2-3, 0) {
+		t.Fatalf("available CPU = %d", capacity.AvailableCPUCount)
+	}
+	if capacity.AvailableStorageMiB != 3072-2048 {
+		t.Fatalf("available storage = %d, want 1024", capacity.AvailableStorageMiB)
+	}
+	// Migration targets are not running VMs.
+	if capacity.VirtualMachineCount != 1 {
+		t.Fatalf("VM count = %d, want 1", capacity.VirtualMachineCount)
 	}
 }
 

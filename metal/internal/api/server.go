@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"io"
 	"log/slog"
 	"strings"
@@ -61,9 +62,24 @@ type VirtualMachineManager interface {
 	ConnectSSH(context.Context, string) (vm.SSHConnection, error)
 }
 
+// MigrationManager owns this host's migration records and reservations.
+type MigrationManager interface {
+	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (vmmigration.TargetMigrationRecord, error)
+	TargetStatus(ctx context.Context, migrationID string) (vmmigration.TargetMigrationRecord, error)
+	RequestFinish(ctx context.Context, migrationID string) error
+	AbortTarget(ctx context.Context, migrationID string) error
+	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error)
+	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
+	StopSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceSnapshot, error)
+	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
+	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
+	UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error
+}
+
 // Dependencies contains services used by the HTTP handlers.
 type Dependencies struct {
 	VirtualMachineManager VirtualMachineManager
+	MigrationManager      MigrationManager
 	SnapshotStore         SnapshotStore
 	WakeReconciler        func()
 	HostService           HostService
@@ -73,6 +89,7 @@ type Dependencies struct {
 // Server owns the HTTP handlers and their dependencies.
 type Server struct {
 	virtualMachineManager VirtualMachineManager
+	migrationManager      MigrationManager
 	snapshotStore         SnapshotStore
 	wakeReconciler        func()
 	hostService           HostService
@@ -89,6 +106,7 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 
 	server := &Server{
 		virtualMachineManager: dependencies.VirtualMachineManager,
+		migrationManager:      dependencies.MigrationManager,
 		snapshotStore:         dependencies.SnapshotStore,
 		wakeReconciler:        dependencies.WakeReconciler,
 		hostService:           dependencies.HostService,
@@ -107,7 +125,6 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	// Correlation runs first, so every log line and error carries the same IDs.
 	router.Use(correlationMiddleware)
 	router.Use(server.logRequest)
-	router.Use(server.authenticate)
 	server.registerRoutes(router)
 
 	return router, nil
@@ -142,7 +159,7 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
 		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
 	}
-	if dependencies.VirtualMachineManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil {
+	if dependencies.VirtualMachineManager == nil || dependencies.MigrationManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil
@@ -152,26 +169,28 @@ func validateServerConfiguration(configuration Config, dependencies Dependencies
 // comparison is constant time.
 func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if isPublicPath(c.Path()) {
-			return next(c)
-		}
-
-		token := c.Request().Header.Get("Authorization")
-		const prefix = "Bearer "
-		if len(token) <= len(prefix) || token[:len(prefix)] != prefix {
+		presented, found := bearerToken(c)
+		if !found {
 			return unauthorized()
 		}
 
-		digest := sha256.Sum256([]byte(token[len(prefix):]))
+		digest := sha256.Sum256([]byte(presented))
 		if subtle.ConstantTimeCompare(s.authTokenHash, []byte(hex.EncodeToString(digest[:]))) != 1 {
 			return unauthorized()
 		}
+
 		return next(c)
 	}
 }
 
-// isPublicPath reports whether health and documentation serve without
-// authentication. They carry no VM data.
-func isPublicPath(path string) bool {
-	return path == "/health" || path == "/docs" || path == "/docs/swagger.json"
+// bearerToken returns the Authorization token.
+func bearerToken(c echo.Context) (string, bool) {
+	const prefix = "Bearer "
+
+	header := c.Request().Header.Get("Authorization")
+	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
+		return "", false
+	}
+
+	return header[len(prefix):], true
 }

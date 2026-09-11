@@ -25,7 +25,7 @@ api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> 
  |            └─ network and traffic monitor
  |
  ├─ host.Service ----> network, image policy, capacity
- ├─ reconcilers -----> VM state, image cache, snapshot staging
+ ├─ reconcilers -----> VM state, image cache, snapshot staging, migration handshake, cutover, and completion
  └─ traffic listener -> concurrent VM restoration
 ```
 

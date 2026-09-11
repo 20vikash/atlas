@@ -22,6 +22,13 @@ frappe.ui.form.on("Metal Server", {
 			[__("Ping Server"), "ping_server", is_running, __("Pinging server..."), false],
 			[__("Sync Disks"), "sync_disks", is_running, __("Syncing disks..."), false],
 			[
+				__("Sync Host State"),
+				"sync_state",
+				is_running && frm.doc.is_provisioning_completed,
+				__("Syncing host state..."),
+				false,
+			],
+			[
 				__("Re-configure WireGuard"),
 				"configure_wireguard",
 				is_running,

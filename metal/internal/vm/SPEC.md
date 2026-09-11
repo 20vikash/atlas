@@ -54,6 +54,14 @@ A valid saved state is authoritative when Firecracker is stopped. Restore failur
 
 The phase and operation ID are written before each host call. A failure stores a safe public message and local detail. Destroy records progress per resource so an interrupted destroy resumes safely.
 
+## Migration
+
+The migration lifecycle lives in [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md). This package supports migration without importing that package.
+
+The manager exposes the operations migration drives: read and write VM records, allocate IDs, take the per-VM and allocation locks, release storage, and the migration runtime and network operations (normalize the source to stopped, remove and create the migration network, apply the migrated state with a cold start, remove the migrated runtime, and limit or refresh the source disk).
+
+The manager reads migration lock state through an injected `MigrationGuard`. A source lock blocks every VM mutation and pauses reconciliation. A target reservation hides the VM from get and list and pauses reconciliation. Without a guard, no VM is migrating. The daemon injects the guard with `SetMigrationGuard`.
+
 ## Boundaries
 
 `Runtime`, `Network`, `Storage`, and `Snapshots` are consumed here and implemented by host packages. The manager uses `traffic.Monitor` for samples and watch operations. The daemon traffic listener passes each `traffic.Event` to `Manager.RestoreAfterTraffic`.
@@ -67,3 +75,4 @@ The phase and operation ID are written before each host call. A failure stores a
 - [internal/network/SPEC.md](../network/SPEC.md) implements `Network`.
 - [internal/network/traffic/SPEC.md](../network/traffic/SPEC.md) owns packet tracking.
 - [internal/reconciler/SPEC.md](../reconciler/SPEC.md) drives reconciliation and traffic events.
+- [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md) owns the migration lifecycle this package supports.

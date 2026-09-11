@@ -42,7 +42,11 @@ Every phase is safe to repeat. A creation retry reuses the provider identity fro
 
 `POST /v1/sync` sends the desired host state and returns capacity in the same exchange. Atlas records the result as a Metal Server Usage row, which is what placement later reads.
 
+A scheduled job queues one exchange for each ready server. The `sync_state` action queues one exchange for a single server, so an operator does not wait for the next scheduled run.
+
 A transport fault and a response fault are logged separately, because they need different responses: one is a network problem, the other is a host problem.
+
+The same exchange carries the Atlas public keys that the host must trust. Each host receives its own name as the receiver. A host that is inside the key overlap window receives the current key and the key it replaced. Atlas logs a missing signing key and syncs the host state without keys, so a capacity report never stops for it.
 
 ## Public IPv4
 

@@ -49,10 +49,11 @@ type Manager struct {
 	snapshots            Snapshots
 	traffic              *traffic.Monitor
 	logger               *slog.Logger
-	operationLocks       keyedLocks
+	operationLocks       KeyedLocks
 	allocationMutex      sync.Mutex
 	temporaryUserIDs     map[uint32]bool
 	temporaryIdentifiers map[string]bool
+	migrationGuard       MigrationGuard
 }
 
 // NewManager validates all records and returns one host VM manager.
@@ -96,11 +97,14 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
 	}
-	unlock, err := manager.operationLocks.lock(ctx, identifier)
+	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return Information{}, err
 	}
 	defer unlock()
+	if err := manager.assertNotSourceLocked(identifier); err != nil {
+		return Information{}, err
+	}
 
 	fingerprint, err := createFingerprint(specification)
 	if err != nil {
@@ -127,6 +131,9 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, ErrConflict
 	}
 	defer manager.allocationMutex.Unlock()
+	if manager.isTargetReserved(identifier) {
+		return Information{}, ErrConflict
+	}
 	if inUse, err := manager.publicIPv4InUse(identifier, specification.Network.PublicIPv4); err != nil {
 		return Information{}, err
 	} else if inUse {
@@ -164,6 +171,10 @@ func (manager *Manager) Information(ctx context.Context, identifier string) (Inf
 		return Information{}, err
 	}
 	defer unlock()
+	// Incoming migration targets are not normal VMs.
+	if manager.isTargetReserved(identifier) {
+		return Information{}, ErrNotFound
+	}
 	return manager.information(identifier)
 }
 
@@ -177,6 +188,10 @@ func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	}
 	information := make([]Information, 0, len(identifiers))
 	for _, identifier := range identifiers {
+		// Hide incoming migration targets from the VM list.
+		if manager.isTargetReserved(identifier) {
+			continue
+		}
 		current, err := manager.Information(ctx, identifier)
 		if errors.Is(err, ErrNotFound) {
 			manager.logger.WarnContext(ctx, "skipped incomplete virtual machine records",

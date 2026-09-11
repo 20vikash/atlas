@@ -6,6 +6,8 @@ import "context"
 type Runtime interface {
 	Inspect(context.Context, RuntimeMachine) (RuntimeStatus, error)
 	Start(context.Context, RuntimeMachine) error
+	// ColdStart boots the disk without restoring warm memory.
+	ColdStart(context.Context, RuntimeMachine) error
 	Stop(context.Context, RuntimeMachine) error
 	SaveAndStop(context.Context, RuntimeMachine) error
 	Restore(context.Context, RuntimeMachine) error
@@ -15,6 +17,8 @@ type Runtime interface {
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error
 	RefreshMetadata(context.Context, RuntimeMachine) error
+	// RefreshDisk applies the machine's disk limits to a live guest. A caller may
+	// lower the limit in the machine specification for a temporary throttle.
 	RefreshDisk(context.Context, RuntimeMachine) error
 	ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error)
 }

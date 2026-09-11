@@ -15,7 +15,7 @@ func (manager *Manager) newVirtualMachine(identifier string) virtualMachine {
 
 // lock serializes operations on this virtual machine.
 func (virtualMachine virtualMachine) lock(ctx context.Context) (func(), error) {
-	return virtualMachine.manager.operationLocks.lock(ctx, virtualMachine.identifier)
+	return virtualMachine.manager.operationLocks.Lock(ctx, virtualMachine.identifier)
 }
 
 // records reads both stored records, so a caller sees one consistent pair.

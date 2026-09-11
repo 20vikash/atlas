@@ -157,12 +157,14 @@ permission_query_conditions = {
 	"Metal Server IP Address": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine Image": "atlas.auth.overrides.get_permission_query_conditions",
+	"Virtual Machine Migration": "atlas.auth.overrides.get_permission_query_conditions",
 }
 
 has_permission = {
 	"Metal Server IP Address": "atlas.auth.overrides.has_permission",
 	"Virtual Machine": "atlas.auth.overrides.has_permission",
 	"Virtual Machine Image": "atlas.auth.overrides.has_permission",
+	"Virtual Machine Migration": "atlas.auth.overrides.has_permission",
 }
 
 # Document Events
@@ -224,13 +226,16 @@ scheduler_events = {
 		],
 		"* * * * *": [
 			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
+			"atlas.vm.core.vm_migration.reconcile_migrations",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
 			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],
 	},
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],
-	"daily": ["atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate"],
+	"daily": [
+		"atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate",
+	],
 }
 
 # Testing

@@ -108,6 +108,8 @@ func statusCode(status int) string {
 		return "invalid_request"
 	case http.StatusUnauthorized:
 		return "unauthorized"
+	case http.StatusForbidden:
+		return "forbidden"
 	case http.StatusNotFound:
 		return "not_found"
 	case http.StatusConflict:
@@ -135,6 +137,6 @@ func badRequest(message string) error {
 }
 
 // unauthorized reports a missing or wrong API token.
-func unauthorized() error {
+func unauthorized() *apiError {
 	return newAPIError(http.StatusUnauthorized, "unauthorized", "invalid API token")
 }

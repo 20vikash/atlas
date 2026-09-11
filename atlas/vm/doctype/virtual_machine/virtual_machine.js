@@ -48,6 +48,27 @@ frappe.ui.form.on("Virtual Machine", {
 			);
 		});
 
+		const is_migrating = Boolean(frm.doc.active_migration);
+		if ((is_running || is_stopped || is_paused) && !is_migrating) {
+			frm.add_custom_button(
+				__("Migrate VM"),
+				() => migrateVirtualMachine(frm),
+				__("Actions")
+			);
+		}
+		if (is_migrating) {
+			frm.add_custom_button(
+				__("View Migration"),
+				() =>
+					frappe.set_route(
+						"Form",
+						"Virtual Machine Migration",
+						frm.doc.active_migration
+					),
+				__("Actions")
+			);
+		}
+
 		frm.add_custom_button(
 			__("Snapshot VM"),
 			() => showCreateMachineImageDialog(frm),
@@ -127,6 +148,54 @@ frappe.ui.form.on("Virtual Machine", {
 		);
 	},
 });
+
+function migrateVirtualMachine(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Migrate Virtual Machine"),
+		fields: [
+			{
+				fieldtype: "HTML",
+				fieldname: "summary",
+				options: __(
+					"This copies the disk and moves {0} off {1}. It stays available until the short cutover.",
+					[frm.doc.name.bold(), (frm.doc.server || "").bold()]
+				),
+			},
+			{
+				fieldtype: "Link",
+				fieldname: "target_server",
+				label: __("Target Host"),
+				options: "Metal Server",
+				description: __("Leave empty to let Atlas choose a host."),
+				get_query: () => ({
+					filters: {
+						status: "Running",
+						is_provisioning_completed: 1,
+						name: ["!=", frm.doc.server],
+					},
+				}),
+			},
+		],
+		primary_action_label: __("Migrate"),
+		primary_action(values) {
+			dialog.hide();
+			frm.call({
+				method: "migrate",
+				doc: frm.doc,
+				args: { target_server: values.target_server || null },
+				freeze: true,
+				freeze_message: __("Starting migration..."),
+			}).then((response) => {
+				if (response.message) {
+					frappe.set_route("Form", "Virtual Machine Migration", response.message);
+				} else {
+					frm.reload_doc();
+				}
+			});
+		},
+	});
+	dialog.show();
+}
 
 function showPrivilegeDialog(frm) {
 	const granting = !frm.doc.is_privileged;

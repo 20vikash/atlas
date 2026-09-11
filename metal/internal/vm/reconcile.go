@@ -39,6 +39,11 @@ func (manager *Manager) Reconcile(ctx context.Context, identifier string) error 
 	}
 	defer unlock()
 
+	// Migration sources and incoming targets pause normal reconciliation.
+	if manager.isMigrating(identifier) {
+		return nil
+	}
+
 	desired, observed, err := virtualMachine.records()
 	if err != nil {
 		return err
