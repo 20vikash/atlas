@@ -93,6 +93,13 @@ def build_http_proxy_package(context: CliCtxObj) -> None:
 @click.option("--minimal", is_flag=True, help="Build the Ubuntu minimal cloud image.")
 @click.option("--title")
 @click.option(
+	"--storage",
+	type=click.Choice(["object-storage", "site-file"]),
+	default="object-storage",
+	show_default=True,
+	help="Store the artifacts in object storage, or as public site files during bootstrap.",
+)
+@click.option(
 	"--output-directory", type=click.Path(path_type=Path), default=Path("./dist"), show_default=True
 )
 @pass_context
@@ -102,6 +109,7 @@ def build_ubuntu_base_image(
 	architecture: str,
 	minimal: bool,
 	title: str | None,
+	storage: str,
 	output_directory: Path,
 ) -> None:
 	"""Build and publish a public Ubuntu server cloud image."""
@@ -125,6 +133,7 @@ def build_ubuntu_base_image(
 					architecture,
 					image_path,
 					kernel_path,
+					"Site File" if storage == "site-file" else "Object Storage",
 				)
 			except ObjectStorageError as error:
 				raise click.UsageError(str(error)) from error

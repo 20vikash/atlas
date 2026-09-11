@@ -28,6 +28,14 @@ PROXY_CONFIGURATION_FIELDS = (
 	"proxy_cluster_password",
 	"previous_proxy_cluster_password",
 )
+# Changes can trigger pending image migrations.
+OBJECT_STORAGE_FIELDS = (
+	"object_storage_bucket",
+	"object_storage_access_key_id",
+	"object_storage_secret_access_key",
+	"object_storage_endpoint_url",
+	"object_storage_region",
+)
 
 
 class AtlasSettings(Document):
@@ -151,6 +159,15 @@ class AtlasSettings(Document):
 
 		return LetsEncrypt(settings=self)
 
+	@property
+	def is_object_storage_configured(self) -> bool:
+		"""Return whether the bucket and both credentials are set."""
+		return bool(
+			self.object_storage_bucket
+			and self.object_storage_access_key_id
+			and self.get_password("object_storage_secret_access_key", raise_exception=False)
+		)
+
 	def get_object_storage_client(self) -> "ObjectStorageClient":
 		"""Create the configured object storage client."""
 		from atlas.atlas.object_storage import ObjectStorageClient
@@ -216,6 +233,11 @@ class AtlasSettings(Document):
 
 		if any(self.has_value_changed(field) for field in PROXY_CONFIGURATION_FIELDS):
 			push_configuration_to_active_proxies()
+
+		if any(self.has_value_changed(field) for field in OBJECT_STORAGE_FIELDS):
+			from atlas.vm.core.vm_image_storage_migration import enqueue_site_file_image_migrations
+
+			enqueue_site_file_image_migrations()
 
 	def before_save(self) -> None:
 		"""Create the regional credentials and apply provider setup when the credentials change."""

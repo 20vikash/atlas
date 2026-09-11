@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+from pathlib import Path
 
 import frappe
 
@@ -21,6 +23,26 @@ def publish_public_file(file_name: str, label: str, content: bytes) -> str:
 
 	print(f"atlas: {label} sha256 {digest}")
 	return file_doc.name
+
+
+def publish_public_file_path(source: Path, digest: str) -> str:
+	"""Publish a large public build file from disk."""
+	file_name = f"{digest[:12]}-{source.name}"
+	destination = Path(frappe.get_site_path("public", "files", file_name))
+	destination.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copyfile(source, destination)
+
+	file_doc = frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": file_name,
+			"file_url": f"/files/{file_name}",
+			"file_size": destination.stat().st_size,
+			"is_private": 0,
+		}
+	)
+	file_doc.flags.copy_from_existing_file = True
+	return file_doc.insert(ignore_permissions=True).name
 
 
 def get_content_addressed_name(file_name: str, digest: str) -> str:
