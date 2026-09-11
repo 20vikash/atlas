@@ -47,16 +47,6 @@ A wildcard name can only be proved through DNS, so `LetsEncrypt` answers the ACM
 
 Atlas Settings owns the certificate chain, the private key, and the expiry. The expiry is read from the certificate on every validate, so the stored values cannot drift apart.
 
-## Metal token signing
-
-One Metal host calls another with a token that Atlas signs. Atlas Settings owns the Ed25519 signing key, the previous key, and the rotation time.
-
-The first key is created after install and after migration. A daily task rotates the key once it is 30 days old and keeps the key it replaces, so a token issued before the rotation stays usable.
-
-`MetalTokenIssuer` signs one token for a VM, a caller, a receiver, and a set of scopes. The only scopes are `read_vm` and `migration`, and a token expires inside two hours. The issuer reads no VM record.
-
-Nothing outside Atlas ever receives a private key. Metal receives public keys through the host state exchange.
-
 ## SSH tasks
 
 An `SSH Task` records one shell command or script run for a `Metal Server` or a `Virtual Machine`. Its `target` field is a Dynamic Link. The task reads the target document's `ssh_host` property for the connection address.

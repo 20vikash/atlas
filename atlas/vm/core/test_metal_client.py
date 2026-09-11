@@ -166,7 +166,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			"atlas.vm.core.metal_client.requests.request",
 			return_value=build_response(202, migration),
 		) as request:
-			result = client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000", "jwt-token")
+			result = client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000")
 
 		self.assertEqual(result, migration)
 		self.assertEqual(
@@ -175,7 +175,7 @@ class TestMetalClientMigrations(UnitTestCase):
 		# The keys must match Metal's createMigrationRequest, which decodes strictly.
 		self.assertEqual(
 			request.call_args.kwargs["json"],
-			{"virtual_machine_id": "vm-00001", "source": "http://10.0.0.3:9000", "token": "jwt-token"},
+			{"virtual_machine_id": "vm-00001", "source": "http://10.0.0.3:9000"},
 		)
 
 	def test_get_migration_reads_status(self) -> None:
@@ -213,7 +213,7 @@ class TestMetalClientMigrations(UnitTestCase):
 		client = build_client()
 
 		for call_migration in (
-			lambda: client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000", "jwt"),
+			lambda: client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000"),
 			lambda: client.abort_migration("mig-00001"),
 			lambda: client.finish_migration("mig-00001"),
 		):

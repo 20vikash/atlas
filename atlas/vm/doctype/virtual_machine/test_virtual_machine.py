@@ -480,34 +480,6 @@ class TestMetalClient(UnitTestCase):
 			},
 		)
 
-	def test_sync_sends_the_atlas_public_keys_when_they_are_given(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = SimpleNamespace(status_code=200, content=b"{}", json=lambda: {"capacity": {}})
-		key_sync = {
-			"issuer": "atlas-1",
-			"receiver": "node-fra-00001",
-			"public_keys": [{"id": "key-1", "key": "public-key"}],
-		}
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.sync([], [], [], key_sync=key_sync)
-
-		self.assertEqual(request.call_args.kwargs["json"]["jwt"], key_sync)
-
-	# Keep existing host keys when sync sends none.
-	def test_sync_omits_the_key_object_when_no_keys_are_given(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = SimpleNamespace(status_code=200, content=b"{}", json=lambda: {"capacity": {}})
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.sync([], [], [])
-
-		self.assertNotIn("jwt", request.call_args.kwargs["json"])
-
 	def test_snapshot_transport_error_is_uncertain(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"

@@ -232,27 +232,23 @@ class MetalClient:
 		wireguard_peers: list[dict[str, Any]],
 		images: list[dict[str, Any]],
 		privileged_vm_addresses: list[str],
-		key_sync: dict[str, Any] | None = None,
 	) -> dict[str, Any]:
-		"""Exchange controller and host state. Absent keys leave the host keys alone."""
+		"""Exchange controller and host state."""
 		request = {
 			"wireguard_peers": wireguard_peers,
 			"images": images,
 			"privileged_vm_addresses": privileged_vm_addresses,
 		}
-		if key_sync:
-			request["jwt"] = key_sync
-
 		return self._request("POST", "/v1/sync", json=request, uncertain_on_failure=True)
 
 	def put_migration(
-		self, migration_id: str, virtual_machine_id: str, source: str, token: str
+		self, migration_id: str, virtual_machine_id: str, source: str
 	) -> dict[str, Any]:
 		"""Store one migration request at the target host. Safe to repeat."""
 		return self._request(
 			"PUT",
 			f"/v1/migrations/{quote(migration_id, safe='')}",
-			json={"virtual_machine_id": virtual_machine_id, "source": source, "token": token},
+			json={"virtual_machine_id": virtual_machine_id, "source": source},
 			expected_status=202,
 			uncertain_on_failure=True,
 			timeout=self.create_timeout_seconds,

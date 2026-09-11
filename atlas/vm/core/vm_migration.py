@@ -10,11 +10,6 @@ from frappe.utils import get_datetime, now_datetime
 
 from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
-from atlas.metal_server.core.metal_token import (
-	SCOPE_MIGRATION,
-	SCOPE_READ_VIRTUAL_MACHINE,
-	MetalTokenIssuer,
-)
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementService
@@ -128,8 +123,8 @@ class MigrationService:
 	def run(self) -> None:
 		"""Send the request, then poll the target until the migration settles.
 
-		The request repeats on every non-abort run, so a recovery run refreshes the
-		target token before a finish retry when the stored token can be expired.
+		The request repeats on every non-abort run, so a recovery run re-sends the
+		target-pull request to a target that lost it.
 		"""
 		if not self.migration.abort_requested:
 			self.send_request()
@@ -182,11 +177,10 @@ class MigrationService:
 		self.settle("failed")
 
 	def send_request(self) -> None:
-		"""Issue one migration token and send the target-pull request. Safe to repeat."""
-		token = self.issue_token()
+		"""Send the target-pull request. Safe to repeat."""
 		source = MetalClient.get_api_url(self.source_server)
 		self.target_client.put_migration(
-			cast(str, self.migration.name), self.migration.virtual_machine, source, token
+			cast(str, self.migration.name), self.migration.virtual_machine, source
 		)
 
 	def poll(self) -> dict[str, Any]:
@@ -263,15 +257,6 @@ class MigrationService:
 		progress["error"] = str(error)
 		self.migration.db_set("progress", frappe.as_json(progress))
 		frappe.db.commit()  # nosemgrep
-
-	def issue_token(self) -> str:
-		"""Return one token that lets the target pull the VM from the source."""
-		return MetalTokenIssuer().issue_token(
-			virtual_machine_id=self.migration.virtual_machine,
-			caller=self.migration.target_server,
-			receiver=self.migration.source_server,
-			scopes=[SCOPE_READ_VIRTUAL_MACHINE, SCOPE_MIGRATION],
-		)
 
 	@property
 	def is_expired(self) -> bool:

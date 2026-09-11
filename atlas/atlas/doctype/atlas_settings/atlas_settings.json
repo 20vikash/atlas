@@ -32,10 +32,6 @@
   "column_break_bgjv",
   "wg_mesh_binary_x86_64_file",
   "wg_mesh_source_hash",
-  "metal_token_section",
-  "metal_token_private_key",
-  "previous_metal_token_private_key",
-  "metal_token_key_rotated_on",
   "jwks_data_section",
   "central_jwks_url",
   "jwt_signing_key_id",
@@ -350,29 +346,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "metal_token_section",
-   "fieldtype": "Section Break",
-   "label": "Metal Token Signing"
-  },
-  {
-   "fieldname": "metal_token_private_key",
-   "fieldtype": "Password",
-   "label": "Signing Key",
-   "read_only": 1
-  },
-  {
-   "fieldname": "previous_metal_token_private_key",
-   "fieldtype": "Password",
-   "label": "Previous Signing Key",
-   "read_only": 1
-  },
-  {
-   "fieldname": "metal_token_key_rotated_on",
-   "fieldtype": "Datetime",
-   "label": "Signing Key Rotated On",
-   "read_only": 1
-  },
-  {
    "fieldname": "storage_tab",
    "fieldtype": "Tab Break",
    "label": "Storage"
@@ -573,7 +546,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-11 09:40:00.000000",
+ "modified": "2026-09-11 09:45:00.000000",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",
