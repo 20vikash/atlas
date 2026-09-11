@@ -6,7 +6,10 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.object_storage import ObjectStorageError
-from atlas.vm.core.vm_image_storage_migration import VirtualMachineImageStorageMigration
+from atlas.vm.core.vm_image_storage_migration import (
+	VirtualMachineImageStorageMigration,
+	enqueue_site_file_image_migrations,
+)
 
 
 def build_image(**overrides) -> SimpleNamespace:
@@ -106,3 +109,35 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 
 		with self.assertRaises(ObjectStorageError):
 			VirtualMachineImageStorageMigration.validate_stored_size(client, "key", 20)
+
+
+class TestSiteFileImageMigrationTrigger(UnitTestCase):
+	def test_nothing_is_queued_without_object_storage(self) -> None:
+		settings = SimpleNamespace(is_object_storage_configured=False)
+
+		with (
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.get_single", return_value=settings),
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.get_all") as get_all,
+		):
+			enqueue_site_file_image_migrations()
+
+		get_all.assert_not_called()
+
+	def test_every_available_site_file_image_is_queued(self) -> None:
+		settings = SimpleNamespace(is_object_storage_configured=True)
+
+		with (
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.get_single", return_value=settings),
+			patch(
+				"atlas.vm.core.vm_image_storage_migration.frappe.get_all",
+				return_value=["image-1", "image-2"],
+			) as get_all,
+			patch.object(VirtualMachineImageStorageMigration, "enqueue") as enqueue,
+		):
+			enqueue_site_file_image_migrations()
+
+		self.assertEqual(
+			get_all.call_args.kwargs["filters"],
+			{"artifact_storage": "Site File", "status": "Available"},
+		)
+		self.assertEqual([call.args[0] for call in enqueue.call_args_list], ["image-1", "image-2"])

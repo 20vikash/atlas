@@ -186,3 +186,20 @@ class IntegrationTestWildcardCertificateRenewal(IntegrationTestCase):
 		self.settings.wildcard_tls_expires_on = None
 
 		self.assertFalse(self._renew_expiring().called)
+
+
+class TestObjectStorageConfiguration(UnitTestCase):
+	def test_object_storage_needs_a_bucket_and_both_credentials(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		cases = (
+			("bucket", "key", "secret", True),
+			("", "key", "secret", False),
+			("bucket", "", "secret", False),
+			("bucket", "key", None, False),
+		)
+		for bucket, access_key_id, secret, expected in cases:
+			settings = MagicMock(object_storage_bucket=bucket, object_storage_access_key_id=access_key_id)
+			settings.get_password.return_value = secret
+			with self.subTest(bucket=bucket, access_key_id=access_key_id, secret=secret):
+				self.assertEqual(AtlasSettings.is_object_storage_configured.fget(settings), expected)

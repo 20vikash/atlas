@@ -97,6 +97,26 @@ class VirtualMachineImageStorageMigration:
 			)
 
 
+def enqueue_site_file_image_migrations() -> None:
+	"""Queue a migration for every Available image that site files still hold.
+
+	Atlas Settings calls this when the object storage fields change, and a
+	scheduled job calls it again, because a migration is safe to repeat and one
+	that failed has nothing else to retry it.
+	"""
+	settings = cast("AtlasSettings", frappe.get_single("Atlas Settings"))
+	if not settings.is_object_storage_configured:
+		return
+
+	migration = VirtualMachineImageStorageMigration()
+	for name in frappe.get_all(
+		"Virtual Machine Image",
+		filters={"artifact_storage": "Site File", "status": "Available"},
+		pluck="name",
+	):
+		migration.enqueue(name)
+
+
 @run_as_admin
 def migrate_virtual_machine_image_storage(image_name: str) -> None:
 	"""Run one queued storage migration and record a visible failure."""

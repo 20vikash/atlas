@@ -21,13 +21,15 @@ Atlas has no object storage during bootstrap, so the first System image can use 
 
 ## Migration to object storage
 
-Use the **Migrate to Object Storage** action on an Available `Site File` image after you set the object storage credentials. The background job:
+Atlas migrates each Available `Site File` image on its own. A change to the object storage fields in Atlas Settings queues one migration for each of them, and a job repeats the search every 15 minutes, which is also what retries a migration that failed. Use the **Migrate to Object Storage** action on the image to start one immediately.
+
+The background job:
 
 1. Uploads each artifact under its content addressed key and compares the stored size with the local size.
 2. Saves both object keys, sets `artifact_storage` to `Object Storage`, and commits.
 3. Deletes both site Files.
 
-The order keeps one downloadable copy at each step. An interrupted job leaves an unused object or an unused site file, and never an image that a host cannot download. The job is safe to repeat. `immutable_reference` uses only the architecture and the artifact digests, so a host that already cached the artifacts does not download them again.
+The order keeps one downloadable copy at each step. An interrupted job leaves an unused object or an unused site file, and never an image that a host cannot download. The job is safe to repeat, and it does nothing for an image that is already in object storage. `immutable_reference` uses only the architecture and the artifact digests, so a host that already cached the artifacts does not download them again.
 
 ## Machine images
 

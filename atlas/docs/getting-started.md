@@ -81,7 +81,7 @@ pilot --site <site> build-ubuntu-base-image --version 24.04 --architecture amd64
 
 The command uploads the root file system and kernel to object storage. It then creates an Available **Virtual Machine Image**.
 
-Without object storage credentials, add `--storage site-file` to serve both artifacts from the site itself. Use the **Migrate to Object Storage** action on the image after you set the credentials. See [images.md](images.md#artifact-storage).
+Without object storage credentials, add `--storage site-file` to serve both artifacts from the site itself. Atlas moves the image into object storage after you set the credentials in Atlas Settings. See [images.md](images.md#artifact-storage).
 
 ## 9. Create a virtual machine
 
