@@ -14,7 +14,7 @@ from atlas.auth.identity import current_identity
 from atlas.auth.jwks import TrustedKeys
 from atlas.auth.request import authenticate_token
 from atlas.auth.token import TokenValidator
-from atlas.auth.user import CENTRAL_ADMIN_USER
+from atlas.auth.user import CENTRAL_TENANT_USER
 
 AUDIENCE = "atlas-admin:42"
 ATLAS_ISSUER = "atlas:42"
@@ -160,7 +160,7 @@ class TestTokenSession(UnitTestCase):
 		frappe.local.atlas_identity = self.previous_identity
 		frappe.set_user(self.previous_user)
 
-	def test_a_central_token_becomes_the_central_admin_user(self) -> None:
+	def test_a_central_token_becomes_the_every_tenant_user(self) -> None:
 		claims = {"iss": "central", "sub": "central", "tenant": "*", "scope": "*"}
 		with (
 			patch("frappe.get_request_header", return_value="Bearer a-token"),
@@ -169,7 +169,7 @@ class TestTokenSession(UnitTestCase):
 		):
 			authenticate_token()
 
-		set_user.assert_called_once_with(CENTRAL_ADMIN_USER)
+		set_user.assert_called_once_with(CENTRAL_TENANT_USER)
 		self.assertTrue(current_identity().is_central)
 
 	def test_a_regional_token_becomes_its_tenant_user(self) -> None:
@@ -182,7 +182,7 @@ class TestTokenSession(UnitTestCase):
 		):
 			authenticate_token()
 
-		ensure.assert_called_once_with(7)
+		ensure.assert_called_once_with("7")
 		set_user.assert_called_once_with("tenant-7@atlas.local")
 		self.assertEqual(current_identity().tenant, "7")
 

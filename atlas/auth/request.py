@@ -11,7 +11,7 @@ from atlas.auth.identity import (
 )
 from atlas.auth.roles import has_role
 from atlas.auth.token import TokenValidator
-from atlas.auth.user import CENTRAL_ADMIN_USER, ensure_tenant_user
+from atlas.auth.user import ensure_tenant_user
 
 ATLAS_API_PREFIX = "/api/atlas"
 ATLAS_DOCS_PREFIX = "/api/atlas/docs"
@@ -102,5 +102,4 @@ def authenticate_token() -> None:
 		return
 
 	set_identity(identity)
-	user = CENTRAL_ADMIN_USER if identity.is_central else ensure_tenant_user(int(identity.tenant))
-	frappe.set_user(user)  # nosemgrep
+	frappe.set_user(ensure_tenant_user(identity.tenant))  # nosemgrep
