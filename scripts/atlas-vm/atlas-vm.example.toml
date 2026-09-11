@@ -12,7 +12,6 @@ site = "atlas.example.com"
 admin_domain = "admin.example.com"
 password = "Atlas#Bench2026x"
 user = "frappe"
-branch = "develop"
 letsencrypt_email = "tanmoy@example.com"
 
 [atlas]

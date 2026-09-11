@@ -111,7 +111,7 @@ class Settings:
 			memory_mib=int(vm.get("memory_mib", 8192)),
 			disk_gib=int(vm.get("disk_gib", 24)),
 			ssh_port=int(vm.get("ssh_port", 2222)),
-			setup_script_url=vm.get("setup_script_url", f"{raw}/{branch}/scripts/atlas-vm/setup.py"),
+			setup_script_url=f"{raw}/{branch}/scripts/atlas-vm/setup.py",
 		)
 
 	def update_sizes(self, changes: dict[str, int]) -> None:

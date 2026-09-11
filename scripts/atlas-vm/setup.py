@@ -15,6 +15,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CONFIG_FILE = Path(os.environ.get("ATLAS_VM_CONFIG", "/root/atlas-vm.toml"))
+# Pinned: the VM is a production setup, so the configuration cannot choose a
+# Pilot source or an interpreter.
+PILOT_INSTALL_URL = "https://raw.githubusercontent.com/frappe/pilot/develop/install.sh"
+PYTHON_VERSION = "3.14"
 SETUP_GRANT = "/etc/sudoers.d/{user}-atlas-setup"
 IMAGE_BUILDER_GRANT = "/etc/sudoers.d/{user}-atlas-image-builder"
 
@@ -40,11 +44,9 @@ class Configuration:
 	admin_domain: str
 	bench_name: str = "atlas"
 	bench_user: str = "frappe"
-	pilot_branch: str = "develop"
 	letsencrypt_email: str = ""
 	atlas_repository: str = "https://github.com/frappe/atlas"
 	atlas_branch: str = "develop"
-	python_version: str = "3.14"
 	images: list[tuple[str, str, bool]] = field(default_factory=list)
 
 	@classmethod
@@ -69,17 +71,11 @@ class Configuration:
 			password=password,
 			admin_domain=pilot.get("admin_domain", f"admin.{site}"),
 			bench_user=pilot.get("user", "frappe"),
-			pilot_branch=pilot.get("branch", "develop"),
 			letsencrypt_email=pilot.get("letsencrypt_email", ""),
 			atlas_repository=atlas.get("repository", "https://github.com/frappe/atlas"),
 			atlas_branch=atlas.get("branch", "develop"),
-			python_version=str(document.get("vm", {}).get("python_version", "3.14")),
 			images=images,
 		)
-
-	@property
-	def pilot_install_url(self) -> str:
-		return f"https://raw.githubusercontent.com/frappe/pilot/{self.pilot_branch}/install.sh"
 
 	@property
 	def pilot_home(self) -> Path:
@@ -134,7 +130,7 @@ class Setup:
 
 	def install_host_dependencies(self) -> None:
 		step(f"stage 2: host dependencies and the {self.configuration.bench_user} user")
-		run(["wget", "-qO", "/root/pilot-install.sh", self.configuration.pilot_install_url])
+		run(["wget", "-qO", "/root/pilot-install.sh", PILOT_INSTALL_URL])
 		run(["sh", "/root/pilot-install.sh", "--user", self.configuration.bench_user])
 
 	def grant_setup_sudo(self) -> None:
@@ -145,22 +141,21 @@ class Setup:
 	def install_python(self) -> None:
 		# Ubuntu 24.04 ships Python 3.12, which cannot parse the Atlas sources. Keep
 		# the system python3 for apt and give the bench user its own interpreter.
-		version = self.configuration.python_version
-		step(f"stage 4: python {version} for {self.configuration.bench_user}")
+		step(f"stage 4: python {PYTHON_VERSION} for {self.configuration.bench_user}")
 		self.as_bench("command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh")
-		self.as_bench(f"uv python install {version}")
-		self.as_bench(f'mkdir -p ~/.local/bin && ln -sf "$(uv python find {version})" ~/.local/bin/python3')
+		self.as_bench(f"uv python install {PYTHON_VERSION}")
+		self.as_bench(f'mkdir -p ~/.local/bin && ln -sf "$(uv python find {PYTHON_VERSION})" ~/.local/bin/python3')
 		reported = self.bench_output("python3 --version")
-		if version not in reported:
+		if PYTHON_VERSION not in reported:
 			raise SetupError(
 				f"{self.configuration.bench_user} runs {reported};"
-				f" Pilot needs Python {version} to read the Atlas sources"
+				f" Pilot needs Python {PYTHON_VERSION} to read the Atlas sources"
 			)
 		step(f"{self.configuration.bench_user} runs {reported}")
 
 	def install_pilot(self) -> None:
 		step("stage 5: Pilot")
-		self.as_bench(f"curl -fsSL {self.configuration.pilot_install_url} | bash")
+		self.as_bench(f"curl -fsSL {PILOT_INSTALL_URL} | bash")
 
 	def create_bench(self) -> None:
 		# Guard each step on what it produces, so a stopped run continues here.
