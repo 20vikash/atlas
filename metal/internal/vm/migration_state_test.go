@@ -157,6 +157,46 @@ func TestApplyMigratedTargetStateReportsAStartFailure(t *testing.T) {
 	}
 }
 
+func TestLimitSourceDiskAppliesAndClampsTheThrottle(t *testing.T) {
+	machines, runtime, _, _ := newTestManager(t)
+	ctx := context.Background()
+	spec := testSpecification()
+	spec.Disk.ThroughputMiBps = 100 // configured limit
+	if _, err := machines.Create(ctx, "vm-1", spec); err != nil {
+		t.Fatal(err)
+	}
+	setObservedState(t, machines, "vm-1", StateRunning)
+	runtime.state = StateRunning
+
+	// A throttle below the configured limit applies as requested.
+	applied, err := machines.LimitSourceDisk(ctx, "vm-1", 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied != 64 || runtime.diskLimitMiBps != 64 {
+		t.Fatalf("throttle = %d, runtime saw %d, want 64", applied, runtime.diskLimitMiBps)
+	}
+
+	// A throttle above the configured limit clamps down to it.
+	applied, err = machines.LimitSourceDisk(ctx, "vm-1", 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied != 100 || runtime.diskLimitMiBps != 100 {
+		t.Fatalf("clamped throttle = %d, runtime saw %d, want 100", applied, runtime.diskLimitMiBps)
+	}
+
+	// A nonpositive throttle is a no-op and touches nothing on the guest.
+	runtime.diskRefresh = 0
+	applied, err = machines.LimitSourceDisk(ctx, "vm-1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied != 0 || runtime.diskRefresh != 0 {
+		t.Fatalf("nonpositive throttle = %d, refreshes = %d, want 0 and 0", applied, runtime.diskRefresh)
+	}
+}
+
 func TestRemoveMigrationNetworkReleases(t *testing.T) {
 	machines, _, network, _ := newTestManager(t)
 	ctx := context.Background()

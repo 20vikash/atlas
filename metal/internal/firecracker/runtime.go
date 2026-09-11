@@ -164,7 +164,9 @@ func (runtime *Runtime) Remove(ctx context.Context, input vm.RuntimeMachine) err
 	return nil
 }
 
-// RefreshDisk applies current disk limits to a live guest.
+// RefreshDisk applies the machine's disk limits to a live guest. A caller may
+// lower the limit in the machine specification for a temporary throttle. A VM
+// that is neither running nor paused is unchanged.
 func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine) error {
 	status, err := runtime.Inspect(ctx, input)
 	if err != nil {
@@ -178,26 +180,5 @@ func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine
 		DriveID:     rootDriveIdentifier,
 		PathOnHost:  rootDrivePath,
 		RateLimiter: driveRateLimiter(input.Specification.Disk),
-	})
-}
-
-// LimitDiskThroughput applies a temporary combined read and write limit to the
-// live drive. Nonpositive values and stopped or paused VMs are unchanged.
-func (runtime *Runtime) LimitDiskThroughput(ctx context.Context, input vm.RuntimeMachine, throughputMiBps int) error {
-	if throughputMiBps <= 0 {
-		return nil
-	}
-	status, err := runtime.Inspect(ctx, input)
-	if err != nil {
-		return err
-	}
-	if status.State != vm.StateRunning && status.State != vm.StatePaused {
-		return nil
-	}
-
-	return api.New(runtime.configuration.socketPath(input.ID)).PatchDrive(ctx, api.PartialDrive{
-		DriveID:     rootDriveIdentifier,
-		PathOnHost:  rootDrivePath,
-		RateLimiter: driveRateLimiter(vm.Disk{ThroughputMiBps: throughputMiBps}),
 	})
 }

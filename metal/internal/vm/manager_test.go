@@ -122,13 +122,9 @@ func (runtime *fakeRuntime) RefreshMetadata(context.Context, RuntimeMachine) err
 	return nil
 }
 
-func (runtime *fakeRuntime) RefreshDisk(context.Context, RuntimeMachine) error {
+func (runtime *fakeRuntime) RefreshDisk(_ context.Context, machine RuntimeMachine) error {
 	runtime.diskRefresh++
-	return nil
-}
-
-func (runtime *fakeRuntime) LimitDiskThroughput(_ context.Context, _ RuntimeMachine, throughputMiBps int) error {
-	runtime.diskLimitMiBps = throughputMiBps
+	runtime.diskLimitMiBps = machine.Specification.Disk.ThroughputMiBps
 	return nil
 }
 

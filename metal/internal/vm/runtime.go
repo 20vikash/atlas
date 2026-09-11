@@ -17,9 +17,9 @@ type Runtime interface {
 	Resume(context.Context, RuntimeMachine) error
 	Remove(context.Context, RuntimeMachine) error
 	RefreshMetadata(context.Context, RuntimeMachine) error
+	// RefreshDisk applies the machine's disk limits to a live guest. A caller may
+	// lower the limit in the machine specification for a temporary throttle.
 	RefreshDisk(context.Context, RuntimeMachine) error
-	// LimitDiskThroughput applies a temporary combined read and write limit.
-	LimitDiskThroughput(ctx context.Context, machine RuntimeMachine, throughputMiBps int) error
 	ConnectSSH(context.Context, RuntimeMachine) (SSHConnection, error)
 }
 

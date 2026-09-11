@@ -56,7 +56,8 @@ func (manager *Manager) LimitSourceDisk(ctx context.Context, virtualMachineID st
 		throughputMiBps = configured
 	}
 	machine := runtimeMachine(desired, observed.NetworkInterface)
-	if err := manager.runtime.LimitDiskThroughput(ctx, machine, throughputMiBps); err != nil {
+	machine.Specification.Disk.ThroughputMiBps = throughputMiBps
+	if err := manager.runtime.RefreshDisk(ctx, machine); err != nil {
 		return 0, err
 	}
 	return throughputMiBps, nil
