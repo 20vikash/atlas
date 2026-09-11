@@ -159,11 +159,8 @@ class Setup:
 		step(f"{self.configuration.bench_user} runs {reported}")
 
 	def install_pilot(self) -> None:
-		step(f"stage 5: Pilot from branch {self.configuration.pilot_branch}")
-		self.as_bench(
-			f"PILOT_DEV=1 PILOT_BRANCH={self.configuration.pilot_branch}"
-			f" bash -c 'curl -fsSL {self.configuration.pilot_install_url} | bash'"
-		)
+		step("stage 5: Pilot")
+		self.as_bench(f"curl -fsSL {self.configuration.pilot_install_url} | bash")
 
 	def create_bench(self) -> None:
 		# Guard each step on what it produces, so a stopped run continues here.
