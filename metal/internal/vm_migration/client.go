@@ -1,4 +1,7 @@
-package vm
+// Package vmmigration carries VM migration traffic between Metal hosts. The
+// target host drives the migration: it makes the control calls and pulls the
+// disk from the source over the trusted WireGuard mesh.
+package vmmigration
 
 import (
 	"bytes"
@@ -10,23 +13,33 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// defaultSourceClientTimeout bounds one target-to-source control call.
-const defaultSourceClientTimeout = 60 * time.Second
+// streamRequest asks for one snapshot stream.
+type streamRequest struct {
+	Sequence        int    `json:"sequence"`
+	ResumeToken     string `json:"resume_token,omitempty"`
+	ThroughputMiBps int    `json:"throughput_mibps,omitempty"`
+}
 
-// HTTPSourceClient calls the source over the trusted mesh.
-type HTTPSourceClient struct {
+// defaultControlTimeout bounds one target-to-source control call.
+const defaultControlTimeout = 60 * time.Second
+
+// SourceClient calls the source host over the mesh.
+type SourceClient struct {
 	client       *http.Client
 	streamClient *http.Client
 }
 
-// NewHTTPSourceClient returns a client with per-call control timeouts.
-func NewHTTPSourceClient(timeout time.Duration) *HTTPSourceClient {
+// NewSourceClient returns a client with the given per-call control timeout. The
+// disk stream has no timeout.
+func NewSourceClient(timeout time.Duration) *SourceClient {
 	if timeout <= 0 {
-		timeout = defaultSourceClientTimeout
+		timeout = defaultControlTimeout
 	}
-	return &HTTPSourceClient{
+	return &SourceClient{
 		client:       &http.Client{Timeout: timeout},
 		streamClient: &http.Client{},
 	}
@@ -44,32 +57,25 @@ type nextSnapshotResponse struct {
 	GUID      string `json:"guid"`
 }
 
-// streamRequest asks for one snapshot stream.
-type streamRequest struct {
-	Sequence        int    `json:"sequence"`
-	ResumeToken     string `json:"resume_token,omitempty"`
-	ThroughputMiBps int    `json:"throughput_mibps,omitempty"`
-}
-
 // NextSnapshot acknowledges a sequence and asks for the next snapshot.
-func (c *HTTPSourceClient) NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
+func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (vm.SourceSnapshot, error) {
 	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
 	if err != nil {
-		return SourceSnapshot{}, err
+		return vm.SourceSnapshot{}, err
 	}
 	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/snapshot"), body)
 	if err != nil {
-		return SourceSnapshot{}, err
+		return vm.SourceSnapshot{}, err
 	}
 	var response nextSnapshotResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return SourceSnapshot{}, fmt.Errorf("decode snapshot response: %w", err)
+		return vm.SourceSnapshot{}, fmt.Errorf("decode snapshot response: %w", err)
 	}
-	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
+	return vm.SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
 // StreamSnapshot reads one snapshot into w and returns its byte count.
-func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
+func (c *SourceClient) StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
 	body, err := json.Marshal(streamRequest{Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps})
 	if err != nil {
 		return 0, err
@@ -94,7 +100,7 @@ func (c *HTTPSourceClient) StreamSnapshot(ctx context.Context, address, migratio
 }
 
 // postJSON sends a JSON control request and returns its body.
-func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path string, body []byte) ([]byte, error) {
+func (c *SourceClient) postJSON(ctx context.Context, address, path string, body []byte) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build source request: %w", err)
@@ -111,7 +117,7 @@ func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path string, b
 		return nil, fmt.Errorf("read source response: %w", err)
 	}
 	if response.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("source %s: %w", path, ErrNotFound)
+		return nil, fmt.Errorf("source %s: %w", path, vm.ErrNotFound)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("source %s returned HTTP %d", path, response.StatusCode)
@@ -121,57 +127,57 @@ func (c *HTTPSourceClient) postJSON(ctx context.Context, address, path string, b
 
 // sourceHandshakeResponse is a prepare reply.
 type sourceHandshakeResponse struct {
-	Config        PortableConfig `json:"config"`
-	ObservedState State          `json:"observed_state"`
+	Config        vm.PortableConfig `json:"config"`
+	ObservedState vm.State          `json:"observed_state"`
 }
 
 // PrepareSource asks the source to lock the VM and return portable state.
-func (c *HTTPSourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, State, error) {
+func (c *SourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (vm.PortableConfig, vm.State, error) {
 	body, err := c.call(ctx, http.MethodPut, address, sourcePath(migrationID, virtualMachineID, "/source"))
 	if err != nil {
-		return PortableConfig{}, "", err
+		return vm.PortableConfig{}, "", err
 	}
 	var response sourceHandshakeResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return PortableConfig{}, "", fmt.Errorf("decode source handshake: %w", err)
+		return vm.PortableConfig{}, "", fmt.Errorf("decode source handshake: %w", err)
 	}
 	return response.Config, response.ObservedState, nil
 }
 
 // StopSource asks the source to stop the VM, remove its network, and create the
 // final snapshot.
-func (c *HTTPSourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (SourceSnapshot, error) {
+func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (vm.SourceSnapshot, error) {
 	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/stop"), nil)
 	if err != nil {
-		return SourceSnapshot{}, err
+		return vm.SourceSnapshot{}, err
 	}
 	var response nextSnapshotResponse
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		return SourceSnapshot{}, fmt.Errorf("decode stop response: %w", err)
+		return vm.SourceSnapshot{}, fmt.Errorf("decode stop response: %w", err)
 	}
-	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
+	return vm.SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
 // StartSource asks the source to restore its original desired state.
-func (c *HTTPSourceClient) StartSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
+func (c *SourceClient) StartSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
 	_, err := c.call(ctx, http.MethodPost, address, sourcePath(migrationID, virtualMachineID, "/start"))
 	return err
 }
 
 // FinishSource asks the source to destroy the stopped VM and state.
-func (c *HTTPSourceClient) FinishSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
+func (c *SourceClient) FinishSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
 	_, err := c.call(ctx, http.MethodPost, address, sourcePath(migrationID, virtualMachineID, "/destroy"))
 	return err
 }
 
 // RemoveSource asks the source to unlock the VM and drop migration state.
-func (c *HTTPSourceClient) RemoveSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
+func (c *SourceClient) RemoveSource(ctx context.Context, address, migrationID, virtualMachineID string) error {
 	_, err := c.call(ctx, http.MethodDelete, address, sourcePath(migrationID, virtualMachineID, ""))
 	return err
 }
 
 // call sends a request over the mesh and returns its body.
-func (c *HTTPSourceClient) call(ctx context.Context, method, address, path string) ([]byte, error) {
+func (c *SourceClient) call(ctx context.Context, method, address, path string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, method, address+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build source request: %w", err)
@@ -188,7 +194,7 @@ func (c *HTTPSourceClient) call(ctx context.Context, method, address, path strin
 		return nil, fmt.Errorf("read source response: %w", err)
 	}
 	if response.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("source %s %s: %w", method, path, ErrNotFound)
+		return nil, fmt.Errorf("source %s %s: %w", method, path, vm.ErrNotFound)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, fmt.Errorf("source %s %s returned HTTP %d", method, path, response.StatusCode)

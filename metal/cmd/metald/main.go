@@ -29,6 +29,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 const (
@@ -329,7 +330,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	}
 	migrationManager, err = vm.NewMigrationManager(
 		virtualMachineManager,
-		vm.NewHTTPSourceClient(0),
+		vmmigration.NewSourceClient(0),
 		storage.NewMigrationTransfer(stores.Pool),
 		migrationCapacity,
 		vm.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
