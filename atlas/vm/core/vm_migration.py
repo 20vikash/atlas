@@ -193,7 +193,9 @@ class MigrationService:
 		"""Read the target migration status and store it as progress.
 
 		The write commits, so an open form and a recovery run see live progress
-		during the copy, not only the final result.
+		during the copy, not only the final result. It merges into the stored
+		progress, so the compact terminal record does not erase the copy history
+		such as the per-interval throughput.
 		"""
 		try:
 			status = self.target_client.get_migration(cast(str, self.migration.name))
@@ -201,7 +203,10 @@ class MigrationService:
 			if error.is_not_found:
 				return {"status": "missing"}
 			raise
-		self.migration.db_set("progress", frappe.as_json(status), commit=True)
+		stored = frappe.parse_json(self.migration.progress or "{}")
+		if not isinstance(stored, dict):
+			stored = {}
+		self.migration.db_set("progress", frappe.as_json({**stored, **status}), commit=True)
 		return status
 
 	@staticmethod

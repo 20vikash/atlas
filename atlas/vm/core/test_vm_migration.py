@@ -420,6 +420,24 @@ class TestMigrationRecovery(UnitTestCase):
 		self.assertEqual(service.migration.db_set.call_args.args[0], "progress")
 		self.assertTrue(service.migration.db_set.call_args.kwargs.get("commit"))
 
+	def test_poll_keeps_copy_history_on_a_terminal_record(self) -> None:
+		service = MigrationService(
+			migration_doc(progress='{"snapshots": [{"throughput_mibps": 32}], "bytes_transferred": 100}')
+		)
+		client = Mock()
+		client.get_migration.return_value = {"status": "completed", "phase": ""}
+
+		with patch.object(
+			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
+		):
+			service.poll()
+
+		# The compact terminal record must not erase the copy history.
+		merged = frappe.parse_json(service.migration.db_set.call_args.args[1])
+		self.assertEqual(merged["status"], "completed")
+		self.assertEqual(merged["snapshots"], [{"throughput_mibps": 32}])
+		self.assertEqual(merged["bytes_transferred"], 100)
+
 	def test_is_expired_tracks_the_visibility_timeout(self) -> None:
 		recent = MigrationService(migration_doc(started_at=now_datetime()))
 		stale = MigrationService(migration_doc(started_at=add_to_date(now_datetime(), minutes=-11)))
