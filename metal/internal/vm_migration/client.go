@@ -9,39 +9,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// streamRequest asks for one snapshot stream.
-type streamRequest struct {
-	Sequence        int    `json:"sequence"`
-	ResumeToken     string `json:"resume_token,omitempty"`
-	ThroughputMiBps int    `json:"throughput_mibps,omitempty"`
-}
-
 // defaultControlTimeout bounds one target-to-source control call.
 const defaultControlTimeout = 60 * time.Second
 
-// SourceClient calls the source host over the mesh.
+// SourceClient calls the source host over the mesh. Control calls use HTTP; the
+// disk stream uses a plain TCP connection to the source transfer port.
 type SourceClient struct {
 	client       *http.Client
-	streamClient *http.Client
+	transferPort int
 }
 
-// NewSourceClient returns a client with the given per-call control timeout. The
-// disk stream has no timeout.
-func NewSourceClient(timeout time.Duration) *SourceClient {
+// NewSourceClient returns a client with the given per-call control timeout and
+// the fixed source transfer port used for the disk stream.
+func NewSourceClient(timeout time.Duration, transferPort int) *SourceClient {
 	if timeout <= 0 {
 		timeout = defaultControlTimeout
 	}
 	return &SourceClient{
 		client:       &http.Client{Timeout: timeout},
-		streamClient: &http.Client{},
+		transferPort: transferPort,
 	}
 }
 
@@ -74,29 +70,60 @@ func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, v
 	return vm.SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
 }
 
-// StreamSnapshot reads one snapshot into w and returns its byte count.
+// StreamSnapshot dials the source transfer port, requests one snapshot, and
+// copies the disk stream into w. It returns the byte count.
 func (c *SourceClient) StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
-	body, err := json.Marshal(streamRequest{Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps})
+	host, err := hostname(address)
 	if err != nil {
 		return 0, err
 	}
-	path := sourcePath(migrationID, virtualMachineID, "/stream")
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address+path, bytes.NewReader(body))
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(c.transferPort)))
 	if err != nil {
-		return 0, fmt.Errorf("build stream request: %w", err)
+		return 0, fmt.Errorf("dial source transfer port: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	defer conn.Close()
 
-	response, err := c.streamClient.Do(request)
+	// End the transfer when the context is canceled.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	header := streamHeader{
+		MigrationID:      migrationID,
+		VirtualMachineID: virtualMachineID,
+		Sequence:         sequence,
+		ResumeToken:      resumeToken,
+		ThroughputMiBps:  throughputMiBps,
+	}
+	if err := writeStreamHeader(conn, header); err != nil {
+		return 0, fmt.Errorf("send stream header: %w", err)
+	}
+
+	var status [1]byte
+	if _, err := io.ReadFull(conn, status[:]); err != nil {
+		return 0, fmt.Errorf("read stream status: %w", err)
+	}
+	switch status[0] {
+	case streamStatusOK:
+		return io.Copy(w, conn)
+	case streamStatusError:
+		message, _ := readFrame(conn, maxFrameBytes)
+		return 0, fmt.Errorf("source refused the stream: %s", strings.TrimSpace(string(message)))
+	default:
+		return 0, fmt.Errorf("unexpected stream status %d", status[0])
+	}
+}
+
+// hostname returns the host of a source base URL for a mesh dial.
+func hostname(address string) (string, error) {
+	parsed, err := url.Parse(address)
 	if err != nil {
-		return 0, fmt.Errorf("stream from source: %w", err)
+		return "", fmt.Errorf("parse source address %q: %w", address, err)
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message, _ := io.ReadAll(io.LimitReader(response.Body, 1<<16))
-		return 0, fmt.Errorf("source stream returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(message)))
+	if parsed.Hostname() == "" {
+		return "", fmt.Errorf("source address %q has no host", address)
 	}
-	return io.Copy(w, response.Body)
+	return parsed.Hostname(), nil
 }
 
 // postJSON sends a JSON control request and returns its body.

@@ -113,6 +113,21 @@ func listen(addr string) (net.Listener, error) {
 	return net.Listen("tcp", addr)
 }
 
+// transferListenAddress derives the migration transfer address from the API
+// listen address, keeping its host but using the transfer port. A unix socket
+// API address falls back to every interface.
+func transferListenAddress(apiAddress string, transferPort int) string {
+	port := fmt.Sprintf("%d", transferPort)
+	if strings.HasPrefix(apiAddress, "unix:") {
+		return ":" + port
+	}
+	host, _, err := net.SplitHostPort(apiAddress)
+	if err != nil {
+		return ":" + port
+	}
+	return net.JoinHostPort(host, port)
+}
+
 func makeDirs(options options) error {
 	dirs := []struct {
 		path string
@@ -330,7 +345,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	}
 	migrationManager, err = vm.NewMigrationManager(
 		virtualMachineManager,
-		vmmigration.NewSourceClient(0),
+		vmmigration.NewSourceClient(0, options.migration.transferPort),
 		storage.NewMigrationTransfer(stores.Pool),
 		migrationCapacity,
 		vm.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
@@ -345,6 +360,11 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconciler.MigrationConfig{Logger: logger},
 	)
 	daemon.OwnMigrations(migrationManager)
+	migrationListener, err := vmmigration.Listen(transferListenAddress(options.listen, options.migration.transferPort), migrationManager, logger)
+	if err != nil {
+		return fmt.Errorf("start migration transfer listener: %w", err)
+	}
+	daemon.OwnMigrationListener(migrationListener)
 	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		MigrationManager:      migrationManager,

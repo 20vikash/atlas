@@ -27,6 +27,8 @@ type options struct {
 // migrationOptions holds VM migration settings.
 type migrationOptions struct {
 	finalDeltaMiB int
+	// transferPort is the TCP port the source listens on for disk streams.
+	transferPort int
 }
 
 // meshOptions configures Atlas WG Mesh.
@@ -53,7 +55,7 @@ func defaultOptions() options {
 		wireGuardName:  "wg0",
 		mesh:           meshOptions{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
 		trafficMonitor: trafficMonitorOptions{enabled: true},
-		migration:      migrationOptions{finalDeltaMiB: 512},
+		migration:      migrationOptions{finalDeltaMiB: 512, transferPort: 9001},
 		// TCP host:port by default; "unix:/path" for a unix socket instead.
 		listen: "127.0.0.1:8080",
 	}
@@ -129,6 +131,7 @@ type trafficFile struct {
 
 type migrationFile struct {
 	FinalDeltaMiB *int `toml:"final_delta_mib"`
+	TransferPort  *int `toml:"transfer_port"`
 }
 
 func load(path string) (options, error) {
@@ -167,6 +170,7 @@ func applyFile(resolvedOptions *options, path string) error {
 	overlay(&resolvedOptions.mesh.uplinkName, fc.WGMesh.Uplink)
 	overlayBool(&resolvedOptions.trafficMonitor.enabled, fc.Traffic.Enabled)
 	overlayInt(&resolvedOptions.migration.finalDeltaMiB, fc.Migration.FinalDeltaMiB)
+	overlayInt(&resolvedOptions.migration.transferPort, fc.Migration.TransferPort)
 	return nil
 }
 
