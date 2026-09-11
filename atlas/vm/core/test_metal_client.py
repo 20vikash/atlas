@@ -169,9 +169,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			result = client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000")
 
 		self.assertEqual(result, migration)
-		self.assertEqual(
-			request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/migrations/mig-00001")
-		)
+		self.assertEqual(request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/migrations/mig-00001"))
 		# The keys must match Metal's createMigrationRequest, which decodes strictly.
 		self.assertEqual(
 			request.call_args.kwargs["json"],
@@ -189,9 +187,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			result = client.get_migration("mig-00001")
 
 		self.assertEqual(result, progress)
-		self.assertEqual(
-			request.call_args.args[:2], ("GET", "http://10.0.0.2:9000/v1/migrations/mig-00001")
-		)
+		self.assertEqual(request.call_args.args[:2], ("GET", "http://10.0.0.2:9000/v1/migrations/mig-00001"))
 
 	def test_abort_and_finish_use_their_routes(self) -> None:
 		client = build_client()

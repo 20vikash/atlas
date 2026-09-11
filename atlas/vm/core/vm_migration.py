@@ -115,9 +115,7 @@ class MigrationService:
 		"""Return the image architecture for placement."""
 		return cast(
 			str,
-			frappe.db.get_value(
-				"Virtual Machine Image", virtual_machine.virtual_machine_image, "platform"
-			),
+			frappe.db.get_value("Virtual Machine Image", virtual_machine.virtual_machine_image, "platform"),
 		)
 
 	def run(self) -> None:
@@ -210,9 +208,7 @@ class MigrationService:
 
 	def commit_target(self) -> None:
 		"""Point the VM at the target and mark the migration ready in one transaction."""
-		virtual_machine = frappe.get_doc(
-			"Virtual Machine", self.migration.virtual_machine, for_update=True
-		)
+		virtual_machine = frappe.get_doc("Virtual Machine", self.migration.virtual_machine, for_update=True)
 		migration = cast(
 			"VirtualMachineMigration",
 			frappe.get_doc("Virtual Machine Migration", self.migration.name, for_update=True),
@@ -298,9 +294,7 @@ def enqueue_migration(migration_name: str) -> None:
 @run_as_admin
 def run_migration(migration_name: str) -> None:
 	"""Advance one migration to completion, or record why it stopped."""
-	migration = cast(
-		"VirtualMachineMigration", frappe.get_doc("Virtual Machine Migration", migration_name)
-	)
+	migration = cast("VirtualMachineMigration", frappe.get_doc("Virtual Machine Migration", migration_name))
 	service = MigrationService(migration)
 	try:
 		service.run()

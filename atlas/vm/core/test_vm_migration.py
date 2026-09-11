@@ -127,9 +127,7 @@ class TestMigrationCreation(UnitTestCase):
 			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
 			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-10 00:00:00"),
 		):
-			migration_id = MigrationService.create(
-				SimpleNamespace(name="vm-00001"), target_server="metal-3"
-			)
+			migration_id = MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-3")
 
 		self.assertEqual(migration_id, "mig-00001")
 		select_server.assert_not_called()
@@ -160,9 +158,7 @@ class TestMigrationCreation(UnitTestCase):
 		virtual_machine = frappe.new_doc("Virtual Machine")
 		virtual_machine.check_permission = Mock()
 
-		with patch(
-			"atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001"
-		) as create:
+		with patch("atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001") as create:
 			result = virtual_machine.migrate()
 
 		self.assertEqual(result, "mig-00001")
@@ -172,9 +168,7 @@ class TestMigrationCreation(UnitTestCase):
 		virtual_machine = frappe.new_doc("Virtual Machine")
 		virtual_machine.check_permission = Mock()
 
-		with patch(
-			"atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001"
-		) as create:
+		with patch("atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001") as create:
 			virtual_machine.migrate(target_server="metal-3")
 
 		create.assert_called_once_with(virtual_machine, target_server="metal-3")
@@ -222,9 +216,7 @@ class TestMigrationWorker(UnitTestCase):
 		service.commit_target = manager.commit_target
 		service.finish = manager.finish
 		service.settle = manager.settle
-		service.poll = Mock(
-			side_effect=[{"status": "running"}, {"status": "ready"}, {"status": "completed"}]
-		)
+		service.poll = Mock(side_effect=[{"status": "running"}, {"status": "ready"}, {"status": "completed"}])
 
 		with (
 			patch.object(
@@ -307,9 +299,7 @@ class TestMigrationWorker(UnitTestCase):
 		service.record_error = Mock()
 
 		with (
-			patch.object(
-				MigrationService, "target_client", new_callable=PropertyMock, return_value=client
-			),
+			patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client),
 			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
 		):
 			service.request_abort()
@@ -346,24 +336,18 @@ class TestMigrationWorker(UnitTestCase):
 class TestMigrationRecovery(UnitTestCase):
 	def test_reconcile_requeues_every_locked_migration(self) -> None:
 		with (
-			patch(
-				"atlas.vm.core.vm_migration.frappe.get_all", return_value=["mig-00001", "mig-00002"]
-			),
+			patch("atlas.vm.core.vm_migration.frappe.get_all", return_value=["mig-00001", "mig-00002"]),
 			patch("atlas.vm.core.vm_migration.enqueue_migration") as enqueue,
 		):
 			reconcile_migrations()
 
-		self.assertEqual(
-			enqueue.call_args_list, [call("mig-00001"), call("mig-00002")]
-		)
+		self.assertEqual(enqueue.call_args_list, [call("mig-00001"), call("mig-00002")])
 
 	def test_missing_target_retries_before_the_timeout(self) -> None:
 		service = MigrationService(migration_doc())
 		service.send_request = Mock()
 
-		with patch.object(
-			MigrationService, "is_expired", new_callable=PropertyMock, return_value=False
-		):
+		with patch.object(MigrationService, "is_expired", new_callable=PropertyMock, return_value=False):
 			self.assertFalse(service.advance({"status": "missing"}))
 
 		service.send_request.assert_called_once()
@@ -372,9 +356,7 @@ class TestMigrationRecovery(UnitTestCase):
 		service = MigrationService(migration_doc())
 		service.expire = Mock()
 
-		with patch.object(
-			MigrationService, "is_expired", new_callable=PropertyMock, return_value=True
-		):
+		with patch.object(MigrationService, "is_expired", new_callable=PropertyMock, return_value=True):
 			self.assertTrue(service.advance({"status": "missing"}))
 
 		service.expire.assert_called_once()
@@ -384,9 +366,7 @@ class TestMigrationRecovery(UnitTestCase):
 		client = Mock()
 		service.settle = Mock()
 
-		with patch.object(
-			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
-		):
+		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
 			service.expire()
 
 		client.abort_migration.assert_called_once_with("mig-00001")
@@ -397,9 +377,7 @@ class TestMigrationRecovery(UnitTestCase):
 		client = Mock()
 		client.get_migration.side_effect = MetalClientError("gone", status=404)
 
-		with patch.object(
-			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
-		):
+		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
 			status = service.poll()
 
 		self.assertEqual(status, {"status": "missing"})
@@ -410,9 +388,7 @@ class TestMigrationRecovery(UnitTestCase):
 		client = Mock()
 		client.get_migration.return_value = {"status": "running", "phase": "copying"}
 
-		with patch.object(
-			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
-		):
+		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
 			service.poll()
 
 		# The commit lets an open form and a recovery run see live progress.
@@ -427,9 +403,7 @@ class TestMigrationRecovery(UnitTestCase):
 		client = Mock()
 		client.get_migration.return_value = {"status": "completed", "phase": ""}
 
-		with patch.object(
-			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
-		):
+		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
 			service.poll()
 
 		# The compact terminal record must not erase the copy history.

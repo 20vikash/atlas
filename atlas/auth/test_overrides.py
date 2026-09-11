@@ -37,9 +37,7 @@ class TestMigrationPermissions(UnitTestCase):
 			allowed = overrides.has_permission(document, "read")
 
 		self.assertTrue(allowed)
-		frappe_permission.assert_called_once_with(
-			"Virtual Machine", ptype="read", doc="vm-00001", user=None
-		)
+		frappe_permission.assert_called_once_with("Virtual Machine", ptype="read", doc="vm-00001", user=None)
 
 	def test_write_is_denied_to_a_tenant(self) -> None:
 		document = SimpleNamespace(doctype="Virtual Machine Migration", virtual_machine="vm-00001")

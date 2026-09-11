@@ -50,7 +50,11 @@ frappe.ui.form.on("Virtual Machine", {
 
 		const is_migrating = Boolean(frm.doc.active_migration);
 		if ((is_running || is_stopped || is_paused) && !is_migrating) {
-			frm.add_custom_button(__("Migrate VM"), () => migrateVirtualMachine(frm), __("Actions"));
+			frm.add_custom_button(
+				__("Migrate VM"),
+				() => migrateVirtualMachine(frm),
+				__("Actions")
+			);
 		}
 		if (is_migrating) {
 			frm.add_custom_button(

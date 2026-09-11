@@ -241,9 +241,7 @@ class MetalClient:
 		}
 		return self._request("POST", "/v1/sync", json=request, uncertain_on_failure=True)
 
-	def put_migration(
-		self, migration_id: str, virtual_machine_id: str, source: str
-	) -> dict[str, Any]:
+	def put_migration(self, migration_id: str, virtual_machine_id: str, source: str) -> dict[str, Any]:
 		"""Store one migration request at the target host. Safe to repeat."""
 		return self._request(
 			"PUT",
