@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 TOKEN_LIFETIME = timedelta(minutes=5)
 
 
-def initialize_signing_key(settings: AtlasSettings, *, persist: bool = False) -> bool:
+def initialize_signing_key(settings: AtlasSettings) -> bool:
 	"""Create a regional signing key when Atlas has no key for this region."""
 	prefix = f"{settings.issuer}:"
 	private_key = settings.get_password("jwt_signing_private_key", raise_exception=False)
@@ -30,13 +30,6 @@ def initialize_signing_key(settings: AtlasSettings, *, persist: bool = False) ->
 	key_id = f"{prefix}{uuid4()}"
 	settings.jwt_signing_private_key = private_key
 	settings.jwt_signing_key_id = key_id
-	if persist:
-		previous_ignore_validate = settings.flags.ignore_validate
-		settings.flags.ignore_validate = True
-		try:
-			settings.save()
-		finally:
-			settings.flags.ignore_validate = previous_ignore_validate
 	return True
 
 

@@ -164,13 +164,6 @@ class AtlasSettings(Document):
 			signed_url_expiry=self.object_storage_signed_url_expiry or 86400,
 		)
 
-	def before_validate(self) -> None:
-		"""Create the regional credentials when they are missing."""
-		from atlas.auth.issuer import initialize_signing_key
-
-		self.initialize_proxy_cluster_password()
-		initialize_signing_key(self)
-
 	def validate(self) -> None:
 		"""Reject settings that would leave Atlas unable to reach a provider."""
 		if not self.is_new() and self.has_value_changed("region_id"):
@@ -225,7 +218,12 @@ class AtlasSettings(Document):
 			push_configuration_to_active_proxies()
 
 	def before_save(self) -> None:
-		"""Apply provider setup when the credentials change."""
+		"""Create the regional credentials and apply provider setup when the credentials change."""
+		from atlas.auth.issuer import initialize_signing_key
+
+		self.initialize_proxy_cluster_password()
+		initialize_signing_key(self)
+
 		if (
 			self.is_dns_setup_completed
 			and self.is_server_provider_setup_completed
@@ -338,22 +336,13 @@ class AtlasSettings(Document):
 		self._rotate_proxy_cluster_password()
 		frappe.msgprint(_("The proxy cluster password was rotated."))
 
-	def initialize_proxy_cluster_password(self, persist: bool = False) -> bool:
+	def initialize_proxy_cluster_password(self) -> bool:
 		"""Create the regional proxy password when it is missing."""
 		if self.get_password("proxy_cluster_password", raise_exception=False):
 			return False
-		password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
-		self.proxy_cluster_password = password
-		self.proxy_cluster_password_rotated_on = now_datetime()
-		if persist:
-			from frappe.utils.password import set_encrypted_password
 
-			set_encrypted_password(self.doctype, self.name, password, "proxy_cluster_password")
-			frappe.db.set_single_value(
-				self.doctype,
-				"proxy_cluster_password_rotated_on",
-				self.proxy_cluster_password_rotated_on,
-			)
+		self.proxy_cluster_password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
+		self.proxy_cluster_password_rotated_on = now_datetime()
 		return True
 
 	def enqueue_wildcard_certificate_renewal(self) -> None:
@@ -387,12 +376,11 @@ class AtlasSettings(Document):
 	def _rotate_proxy_cluster_password(self) -> None:
 		"""Rotate the regional proxy password and retain the previous value."""
 		current_password = self.get_password("proxy_cluster_password", raise_exception=False)
-		if not current_password:
-			self.initialize_proxy_cluster_password()
-		else:
+		if current_password:
 			self.previous_proxy_cluster_password = current_password
 			self.proxy_cluster_password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
 			self.proxy_cluster_password_rotated_on = now_datetime()
+
 		self.save(ignore_permissions=True)
 
 	def _renew_wildcard_certificate(self) -> None:
@@ -413,18 +401,6 @@ def renew_expiring_wildcard_certificate() -> None:
 		return
 
 	settings.enqueue_wildcard_certificate_renewal()
-
-
-def initialize_proxy_cluster_password() -> None:
-	"""Create the regional proxy password after schema migration."""
-	frappe.get_single("Atlas Settings").initialize_proxy_cluster_password(persist=True)
-
-
-def initialize_jwt_signing_key() -> None:
-	"""Create the regional JSON Web Token signing key after schema migration."""
-	from atlas.auth.issuer import initialize_signing_key
-
-	initialize_signing_key(frappe.get_single("Atlas Settings"), persist=True)
 
 
 def rotate_proxy_cluster_password() -> None:

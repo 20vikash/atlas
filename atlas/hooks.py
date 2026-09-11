@@ -101,15 +101,11 @@ code_only_modules = {
 # before_install = "atlas.install.before_install"
 after_install = [
 	"atlas.auth.user.create_central_admin_user",
-	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
-	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_jwt_signing_key",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
 after_migrate = [
 	"atlas.auth.user.create_central_admin_user",
-	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_proxy_cluster_password",
-	"atlas.atlas.doctype.atlas_settings.atlas_settings.initialize_jwt_signing_key",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
