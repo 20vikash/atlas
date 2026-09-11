@@ -32,7 +32,10 @@ function scheduleProgressRefresh(frm) {
 		return;
 	}
 	frm.__migration_poll = setInterval(() => {
-		if (cur_frm !== frm) {
+		const route = frappe.get_route();
+		const on_this_form =
+			route[0] === "Form" && route[1] === frm.doctype && route[2] === frm.doc.name;
+		if (!on_this_form) {
 			clearInterval(frm.__migration_poll);
 			frm.__migration_poll = null;
 			return;
