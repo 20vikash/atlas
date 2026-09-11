@@ -163,18 +163,16 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 	return informationFromRecords(desired, observed, DiskUsage{}), nil
 }
 
-// Information returns the persisted desired and observed VM state.
-func (manager *Manager) Information(ctx context.Context, identifier string) (Information, error) {
-	virtualMachine := manager.newVirtualMachine(identifier)
-	unlock, err := virtualMachine.lock(ctx)
-	if err != nil {
-		return Information{}, err
-	}
-	defer unlock()
+// Information returns the persisted desired and observed VM state. It takes no
+// operation lock, because a status read must not wait for the reconcile pass
+// that holds the lock across an image pull and a boot. Each record is written
+// atomically, so a read sees whole records.
+func (manager *Manager) Information(_ context.Context, identifier string) (Information, error) {
 	// Incoming migration targets are not normal VMs.
 	if manager.isTargetReserved(identifier) {
 		return Information{}, ErrNotFound
 	}
+
 	return manager.information(identifier)
 }
 
