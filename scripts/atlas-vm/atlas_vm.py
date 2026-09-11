@@ -53,6 +53,9 @@ class AtlasVmError(Exception):
 
 
 USE_COLOR = sys.stdout.isatty()
+# curl redraws its bar with a carriage return, which a log or a pipe keeps as
+# one line for each redraw.
+CURL_PROGRESS = ["--progress-bar"] if USE_COLOR else ["--silent", "--show-error"]
 
 
 def paint(text: str, code: str) -> str:
@@ -276,13 +279,15 @@ def download(url: str, path: Path, checksum: str = "") -> None:
 		return
 	step(f"download {path.name}")
 	staged = path.with_suffix(path.suffix + ".part")
-	run(["curl", "-fL", "--progress-bar", "-o", str(staged), url])
+	run(["curl", "-fL", *CURL_PROGRESS, "-o", str(staged), url])
 	if checksum:
 		digest = hashlib.sha256(staged.read_bytes()).hexdigest()
 		if digest != checksum:
 			staged.unlink()
 			raise AtlasVmError(f"{path.name} does not match its checksum")
 	staged.rename(path)
+	size = path.stat().st_size
+	detail(f"{size / 1024**2:.0f} MiB" if size >= 1024**2 else f"{size / 1024:.0f} KiB")
 
 
 class ConsoleReader:
@@ -504,7 +509,7 @@ WantedBy=multi-user.target
 		archive = self.paths.downloads / "firecracker.tgz"
 		step(f"install firecracker {version}")
 		run([
-			"curl", "-fL", "--progress-bar", "-o", str(archive),
+			"curl", "-fL", *CURL_PROGRESS, "-o", str(archive),
 			f"https://github.com/firecracker-microvm/firecracker/releases/download/{version}/firecracker-{version}-x86_64.tgz",
 		])
 		run(["tar", "-xzf", str(archive), "-C", str(self.paths.downloads)])
