@@ -25,7 +25,7 @@ sudo atlas-vm ssh
 sudo atlas-vm logs --setup --follow
 sudo atlas-vm restart
 sudo atlas-vm setup                        # run setup.py again
-sudo atlas-vm reset-password [pilot|site]        # new random password, printed once
+sudo atlas-vm reset-password pilot               # or: site. New random password, printed once
 sudo atlas-vm resize --vcpu 8 --disk 60    # reboots the VM; a disk can only grow
 ```
 

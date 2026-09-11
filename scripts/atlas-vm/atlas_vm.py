@@ -137,17 +137,6 @@ class Settings:
 			setattr(self, key, value)
 		self.path.write_text("\n".join(lines) + "\n")
 
-	def update_password(self, password: str) -> None:
-		"""Keep the file honest about the password the VM answers to."""
-		lines = self.path.read_text().splitlines()
-		for index, line in enumerate(lines):
-			if line.split("=", 1)[0].strip() == "password":
-				lines[index] = f"password = {json.dumps(password)}"
-				break
-		else:
-			lines.insert(lines.index("[pilot]") + 1, f"password = {json.dumps(password)}")
-		self.path.write_text("\n".join(lines) + "\n")
-
 
 def validate_images(images: list[dict], path: Path) -> None:
 	"""Refuse an image the builder cannot make, before the VM boots."""
@@ -772,26 +761,23 @@ def command_setup(machine: VirtualMachine, arguments: argparse.Namespace) -> Non
 
 
 def command_reset_password(machine: VirtualMachine, arguments: argparse.Namespace) -> None:
-	"""Set one new password on the Pilot admin panel, the site, or both."""
+	"""Set a new password on the Pilot admin panel or on the site Administrator."""
 	if not machine.is_running:
 		raise AtlasVmError(f"{SERVICE_NAME} is not running; start it with: atlas-vm start")
 
+	settings = machine.settings
 	password = generate_password()
-	quoted = shlex.quote(password)
-	if arguments.target in ("pilot", "both"):
+	if arguments.target == "pilot":
 		step("reset the Pilot admin password")
-		if machine.run_as_bench(f"pilot set-admin-password --password {quoted}") != 0:
-			raise AtlasVmError("pilot set-admin-password failed; the old password still works")
-	if arguments.target in ("site", "both"):
-		step(f"reset Administrator on {machine.settings.site}")
+		command = f"pilot set-admin-password --password {shlex.quote(password)}"
+	else:
+		step(f"reset Administrator on {settings.site}")
 		command = (
-			f"pilot --bench {BENCH_NAME} --site {machine.settings.site}"
-			f" set-password Administrator {quoted}"
+			f"pilot --bench {BENCH_NAME} --site {settings.site}"
+			f" set-password Administrator {shlex.quote(password)}"
 		)
-		if machine.run_as_bench(command) != 0:
-			raise AtlasVmError("pilot set-password failed; the old password still works")
-
-	machine.settings.update_password(password)
+	if machine.run_as_bench(command) != 0:
+		raise AtlasVmError("the password did not change; the old one still works")
 	print(password)
 
 
@@ -904,8 +890,7 @@ def build_parser() -> argparse.ArgumentParser:
 		"reset-password", help="set a new random password and print it"
 	)
 	reset_password.add_argument(
-		"target", nargs="?", default="both", choices=("pilot", "site", "both"),
-		help="the Pilot admin panel, the site Administrator, or both",
+		"target", choices=("pilot", "site"), help="the Pilot admin panel or the site Administrator"
 	)
 	reset_password.set_defaults(handler=command_reset_password)
 
