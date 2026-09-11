@@ -1,5 +1,7 @@
 # console: VM serial consoles
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 [internal SPEC](../SPEC.md) · overview: [docs/api.md](../../docs/api.md)
 
 ## Purpose

@@ -9,16 +9,19 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_to_date, now_datetime
 
+from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.exceptions import AtlasUserError
 
 SIGNED_URL_EXPIRY_SECONDS = 86400
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
+Artifact = Literal["rootfs", "kernel"]
+
 
 class ImageDownload(TypedDict):
 	"""One signed image artifact download."""
 
-	artifact: Literal["rootfs", "kernel"]
+	artifact: Artifact
 	url: str
 	size_mib: int
 	sha256: str
@@ -41,12 +44,15 @@ class VirtualMachineImage(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		artifact_storage: DF.Literal["Object Storage", "Site File"]
 		cache_image: DF.Check
 		enabled: DF.Check
+		image_file: DF.Link | None
 		image_object_key: DF.Data | None
 		image_sha256: DF.Data | None
 		image_size_mib: DF.Int
-		image_type: DF.Literal["System", "Machine"]
+		image_type: DF.Literal["system", "machine"]
+		kernel_file: DF.Link | None
 		kernel_multipart_upload_id: DF.Data | None
 		kernel_object_key: DF.Data | None
 		kernel_sha256: DF.Data | None
@@ -86,6 +92,12 @@ class VirtualMachineImage(Document):
 		if self.status == "Available":
 			self.validate_artifacts()
 
+	def on_trash(self) -> None:
+		"""Remove the public site files this image owns."""
+		for file_name in (self.image_file, self.kernel_file):
+			if file_name:
+				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
+
 	def get_metal_image_request(self, user_data: str = "") -> dict[str, Any]:
 		"""Return the image object for a Metal create request."""
 		self.validate_user_data(user_data)
@@ -111,14 +123,14 @@ class VirtualMachineImage(Document):
 		return {
 			"ref": self.immutable_reference,
 			"architecture": self.platform,
-			"rootfs": {"url": self.get_presigned_image_url(expiry_seconds), "sha256": self.image_sha256},
-			"kernel": {"url": self.get_presigned_kernel_url(expiry_seconds), "sha256": self.kernel_sha256},
+			"rootfs": {"url": self.get_artifact_url("rootfs", expiry_seconds), "sha256": self.image_sha256},
+			"kernel": {"url": self.get_artifact_url("kernel", expiry_seconds), "sha256": self.kernel_sha256},
 		}
 
 	@property
 	def is_shared(self) -> bool:
 		"""Return whether every tenant can read and boot this image."""
-		return self.image_type == "System"
+		return self.image_type == "system"
 
 	def is_visible_to_tenant(self, tenant_id: int) -> bool:
 		"""Return whether one tenant can read and boot this image."""
@@ -141,34 +153,39 @@ class VirtualMachineImage(Document):
 			"disk_mib": self.memory_snapshot_disk_mib,
 		}
 
-	def get_presigned_download_url(self, artifact: Literal["rootfs", "kernel"]) -> ImageDownload:
+	def get_presigned_download_url(self, artifact: Artifact) -> ImageDownload:
 		"""Return one signed artifact URL with its size, digest, and expiry time."""
 		self.validate_is_available()
-		if artifact == "rootfs":
-			url = self.get_presigned_image_url()
-			size_mib = self.image_size_mib
-			sha256 = self.image_sha256
-		else:
-			url = self.get_presigned_kernel_url()
-			size_mib = self.kernel_size_mib
-			sha256 = self.kernel_sha256
+		if self.is_stored_in_site_file:
+			frappe.throw(
+				_("Virtual Machine Image {0} is not in object storage.").format(self.title),
+				exc=AtlasUserError,
+			)
 
 		return {
 			"artifact": artifact,
-			"url": url,
-			"size_mib": size_mib,
-			"sha256": sha256,
+			"url": self.get_artifact_url(artifact),
+			"size_mib": self.image_size_mib if artifact == "rootfs" else self.kernel_size_mib,
+			"sha256": self.image_sha256 if artifact == "rootfs" else self.kernel_sha256,
 			"expires_in": SIGNED_URL_EXPIRY_SECONDS,
 			"expires_at": str(add_to_date(now_datetime(), seconds=SIGNED_URL_EXPIRY_SECONDS)),
 		}
 
-	def get_presigned_image_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
-		"""Return a signed URL for the root file system object."""
-		return self.get_object_url(self.image_object_key, expiry_seconds)
+	@property
+	def is_stored_in_site_file(self) -> bool:
+		"""Return whether the artifacts are public site files instead of objects."""
+		return self.artifact_storage == "Site File"
 
-	def get_presigned_kernel_url(self, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
-		"""Return a signed URL for the kernel object."""
-		return self.get_object_url(self.kernel_object_key, expiry_seconds)
+	def get_artifact_url(self, artifact: Artifact, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
+		"""Return the download URL for one artifact."""
+		if self.is_stored_in_site_file:
+			file_name = self.image_file if artifact == "rootfs" else self.kernel_file
+			if not file_name:
+				frappe.throw(_("Virtual Machine Image {0} has no {1} file.").format(self.title, artifact))
+			return get_download_url(file_name)
+
+		object_key = self.image_object_key if artifact == "rootfs" else self.kernel_object_key
+		return self.get_object_url(object_key, expiry_seconds)
 
 	def validate_memory_snapshot_configuration(self) -> None:
 		"""Require a complete VM shape when a warm artifact is requested."""
@@ -190,7 +207,9 @@ class VirtualMachineImage(Document):
 
 	def validate_artifacts(self) -> None:
 		"""Require both artifacts with an exact size and digest."""
-		if not self.image_object_key or not self.kernel_object_key:
+		if self.is_stored_in_site_file:
+			self.validate_site_file_artifacts()
+		elif not self.image_object_key or not self.kernel_object_key:
 			frappe.throw(_("An available Virtual Machine Image requires rootfs and kernel object keys."))
 		if not SHA256_PATTERN.fullmatch(self.image_sha256 or ""):
 			frappe.throw(_("Image SHA-256 must contain 64 lowercase hexadecimal characters."))
@@ -198,6 +217,13 @@ class VirtualMachineImage(Document):
 			frappe.throw(_("Kernel SHA-256 must contain 64 lowercase hexadecimal characters."))
 		if self.image_size_mib <= 0 or self.kernel_size_mib <= 0:
 			frappe.throw(_("An available Virtual Machine Image requires positive artifact sizes."))
+
+	def validate_site_file_artifacts(self) -> None:
+		"""Require both public files, and refuse tenant content on a public URL."""
+		if self.image_type != "system":
+			frappe.throw(_("Only a System image can use site file storage."))
+		if not self.image_file or not self.kernel_file:
+			frappe.throw(_("A site file Virtual Machine Image requires rootfs and kernel files."))
 
 	def validate_is_available(self) -> None:
 		"""Reject an image that is not ready to boot a VM."""
@@ -232,12 +258,21 @@ class VirtualMachineImage(Document):
 	def retry_transfer(self) -> None:
 		"""Start the image transfer again, keeping the existing identifiers."""
 		self.check_permission("write")
-		if self.image_type != "Machine" or self.status != "Failed":
+		if self.image_type != "machine" or self.status != "Failed":
 			frappe.throw(_("Only a failed Machine image transfer can be retried."))
 
 		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 
 		VirtualMachineImageTransferService().enqueue(self.name, queue="long", timeout=7200)
+
+	@frappe.whitelist(methods=["POST"])
+	def migrate_to_object_storage(self) -> None:
+		"""Queue the move of this site file image into object storage."""
+		self.check_permission("write")
+
+		from atlas.vm.core.vm_image_storage_migration import VirtualMachineImageStorageMigration
+
+		VirtualMachineImageStorageMigration().request(self)
 
 	@frappe.whitelist(methods=["POST"])
 	def request_deletion(self) -> None:

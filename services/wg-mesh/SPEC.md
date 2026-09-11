@@ -6,6 +6,8 @@
 
 WG Mesh gives VMs private IPv6 addresses. It routes traffic between bare-metal hosts.
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 It uses eBPF, WireGuard, and multicast discovery. It serves one region.
 
 ## Layout

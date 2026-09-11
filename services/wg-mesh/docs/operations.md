@@ -1,5 +1,7 @@
 # Atlas WG Mesh operations guide
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds the BPF object. It does not run as a daemon. Atlas WG Mesh discovers remote VM owners and routes packets in BPF after the CLI exits.
 
 ## Contents

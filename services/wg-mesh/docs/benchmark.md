@@ -1,5 +1,7 @@
 # Atlas WG Mesh benchmarks
 
+For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+
 Bare metal. 1 GbE uplink. WireGuard MTU `1420`. VM interface MTU `1380`.
 
 ## Throughput

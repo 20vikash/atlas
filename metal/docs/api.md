@@ -1,5 +1,7 @@
 # HTTP API
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 [metal SPEC](../SPEC.md) · detail: [internal/api/SPEC.md](../internal/api/SPEC.md)
 
 `metald` serves the controller API. The complete reference, with every field and status, is the OpenAPI document the binary embeds: open `GET /docs` in a browser, or read `GET /docs/swagger.json`.

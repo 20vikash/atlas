@@ -18,10 +18,8 @@
   "server_provider",
   "column_break_ywxk",
   "region_name",
-  "column_break_qqfv",
+  "column_break_kxwi",
   "region_id",
-  "column_break_xvbe",
-  "central_jwks_url",
   "private_network_config_section",
   "private_network_cidr",
   "column_break_jzip",
@@ -38,6 +36,12 @@
   "metal_token_private_key",
   "previous_metal_token_private_key",
   "metal_token_key_rotated_on",
+  "jwks_data_section",
+  "central_jwks_url",
+  "jwt_signing_key_id",
+  "jwt_signing_private_key",
+  "column_break_abbx",
+  "central_jwks",
   "scaleway_tab",
   "scaleway_settings_section",
   "scaleway_organization_id",
@@ -281,10 +285,6 @@
    "reqd": 1
   },
   {
-   "fieldname": "column_break_qqfv",
-   "fieldtype": "Column Break"
-  },
-  {
    "fieldname": "column_break_vkzm",
    "fieldtype": "Column Break"
   },
@@ -518,6 +518,24 @@
    "label": "Central JWKS URL"
   },
   {
+   "fieldname": "central_jwks",
+   "fieldtype": "JSON",
+   "label": "Central JWKS",
+   "read_only": 1
+  },
+  {
+   "fieldname": "jwt_signing_key_id",
+   "fieldtype": "Data",
+   "label": "JWT Signing Key ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "jwt_signing_private_key",
+   "fieldtype": "Password",
+   "label": "JWT Signing Private Key",
+   "read_only": 1
+  },
+  {
    "fieldname": "proxy_cluster_password",
    "fieldtype": "Password",
    "label": "Cluster Password",
@@ -536,7 +554,18 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_xvbe",
+   "fieldname": "column_break_kxwi",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval: false",
+   "fieldname": "jwks_data_section",
+   "fieldtype": "Section Break",
+   "label": "JWKS Data"
+  },
+  {
+   "fieldname": "column_break_abbx",
    "fieldtype": "Column Break"
   }
  ],
@@ -544,7 +573,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-10 21:10:00.000000",
+ "modified": "2026-09-11 09:40:00.000000",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",

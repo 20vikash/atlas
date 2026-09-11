@@ -96,7 +96,7 @@ class TestMetalTokenKey(UnitTestCase):
 
 		self.settings._rotate_metal_token_key.assert_called_once()
 
-# Create a missing host key instead of rotating.
+	# Create a missing host key instead of rotating.
 	def test_a_missing_key_is_created_in_place_of_a_rotation(self) -> None:
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import rotate_metal_token_key
 
@@ -106,6 +106,18 @@ class TestMetalTokenKey(UnitTestCase):
 			rotate_metal_token_key()
 
 		self.settings._rotate_metal_token_key.assert_not_called()
+
+
+class TestRegionalCredentials(UnitTestCase):
+	def test_a_save_creates_the_proxy_password_and_the_signing_key(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		settings = MagicMock(is_setup_completed=False)
+		with patch("atlas.auth.issuer.initialize_signing_key") as initialize_signing_key:
+			AtlasSettings.before_save(settings)
+
+		settings.initialize_proxy_cluster_password.assert_called_once_with()
+		initialize_signing_key.assert_called_once_with(settings)
 
 
 class TestRegionID(UnitTestCase):
@@ -250,3 +262,20 @@ class IntegrationTestWildcardCertificateRenewal(IntegrationTestCase):
 		self.settings.wildcard_tls_expires_on = None
 
 		self.assertFalse(self._renew_expiring().called)
+
+
+class TestObjectStorageConfiguration(UnitTestCase):
+	def test_object_storage_needs_a_bucket_and_both_credentials(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		cases = (
+			("bucket", "key", "secret", True),
+			("", "key", "secret", False),
+			("bucket", "", "secret", False),
+			("bucket", "key", None, False),
+		)
+		for bucket, access_key_id, secret, expected in cases:
+			settings = MagicMock(object_storage_bucket=bucket, object_storage_access_key_id=access_key_id)
+			settings.get_password.return_value = secret
+			with self.subTest(bucket=bucket, access_key_id=access_key_id, secret=secret):
+				self.assertEqual(AtlasSettings.is_object_storage_configured.fget(settings), expected)

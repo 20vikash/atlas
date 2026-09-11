@@ -6,6 +6,8 @@
 
 Metal manages virtual machines on a host. Its executable is `metald`.
 
+For Go code, follow the repository [Go anti-pattern rules](../llm/go-code-review-guide.md).
+
 ## Layout
 
 ```text

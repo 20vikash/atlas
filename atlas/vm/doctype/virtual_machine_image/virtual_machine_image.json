@@ -25,11 +25,14 @@
   "column_break_ueib",
   "memory_snapshot_disk_mib",
   "section_break_files",
+  "artifact_storage",
   "image_object_key",
+  "image_file",
   "image_sha256",
   "image_size_mib",
   "column_break_files",
   "kernel_object_key",
+  "kernel_file",
   "kernel_sha256",
   "kernel_size_mib",
   "section_break_source",
@@ -53,12 +56,12 @@
    "label": "Enabled"
   },
   {
-   "default": "System",
+   "default": "system",
    "fieldname": "image_type",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Image Type",
-   "options": "System\nMachine",
+   "options": "system\nmachine",
    "reqd": 1,
    "set_only_once": 1
   },
@@ -152,10 +155,31 @@
    "label": "Artifacts"
   },
   {
+   "default": "Object Storage",
+   "description": "Where the rootfs and kernel bytes are stored.",
+   "fieldname": "artifact_storage",
+   "fieldtype": "Select",
+   "label": "Artifact Storage",
+   "options": "Object Storage\nSite File",
+   "read_only": 1,
+   "reqd": 1,
+   "show_description_on_click": 1
+  },
+  {
    "description": "Object key of the rootfs image.",
    "fieldname": "image_object_key",
    "fieldtype": "Data",
    "label": "Image Object Key",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "depends_on": "eval: doc.artifact_storage === 'Site File'",
+   "description": "Public site File that holds the rootfs during bootstrap.",
+   "fieldname": "image_file",
+   "fieldtype": "Link",
+   "label": "Image File",
+   "options": "File",
    "read_only": 1,
    "show_description_on_click": 1
   },
@@ -184,6 +208,16 @@
    "show_description_on_click": 1
   },
   {
+   "depends_on": "eval: doc.artifact_storage === 'Site File'",
+   "description": "Public site File that holds the kernel during bootstrap.",
+   "fieldname": "kernel_file",
+   "fieldtype": "Link",
+   "label": "Kernel File",
+   "options": "File",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
    "fieldname": "kernel_sha256",
    "fieldtype": "Data",
    "label": "Kernel SHA-256",
@@ -196,7 +230,7 @@
    "read_only": 1
   },
   {
-   "depends_on": "eval:doc.image_type === 'Machine'",
+   "depends_on": "eval:doc.image_type === 'machine'",
    "fieldname": "section_break_source",
    "fieldtype": "Section Break",
    "label": "Machine Image Source"
@@ -215,7 +249,7 @@
   },
   {
    "collapsible": 1,
-   "depends_on": "eval:doc.image_type === 'Machine'",
+   "depends_on": "eval:doc.image_type === 'machine'",
    "fieldname": "section_break_transfer",
    "fieldtype": "Section Break",
    "label": "Transfer"

@@ -1,5 +1,7 @@
 # Networking
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 [metal SPEC](../SPEC.md) · detail: [internal/network/SPEC.md](../internal/network/SPEC.md)
 
 Every virtual machine gets the same private addresses. That is safe because each VM owns its own Linux network namespace, so nothing has to be allocated per VM and nothing has to be remembered between restarts.
@@ -50,7 +52,7 @@ Atlas WG Mesh is required. metald refuses to run without the CLI, because a VM w
 
 Tenant 0 is the privileged tenant. A tenant-0 VM crosses tenants only when its address is in the Atlas WG Mesh whitelist, which `POST /v1/sync` carries in full.
 
-A VM learns its address from MMDS. `atlas-metadata.service` in the guest reads `meta-data/mesh-ipv6` and writes a systemd-networkd drop-in. A timer repeats it, because a warm snapshot resumes with new MMDS content and systemd does not rerun a unit after a resume.
+A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes.
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 

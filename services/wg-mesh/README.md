@@ -2,6 +2,8 @@
 
 Atlas WG Mesh gives VMs static private IPv6 addresses and routes their traffic directly between bare-metal hosts. It uses eBPF for routing, WireGuard for encryption, and multicast discovery for VM locations.
 
+For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-review-guide.md).
+
 ## Scope
 
 Atlas WG Mesh is a region-scoped private network. A VM keeps its address when it moves, and routing needs no controller or daemon. It requires a trusted IPv4 multicast Layer-2 network and does not manage WireGuard peers, keys, NAT, DNS, DHCP, or firewall rules.

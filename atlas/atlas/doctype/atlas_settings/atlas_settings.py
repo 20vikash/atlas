@@ -26,9 +26,16 @@ METAL_TOKEN_KEY_ROTATION_DAYS = 30
 PROXY_CONFIGURATION_FIELDS = (
 	"wildcard_tls_certificate",
 	"wildcard_tls_private_key",
-	"central_jwks_url",
 	"proxy_cluster_password",
 	"previous_proxy_cluster_password",
+)
+# Changes can trigger pending image migrations.
+OBJECT_STORAGE_FIELDS = (
+	"object_storage_bucket",
+	"object_storage_access_key_id",
+	"object_storage_secret_access_key",
+	"object_storage_endpoint_url",
+	"object_storage_region",
 )
 
 
@@ -43,6 +50,7 @@ class AtlasSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		central_jwks: DF.JSON | None
 		central_jwks_url: DF.Data | None
 		dns_provider: DF.Literal["Route53"]
 		http_proxy_package_file: DF.Link | None
@@ -52,6 +60,8 @@ class AtlasSettings(Document):
 		is_server_provider_setup_completed: DF.Check
 		is_setup_completed: DF.Check
 		is_wildcard_tls_auto_renew_enabled: DF.Check
+		jwt_signing_key_id: DF.Data | None
+		jwt_signing_private_key: DF.Password | None
 		letsencrypt_config_directory: DF.Data | None
 		letsencrypt_email: DF.Data
 		metal_token_key_rotated_on: DF.Datetime | None
@@ -112,12 +122,25 @@ class AtlasSettings(Document):
 	@property
 	def admin_audience_id(self) -> str:
 		"""Return the audience that a token for the Atlas API must carry."""
-		return f"atlas-{self.region_id}-admin"
+		return f"atlas-admin:{self.region_id}"
 
 	@property
 	def proxy_audience_id(self) -> str:
 		"""Return the audience that a token for a regional proxy must carry."""
-		return f"atlas-{self.region_id}-proxy"
+		return f"atlas-proxy:{self.region_id}"
+
+	@property
+	def issuer(self) -> str:
+		"""Return this region's Atlas issuer."""
+		return f"atlas:{self.region_id}"
+
+	@property
+	def jwks_url(self) -> str:
+		"""Return the public regional JSON Web Key Set URL."""
+		from atlas.auth.jwks import JWKS_PATH
+
+		base_url = frappe.conf.atlas_base_url or frappe.utils.get_url()
+		return f"{base_url.rstrip('/')}{JWKS_PATH}"
 
 	@property
 	def metal_issuer_id(self) -> str:
@@ -145,6 +168,15 @@ class AtlasSettings(Document):
 
 		return LetsEncrypt(settings=self)
 
+	@property
+	def is_object_storage_configured(self) -> bool:
+		"""Return whether the bucket and both credentials are set."""
+		return bool(
+			self.object_storage_bucket
+			and self.object_storage_access_key_id
+			and self.get_password("object_storage_secret_access_key", raise_exception=False)
+		)
+
 	def get_object_storage_client(self) -> "ObjectStorageClient":
 		"""Create the configured object storage client."""
 		from atlas.atlas.object_storage import ObjectStorageClient
@@ -157,10 +189,6 @@ class AtlasSettings(Document):
 			region=self.object_storage_region or "",
 			signed_url_expiry=self.object_storage_signed_url_expiry or 86400,
 		)
-
-	def before_validate(self) -> None:
-		"""Create the regional proxy password when it is missing."""
-		self.initialize_proxy_cluster_password()
 
 	def validate(self) -> None:
 		"""Reject settings that would leave Atlas unable to reach a provider."""
@@ -204,11 +232,29 @@ class AtlasSettings(Document):
 		if any(self.has_value_changed(field) for field in self.dns_provider_controller.credential_fields):
 			self.dns_provider_controller.validate_credentials()
 
+		if self.has_value_changed("central_jwks_url"):
+			frappe.enqueue(
+				"atlas.auth.jwks.sync_central_jwks",
+				job_id="atlas-sync-central-jwks",
+				deduplicate=True,
+				enqueue_after_commit=True,
+			)
+
 		if any(self.has_value_changed(field) for field in PROXY_CONFIGURATION_FIELDS):
 			push_configuration_to_active_proxies()
 
+		if any(self.has_value_changed(field) for field in OBJECT_STORAGE_FIELDS):
+			from atlas.vm.core.vm_image_storage_migration import enqueue_site_file_image_migrations
+
+			enqueue_site_file_image_migrations()
+
 	def before_save(self) -> None:
-		"""Apply provider setup when the credentials change."""
+		"""Create the regional credentials and apply provider setup when the credentials change."""
+		from atlas.auth.issuer import initialize_signing_key
+
+		self.initialize_proxy_cluster_password()
+		initialize_signing_key(self)
+
 		if (
 			self.is_dns_setup_completed
 			and self.is_server_provider_setup_completed
@@ -321,22 +367,13 @@ class AtlasSettings(Document):
 		self._rotate_proxy_cluster_password()
 		frappe.msgprint(_("The proxy cluster password was rotated."))
 
-	def initialize_proxy_cluster_password(self, persist: bool = False) -> bool:
+	def initialize_proxy_cluster_password(self) -> bool:
 		"""Create the regional proxy password when it is missing."""
 		if self.get_password("proxy_cluster_password", raise_exception=False):
 			return False
-		password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
-		self.proxy_cluster_password = password
-		self.proxy_cluster_password_rotated_on = now_datetime()
-		if persist:
-			from frappe.utils.password import set_encrypted_password
 
-			set_encrypted_password(self.doctype, self.name, password, "proxy_cluster_password")
-			frappe.db.set_single_value(
-				self.doctype,
-				"proxy_cluster_password_rotated_on",
-				self.proxy_cluster_password_rotated_on,
-			)
+		self.proxy_cluster_password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
+		self.proxy_cluster_password_rotated_on = now_datetime()
 		return True
 
 	def initialize_metal_token_key(self, persist: bool = False) -> bool:
@@ -389,12 +426,11 @@ class AtlasSettings(Document):
 	def _rotate_proxy_cluster_password(self) -> None:
 		"""Rotate the regional proxy password and retain the previous value."""
 		current_password = self.get_password("proxy_cluster_password", raise_exception=False)
-		if not current_password:
-			self.initialize_proxy_cluster_password()
-		else:
+		if current_password:
 			self.previous_proxy_cluster_password = current_password
 			self.proxy_cluster_password = frappe.generate_hash(length=PROXY_CLUSTER_PASSWORD_LENGTH)
 			self.proxy_cluster_password_rotated_on = now_datetime()
+
 		self.save(ignore_permissions=True)
 
 	def _rotate_metal_token_key(self) -> None:
@@ -426,11 +462,6 @@ def renew_expiring_wildcard_certificate() -> None:
 		return
 
 	settings.enqueue_wildcard_certificate_renewal()
-
-
-def initialize_proxy_cluster_password() -> None:
-	"""Create the regional proxy password after schema migration."""
-	frappe.get_single("Atlas Settings").initialize_proxy_cluster_password(persist=True)
 
 
 def rotate_proxy_cluster_password() -> None:
