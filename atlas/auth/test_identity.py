@@ -186,6 +186,7 @@ class TestGuestPaths(UnitTestCase):
 			"/api/method/login",
 			"/api/method/logout",
 			"/assets/atlas/app.js",
+			"/files/metald-linux-amd64-0123456789ab",
 			"/api/atlas/docs",
 			"/api/atlas/docs/openapi.json",
 			"/api/atlas/jwks.json",
