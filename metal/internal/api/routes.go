@@ -45,7 +45,6 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	sourceRoutes := router.Group("/v1/migrations")
 	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource)
 	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot)
-	sourceRoutes.POST("/:id/stream", s.streamMigrationSnapshot)
 	sourceRoutes.POST("/:id/stop", s.stopMigrationSource)
 	sourceRoutes.POST("/:id/start", s.startMigrationSource)
 	sourceRoutes.POST("/:id/destroy", s.destroyMigrationSource)

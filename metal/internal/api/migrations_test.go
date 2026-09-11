@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"testing"
 
@@ -12,34 +11,29 @@ import (
 )
 
 type stubMigrationManager struct {
-	record            vm.TargetMigrationRecord
-	createErr         error
-	statusErr         error
-	abortErr          error
-	handshake         vm.SourceHandshake
-	lockErr           error
-	unlockErr         error
-	snapshot          vm.SourceSnapshot
-	snapshotErr       error
-	streamBytes       int64
-	streamErr         error
-	createArgs        []string
-	lockArgs          []string
-	unlockArgs        []string
-	snapshotArgs      []string
-	abortedID         string
-	finishedID        string
-	finishErr         error
-	receivedSequence  int
-	streamSequence    int
-	streamResumeToken string
-	streamThroughput  int
-	stopArgs          []string
-	stopErr           error
-	startArgs         []string
-	startErr          error
-	destroyArgs       []string
-	destroyErr        error
+	record           vm.TargetMigrationRecord
+	createErr        error
+	statusErr        error
+	abortErr         error
+	handshake        vm.SourceHandshake
+	lockErr          error
+	unlockErr        error
+	snapshot         vm.SourceSnapshot
+	snapshotErr      error
+	createArgs       []string
+	lockArgs         []string
+	unlockArgs       []string
+	snapshotArgs     []string
+	abortedID        string
+	finishedID       string
+	finishErr        error
+	receivedSequence int
+	stopArgs         []string
+	stopErr          error
+	startArgs        []string
+	startErr         error
+	destroyArgs      []string
+	destroyErr       error
 }
 
 func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source string) (vm.TargetMigrationRecord, error) {
@@ -70,17 +64,6 @@ func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID
 	m.receivedSequence = receivedSequence
 	m.snapshotArgs = []string{migrationID, virtualMachineID}
 	return m.snapshot, m.snapshotErr
-}
-
-func (m *stubMigrationManager) SendSourceStream(_ context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
-	m.streamSequence = sequence
-	m.streamResumeToken = resumeToken
-	m.streamThroughput = throughputMiBps
-	if m.streamErr != nil {
-		return 0, m.streamErr
-	}
-	_, _ = w.Write(make([]byte, m.streamBytes))
-	return m.streamBytes, nil
 }
 
 func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string) (vm.SourceSnapshot, error) {
@@ -253,21 +236,6 @@ func TestCreateMigrationSnapshotAcceptsNoBody(t *testing.T) {
 	do(t, server, http.MethodPost, "/v1/migrations/mig-1/snapshot?virtual_machine_id=vm-00001", "", http.StatusOK)
 	if stub.receivedSequence != 0 {
 		t.Fatalf("received %d, want 0", stub.receivedSequence)
-	}
-}
-
-func TestStreamMigrationSnapshotStreamsBytes(t *testing.T) {
-	stub := &stubMigrationManager{streamBytes: 4096}
-	server := newMigrationTestServer(t, stub)
-
-	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/stream?virtual_machine_id=vm-00001",
-		`{"sequence":2,"resume_token":"rt","throughput_mibps":32}`, http.StatusOK)
-
-	if recorder.Body.Len() != 4096 || recorder.Header().Get("Content-Type") != "application/octet-stream" {
-		t.Fatalf("body = %d bytes, type %q", recorder.Body.Len(), recorder.Header().Get("Content-Type"))
-	}
-	if stub.streamSequence != 2 || stub.streamResumeToken != "rt" || stub.streamThroughput != 32 {
-		t.Fatalf("stream args = %d %q %d", stub.streamSequence, stub.streamResumeToken, stub.streamThroughput)
 	}
 }
 

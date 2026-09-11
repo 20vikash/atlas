@@ -39,13 +39,6 @@ type snapshotResponse struct {
 	GUID      string `json:"guid"`
 }
 
-// streamSnapshotRequest names a snapshot stream and optional disk limit.
-type streamSnapshotRequest struct {
-	Sequence        int    `json:"sequence"`
-	ResumeToken     string `json:"resume_token"`
-	ThroughputMiBps int    `json:"throughput_mibps"`
-}
-
 // createMigrationSnapshot returns the next source snapshot.
 func (s *Server) createMigrationSnapshot(c echo.Context) error {
 	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
@@ -61,21 +54,6 @@ func (s *Server) createMigrationSnapshot(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
-}
-
-// streamMigrationSnapshot streams one snapshot. It writes no status until data.
-func (s *Server) streamMigrationSnapshot(c echo.Context) error {
-	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
-	if err != nil {
-		return err
-	}
-	var request streamSnapshotRequest
-	if err := decodeJSONRequest(c, &request); err != nil {
-		return err
-	}
-	c.Response().Header().Set(echo.HeaderContentType, "application/octet-stream")
-	_, err = s.migrationManager.SendSourceStream(c.Request().Context(), identifier, virtualMachineID, request.Sequence, request.ResumeToken, request.ThroughputMiBps, c.Response())
-	return err
 }
 
 // stopMigrationSource stops the source, removes its network, and returns its
