@@ -22,11 +22,7 @@ MIGRATION_TIMEOUT_SECONDS = 3600
 
 
 class VirtualMachineImageStorageMigration:
-	"""Move one bootstrap System image from public site files into object storage.
-
-	Atlas has no object storage while it bootstraps, so the first System image is
-	served from the site. This runs once credentials exist.
-	"""
+	"""Move one bootstrap System image into object storage."""
 
 	def request(self, image: VirtualMachineImage) -> None:
 		"""Queue one repeatable migration for a site file image."""
@@ -50,11 +46,7 @@ class VirtualMachineImageStorageMigration:
 		)
 
 	def migrate(self, image_name: str) -> None:
-		"""Upload both artifacts, move the record, and then drop the local files.
-
-		The order matters. An interrupted run leaves an unused object or an unused
-		site file, never a record whose artifacts cannot be downloaded.
-		"""
+		"""Upload both artifacts, update the record, and remove the site files."""
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
 		if not image.is_stored_in_site_file:
 			return
@@ -98,12 +90,7 @@ class VirtualMachineImageStorageMigration:
 
 
 def enqueue_site_file_image_migrations() -> None:
-	"""Queue a migration for every Available image that site files still hold.
-
-	Atlas Settings calls this when the object storage fields change, and a
-	scheduled job calls it again, because a migration is safe to repeat and one
-	that failed has nothing else to retry it.
-	"""
+	"""Queue migrations for Available images stored as site files."""
 	settings = cast("AtlasSettings", frappe.get_single("Atlas Settings"))
 	if not settings.is_object_storage_configured:
 		return

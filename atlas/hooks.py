@@ -215,7 +215,7 @@ scheduler_events = {
 		"*/15 * * * *": [
 			# Remove the published files that a newer build replaced.
 			"atlas.atlas.core.artifacts.delete_unlinked_files",
-			# Move a bootstrap image into object storage once it is configured.
+			# Migrate bootstrap images after object storage is configured.
 			"atlas.vm.core.vm_image_storage_migration.enqueue_site_file_image_migrations",
 		],
 		"0 */12 * * *": [

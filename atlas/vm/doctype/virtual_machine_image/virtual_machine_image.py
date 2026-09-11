@@ -177,11 +177,7 @@ class VirtualMachineImage(Document):
 		return self.artifact_storage == "Site File"
 
 	def get_artifact_url(self, artifact: Artifact, expiry_seconds: int = SIGNED_URL_EXPIRY_SECONDS) -> str:
-		"""Return the URL a host uses to download one artifact.
-
-		A site file URL is public and does not expire. Only the bootstrap System
-		image uses it, until object storage exists.
-		"""
+		"""Return the download URL for one artifact."""
 		if self.is_stored_in_site_file:
 			file_name = self.image_file if artifact == "rootfs" else self.kernel_file
 			if not file_name:

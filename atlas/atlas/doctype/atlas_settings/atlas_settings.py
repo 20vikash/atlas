@@ -28,8 +28,7 @@ PROXY_CONFIGURATION_FIELDS = (
 	"proxy_cluster_password",
 	"previous_proxy_cluster_password",
 )
-# A change to one of these can make object storage usable, which is what a site
-# file image waits for.
+# Changes can trigger pending image migrations.
 OBJECT_STORAGE_FIELDS = (
 	"object_storage_bucket",
 	"object_storage_access_key_id",

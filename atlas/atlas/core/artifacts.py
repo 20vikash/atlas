@@ -26,11 +26,7 @@ def publish_public_file(file_name: str, label: str, content: bytes) -> str:
 
 
 def publish_public_file_path(source: Path, digest: str) -> str:
-	"""Publish a large public build file from disk and return its document name.
-
-	A virtual machine artifact is too large to hold in memory, so the bytes are
-	copied into the public files directory and the File document only names them.
-	"""
+	"""Publish a large public build file from disk."""
 	file_name = f"{digest[:12]}-{source.name}"
 	destination = Path(frappe.get_site_path("public", "files", file_name))
 	destination.parent.mkdir(parents=True, exist_ok=True)
