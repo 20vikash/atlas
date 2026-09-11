@@ -8,6 +8,7 @@ from frappe import _
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
+from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import EGRESS_MODES, VirtualMachineCreateRequest
@@ -344,10 +345,12 @@ class VirtualMachineService:
 			"MetalServerIPAddress",
 			frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True),
 		)
-		if address.tenant_id != self.virtual_machine.tenant_id:
+		if address.tenant_id not in (self.virtual_machine.tenant_id, UNOWNED_TENANT_ID):
 			frappe.throw(_("The IP address belongs to another tenant."), exc=frappe.PermissionError)
 		if address.status != "Allocated" or address.virtual_machine:
 			frappe.throw(_("The IP address is not available."), exc=frappe.ValidationError)
+
+		address.tenant_id = self.virtual_machine.tenant_id
 		address.begin_assignment(self.virtual_machine.server, self.virtual_machine.name)
 		return address
 
