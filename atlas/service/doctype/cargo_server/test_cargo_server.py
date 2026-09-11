@@ -3,7 +3,7 @@
 
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe.tests import UnitTestCase
@@ -11,33 +11,51 @@ from frappe.tests import UnitTestCase
 import atlas.service.doctype.cargo_server.cargo_server as cargo_server_module
 from atlas.service.doctype.cargo_server.cargo_server import CargoServer
 
+VALID_REQUEST = {
+	"virtual_machine_image": "image-1",
+	"vcpus": 2,
+	"memory_mib": 4096,
+	"disk_mib": 16384,
+	"server_ip_address": "203.0.113.9",
+}
 
-class TestCargoServerProvisioning(UnitTestCase):
-	def test_provisioning_requires_an_active_proxy(self) -> None:
-		server = SimpleNamespace()
-		with (
-			patch.object(cargo_server_module.frappe.db, "exists", return_value=None),
-			self.assertRaisesRegex(frappe.ValidationError, "Active Proxy Server"),
-		):
-			CargoServer._validate_active_proxy(server)
 
-	def test_provisioning_requires_a_system_image(self) -> None:
-		server = SimpleNamespace()
-		with (
-			patch.object(cargo_server_module.frappe.db, "get_value", return_value="machine"),
-			self.assertRaisesRegex(frappe.ValidationError, "System Virtual Machine Image"),
-		):
-			CargoServer._validate_system_image(server, "image-1")
-
+class TestCargoServerProvisionRequest(UnitTestCase):
 	def test_an_attached_virtual_machine_blocks_provisioning(self) -> None:
 		server = SimpleNamespace(virtual_machine="vm-00001", status="Failed")
 		with self.assertRaisesRegex(frappe.ValidationError, "Archive"):
-			CargoServer._validate_provisioning_state(server)
+			CargoServer._validate_provision_request(server, VALID_REQUEST)
 
 	def test_a_pending_state_blocks_provisioning(self) -> None:
 		server = SimpleNamespace(virtual_machine=None, status="Pending")
 		with self.assertRaisesRegex(frappe.ValidationError, "Pending"):
-			CargoServer._validate_provisioning_state(server)
+			CargoServer._validate_provision_request(server, VALID_REQUEST)
+
+	def test_provisioning_requires_an_active_proxy(self) -> None:
+		server = SimpleNamespace(virtual_machine=None, status="Not Provisioned")
+		with (
+			patch.object(cargo_server_module.frappe.db, "exists", return_value=None),
+			self.assertRaisesRegex(frappe.ValidationError, "Active Proxy Server"),
+		):
+			CargoServer._validate_provision_request(server, VALID_REQUEST)
+
+	def test_provisioning_requires_a_system_image(self) -> None:
+		server = SimpleNamespace(virtual_machine=None, status="Not Provisioned")
+		with (
+			patch.object(cargo_server_module.frappe.db, "exists", return_value=True),
+			patch.object(cargo_server_module.frappe.db, "get_value", return_value="machine"),
+			self.assertRaisesRegex(frappe.ValidationError, "System Virtual Machine Image"),
+		):
+			CargoServer._validate_provision_request(server, VALID_REQUEST)
+
+	def test_provisioning_requires_a_public_address(self) -> None:
+		server = SimpleNamespace(virtual_machine=None, status="Not Provisioned")
+		with (
+			patch.object(cargo_server_module.frappe.db, "exists", return_value=True),
+			patch.object(cargo_server_module.frappe.db, "get_value", return_value="system"),
+			self.assertRaisesRegex(frappe.ValidationError, "public IPv4 address"),
+		):
+			CargoServer._validate_provision_request(server, {**VALID_REQUEST, "server_ip_address": " "})
 
 	def test_virtual_machine_request_uses_the_reserved_public_address(self) -> None:
 		server = SimpleNamespace(virtual_machine=None, status="Pending", failure_message=None)
@@ -51,16 +69,7 @@ class TestCargoServerProvisioning(UnitTestCase):
 			),
 			patch("atlas.vm.core.vm_service.VirtualMachineService", virtual_machine_service),
 		):
-			is_draft = CargoServer._create_virtual_machine(
-				server,
-				{
-					"virtual_machine_image": "image-1",
-					"vcpus": 2,
-					"memory_mib": 4096,
-					"disk_mib": 16384,
-					"server_ip_address": "203.0.113.9",
-				},
-			)
+			is_draft = CargoServer._create_virtual_machine(server, VALID_REQUEST)
 
 		request = virtual_machine_service.create.call_args.args[0]
 		self.assertFalse(is_draft)
@@ -79,9 +88,9 @@ class TestCargoServerProvisioning(UnitTestCase):
 				side_effect=cargo_server_module.LockTimeoutError("busy"),
 			),
 			self.assertRaisesRegex(frappe.ValidationError, "lifecycle action"),
+			cargo_server_module.cargo_lifecycle_lock(),
 		):
-			with cargo_server_module.cargo_lifecycle_lock():
-				pass
+			pass
 
 	def test_pending_reconciliation_queues_the_same_virtual_machine(self) -> None:
 		server = MagicMock(status="Pending", virtual_machine="vm-00001")

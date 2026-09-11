@@ -5,6 +5,7 @@ import random
 import secrets
 import string
 import time
+from collections.abc import Callable
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,7 @@ from frappe import _
 from atlas.atlas.core.ssh import wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.auth.issuer import issue_token
-from atlas.service.doctype.cargo_server.cargo_server import cargo_lifecycle_lock, failure_message
+from atlas.service.doctype.cargo_server.cargo_server import cargo_lifecycle_lock
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -42,48 +43,47 @@ class CargoServerProvisioner:
 		self.logger = logging.getLogger("atlas.service.provisioning")
 
 	def run(self) -> None:
-		"""Run the Cargo setup sequence after the virtual machine is ready."""
+		"""Run each Cargo setup step in order."""
 		with cargo_lifecycle_lock():
 			self.cargo_server = frappe.get_single("Cargo Server")
 			if self.cargo_server.status == "Failed" or not self.is_virtual_machine_ready:
 				return
 
-			self._run()
+			phase = "start"
+			self.cargo_server.status = "Provisioning"
+			self.cargo_server.failure_message = None
+			self.save()
+			try:
+				for phase, operation in self.steps:
+					self.logger.info(
+						"Cargo provisioning step started",
+						extra={"resource": self.cargo_server.name, "operation": "provision", "phase": phase},
+					)
+					operation()
 
-	def _run(self) -> None:
-		"""Run each Cargo setup step while the lifecycle lock is active."""
-		phase = "start"
-		self.cargo_server.status = "Provisioning"
-		self.cargo_server.failure_message = None
-		self.save_progress(5)
-		try:
-			phase = "secure-shell"
-			self.wait_for_ssh()
-			self.save_progress(20)
+				self.cargo_server.status = "Active"
+				self.save()
+			except Exception as error:
+				self.cargo_server.status = "Failed"
+				self.cargo_server.failure_message = f"{phase}: {error}"
+				self.save()
+				frappe.db.commit()  # nosemgrep
+				self.logger.exception(
+					"Cargo provisioning failed",
+					extra={"resource": self.cargo_server.name, "operation": "provision", "phase": phase},
+				)
+				frappe.log_error(title=f"Cargo provisioning failed during {phase}")
+				raise
 
-			phase = "installation"
-			self.install_cargo()
-			self.save_progress(70)
-
-			phase = "proxy-routes"
-			self.update_proxy_routes()
-			self.save_progress(90)
-
-			phase = "readiness"
-			self.wait_for_readiness()
-			self.cargo_server.status = "Active"
-			self.save_progress(100)
-		except Exception as error:
-			self.cargo_server.status = "Failed"
-			self.cargo_server.failure_message = failure_message(phase, error)
-			self.cargo_server.save(ignore_permissions=True)
-			frappe.db.commit()  # nosemgrep
-			self.logger.exception(
-				"Cargo provisioning failed",
-				extra={"resource": self.cargo_server.name, "operation": "provision", "phase": phase},
-			)
-			frappe.log_error(title=f"Cargo provisioning failed during {phase}")
-			raise
+	@property
+	def steps(self) -> tuple[tuple[str, Callable[[], None]], ...]:
+		"""Return setup steps in execution order."""
+		return (
+			("secure-shell", self.wait_for_ssh),
+			("installation", self.install_cargo),
+			("proxy-routes", self.update_proxy_routes),
+			("readiness", self.wait_for_readiness),
+		)
 
 	@property
 	def is_virtual_machine_ready(self) -> bool:
@@ -118,17 +118,16 @@ class CargoServerProvisioner:
 
 	def install_cargo(self) -> None:
 		"""Install Cargo with a synchronous SSH Task."""
-		environment = self.install_environment()
 		task = SSHTask.create_for_script_file(
 			target_type="Virtual Machine",
 			target=self.cargo_server.virtual_machine,
 			script_path="install-cargo.sh",
-			environment=environment,
+			environment=self.install_environment(),
 			timeout_seconds=INSTALL_TIMEOUT_SECONDS,
 			run_in_background=False,
 		)
 		self.cargo_server.installation_task = task.name
-		self.cargo_server.save(ignore_permissions=True)
+		self.save()
 
 		result = task.result
 		if result is None or not result.is_success:
@@ -172,6 +171,7 @@ class CargoServerProvisioner:
 			"REGION_ID": settings.region_id,
 			"PROXY_URL": self.proxy_url,
 			"PROXY_TOKEN": proxy_token,
+			"WILDCARD_DOMAIN": settings.wildcard_domain,
 		}
 
 	def update_proxy_routes(self) -> None:
@@ -216,21 +216,13 @@ class CargoServerProvisioner:
 		while time.monotonic() < deadline:
 			try:
 				response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
-				if response.status_code == 200 and self.is_pong(response):
+				if response.status_code == 200 and response.json().get("message") == "pong":
 					return
-			except requests.RequestException:
+			except requests.RequestException, ValueError:
 				pass
 			time.sleep(READINESS_POLL_INTERVAL_SECONDS)
 
 		frappe.throw(_("Cargo did not become ready through the Proxy."))
-
-	@staticmethod
-	def is_pong(response: requests.Response) -> bool:
-		"""Report whether a Frappe ping response contains pong."""
-		try:
-			return response.json().get("message") == "pong"
-		except AttributeError, ValueError:
-			return "pong" in response.text.lower()
 
 	def proxy_headers(self) -> dict[str, str]:
 		"""Return the current regional Proxy bearer credential."""
@@ -240,9 +232,8 @@ class CargoServerProvisioner:
 
 		return {"Authorization": f"Bearer {password}"}
 
-	def save_progress(self, completion: int) -> None:
-		"""Store the current lifecycle state and completion."""
-		self.cargo_server.completion = completion
+	def save(self) -> None:
+		"""Store the current Cargo Server state."""
 		self.cargo_server.save(ignore_permissions=True)
 
 

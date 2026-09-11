@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -11,16 +13,23 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 from frappe.tests import UnitTestCase
 
+import atlas
 import atlas.service.core.cargo.provisioning as provisioning
 from atlas.atlas.core.ssh import SSHResult
 from atlas.service.core.cargo.provisioning import CargoServerProvisioner, generate_installer_password
+
+
+def script_enrolment_variables() -> list[str]:
+	"""Return the ENROLMENT_VARS that install-cargo.sh refuses to run without."""
+	script = (Path(atlas.__file__).parent / "scripts" / "install-cargo.sh").read_text()
+	declaration = re.search(r'ENROLMENT_VARS="(.*?)"', script, re.DOTALL)
+	return declaration.group(1).replace("\\\n", " ").split()
 
 
 def cargo_server(**values) -> SimpleNamespace:
 	defaults = {
 		"name": "Cargo Server",
 		"status": "Pending",
-		"completion": 0,
 		"failure_message": None,
 		"installation_task": None,
 		"virtual_machine": "vm-00001",
@@ -48,14 +57,38 @@ class TestCargoInstallation(UnitTestCase):
 	def test_a_failed_service_never_creates_a_replacement(self) -> None:
 		server = cargo_server(status="Failed")
 		provisioner = CargoServerProvisioner(server)
+		step = Mock()
 		with (
 			patch.object(provisioning, "cargo_lifecycle_lock", return_value=nullcontext()),
 			patch.object(provisioning.frappe, "get_single", return_value=server),
-			patch.object(provisioner, "_run") as run,
+			patch.object(
+				provisioner.__class__, "steps", new=property(lambda self: (("installation", step),))
+			),
 		):
 			provisioner.run()
 
-		run.assert_not_called()
+		step.assert_not_called()
+		self.assertEqual(server.status, "Failed")
+
+	def test_a_failed_step_records_its_phase(self) -> None:
+		server = cargo_server()
+		provisioner = CargoServerProvisioner(server)
+		step = Mock(side_effect=RuntimeError("proxy unavailable"))
+		with (
+			patch.object(provisioning, "cargo_lifecycle_lock", return_value=nullcontext()),
+			patch.object(provisioning.frappe, "get_single", return_value=server),
+			patch.object(provisioner.__class__, "is_virtual_machine_ready", new=property(lambda self: True)),
+			patch.object(
+				provisioner.__class__, "steps", new=property(lambda self: (("proxy-routes", step),))
+			),
+			patch.object(provisioning.frappe.db, "commit"),
+			patch.object(provisioning.frappe, "log_error"),
+			self.assertRaises(RuntimeError),
+		):
+			provisioner.run()
+
+		self.assertEqual(server.status, "Failed")
+		self.assertEqual(server.failure_message, "proxy-routes: proxy unavailable")
 
 	def test_ssh_wait_uses_the_virtual_machine_public_address(self) -> None:
 		virtual_machine = SimpleNamespace(ssh_host="203.0.113.9")
@@ -132,6 +165,20 @@ class TestCargoInstallation(UnitTestCase):
 		self.assertEqual(environment["JWKS_URL"], "https://atlas.example.com/api/atlas/jwks.json")
 		self.assertEqual(environment["SITE"], "cargo.example.com")
 		self.assertEqual(environment["ADMIN_DOMAIN"], "cargo-pilot.example.com")
+
+	def test_every_enrolment_variable_the_script_requires_is_supplied(self) -> None:
+		settings = atlas_settings()
+		provisioner = CargoServerProvisioner(cargo_server())
+		with (
+			patch.object(provisioner.__class__, "settings", new=property(lambda self: settings)),
+			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
+			patch.object(provisioning, "issue_token", side_effect=["atlas-token", "proxy-token"]),
+		):
+			environment = provisioner.install_environment()
+
+		for name in script_enrolment_variables():
+			self.assertIn(name, environment)
+			self.assertNotEqual(environment[name], "", f"{name} is empty")
 
 	def test_generated_passwords_meet_the_installer_rule(self) -> None:
 		password = generate_installer_password()

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import frappe
@@ -30,7 +30,6 @@ class CargoServer(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-		completion: DF.Percent
 		failure_message: DF.SmallText | None
 		installation_task: DF.Link | None
 		status: DF.Literal["Not Provisioned", "Pending", "Provisioning", "Active", "Failed", "Archived"]
@@ -51,17 +50,10 @@ class CargoServer(Document):
 		if not isinstance(values, dict):
 			frappe.throw(_("Cargo Server provisioning data must be an object."))
 
-		server_ip_address = values.get("server_ip_address")
-		if not isinstance(server_ip_address, str) or not server_ip_address.strip():
-			frappe.throw(_("Select an allocated public IPv4 address."))
-
 		with cargo_lifecycle_lock():
 			cargo_server: CargoServer = frappe.get_single("Cargo Server")
-			cargo_server._validate_provisioning_state()
-			cargo_server._validate_active_proxy()
-			cargo_server._validate_system_image(values.get("virtual_machine_image"))
+			cargo_server._validate_provision_request(values)
 			cargo_server.status = "Pending"
-			cargo_server.completion = 0
 			cargo_server.failure_message = None
 			cargo_server.installation_task = None
 			cargo_server.save(ignore_permissions=True)
@@ -96,13 +88,12 @@ class CargoServer(Document):
 					frappe.get_doc("Virtual Machine", cargo_server.virtual_machine).terminate()
 			except Exception as error:
 				cargo_server.status = "Failed"
-				cargo_server.failure_message = failure_message("archive", error)
+				cargo_server.failure_message = f"archive: {error}"
 				cargo_server.save(ignore_permissions=True)
 				frappe.db.commit()  # nosemgrep
 				raise
 
 			cargo_server.status = "Archived"
-			cargo_server.completion = 0
 			cargo_server.failure_message = None
 			cargo_server.virtual_machine = None
 			cargo_server.installation_task = None
@@ -128,26 +119,30 @@ class CargoServer(Document):
 
 		CargoServerProvisioner(self).run()
 
-	def _validate_provisioning_state(self) -> None:
+	def _validate_provision_request(self, values: dict[str, Any]) -> None:
+		"""Reject a provision request that cannot produce a working Cargo Server."""
 		if self.virtual_machine:
 			frappe.throw(_("Archive the current Cargo Server before you provision another one."))
 		if self.status not in PROVISIONABLE_STATUSES:
 			frappe.throw(_("Cargo Server cannot be provisioned while its status is {0}.").format(self.status))
 
-	def _validate_active_proxy(self) -> None:
 		if not frappe.db.exists("Proxy Server", {"status": "Active"}):
 			frappe.throw(_("Provision an Active Proxy Server before you provision Cargo Server."))
 
-	def _validate_system_image(self, image_name: object) -> None:
-		if not isinstance(image_name, str) or not image_name:
+		image_name = values.get("virtual_machine_image")
+		if (
+			not image_name
+			or frappe.db.get_value("Virtual Machine Image", image_name, "image_type") != "system"
+		):
 			frappe.throw(_("Select a System Virtual Machine Image."))
-		if frappe.db.get_value("Virtual Machine Image", image_name, "image_type") != "system":
-			frappe.throw(_("Select a System Virtual Machine Image."))
+
+		address = values.get("server_ip_address")
+		if not isinstance(address, str) or not address.strip():
+			frappe.throw(_("Select an allocated public IPv4 address."))
 
 	def _create_virtual_machine(self, values: dict[str, Any]) -> bool:
 		from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 
-		settings = frappe.get_single("Atlas Settings")
 		request = {
 			"virtual_machine_image": values.get("virtual_machine_image"),
 			"vcpus": values.get("vcpus"),
@@ -156,7 +151,7 @@ class CargoServer(Document):
 			"tenant_id": 0,
 			"is_privileged": True,
 			"hostname": "cargo",
-			"ssh_keys": settings.public_ssh_key,
+			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",
 			"server_ip_address": values["server_ip_address"],
 		}
@@ -167,26 +162,18 @@ class CargoServer(Document):
 		except VirtualMachineCreateError as error:
 			self.virtual_machine = error.virtual_machine_name
 			self.status = "Failed"
-			self.failure_message = failure_message("virtual-machine", error)
+			self.failure_message = f"virtual-machine: {error}"
 			return True
 
 
 @contextmanager
 def cargo_lifecycle_lock() -> Iterator[None]:
-	"""Hold the site file lock that serializes Cargo lifecycle changes."""
-	with ExitStack() as stack:
-		try:
-			stack.enter_context(filelock(LIFECYCLE_LOCK_NAME, timeout=0))
-		except LockTimeoutError:
-			frappe.throw(_("Another Cargo Server lifecycle action is in progress."))
-
-		yield
-
-
-def failure_message(phase: str, error: Exception) -> str:
-	"""Return a bounded one-line failure without installation credentials."""
-	message = " ".join(str(error).split()) or error.__class__.__name__
-	return f"{phase}: {message}"[:500]
+	"""Serialize Cargo lifecycle actions. One Single owns one virtual machine."""
+	try:
+		with filelock(LIFECYCLE_LOCK_NAME, timeout=0):
+			yield
+	except LockTimeoutError:
+		frappe.throw(_("Another Cargo Server lifecycle action is in progress."))
 
 
 def _validate_system_manager() -> None:
