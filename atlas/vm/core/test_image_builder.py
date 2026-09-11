@@ -6,6 +6,7 @@ from unittest.mock import call, patch
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.image_builder import build_ubuntu_image, publish_ubuntu_image
+from atlas.vm.core.multipart_upload import MEBIBYTE
 
 
 class TestUbuntuImageBuilder(UnitTestCase):
@@ -43,3 +44,36 @@ class TestUbuntuImageBuilder(UnitTestCase):
 
 		self.assertEqual(sha256.call_args_list, [call(Path("rootfs.img")), call(Path("kernel"))])
 		get_single.assert_not_called()
+
+	def test_publish_to_site_files_does_not_touch_object_storage(self) -> None:
+		created = {}
+
+		with (
+			patch("atlas.vm.core.image_builder.get_sha256", side_effect=["a" * 64, "b" * 64]),
+			patch("atlas.vm.core.image_builder.frappe.db.exists", return_value=None),
+			patch("atlas.vm.core.image_builder.frappe.get_single") as get_single,
+			patch(
+				"atlas.vm.core.image_builder.publish_public_file_path",
+				side_effect=["file-rootfs", "file-kernel"],
+			),
+			patch("atlas.vm.core.image_builder.Path.stat", return_value=SimpleNamespace(st_size=MEBIBYTE)),
+			patch(
+				"atlas.vm.core.image_builder.frappe.get_doc",
+				side_effect=lambda values: SimpleNamespace(insert=lambda: created.update(values)),
+			),
+		):
+			publish_ubuntu_image(
+				"Ubuntu 24.04",
+				"24.04",
+				"amd64",
+				Path("rootfs.ext4"),
+				Path("kernel"),
+				"Site File",
+			)
+
+		get_single.assert_not_called()
+		self.assertEqual(created["artifact_storage"], "Site File")
+		self.assertEqual(created["image_file"], "file-rootfs")
+		self.assertEqual(created["kernel_file"], "file-kernel")
+		self.assertIsNone(created["image_object_key"])
+		self.assertIsNone(created["kernel_object_key"])

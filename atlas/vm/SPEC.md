@@ -23,6 +23,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
 | `vm_image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
+| `vm_image_storage_migration` | Moving a bootstrap System image from site files into object storage. |
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
 | `vm_state` | The only writer of Virtual Machine State. The host sync job calls it. |
 
@@ -63,7 +64,9 @@ Two scheduled jobs settle records that a lost response left uncertain: stale dra
 
 ## Images
 
-Virtual Machine Image is the durable boot artifact. `image_type` is `System` or `Machine`. Each image carries a tenant ID, and a Machine image inherits the tenant of its source virtual machine. System images are shared with every tenant. Machine images are visible only to their owning tenant. Each image has its own rootfs and kernel object key, exact byte size, and SHA-256 value. The immutable reference uses the architecture and both artifact hashes.
+Virtual Machine Image is the durable boot artifact. `image_type` is `System` or `Machine`. Each image carries a tenant ID, and a Machine image inherits the tenant of its source virtual machine. System images are shared with every tenant. Machine images are visible only to their owning tenant. Each image has its own rootfs and kernel location, exact byte size, and SHA-256 value. The immutable reference uses the architecture and both artifact hashes.
+
+`artifact_storage` is the single owner of the artifact location. `Object Storage` uses the object keys and signs a URL for 24 hours. `Site File` uses two public site Files and their permanent URLs, which lets Atlas boot a VM before object storage exists. Only a System image can use `Site File`, and the tenant download route refuses one. `vm_image_storage_migration.py` moves an image to object storage after the credentials exist. See [docs/images.md](../docs/images.md).
 
 Only enabled, Available images can create VMs. Atlas sends enabled, Available images with `cache_image` to each host through `POST /v1/sync`. Signed URLs are valid for 24 hours.
 
@@ -103,6 +106,8 @@ Build and publish a pinned Ubuntu image:
 ```sh
 bench --site <site> atlas build-ubuntu-base-image --version 24.04 --architecture amd64
 ```
+
+Add `--storage site-file` to publish the artifacts as public site Files during bootstrap, when object storage does not exist yet.
 
 `image_builder.py` owns the build and publication behavior. The CLI command only validates its options and connects to each selected site. The publisher creates an Available System image and stores exact artifact sizes.
 

@@ -18,13 +18,21 @@ from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 
+def artifact_url(image, artifact, expiry_seconds=0) -> str:
+	"""Return one predictable artifact URL in place of a signed one."""
+	return f"{artifact}-url"
+
+
 class TestVirtualMachineImage(UnitTestCase):
 	def make_image(self, **values):
 		defaults = {
 			"image_sha256": "a" * 64,
 			"kernel_sha256": "b" * 64,
+			"artifact_storage": "Object Storage",
 			"image_object_key": "images/image/rootfs.img",
 			"kernel_object_key": "images/image/kernel",
+			"image_file": None,
+			"kernel_file": None,
 			"image_size_mib": 10,
 			"kernel_size_mib": 5,
 			"platform": "amd64",
@@ -47,8 +55,7 @@ class TestVirtualMachineImage(UnitTestCase):
 		image = self.make_image()
 		with (
 			patch.object(VirtualMachineImage, "validate_is_available"),
-			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs-url"),
-			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel-url"),
+			patch.object(VirtualMachineImage, "get_artifact_url", artifact_url),
 		):
 			rootfs = image.get_presigned_download_url("rootfs")
 			kernel = image.get_presigned_download_url("kernel")
@@ -65,12 +72,7 @@ class TestVirtualMachineImage(UnitTestCase):
 
 		with (
 			patch.object(VirtualMachineImage, "validate_user_data"),
-			patch.object(
-				VirtualMachineImage, "get_presigned_image_url", return_value="https://example.test/image"
-			),
-			patch.object(
-				VirtualMachineImage, "get_presigned_kernel_url", return_value="https://example.test/kernel"
-			),
+			patch.object(VirtualMachineImage, "get_artifact_url", artifact_url),
 		):
 			request = image.get_metal_image_request("#cloud-config")
 
@@ -79,6 +81,51 @@ class TestVirtualMachineImage(UnitTestCase):
 		self.assertEqual(request["ref"], f"sha256:{expected_reference}")
 		self.assertEqual(request["rootfs"]["sha256"], "a" * 64)
 		self.assertEqual(request["kernel"]["sha256"], "b" * 64)
+
+	def test_a_site_file_image_uses_a_public_download_url(self) -> None:
+		image = self.make_image(
+			artifact_storage="Site File",
+			image_object_key=None,
+			kernel_object_key=None,
+			image_file="file-rootfs",
+			kernel_file="file-kernel",
+		)
+
+		with patch(
+			"atlas.vm.doctype.virtual_machine_image.virtual_machine_image.get_download_url",
+			side_effect=lambda name: f"https://atlas.test/files/{name}",
+		) as get_download_url:
+			self.assertEqual(image.get_artifact_url("rootfs"), "https://atlas.test/files/file-rootfs")
+			self.assertEqual(image.get_artifact_url("kernel"), "https://atlas.test/files/file-kernel")
+
+		self.assertEqual(get_download_url.call_count, 2)
+
+	def test_a_site_file_image_has_no_signed_download(self) -> None:
+		image = self.make_image(
+			artifact_storage="Site File", image_file="file-rootfs", kernel_file="file-kernel"
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.get_presigned_download_url("rootfs")
+
+	def test_only_a_system_image_can_use_site_file_storage(self) -> None:
+		image = self.make_image(
+			artifact_storage="Site File",
+			image_type="Machine",
+			image_file="file-rootfs",
+			kernel_file="file-kernel",
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.validate_artifacts()
+
+	def test_a_site_file_image_requires_both_files(self) -> None:
+		image = self.make_image(
+			artifact_storage="Site File", image_type="System", image_file="file-rootfs", kernel_file=None
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.validate_artifacts()
 
 	def test_image_requires_disk_to_hold_rootfs(self) -> None:
 		image = self.make_image(image_size_mib=10240)
@@ -122,8 +169,7 @@ class TestVirtualMachineImage(UnitTestCase):
 			memory_snapshot_disk_mib=10240,
 		)
 		with (
-			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs"),
-			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel"),
+			patch.object(VirtualMachineImage, "get_artifact_url", artifact_url),
 		):
 			request = image.get_metal_image_request()
 
@@ -139,8 +185,7 @@ class TestVirtualMachineImage(UnitTestCase):
 			memory_snapshot_disk_mib=10240,
 		)
 		with (
-			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs"),
-			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel"),
+			patch.object(VirtualMachineImage, "get_artifact_url", artifact_url),
 		):
 			request = image.get_metal_image_request()
 
@@ -156,8 +201,7 @@ class TestVirtualMachineImage(UnitTestCase):
 			memory_snapshot_disk_mib=10240,
 		)
 		with (
-			patch.object(VirtualMachineImage, "get_presigned_image_url", return_value="rootfs"),
-			patch.object(VirtualMachineImage, "get_presigned_kernel_url", return_value="kernel"),
+			patch.object(VirtualMachineImage, "get_artifact_url", artifact_url),
 		):
 			request = image.get_desired_image()
 

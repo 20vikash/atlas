@@ -4,9 +4,30 @@ Atlas owns public image records and object storage. Metal owns cached host artif
 
 ## System images
 
-The Ubuntu image builder creates one root file system and one kernel. It uploads both objects, calculates SHA-256 values, and creates or updates an Available System image.
+The Ubuntu image builder creates one root file system and one kernel. It stores both artifacts, calculates SHA-256 values, and creates or updates an Available System image.
 
-An unchanged build keeps the existing image version. A changed build increases the version after both objects upload.
+An unchanged build keeps the existing image version. A changed build increases the version after both artifacts are stored.
+
+## Artifact storage
+
+`artifact_storage` says where the bytes of one image are.
+
+| Value | Artifact location | Host URL |
+|---|---|---|
+| `Object Storage` | The bucket in Atlas Settings, under `vm-images/sha256/<digest>/<name>` | A signed URL that is valid for 24 hours |
+| `Site File` | A public site File under `/files/` | A public URL that does not expire |
+
+Atlas has no object storage during bootstrap, so the first System image can use `Site File` storage. Build it with `--storage site-file`. The public URL needs `atlas_base_url` to be reachable by the host. Only a System image can use `Site File` storage, because a public URL gives no tenant separation. The tenant download route refuses a `Site File` image.
+
+## Migration to object storage
+
+Use the **Migrate to Object Storage** action on an Available `Site File` image after you set the object storage credentials. The background job:
+
+1. Uploads each artifact under its content addressed key and compares the stored size with the local size.
+2. Saves both object keys, sets `artifact_storage` to `Object Storage`, and commits.
+3. Deletes both site Files.
+
+The order keeps one downloadable copy at each step. An interrupted job leaves an unused object or an unused site file, and never an image that a host cannot download. The job is safe to repeat. `immutable_reference` uses only the architecture and the artifact digests, so a host that already cached the artifacts does not download them again.
 
 ## Machine images
 
