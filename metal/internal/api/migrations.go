@@ -43,6 +43,7 @@ type snapshotProgress struct {
 	DurationSeconds  int   `json:"duration_seconds"`
 	BytesTransferred int64 `json:"bytes_transferred"`
 	TotalBytes       int64 `json:"total_bytes"`
+	ThroughputMiBps  int   `json:"throughput_mibps,omitempty"`
 	Completed        bool  `json:"completed"`
 }
 
@@ -134,6 +135,7 @@ func toMigration(record vm.TargetMigrationRecord) migrationResponse {
 			DurationSeconds:  interval.DurationSeconds,
 			BytesTransferred: interval.BytesTransferred,
 			TotalBytes:       interval.TotalBytes,
+			ThroughputMiBps:  interval.ThroughputMiBps,
 			Completed:        interval.Completed,
 		})
 	}

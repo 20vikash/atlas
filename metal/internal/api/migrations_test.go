@@ -180,7 +180,7 @@ func TestGetMigrationReportsTransferProgress(t *testing.T) {
 		ID: "mig-1", VirtualMachineID: "vm-1", Status: vm.MigrationRunning, Phase: vm.PhaseCopying,
 		Intervals: []vm.IntervalProgress{
 			{Sequence: 1, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},
-			{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024},
+			{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024, ThroughputMiBps: 64},
 		},
 	}}
 	server := newMigrationTestServer(t, stub)
@@ -195,6 +195,10 @@ func TestGetMigrationReportsTransferProgress(t *testing.T) {
 	}
 	if !response.Snapshots[0].Completed || response.Snapshots[0].DurationSeconds != 42 {
 		t.Fatalf("snapshot 0 = %+v", response.Snapshots[0])
+	}
+	// The throttle step is visible per interval, so an operator sees it decrease.
+	if response.Snapshots[1].ThroughputMiBps != 64 {
+		t.Fatalf("snapshot 1 throughput = %d, want 64", response.Snapshots[1].ThroughputMiBps)
 	}
 }
 
