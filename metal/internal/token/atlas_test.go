@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// TestAtlasIssuedTokenIsAccepted reads the trust state and the token that
-// scripts/check-metal-token.sh writes, and verifies the token as a route would.
+// TestAtlasIssuedTokenIsAccepted verifies the token created by the check script.
 func TestAtlasIssuedTokenIsAccepted(t *testing.T) {
 	keysFile := os.Getenv("ATLAS_TRUSTED_KEYS_FILE")
 	tokenFile := os.Getenv("ATLAS_TOKEN_FILE")

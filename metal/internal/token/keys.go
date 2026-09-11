@@ -1,5 +1,4 @@
-// Package token holds the Atlas trust state of one Metal host and verifies the
-// Atlas-signed tokens that arrive with it.
+// Package token stores host trust state and verifies Atlas tokens.
 package token
 
 import (
@@ -11,21 +10,20 @@ import (
 )
 
 var (
-	// ErrInvalidKeys reports trust state that Metal cannot use.
+	// ErrInvalidKeys reports unusable trust state.
 	ErrInvalidKeys = errors.New("invalid trusted keys")
 
-	// ErrKeyConflict reports an update that changes the issuer or the receiver.
+	// ErrKeyConflict reports an issuer or receiver change.
 	ErrKeyConflict = errors.New("trusted key identity conflict")
 )
 
-// PublicKey is one Atlas signing key. Key is a raw Ed25519 public key in
-// base64url without padding.
+// PublicKey is an unpadded base64url Ed25519 public key.
 type PublicKey struct {
 	ID  string `json:"id"`
 	Key string `json:"key"`
 }
 
-// TrustedKeys is the complete Atlas trust state of one Metal host.
+// TrustedKeys is one host's complete Atlas trust state.
 type TrustedKeys struct {
 	Issuer     string      `json:"issuer"`
 	Receiver   string      `json:"receiver"`
@@ -43,7 +41,7 @@ func (keys TrustedKeys) Validate() error {
 	return validatePublicKeys(keys.PublicKeys)
 }
 
-// clone copies the key slice, so a caller cannot change stored state.
+// clone copies keys so callers cannot change stored state.
 func (keys TrustedKeys) clone() TrustedKeys {
 	keys.PublicKeys = slices.Clone(keys.PublicKeys)
 	return keys

@@ -9,25 +9,25 @@ import (
 )
 
 var (
-	// ErrUnauthorized reports a missing, invalid, expired, or wrongly addressed token.
+	// ErrUnauthorized reports a missing, invalid, expired, or misaddressed token.
 	ErrUnauthorized = errors.New("unauthorized token")
 
-	// ErrForbidden reports a valid token that does not carry a required scope.
+	// ErrForbidden reports a valid token missing a required scope.
 	ErrForbidden = errors.New("forbidden token")
 )
 
-// Scope is one permission that an Atlas token carries.
+// Scope is one permission in an Atlas token.
 type Scope string
 
 const (
-	// ScopeReadVirtualMachine lets the caller read the state of the named VM.
+	// ScopeReadVirtualMachine permits reading the named VM.
 	ScopeReadVirtualMachine Scope = "read_vm"
 
-	// ScopeMigration lets the caller run migration operations on the named VM.
+	// ScopeMigration permits migration operations on the named VM.
 	ScopeMigration Scope = "migration"
 )
 
-// Claims is the validated content of one Atlas token.
+// Claims is the validated content of an Atlas token.
 type Claims struct {
 	VirtualMachineID string
 	Caller           string
@@ -41,8 +41,7 @@ type tokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-// Verify checks one Atlas-signed token against the trusted keys and returns its
-// claims. The caller matches the returned VM identifier to its own request.
+// Verify checks an Atlas token and returns its claims.
 func Verify(keys TrustedKeys, signedToken string, requiredScopes ...Scope) (Claims, error) {
 	if len(keys.PublicKeys) == 0 {
 		return Claims{}, fmt.Errorf("%w: the host trusts no Atlas key", ErrUnauthorized)

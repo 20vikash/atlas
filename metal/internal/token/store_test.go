@@ -182,7 +182,7 @@ func TestReplaceKeepsKeysWhenTheWriteFails(t *testing.T) {
 		t.Fatalf("replace: %v", err)
 	}
 
-	// A file in place of the parent directory makes the next write fail.
+	// A file parent makes the next write fail.
 	if err := os.RemoveAll(filepath.Join(directory, "state")); err != nil {
 		t.Fatalf("remove directory: %v", err)
 	}

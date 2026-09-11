@@ -16,7 +16,7 @@ const (
 	testCaller   = "node-fra-00002"
 )
 
-// atlasKey is one Atlas key pair that a test signs with.
+// atlasKey is an Atlas key pair for test signing.
 type atlasKey struct {
 	identifier string
 	private    ed25519.PrivateKey

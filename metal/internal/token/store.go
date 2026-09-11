@@ -11,18 +11,17 @@ import (
 	"github.com/frappe/atlas/metal/internal/platform"
 )
 
-// keyFileMode keeps the file out of reach of other host users.
+// keyFileMode restricts the key file to its owner.
 const keyFileMode = 0o640
 
-// KeyStore owns the trusted key file and the copy that the API reads.
+// KeyStore owns the trusted key file and in-memory copy.
 type KeyStore struct {
 	path    string
 	mutex   sync.RWMutex
 	trusted TrustedKeys
 }
 
-// NewKeyStore reads the trusted keys at path. A missing file leaves the store
-// empty. A file that Metal cannot use returns an error.
+// NewKeyStore reads trusted keys. A missing file creates an empty store.
 func NewKeyStore(path string) (*KeyStore, error) {
 	store := &KeyStore{path: path}
 
@@ -54,8 +53,7 @@ func (store *KeyStore) Keys() TrustedKeys {
 	return store.trusted.clone()
 }
 
-// Replace publishes the update and then swaps the copy in memory. Both stay
-// unchanged when a step fails.
+// Replace publishes the update, then swaps the in-memory copy.
 func (store *KeyStore) Replace(update TrustedKeys) error {
 	if err := update.Validate(); err != nil {
 		return err
@@ -80,7 +78,7 @@ func (store *KeyStore) Replace(update TrustedKeys) error {
 	return nil
 }
 
-// checkIdentity fixes the issuer and the receiver after the first update.
+// checkIdentity fixes issuer and receiver after the first update.
 func (store *KeyStore) checkIdentity(update TrustedKeys) error {
 	if store.trusted.Issuer == "" {
 		return nil
