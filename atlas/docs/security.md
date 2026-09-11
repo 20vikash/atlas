@@ -12,7 +12,7 @@ The Atlas API at `/api/atlas` is the only tenant-facing surface. Metal Servers, 
 
 A service caller needs a valid Central or regional Atlas token. Send the token in the `Authorization: Bearer <token>` header. A System Manager can also use the Atlas API.
 
-The authentication validator closes the standard Frappe guest surface. A guest can sign in and read the API reference or public key set. The realtime console stays open because its handshake and permission calls need the web process. A session without a verified token cannot use an Atlas API route.
+The authentication validator closes the standard Frappe guest surface. A guest can sign in, read the API reference or public key set, and read a public file under `/files/`, which is how a Metal host downloads the published binaries and boot artifacts. The realtime console stays open because its handshake and permission calls need the web process. A session without a verified token cannot use an Atlas API route.
 
 Atlas requires the `iss`, `sub`, `aud`, `scope`, `tenant`, `iat`, and `exp` claims. It checks `nbf` when the claim is present. The audience is `atlas-admin:<region ID>`. The API surface is unrestricted, so the token needs `scope=*`, a subject, a tenant, and no resource constraint. The subject is an identity label and does not change the authority. The `tenant` claim carries the tenant boundary. Central uses `tenant=*`.
 

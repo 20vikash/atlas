@@ -24,7 +24,7 @@ REALTIME_PATHS = frozenset(
 )
 GUEST_PATHS = frozenset({"/login", "/api/method/login", "/api/method/logout"})
 PUBLIC_ATLAS_PATHS = frozenset({"/api/atlas/jwks.json"})
-GUEST_PATH_PREFIXES = ("/assets/",)
+GUEST_PATH_PREFIXES = ("/assets/", "/files/")
 
 
 def validate_auth() -> None:
@@ -62,7 +62,7 @@ def validate_auth() -> None:
 
 
 def validate_guest_path(path: str) -> None:
-	"""Allow a guest to sign in and to read the API reference, and nothing else."""
+	"""Allow a guest to sign in, read the API reference, and read a public file."""
 	if path in GUEST_PATHS or path.startswith(GUEST_PATH_PREFIXES):
 		return
 
