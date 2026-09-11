@@ -1,0 +1,35 @@
+# Copy to atlas-deployer.toml and change what you need.
+# atlas-deployer create reads this file. It writes the pilot values into
+# /root/atlas-vm.env in the guest, which setup.sh reads.
+
+[vm]
+vcpu_count = 4
+memory_mib = 8192
+disk_gib = 24
+ssh_port = 2222
+
+[pilot]
+site = "atlas.example.com"
+admin_domain = "admin.example.com"
+password = "Atlas#Bench2026x"
+user = "frappe"
+branch = "develop"
+letsencrypt_email = "tanmoy@example.com"
+
+[atlas]
+repository = "https://github.com/frappe/atlas"
+branch = "develop"
+
+# The guest images the VM builds after setup. Give one [[image]] table for each
+# variant. Every image is published as a site file, which is the only storage
+# that works during bootstrap. A minimal image needs Ubuntu 24.04.
+[[image]]
+version = "24.04"
+
+[[image]]
+version = "24.04"
+minimal = true
+
+# [[image]]
+# version = "22.04"
+# architecture = "amd64"
