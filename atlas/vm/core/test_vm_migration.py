@@ -405,6 +405,21 @@ class TestMigrationRecovery(UnitTestCase):
 		self.assertEqual(status, {"status": "missing"})
 		service.migration.db_set.assert_not_called()
 
+	def test_poll_commits_progress_for_live_visibility(self) -> None:
+		service = MigrationService(migration_doc())
+		client = Mock()
+		client.get_migration.return_value = {"status": "running", "phase": "copying"}
+
+		with patch.object(
+			MigrationService, "target_client", new_callable=PropertyMock, return_value=client
+		):
+			service.poll()
+
+		# The commit lets an open form and a recovery run see live progress.
+		service.migration.db_set.assert_called_once()
+		self.assertEqual(service.migration.db_set.call_args.args[0], "progress")
+		self.assertTrue(service.migration.db_set.call_args.kwargs.get("commit"))
+
 	def test_is_expired_tracks_the_visibility_timeout(self) -> None:
 		recent = MigrationService(migration_doc(started_at=now_datetime()))
 		stale = MigrationService(migration_doc(started_at=add_to_date(now_datetime(), minutes=-11)))

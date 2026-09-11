@@ -17,8 +17,31 @@ frappe.ui.form.on("Virtual Machine Migration", {
 		if (is_active && !frm.doc.abort_requested) {
 			frm.add_custom_button(__("Abort Migration"), () => abortMigration(frm), __("Actions"));
 		}
+
+		scheduleProgressRefresh(frm);
 	},
 });
+
+// A running migration reloads on an interval, so the desk shows live progress.
+function scheduleProgressRefresh(frm) {
+	if (frm.__migration_poll) {
+		clearInterval(frm.__migration_poll);
+		frm.__migration_poll = null;
+	}
+	if (!["running", "ready"].includes(frm.doc.status)) {
+		return;
+	}
+	frm.__migration_poll = setInterval(() => {
+		if (cur_frm !== frm) {
+			clearInterval(frm.__migration_poll);
+			frm.__migration_poll = null;
+			return;
+		}
+		if (!frm.is_dirty()) {
+			frm.reload_doc();
+		}
+	}, 2000);
+}
 
 function abortMigration(frm) {
 	frappe.confirm(

@@ -190,14 +190,18 @@ class MigrationService:
 		)
 
 	def poll(self) -> dict[str, Any]:
-		"""Read the target migration status and store it as progress."""
+		"""Read the target migration status and store it as progress.
+
+		The write commits, so an open form and a recovery run see live progress
+		during the copy, not only the final result.
+		"""
 		try:
 			status = self.target_client.get_migration(cast(str, self.migration.name))
 		except MetalClientError as error:
 			if error.is_not_found:
 				return {"status": "missing"}
 			raise
-		self.migration.db_set("progress", frappe.as_json(status))
+		self.migration.db_set("progress", frappe.as_json(status), commit=True)
 		return status
 
 	@staticmethod
