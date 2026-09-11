@@ -31,8 +31,6 @@ ROOTFS_SHA256 = "bb4bc95d539df92c96ad0ed34c017363e4a7a62772c6af1dc3553e06ce710b7
 # The Ubuntu kernel does not boot on the Firecracker device model. Use the CI kernel.
 KERNEL_URL = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.10/x86_64/vmlinux-5.10.223"
 BOOT_ARGUMENTS = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
-# The VM has one tap device that only this host reaches, so the addresses and
-# the forwarded ports are fixed.
 VM_NAME = "atlas"
 BENCH_NAME = "atlas"
 FIRECRACKER_VERSION = "v1.16.1"
@@ -42,7 +40,6 @@ FORWARD_PORTS = (80, 443)
 REQUIRED_COMMANDS = (
 	"curl", "ip", "iptables", "unsquashfs", "mkfs.ext4", "truncate", "ssh", "scp", "ssh-keygen",
 )
-# The guest is disposable and its host key changes with every rebuild.
 SSH_OPTIONS = (
 	"-o", "StrictHostKeyChecking=no",
 	"-o", "UserKnownHostsFile=/dev/null",
@@ -52,7 +49,7 @@ SSH_OPTIONS = (
 
 
 class DeployerError(Exception):
-	"""An error the operator must read and act on."""
+	"""An error the operator must act on."""
 
 
 USE_COLOR = sys.stdout.isatty()
@@ -84,12 +81,7 @@ def run(command: list[str], **keywords) -> subprocess.CompletedProcess:
 
 @dataclass
 class Settings:
-	"""What the deployer knows about the VM on this host.
-
-	`create` reads them from the configuration file. It saves them as deployer
-	state, which every later command reads, so the configuration file does not
-	have to stay on the host.
-	"""
+	"""What the deployer knows about the VM. `create` reads the configuration file and saves this state."""
 
 	vcpu_count: int = 4
 	memory_mib: int = 8192
@@ -135,7 +127,7 @@ class Settings:
 		)
 
 	def guest_environment_text(self) -> str:
-		"""setup.sh reads shell assignments, so render them from the configuration."""
+		"""setup.sh reads shell assignments."""
 		return "\n".join(f"{key}={value}" for key, value in self.guest_environment.items()) + "\n"
 
 	@classmethod
@@ -157,7 +149,7 @@ class Settings:
 
 
 def as_toml(value: str | int | bool) -> str:
-	"""Render one scalar. JSON string escapes are valid TOML basic strings."""
+	"""JSON string escapes are valid TOML basic strings."""
 	if isinstance(value, bool):
 		return "true" if value else "false"
 	if isinstance(value, int):
@@ -166,8 +158,7 @@ def as_toml(value: str | int | bool) -> str:
 
 
 def read_image_variants(images: list[dict], path: Path) -> str:
-	"""Render the [[image]] tables as `version:architecture:variant` words, which
-	setup.sh reads as a list."""
+	"""Render the [[image]] tables as `version:architecture:variant` words for setup.sh."""
 	variants = []
 	for image in images or [{"version": "24.04"}]:
 		version = str(image.get("version", "24.04"))
@@ -223,8 +214,7 @@ class GuestImage:
 		shutil.rmtree(extracted, ignore_errors=True)
 
 	def prepare(self, root: Path) -> None:
-		"""Cloud-init has no data source here, so the image carries its own
-		network, host keys, and authorized key."""
+		"""Cloud-init has no data source here, so the image carries its own network and keys."""
 		(root / "etc/cloud/cloud-init.disabled").touch()
 
 		write_file(
@@ -263,7 +253,7 @@ DNS=1.1.1.1
 
 @dataclass
 class Paths:
-	"""Where the host keeps the VM and the files it shares between rebuilds."""
+	"""Where the host keeps the VM and the shared downloads."""
 
 	base: Path
 
@@ -333,11 +323,11 @@ def download(url: str, path: Path, checksum: str = "") -> None:
 
 
 class ConsoleReader:
-	"""Follow the guest console. A healthy boot stays quiet, and the kept lines
-	explain a boot that never reaches Secure Shell."""
+	"""Follow the guest console. The kept lines explain a boot that never reaches Secure Shell."""
 
-	def __init__(self, path: Path) -> None:
+	def __init__(self, path: Path, echo: bool = False) -> None:
 		self.path = path
+		self.echo = echo
 		self.position = path.stat().st_size if path.exists() else 0
 		self.recent: deque[str] = deque(maxlen=40)
 
@@ -349,19 +339,23 @@ class ConsoleReader:
 			data = console.read()
 			self.position = console.tell()
 		for line in data.decode("utf-8", "replace").splitlines():
-			self.recent.append(line)
+			if self.echo:
+				guest(line)
+			else:
+				self.recent.append(line)
 
 	def report(self) -> None:
-		"""Print what the guest said last."""
+		"""Print the last console lines, unless they were printed already."""
 		self.drain()
+		if self.echo:
+			return
 		for line in self.recent:
 			guest(line)
 
 
 NETWORK_SCRIPT_BODY = r'''
-# A packet from another host enters through PREROUTING, and the tap device is
-# excluded there because guest traffic to a forwarded port must leave the host
-# instead of returning to the VM. A packet from this host enters through OUTPUT.
+# The tap device is excluded from PREROUTING, so guest traffic to a forwarded
+# port leaves the host instead of returning to the VM.
 rules() {
 	local uplink pair host_port guest_port
 	uplink=$(ip -4 route show default | awk 'NR == 1 { print $5 }')
@@ -388,8 +382,7 @@ start() {
 	ip link set "$tap_device" up
 
 	sysctl -q -w net.ipv4.ip_forward=1
-	# A packet from 127.0.0.1 leaves through the tap device after the DNAT, and
-	# the kernel drops that source address unless the tap device allows it.
+	# The kernel drops the DNAT source 127.0.0.1 unless the tap device allows it.
 	sysctl -q -w "net.ipv4.conf.$tap_device.route_localnet=1"
 
 	local rule
@@ -404,8 +397,7 @@ stop() {
 	while read -r rule; do
 		rule=${rule/ -A / -D }
 		rule=${rule/ -I / -D }
-		# An earlier run can leave copies of the same rule, so delete every copy.
-		# The count is bounded, because a stop that never ends blocks systemd.
+		# Delete every copy an earlier run left. A stop that never ends blocks systemd.
 		for _ in $(seq 20); do
 			# shellcheck disable=SC2086
 			iptables -w 5 $rule 2>/dev/null || break
@@ -558,10 +550,10 @@ WantedBy=multi-user.target
 		shutil.copy(released, self.paths.firecracker_binary)
 		self.paths.firecracker_binary.chmod(0o755)
 
-	def start(self) -> None:
+	def start(self, verbose: bool = False) -> None:
 		self.paths.api_socket.unlink(missing_ok=True)
 		subprocess.run(["systemctl", "reset-failed", SERVICE_NAME], stderr=subprocess.DEVNULL)
-		console = ConsoleReader(self.paths.console_log)
+		console = ConsoleReader(self.paths.console_log, echo=verbose)
 		step("start the VM")
 		detail(f"console: {self.paths.console_log}")
 		run(["systemctl", "start", SERVICE_NAME])
@@ -612,8 +604,7 @@ WantedBy=multi-user.target
 			command = f"curl -fsS --show-error -L -o /root/setup.sh '{url}' && bash /root/setup.sh"
 		detail(f"log: {self.paths.setup_log}")
 
-		# The environment file holds the site password. Give it to the guest for
-		# this run only, and take it away when the run ends.
+		# The file holds the site password, so the guest keeps it for this run only.
 		self.write_in_guest("/root/atlas-vm.env", self.settings.guest_environment_text())
 		try:
 			with subprocess.Popen(
@@ -707,7 +698,7 @@ def command_create(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 	machine.write_unit()
 	install_self()
 
-	machine.start()
+	machine.start(arguments.verbose)
 	if not arguments.skip_setup:
 		machine.run_setup(arguments.script)
 	command_status(machine, arguments)
@@ -718,7 +709,7 @@ def command_start(machine: VirtualMachine, arguments: argparse.Namespace) -> Non
 		raise DeployerError(f"{SERVICE_NAME} is already running")
 	if not machine.is_created:
 		raise DeployerError(f"no VM in {machine.paths.vm_directory}; run: atlas-deployer create")
-	machine.start()
+	machine.start(arguments.verbose)
 	command_status(machine, arguments)
 
 
@@ -732,7 +723,7 @@ def command_stop(machine: VirtualMachine, arguments: argparse.Namespace) -> None
 def command_restart(machine: VirtualMachine, arguments: argparse.Namespace) -> None:
 	if machine.is_running:
 		machine.stop()
-	machine.start()
+	machine.start(arguments.verbose)
 	command_status(machine, arguments)
 
 
@@ -749,8 +740,7 @@ def command_status(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 	print(f"address:  {VM_ADDRESS} through {HOST_ADDRESS} on {machine.tap_device}")
 	print(f"ports:    {forwards}")
 	if paths.rootfs_image.exists():
-		# The image is a sparse file: the guest sees the full size, and the host
-		# gives it blocks as the guest writes them.
+		# The image is sparse: the host gives it blocks as the guest writes them.
 		allocated_gib = paths.rootfs_image.stat().st_blocks * 512 / 1024**3
 		print(f"disk:     {settings.disk_gib} GiB in the guest, {allocated_gib:.1f} GiB allocated on the host")
 	print(f"state:    {STATE_FILE}")
@@ -849,7 +839,7 @@ def command_resize(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 		run(["truncate", "-s", f"{settings.disk_gib}G", str(machine.paths.rootfs_image)])
 	machine.write_configuration()
 
-	machine.start()
+	machine.start(arguments.verbose)
 	if "disk_gib" in changes:
 		step("grow the guest file system")
 		if machine.run_in_guest("resize2fs /dev/vda") != 0:
@@ -859,6 +849,9 @@ def command_resize(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(prog="atlas-deployer", description=__doc__)
+	parser.add_argument(
+		"-v", "--verbose", action="store_true", help="print the guest console while the VM boots"
+	)
 	subparsers = parser.add_subparsers(dest="command", required=True)
 
 	create = subparsers.add_parser("create", help="build the VM, start it, and run setup.sh")
@@ -903,8 +896,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def resolve_config_file(given: Path | None) -> Path:
-	"""Only `create` reads the configuration file. It holds the bench name, the
-	site name, and the passwords that setup.sh needs."""
+	"""Only `create` reads the configuration file."""
 	if given:
 		if not given.is_file():
 			raise DeployerError(f"no configuration file at {given}")

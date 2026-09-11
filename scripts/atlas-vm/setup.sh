@@ -14,13 +14,12 @@ ADMIN_DOMAIN="${ADMIN_DOMAIN:-admin.$SITE_NAME}"
 PASSWORD="${PASSWORD:?set PASSWORD in the environment file}"
 BENCH_USER="${BENCH_USER:-frappe}"
 PILOT_BRANCH="${PILOT_BRANCH:-develop}"
-# Atlas needs Python 3.14, and Pilot runs on whatever `python3` resolves to.
+# Pilot runs on whatever `python3` resolves to, and Atlas needs 3.14.
 PYTHON_VERSION="${PYTHON_VERSION:-3.14}"
 LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
 ATLAS_REPOSITORY="${ATLAS_REPOSITORY:-https://github.com/frappe/atlas}"
 ATLAS_BRANCH="${ATLAS_BRANCH:-develop}"
-# One word for each image: version:architecture:variant, where variant is
-# server or minimal.
+# One word for each image: version:architecture:variant (server or minimal).
 IMAGES="${IMAGES:-24.04:amd64:server}"
 
 PILOT_INSTALL_URL="https://raw.githubusercontent.com/frappe/pilot/$PILOT_BRANCH/install.sh"
@@ -36,8 +35,7 @@ say() { echo "==> $*"; }
 fail() { echo "error: $*" >&2; exit 1; }
 as_bench() { su - "$BENCH_USER" -c "$1"; }
 
-# Pilot runs the database, Redis, and the workload as user units. `su -` sets no
-# user bus, so `systemctl --user` needs both addresses.
+# `su -` sets no user bus, so `systemctl --user` needs both addresses.
 as_bench_systemctl() {
 	local uid
 	uid=$(id -u "$BENCH_USER")
@@ -64,18 +62,13 @@ install_grant() {
 	rm -f "$staged"
 }
 
-# Pilot needs root for packages, nginx, certbot, and systemd, and it calls sudo
-# with no terminal to answer a password prompt. The grant lives only as long as
-# this run.
+# Pilot calls sudo with no terminal. The grant lives only as long as this run.
 grant_setup_sudo() {
 	install_grant "$SETUP_GRANT" "$BENCH_USER ALL=(ALL) NOPASSWD: ALL"
 	trap 'rm -f "$SETUP_GRANT"' EXIT
 }
 
-# The database and its socket live under $PILOT_HOME, and the unit files do not.
-# Deleting the directory while the daemon runs leaves a server that answers
-# nothing and a unit that claims the bench is provisioned, so stop and remove
-# the units first.
+# The units outlive $PILOT_HOME, so stop and remove them before the directory.
 remove_pilot_installation() {
 	echo "This deletes $PILOT_HOME with every bench, site, and database in it."
 	echo "Certificates in /etc/letsencrypt stay, so a new setup reuses them."
@@ -118,9 +111,8 @@ sh /root/pilot-install.sh --user "$BENCH_USER"
 say "stage 3: sudo for $BENCH_USER during this run"
 grant_setup_sudo
 
-# Ubuntu 24.04 ships Python 3.12, which cannot parse the Atlas sources. Give the
-# bench user a uv-managed interpreter first on its PATH, and leave the system
-# python3 alone for apt and the rest of the distribution.
+# Ubuntu 24.04 ships Python 3.12, which cannot parse the Atlas sources. Keep the
+# system python3 for apt and give the bench user its own interpreter.
 say "stage 4: python $PYTHON_VERSION for $BENCH_USER"
 as_bench "command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh"
 as_bench "uv python install $PYTHON_VERSION"
@@ -134,8 +126,7 @@ say "stage 5: Pilot from branch $PILOT_BRANCH"
 as_bench "PILOT_DEV=1 PILOT_BRANCH=$PILOT_BRANCH bash -c 'curl -fsSL $PILOT_INSTALL_URL | bash'"
 
 say "stage 6: bench $BENCH_NAME"
-# `pilot new` writes bench.toml, and `pilot init` builds the environment. Guard
-# each on what it produces, so a run that stopped inside init continues here.
+# Guard each step on what it produces, so a stopped run continues here.
 if [[ ! -f $BENCH_PATH/bench.toml ]]; then
 	as_bench "pilot new $BENCH_NAME --admin-password '$PASSWORD' --admin-domain $ADMIN_DOMAIN --database mariadb"
 fi
