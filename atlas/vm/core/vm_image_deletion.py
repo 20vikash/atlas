@@ -29,18 +29,31 @@ class VirtualMachineImageInUse(AtlasUserError):
 class VirtualMachineImageDeletionService:
 	"""Own the deletion of one Machine image."""
 
-	def request(self, image: VirtualMachineImage) -> None:
-		"""Mark one unused Machine image for deletion and queue its cleanup."""
-		if image.image_type != "machine":
-			frappe.throw(_("Only a Machine image can be deleted."), exc=AtlasUserError)
-		if image.status != "Available":
-			frappe.throw(_("Only an Available Machine image can be deleted."), exc=AtlasUserError)
-		self.validate_is_unused(cast(str, image.name))
+	def request(self, image: VirtualMachineImage) -> str:
+		"""Retire one image, and reclaim its artifacts when nothing needs them."""
+		if image.status not in ("Available", "Failed"):
+			frappe.throw(_("Only an Available or Failed image can be deleted."), exc=AtlasUserError)
 
-		image.status = "Deleting"
+		image.status = "Deleting" if self.is_reclaimable(image) else "Archived"
 		image.enabled = 0
 		image.save()
-		self.enqueue(cast(str, image.name))
+
+		if image.status == "Deleting":
+			self.enqueue(cast(str, image.name))
+
+		return cast(str, image.status)
+
+	@staticmethod
+	def is_reclaimable(image: VirtualMachineImage) -> bool:
+		"""Return whether the stored artifacts can be removed now.
+
+		A System image stays shared, so only a Machine image that no virtual
+		machine references releases its storage.
+		"""
+		if image.image_type != "machine":
+			return False
+
+		return not frappe.db.exists("Virtual Machine", {"virtual_machine_image": image.name})
 
 	def enqueue(self, image_name: str) -> None:
 		"""Enqueue one repeatable Machine image cleanup."""
