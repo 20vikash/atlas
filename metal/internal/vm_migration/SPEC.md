@@ -102,6 +102,8 @@ abort, source stopped     -> clean target -> restore the source -> unlock the so
 
 The rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before it removes the dataset. It creates the target network never before the source network is gone. A stopped source is restored to its original desired state with a cold start, then unlocked. A rollback failure keeps both records, both locks, and the source disk, and reports failed with phase rollback.
 
+The source stops any in-flight disk stream before it unlocks or destroys the VM. A running `zfs send` therefore never keeps the migration snapshot busy, so the snapshot destroy during unlock always succeeds.
+
 A success or abort keeps a compact terminal record with only the schema version, migration ID, VM ID, terminal status, and finished time. A terminal record has no phase, does not hide the VM, and reserves no capacity. Every nonterminal record, including failed, keeps the VM hidden and its capacity reserved. A new target migration can replace an aborted record only when no VM record, source lock, or target dataset remains.
 
 A migration record that cannot be decoded, from a schema change or a corrupt file, is removed at startup and logged, so one leftover record never blocks the daemon.

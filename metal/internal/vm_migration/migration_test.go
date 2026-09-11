@@ -185,6 +185,8 @@ type fakeTransfer struct {
 	sendErr       error
 	receiveErr    error
 	abortErr      error
+	sendHang      bool
+	sendStarted   chan struct{}
 }
 
 func (f *fakeTransfer) CreateSnapshot(_ context.Context, _, name string) error {
@@ -205,8 +207,15 @@ func (f *fakeTransfer) EstimateStreamBytes(_ context.Context, _, _, _ string) (i
 	return f.sizeBytes, nil
 }
 
-func (f *fakeTransfer) SendSnapshot(_ context.Context, _, name, base, token string, w io.Writer) (int64, error) {
+func (f *fakeTransfer) SendSnapshot(ctx context.Context, _, name, base, token string, w io.Writer) (int64, error) {
 	f.sent = append(f.sent, name+"|"+base+"|"+token)
+	if f.sendStarted != nil {
+		f.sendStarted <- struct{}{}
+	}
+	if f.sendHang {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
 	if f.sendErr != nil {
 		return 0, f.sendErr
 	}
@@ -462,6 +471,53 @@ func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 	}
 	if !migrationManager.IsTargetReserved("vm-1") {
 		t.Fatal("reservation was cleared despite a rollback failure")
+	}
+}
+
+func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
+	machines := newFakeMachines(t)
+	transfer := &fakeTransfer{sendHang: true, sendStarted: make(chan struct{}, 1)}
+	migrationManager, err := NewVMMigration(machines, &fakeSourceClient{}, transfer, ampleCapacity, MigrationSettings{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := newMigrationStore(machines.MachinesDirectory())
+	if err := store.writeSource(SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Sequence: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	streamDone := make(chan error, 1)
+	go func() {
+		_, streamErr := migrationManager.SendSourceStream(context.Background(), "mig-1", "vm-1", 1, "", 0, io.Discard)
+		streamDone <- streamErr
+	}()
+
+	// Wait until the stream holds the snapshot, like a target that stalled.
+	select {
+	case <-transfer.sendStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the source stream did not start")
+	}
+
+	if err := migrationManager.UnlockSource(context.Background(), "mig-1", "vm-1"); err != nil {
+		t.Fatalf("unlock with an in-flight stream = %v", err)
+	}
+
+	select {
+	case streamErr := <-streamDone:
+		if !errors.Is(streamErr, context.Canceled) {
+			t.Fatalf("stream error = %v, want context.Canceled", streamErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UnlockSource did not stop the in-flight stream")
+	}
+
+	if len(transfer.removed) != 1 || transfer.removed[0] != "migration-mig-1-1" {
+		t.Fatalf("removed snapshots = %v, want [migration-mig-1-1]", transfer.removed)
+	}
+	if store.has(store.sourcePath("vm-1")) {
+		t.Fatal("the source record was not removed after unlock")
 	}
 }
 

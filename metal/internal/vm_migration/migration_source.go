@@ -97,6 +97,9 @@ func (m *VMMigration) UnlockSource(ctx context.Context, migrationID, virtualMach
 	if existing.Stopped && !existing.RollbackComplete {
 		return vm.ErrConflict
 	}
+	if err := m.stopSourceStream(ctx, virtualMachineID); err != nil {
+		return err
+	}
 	if err := m.removeMigrationSnapshots(ctx, existing); err != nil {
 		return err
 	}
@@ -154,6 +157,9 @@ func (m *VMMigration) DestroySource(ctx context.Context, migrationID, virtualMac
 	}
 	if !record.Stopped || !record.NetworkRemoved || record.FinalSequence < 1 {
 		return vm.ErrConflict
+	}
+	if err := m.stopSourceStream(ctx, virtualMachineID); err != nil {
+		return err
 	}
 
 	if !record.DestroyRuntimeComplete {
@@ -305,12 +311,64 @@ func (m *VMMigration) SendSourceStream(ctx context.Context, migrationID, virtual
 	if err := m.applySourceDiskLimit(ctx, migrationID, virtualMachineID, throughputMiBps); err != nil {
 		return 0, err
 	}
+
+	streamContext, handle := m.beginSourceStream(ctx, virtualMachineID)
+	defer m.endSourceStream(virtualMachineID, handle)
+
 	name := migrationSnapshotName(migrationID, sequence)
 	base := ""
 	if sequence > 1 {
 		base = migrationSnapshotName(migrationID, sequence-1)
 	}
-	return m.transfer.SendSnapshot(ctx, virtualMachineID, name, base, resumeToken, w)
+	return m.transfer.SendSnapshot(streamContext, virtualMachineID, name, base, resumeToken, w)
+}
+
+// beginSourceStream registers an in-flight source stream and returns a context
+// that an unlock or a daemon shutdown cancels. It stops any earlier stream for
+// the same VM so at most one stream holds the snapshot.
+func (m *VMMigration) beginSourceStream(parent context.Context, virtualMachineID string) (context.Context, *transferHandle) {
+	streamContext, cancel := context.WithCancel(parent)
+	handle := &transferHandle{cancel: cancel, done: make(chan struct{})}
+
+	m.sourceStreamsMutex.Lock()
+	if previous := m.sourceStreams[virtualMachineID]; previous != nil {
+		previous.cancel()
+	}
+	m.sourceStreams[virtualMachineID] = handle
+	m.sourceStreamsMutex.Unlock()
+
+	return streamContext, handle
+}
+
+// endSourceStream clears one stream handle and signals its exit.
+func (m *VMMigration) endSourceStream(virtualMachineID string, handle *transferHandle) {
+	m.sourceStreamsMutex.Lock()
+	if m.sourceStreams[virtualMachineID] == handle {
+		delete(m.sourceStreams, virtualMachineID)
+	}
+	m.sourceStreamsMutex.Unlock()
+
+	handle.cancel()
+	close(handle.done)
+}
+
+// stopSourceStream cancels an in-flight source stream for a VM and waits for it
+// to exit. A later snapshot destroy then cannot fail on a busy dataset.
+func (m *VMMigration) stopSourceStream(ctx context.Context, virtualMachineID string) error {
+	m.sourceStreamsMutex.Lock()
+	handle := m.sourceStreams[virtualMachineID]
+	m.sourceStreamsMutex.Unlock()
+	if handle == nil {
+		return nil
+	}
+
+	handle.cancel()
+	select {
+	case <-handle.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for source stream: %w", ctx.Err())
+	}
 }
 
 // applySourceDiskLimit saves a stream limit under the VM lock, then releases it.

@@ -121,6 +121,10 @@ type VMMigration struct {
 	rootContext        context.Context
 	rootCancel         context.CancelFunc
 	closed             bool
+
+	// The source host tracks its in-flight disk streams so an unlock can stop them.
+	sourceStreamsMutex sync.Mutex
+	sourceStreams      map[string]*transferHandle
 }
 
 // NewVMMigration validates records and returns a host migration manager.
@@ -140,17 +144,18 @@ func NewVMMigration(machines Machines, source MigrationSourceClient, transfer Di
 	}
 	rootContext, rootCancel := context.WithCancel(context.Background())
 	return &VMMigration{
-		machines:    machines,
-		store:       store,
-		source:      source,
-		transfer:    transfer,
-		capacity:    capacity,
-		settings:    settings,
-		logger:      logger,
-		now:         func() time.Time { return time.Now().UTC() },
-		transfers:   make(map[string]*transferHandle),
-		rootContext: rootContext,
-		rootCancel:  rootCancel,
+		machines:      machines,
+		store:         store,
+		source:        source,
+		transfer:      transfer,
+		capacity:      capacity,
+		settings:      settings,
+		logger:        logger,
+		now:           func() time.Time { return time.Now().UTC() },
+		transfers:     make(map[string]*transferHandle),
+		sourceStreams: make(map[string]*transferHandle),
+		rootContext:   rootContext,
+		rootCancel:    rootCancel,
 	}, nil
 }
 
