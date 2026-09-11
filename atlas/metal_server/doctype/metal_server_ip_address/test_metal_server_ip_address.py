@@ -2,6 +2,7 @@ from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.base import ReservedIPAddress
@@ -17,6 +18,32 @@ class TestServerIPAddress(UnitTestCase):
 
 		with self.assertRaises(FrozenInstanceError):
 			reserved.address = "203.0.113.11"
+
+	def test_reset_tenant_returns_the_address_to_the_pool(self) -> None:
+		address = SimpleNamespace(address="203.0.113.10", tenant_id=7, release_to_pool=Mock())
+
+		with patch("frappe.only_for") as only_for:
+			MetalServerIPAddress.reset_tenant(address)
+
+		only_for.assert_called_once_with("System Manager")
+		address.release_to_pool.assert_called_once()
+
+	def test_reset_tenant_needs_a_system_manager(self) -> None:
+		address = SimpleNamespace(address="203.0.113.10", tenant_id=7, release_to_pool=Mock())
+
+		with patch("frappe.only_for", side_effect=frappe.PermissionError):
+			with self.assertRaises(frappe.PermissionError):
+				MetalServerIPAddress.reset_tenant(address)
+
+		address.release_to_pool.assert_not_called()
+
+	def test_an_unowned_address_is_already_in_the_pool(self) -> None:
+		address = SimpleNamespace(address="203.0.113.10", tenant_id=-1, release_to_pool=Mock())
+
+		with patch("frappe.only_for"), self.assertRaises(frappe.ValidationError):
+			MetalServerIPAddress.reset_tenant(address)
+
+		address.release_to_pool.assert_not_called()
 
 	def test_assignment_increments_the_intent_version(self) -> None:
 		address = SimpleNamespace(
