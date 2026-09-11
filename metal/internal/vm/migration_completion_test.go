@@ -30,7 +30,15 @@ func writeReadyTarget(t *testing.T, machines *Manager, mutate func(*TargetMigrat
 
 func TestRunTransferFinishesToCompleted(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
-	store := writeReadyTarget(t, machines, func(r *TargetMigrationRecord) { r.FinishRequested = true })
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	store := writeReadyTarget(t, machines, func(r *TargetMigrationRecord) {
+		r.FinishRequested = true
+		r.FinalSequence = 2
+		r.Intervals = []IntervalProgress{
+			{Sequence: 1, Completed: true},
+			{Sequence: 2, Completed: true},
+		}
+	})
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
@@ -43,6 +51,10 @@ func TestRunTransferFinishesToCompleted(t *testing.T) {
 	}
 	if source.finishCalls != 1 {
 		t.Fatalf("source finish calls = %d, want 1", source.finishCalls)
+	}
+	// Finish removes the received migration snapshots, so they do not pile up.
+	if want := []string{"migration-mig-1-1", "migration-mig-1-2"}; !equalStringSlices(transfer.removed, want) {
+		t.Fatalf("removed snapshots = %v", transfer.removed)
 	}
 }
 

@@ -47,8 +47,24 @@ func (m *MigrationManager) advanceFinish(ctx context.Context, record TargetMigra
 	if err := m.source.FinishSource(ctx, record.Source, record.ID, record.VirtualMachineID); err != nil {
 		return err
 	}
+	if err := m.removeReceivedSnapshots(ctx, record); err != nil {
+		return err
+	}
 
 	return m.store.writeTarget(terminalTargetRecord(record, MigrationCompleted, m.now()))
+}
+
+// removeReceivedSnapshots destroys the migration snapshots left on the received
+// dataset after a successful migration. The live volume keeps its data. Repeats
+// are safe.
+func (m *MigrationManager) removeReceivedSnapshots(ctx context.Context, record TargetMigrationRecord) error {
+	for _, interval := range record.Intervals {
+		name := migrationSnapshotName(record.ID, interval.Sequence)
+		if err := m.transfer.RemoveSnapshot(ctx, record.VirtualMachineID, name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // advanceAbort cleans the target, then unlocks or restores the source. Errors
