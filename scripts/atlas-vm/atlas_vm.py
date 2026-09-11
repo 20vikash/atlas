@@ -599,7 +599,9 @@ WantedBy=multi-user.target
 		else:
 			url = self.settings.setup_script_url
 			detail(url)
-			self.run_in_guest(f"curl -fsS --show-error -L -o /root/setup.py '{url}'")
+			self.run_in_guest("rm -f /root/setup.py")
+			if self.run_in_guest(f"curl -fsS --show-error -L -o /root/setup.py '{url}'") != 0:
+				raise AtlasVmError(f"could not download {url} in the VM")
 		command = "python3 /root/setup.py"
 		detail(f"log: {self.paths.setup_log}")
 
@@ -690,8 +692,8 @@ def command_create(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 
 	if arguments.config_file.resolve() != CONFIG_FILE.resolve():
 		shutil.copy(arguments.config_file, CONFIG_FILE)
-		CONFIG_FILE.chmod(0o600)
 		machine.settings.path = CONFIG_FILE
+	CONFIG_FILE.chmod(0o600)
 	machine.write_network_script()
 	machine.write_configuration()
 	machine.write_unit()

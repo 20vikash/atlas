@@ -273,7 +273,9 @@ def remove_pilot_installation(configuration: Configuration) -> None:
 				unit.unlink(missing_ok=True)
 
 	shutil.rmtree(configuration.pilot_home, ignore_errors=True)
-	for grant in Path("/etc/sudoers.d").glob(f"{user}-*"):
+	grants = [Path(SETUP_GRANT.format(user=user)), Path(IMAGE_BUILDER_GRANT.format(user=user))]
+	grants += Path("/etc/sudoers.d").glob(f"{user}-pilot-*")
+	for grant in grants:
 		grant.unlink(missing_ok=True)
 
 
