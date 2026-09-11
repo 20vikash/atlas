@@ -134,10 +134,9 @@ class Settings:
 			},
 		)
 
-	def write_guest_environment(self, path: Path) -> None:
+	def guest_environment_text(self) -> str:
 		"""setup.sh reads shell assignments, so render them from the configuration."""
-		lines = [f"{key}={value}" for key, value in self.guest_environment.items()]
-		write_file(path, "\n".join(lines) + "\n", mode=0o600)
+		return "\n".join(f"{key}={value}" for key, value in self.guest_environment.items()) + "\n"
 
 	@classmethod
 	def load(cls, path: Path = STATE_FILE) -> Settings:
@@ -261,8 +260,6 @@ DNS=1.1.1.1
 		write_file(root / "etc/ssh/sshd_config.d/90-atlas-vm.conf", "PermitRootLogin prohibit-password\n")
 		run(["ssh-keygen", "-A", "-f", str(root)], stdout=subprocess.DEVNULL)
 
-		self.settings.write_guest_environment(root / "root/atlas-vm.env")
-
 
 @dataclass
 class Paths:
@@ -339,9 +336,8 @@ class ConsoleReader:
 	"""Follow the guest console. A healthy boot stays quiet, and the kept lines
 	explain a boot that never reaches Secure Shell."""
 
-	def __init__(self, path: Path, echo: bool = False) -> None:
+	def __init__(self, path: Path) -> None:
 		self.path = path
-		self.echo = echo
 		self.position = path.stat().st_size if path.exists() else 0
 		self.recent: deque[str] = deque(maxlen=40)
 
@@ -353,16 +349,11 @@ class ConsoleReader:
 			data = console.read()
 			self.position = console.tell()
 		for line in data.decode("utf-8", "replace").splitlines():
-			if self.echo:
-				guest(line)
-			else:
-				self.recent.append(line)
+			self.recent.append(line)
 
 	def report(self) -> None:
-		"""Print what the guest said last, unless it was printed already."""
+		"""Print what the guest said last."""
 		self.drain()
-		if self.echo:
-			return
 		for line in self.recent:
 			guest(line)
 
@@ -480,6 +471,9 @@ class VirtualMachine:
 			stdout=subprocess.DEVNULL,
 		)
 
+	def write_in_guest(self, target: str, content: str) -> None:
+		run(self.ssh_arguments([f"install -m 600 /dev/stdin {target}"]), input=content, text=True)
+
 	def run_in_guest(self, command: str) -> int:
 		return subprocess.run(self.ssh_arguments([command])).returncode
 
@@ -564,10 +558,10 @@ WantedBy=multi-user.target
 		shutil.copy(released, self.paths.firecracker_binary)
 		self.paths.firecracker_binary.chmod(0o755)
 
-	def start(self, verbose: bool = False) -> None:
+	def start(self) -> None:
 		self.paths.api_socket.unlink(missing_ok=True)
 		subprocess.run(["systemctl", "reset-failed", SERVICE_NAME], stderr=subprocess.DEVNULL)
-		console = ConsoleReader(self.paths.console_log, echo=verbose)
+		console = ConsoleReader(self.paths.console_log)
 		step("start the VM")
 		detail(f"console: {self.paths.console_log}")
 		run(["systemctl", "start", SERVICE_NAME])
@@ -617,12 +611,19 @@ WantedBy=multi-user.target
 			detail(url)
 			command = f"curl -fsS --show-error -L -o /root/setup.sh '{url}' && bash /root/setup.sh"
 		detail(f"log: {self.paths.setup_log}")
-		with subprocess.Popen(
-			self.ssh_arguments([command]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-		) as process, self.paths.setup_log.open("w") as log:
-			for line in process.stdout:
-				print(line, end="", flush=True)
-				log.write(line)
+
+		# The environment file holds the site password. Give it to the guest for
+		# this run only, and take it away when the run ends.
+		self.write_in_guest("/root/atlas-vm.env", self.settings.guest_environment_text())
+		try:
+			with subprocess.Popen(
+				self.ssh_arguments([command]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+			) as process, self.paths.setup_log.open("w") as log:
+				for line in process.stdout:
+					print(line, end="", flush=True)
+					log.write(line)
+		finally:
+			self.run_in_guest("rm -f /root/atlas-vm.env /root/setup.sh")
 		if process.returncode != 0:
 			raise DeployerError(f"setup.sh failed; read {self.paths.setup_log}")
 
@@ -706,7 +707,7 @@ def command_create(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 	machine.write_unit()
 	install_self()
 
-	machine.start(arguments.verbose)
+	machine.start()
 	if not arguments.skip_setup:
 		machine.run_setup(arguments.script)
 	command_status(machine, arguments)
@@ -717,7 +718,7 @@ def command_start(machine: VirtualMachine, arguments: argparse.Namespace) -> Non
 		raise DeployerError(f"{SERVICE_NAME} is already running")
 	if not machine.is_created:
 		raise DeployerError(f"no VM in {machine.paths.vm_directory}; run: atlas-deployer create")
-	machine.start(arguments.verbose)
+	machine.start()
 	command_status(machine, arguments)
 
 
@@ -731,7 +732,7 @@ def command_stop(machine: VirtualMachine, arguments: argparse.Namespace) -> None
 def command_restart(machine: VirtualMachine, arguments: argparse.Namespace) -> None:
 	if machine.is_running:
 		machine.stop()
-	machine.start(arguments.verbose)
+	machine.start()
 	command_status(machine, arguments)
 
 
@@ -848,7 +849,7 @@ def command_resize(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 		run(["truncate", "-s", f"{settings.disk_gib}G", str(machine.paths.rootfs_image)])
 	machine.write_configuration()
 
-	machine.start(arguments.verbose)
+	machine.start()
 	if "disk_gib" in changes:
 		step("grow the guest file system")
 		if machine.run_in_guest("resize2fs /dev/vda") != 0:
@@ -858,9 +859,6 @@ def command_resize(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 
 def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(prog="atlas-deployer", description=__doc__)
-	parser.add_argument(
-		"-v", "--verbose", action="store_true", help="print the guest console while the VM boots"
-	)
 	subparsers = parser.add_subparsers(dest="command", required=True)
 
 	create = subparsers.add_parser("create", help="build the VM, start it, and run setup.sh")
