@@ -96,7 +96,7 @@ class TestMetalTokenKey(UnitTestCase):
 
 		self.settings._rotate_metal_token_key.assert_called_once()
 
-	# A host that has no key yet needs one created, not rotated.
+# Create a missing host key instead of rotating.
 	def test_a_missing_key_is_created_in_place_of_a_rotation(self) -> None:
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import rotate_metal_token_key
 

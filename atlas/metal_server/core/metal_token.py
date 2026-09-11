@@ -19,7 +19,7 @@ SCOPE_READ_VIRTUAL_MACHINE = "read_vm"
 SCOPE_MIGRATION = "migration"
 VALID_SCOPES = frozenset({SCOPE_READ_VIRTUAL_MACHINE, SCOPE_MIGRATION})
 MAXIMUM_TOKEN_LIFETIME = timedelta(hours=2)
-# A token issued just before a rotation stays usable for its complete lifetime.
+# Tokens issued before rotation remain valid for their full lifetime.
 PREVIOUS_KEY_OVERLAP = MAXIMUM_TOKEN_LIFETIME
 
 

@@ -277,7 +277,7 @@ class TestServer(UnitTestCase):
 
 		enqueue_server_sync.assert_called_once_with(server.name)
 
-	# A host without a completed provisioning holds no Metal token.
+	# An unprovisioned host has no Metal token.
 	def test_sync_state_rejects_a_server_that_is_not_ready(self) -> None:
 		server = self._server(status="Running")
 

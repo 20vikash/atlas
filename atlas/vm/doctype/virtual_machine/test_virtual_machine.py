@@ -180,7 +180,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 		with self.assertRaises(ValueError):
 			VirtualMachineCreateRequest.from_value({**base, "server_ip_address": "203.0.113.10"})
 
-		# A public limit is stored, not rejected, so a mode change needs no cleanup.
+		# Store the public limit; a mode change needs no cleanup.
 		request = VirtualMachineCreateRequest.from_value({**base, "public_network_throughput_mibps": 50})
 		self.assertEqual(request.public_network_throughput_mibps, 50)
 
@@ -223,8 +223,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 
 
 class TestVirtualMachineDocument(UnitTestCase):
-	# Frappe reads every virtual field to build the new document template. A new
-	# record has no Server, so the Metal lookup must not run.
+	# New records have no Server, so virtual-field reads must skip Metal lookup.
 	def test_new_document_reads_virtual_fields_without_a_server(self) -> None:
 		virtual_machine = frappe.new_doc("Virtual Machine")
 
@@ -496,7 +495,7 @@ class TestMetalClient(UnitTestCase):
 
 		self.assertEqual(request.call_args.kwargs["json"]["jwt"], key_sync)
 
-	# A host keeps the keys it holds when a sync carries none.
+	# Keep existing host keys when sync sends none.
 	def test_sync_omits_the_key_object_when_no_keys_are_given(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"

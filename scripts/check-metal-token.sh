@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Check that Metal accepts a token that Atlas signs. Creates the Atlas signing
-# key on the site when it is missing.
+# Verify a Metal token signed by Atlas. Create the site key if missing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

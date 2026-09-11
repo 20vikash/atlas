@@ -95,7 +95,7 @@ class TestServerUsage(UnitTestCase):
 			deduplicate=True,
 		)
 
-	# One server sync is queued by hand, so it reads the shared sets itself.
+	# The queued sync reads the shared sets itself.
 	def test_one_server_exchange_reads_the_shared_sets(self) -> None:
 		peers = [{"node": "server-1"}]
 		addresses = ["fdaa:1::1"]
@@ -128,7 +128,7 @@ class TestServerUsage(UnitTestCase):
 			get_all.call_args.kwargs["filters"],
 			{"is_privileged": 1, "is_draft": 0, "is_terminating": 0},
 		)
-		# One query, so the address list does not scale its queries with the VMs.
+		# One query keeps address lookup independent of VM count.
 		self.assertEqual(get_all.call_args.kwargs["fields"], ["name", "tenant_id"])
 		get_doc.assert_not_called()
 
