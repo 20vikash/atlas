@@ -79,3 +79,6 @@ jspm_packages/
 scripts/.dev-jwks-key.pem
 scripts/.dev-jwks-ed25519-key.pem
 .tmp
+
+# Local Atlas VM settings
+scripts/atlas-vm/atlas-vm.env

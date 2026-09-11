@@ -4,6 +4,7 @@ Use this guide to create one test virtual machine. Use a test Scaleway project a
 
 Keep the Frappe worker active. Provider setup, catalog sync, and Metal Server provisioning run in background jobs.
 
+
 ## 1. Install build tools
 
 Install the tools that build `metald` and Atlas WG Mesh on the Atlas host:
