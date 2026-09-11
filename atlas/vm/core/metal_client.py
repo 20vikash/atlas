@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -44,6 +45,8 @@ class MetalClient:
 	timeout_seconds = (5, 60)
 	create_timeout_seconds = (5, 60)
 	status_timeout_seconds = (5, 30)
+	status_attempts = 3
+	retry_delay_seconds = 2
 	snapshot_timeout_seconds = (5, 3600)
 
 	def __init__(self, server: "MetalServer") -> None:
@@ -91,6 +94,7 @@ class MetalClient:
 			"GET",
 			f"/v1/vms/{quote(virtual_machine_id, safe='')}",
 			timeout=self.status_timeout_seconds,
+			attempts=self.status_attempts,
 		)
 		return self._virtual_machine(response)
 
@@ -279,6 +283,33 @@ class MetalClient:
 		)
 
 	def _request(
+		self,
+		method: str,
+		path: str,
+		*,
+		expected_status: int | tuple[int, ...] | None = None,
+		uncertain_on_failure: bool = False,
+		attempts: int = 1,
+		**kwargs: Any,
+	) -> dict[str, Any]:
+		"""Send one request. Repeat a retryable failure only when the caller allows it."""
+		for attempt in range(1, attempts + 1):
+			try:
+				return self._send(
+					method,
+					path,
+					expected_status=expected_status,
+					uncertain_on_failure=uncertain_on_failure,
+					**kwargs,
+				)
+			except MetalClientError as error:
+				if not error.retryable or attempt == attempts:
+					raise
+				time.sleep(self.retry_delay_seconds)
+
+		raise AssertionError("unreachable")
+
+	def _send(
 		self,
 		method: str,
 		path: str,

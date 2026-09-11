@@ -14,6 +14,7 @@ def build_client() -> MetalClient:
 	client.base_url = "http://10.0.0.2:9000"
 	client.headers = {"Authorization": "Bearer token"}
 	client.timeout_seconds = 5
+	client.retry_delay_seconds = 0
 	return client
 
 
@@ -23,6 +24,66 @@ def build_response(status: int, body: Any = None, content: bytes | None = None) 
 	response.content = content if content is not None else (b"{}" if body is None else b"body")
 	response.json.return_value = {} if body is None else body
 	return response
+
+
+class TestMetalClientRetries(UnitTestCase):
+	def test_a_retryable_failure_is_repeated_until_it_succeeds(self) -> None:
+		client = build_client()
+		responses = [requests.ReadTimeout("read timed out"), build_response(200, {"state": "running"})]
+
+		with patch("atlas.vm.core.metal_client.requests.request", side_effect=responses) as request:
+			body = client._request("GET", "/v1/vms/VM-00001", attempts=client.status_attempts)
+
+		self.assertEqual(body, {"state": "running"})
+		self.assertEqual(request.call_count, 2)
+
+	def test_migration_polling_is_not_repeated(self) -> None:
+		"""The migration worker runs its own poll loop, so one read must not retry."""
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			side_effect=requests.ReadTimeout("read timed out"),
+		) as request:
+			with self.assertRaises(MetalClientError):
+				client.get_migration("migration-1")
+
+		self.assertEqual(request.call_count, 1)
+
+	def test_a_status_read_gives_up_after_the_last_attempt(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			side_effect=requests.ReadTimeout("read timed out"),
+		) as request:
+			with self.assertRaises(MetalClientError):
+				client.get_virtual_machine("VM-00001")
+
+		self.assertEqual(request.call_count, client.status_attempts)
+
+	def test_a_status_read_does_not_repeat_a_final_failure(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request", return_value=build_response(404)
+		) as request:
+			with self.assertRaises(MetalClientError):
+				client.get_virtual_machine("VM-00001")
+
+		self.assertEqual(request.call_count, 1)
+
+	def test_a_write_is_never_repeated(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.request",
+			side_effect=requests.ReadTimeout("read timed out"),
+		) as request:
+			with self.assertRaises(MetalClientError):
+				client.put_virtual_machine("VM-00001", {})
+
+		self.assertEqual(request.call_count, 1)
 
 
 class TestMetalClientErrors(UnitTestCase):
