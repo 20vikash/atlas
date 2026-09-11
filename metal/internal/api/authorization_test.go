@@ -23,7 +23,7 @@ const (
 	testKeyID    = "key-1"
 )
 
-// newTrustedKeyStore returns a store that trusts the given keys.
+// newTrustedKeyStore returns a store that trusts the keys.
 func newTrustedKeyStore(t *testing.T, trusted ...token.TrustedKeys) *token.KeyStore {
 	t.Helper()
 
@@ -40,7 +40,7 @@ func newTrustedKeyStore(t *testing.T, trusted ...token.TrustedKeys) *token.KeySt
 	return store
 }
 
-// atlasSigner signs the tokens that a test presents.
+// atlasSigner signs test tokens.
 type atlasSigner struct {
 	privateKey ed25519.PrivateKey
 	trusted    token.TrustedKeys
@@ -87,7 +87,7 @@ func (signer atlasSigner) sign(t *testing.T, virtualMachineID string, scopes ...
 	return signed
 }
 
-// newProtectedRouter mounts one JWT route that reports the validated claims.
+// newProtectedRouter mounts a JWT route that reports validated claims.
 func newProtectedRouter(store TrustedKeyStore, scopes ...token.Scope) http.Handler {
 	server := &Server{trustedKeys: store}
 
@@ -105,7 +105,7 @@ func newProtectedRouter(store TrustedKeyStore, scopes ...token.Scope) http.Handl
 	return router
 }
 
-// call sends one request to the protected route with the given bearer value.
+// call sends one bearer value to the protected route.
 func call(router http.Handler, bearer string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
 	if bearer != "" {

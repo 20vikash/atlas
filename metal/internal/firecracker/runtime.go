@@ -102,8 +102,7 @@ func (runtime *Runtime) Start(ctx context.Context, input vm.RuntimeMachine) erro
 	return runtime.newMachine(input).Start(ctx)
 }
 
-// ColdStart boots the received disk fresh. It never restores a warm-memory
-// image, so a migrated VM does not inherit the source's guest memory.
+// ColdStart boots the received disk without restoring source guest memory.
 func (runtime *Runtime) ColdStart(ctx context.Context, input vm.RuntimeMachine) error {
 	return runtime.newMachine(input).coldBoot(ctx)
 }
@@ -182,10 +181,8 @@ func (runtime *Runtime) RefreshDisk(ctx context.Context, input vm.RuntimeMachine
 	})
 }
 
-// LimitDiskThroughput applies a temporary combined read and write bandwidth
-// limit to the live drive. A value of zero or less does nothing, so a caller
-// never clears the limit by accident. It does nothing when the VM is not
-// running or paused.
+// LimitDiskThroughput applies a temporary combined read and write limit to the
+// live drive. Nonpositive values and stopped or paused VMs are unchanged.
 func (runtime *Runtime) LimitDiskThroughput(ctx context.Context, input vm.RuntimeMachine, throughputMiBps int) error {
 	if throughputMiBps <= 0 {
 		return nil

@@ -33,8 +33,7 @@ func decodeJSONRequest(c echo.Context, value any) error {
 	return nil
 }
 
-// decodeOptionalJSON decodes a body like decodeJSONRequest, but an empty body
-// leaves the value unchanged. A request that omits its body is valid.
+// decodeOptionalJSON accepts an empty body and leaves the value unchanged.
 func decodeOptionalJSON(c echo.Context, value any) error {
 	request := c.Request()
 	request.Body = http.MaxBytesReader(c.Response(), request.Body, maximumJSONBodyBytes)

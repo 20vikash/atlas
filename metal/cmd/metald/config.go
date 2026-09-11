@@ -24,7 +24,7 @@ type options struct {
 	migration       migrationOptions
 }
 
-// migrationOptions configures VM migration on this host.
+// migrationOptions holds VM migration settings.
 type migrationOptions struct {
 	finalDeltaMiB int
 }

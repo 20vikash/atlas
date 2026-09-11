@@ -148,7 +148,7 @@ func unauthorized() *apiError {
 	return newAPIError(http.StatusUnauthorized, "unauthorized", "invalid API token")
 }
 
-// forbidden reports a valid token that does not allow the request.
+// forbidden reports a valid token without permission.
 func forbidden() *apiError {
 	return newAPIError(http.StatusForbidden, "forbidden", "token does not allow this request")
 }

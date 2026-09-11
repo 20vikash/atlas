@@ -19,8 +19,7 @@ func TestDriveRateLimiterConvertsLimits(t *testing.T) {
 	}
 }
 
-// A temporary migration limit sets bandwidth only, so it caps combined read and
-// write throughput without touching the operation rate.
+// A temporary migration limit caps combined read and write throughput only.
 func TestDriveRateLimiterThroughputOnly(t *testing.T) {
 	limiter := driveRateLimiter(vm.Disk{ThroughputMiBps: 64})
 	if limiter == nil || limiter.Bandwidth == nil {

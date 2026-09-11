@@ -20,18 +20,18 @@ type syncRequest struct {
 	WireGuardPeers        []wireGuardPeerRequest `json:"wireguard_peers"`
 	Images                []imageRequest         `json:"images"`
 	PrivilegedVMAddresses []string               `json:"privileged_vm_addresses"`
-	// JWT is optional. A missing object keeps the keys the host already trusts.
+	// A missing JWT object keeps the current trusted keys.
 	JWT *jwtRequest `json:"jwt,omitempty"`
 }
 
-// jwtRequest carries the Atlas keys that sign the tokens this host accepts.
+// jwtRequest carries Atlas signing keys accepted by this host.
 type jwtRequest struct {
 	Issuer     string                `json:"issuer"`
 	Receiver   string                `json:"receiver"`
 	PublicKeys []jwtPublicKeyRequest `json:"public_keys"`
 }
 
-// jwtPublicKeyRequest is one Atlas signing key in base64url without padding.
+// jwtPublicKeyRequest is one unpadded base64url Atlas signing key.
 type jwtPublicKeyRequest struct {
 	ID  string `json:"id"`
 	Key string `json:"key"`
@@ -137,7 +137,7 @@ func synchronizationFailure(err error) error {
 	return err
 }
 
-// trustedKeys converts the requested keys into the trust state form.
+// trustedKeys converts requested keys to trust state.
 func (request jwtRequest) trustedKeys() token.TrustedKeys {
 	publicKeys := make([]token.PublicKey, 0, len(request.PublicKeys))
 	for _, publicKey := range request.PublicKeys {

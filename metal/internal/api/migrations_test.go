@@ -230,7 +230,7 @@ func TestPrepareMigrationSourceRejectsTheStaticToken(t *testing.T) {
 	signer := newAtlasSigner(t)
 	server := newMigrationTestServer(t, &stubMigrationManager{}, signer.trusted)
 
-	// The static token does not satisfy the JWT-only source route.
+	// The static token cannot call the JWT-only source route.
 	do(t, server, http.MethodPut, "/v1/migrations/mig-1/source", "", http.StatusUnauthorized)
 }
 

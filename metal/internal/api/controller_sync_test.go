@@ -8,7 +8,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/token"
 )
 
-// syncBody returns one complete sync request. A jwt fragment is added as given.
+// syncBody returns a complete sync request with the given JWT fragment.
 func syncBody(t *testing.T, jwt string) string {
 	t.Helper()
 
@@ -20,7 +20,7 @@ func syncBody(t *testing.T, jwt string) string {
 	return body + `}`
 }
 
-// keysFragment renders trust state in the shape the sync request carries.
+// keysFragment renders trust state as a sync request fragment.
 func keysFragment(t *testing.T, keys token.TrustedKeys) string {
 	t.Helper()
 
@@ -59,8 +59,7 @@ func TestSyncWithoutKeysKeepsTheStoredKeys(t *testing.T) {
 	}
 }
 
-// Atlas repeats the current keys on every sync and adds the previous key while
-// it rotates, so both requests must succeed.
+// Atlas repeats current keys and adds the previous key during rotation.
 func TestSyncAcceptsARepeatAndARotation(t *testing.T) {
 	signer := newAtlasSigner(t)
 	rotated := newAtlasSigner(t)

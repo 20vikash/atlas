@@ -105,7 +105,7 @@ func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	if capacity.AvailableStorageMiB != 3072-2048 {
 		t.Fatalf("available storage = %d, want 1024", capacity.AvailableStorageMiB)
 	}
-	// The migration target is not counted as a running VM.
+	// Migration targets are not running VMs.
 	if capacity.VirtualMachineCount != 1 {
 		t.Fatalf("VM count = %d, want 1", capacity.VirtualMachineCount)
 	}

@@ -62,7 +62,7 @@ type VirtualMachineManager interface {
 	ConnectSSH(context.Context, string) (vm.SSHConnection, error)
 }
 
-// MigrationManager owns migration records and reservations on this host.
+// MigrationManager owns this host's migration records and reservations.
 type MigrationManager interface {
 	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source, signedToken string) (vm.TargetMigrationRecord, error)
 	TargetStatus(ctx context.Context, migrationID string) (vm.TargetMigrationRecord, error)
@@ -77,8 +77,7 @@ type MigrationManager interface {
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID, caller string) error
 }
 
-// TrustedKeyStore owns the Atlas issuer, receiver, and public keys that this
-// host trusts.
+// TrustedKeyStore owns this host's Atlas issuer, receiver, and trusted keys.
 type TrustedKeyStore interface {
 	Keys() token.TrustedKeys
 	Replace(token.TrustedKeys) error
@@ -194,12 +193,11 @@ func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// isControllerTokenKey marks a request that the static controller token authenticated.
+// isControllerTokenKey marks a request authenticated by the static token.
 const isControllerTokenKey = "atlas_controller_token"
 
-// authenticateControllerOrMigration accepts either the static controller token
-// or an Atlas migration-scoped token. The finish route serves Atlas on the
-// target and one host on another, so it must accept both credentials.
+// authenticateControllerOrMigration accepts the static token or a migration
+// token. Finish uses both credentials across the two hosts.
 func (s *Server) authenticateControllerOrMigration(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		presented, found := bearerToken(c)
@@ -220,7 +218,7 @@ func (s *Server) authenticateControllerOrMigration(next echo.HandlerFunc) echo.H
 	}
 }
 
-// bearerToken returns the token the Authorization header presents.
+// bearerToken returns the Authorization token.
 func bearerToken(c echo.Context) (string, bool) {
 	const prefix = "Bearer "
 

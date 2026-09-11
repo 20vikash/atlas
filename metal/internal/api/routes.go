@@ -7,8 +7,7 @@ import (
 )
 
 // registerRoutes binds handlers. PUT mutations are idempotent; POST is for
-// actions and creation of addressable resources. Health and documentation carry
-// no VM data and stay open.
+// actions and resource creation. Health and documentation carry no VM data.
 func (s *Server) registerRoutes(router *echo.Echo) {
 	router.GET("/health", s.checkHealth)
 	router.GET("/docs", s.showDocumentation)
@@ -37,17 +36,17 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	snapshotRoutes.GET("/:id", s.getSnapshot)
 	snapshotRoutes.DELETE("/:id", s.deleteSnapshot)
 
-	// Atlas drives these with the static Metal token.
+	// Atlas calls these with the static Metal token.
 	migrationRoutes := versionOneRoutes.Group("/migrations")
 	migrationRoutes.PUT("/:id", s.createMigration)
 	migrationRoutes.GET("/:id", s.getMigration)
 	migrationRoutes.POST("/:id/abort", s.abortMigration)
 
-	// Finish serves Atlas on the target and one host on another, so it accepts
-	// either the static controller token or a migration-scoped Atlas token.
+	// Finish serves Atlas on the target and another host, so it accepts the static
+	// controller token or a migration-scoped Atlas token.
 	router.POST("/v1/migrations/:id/finish", s.finishMigration, s.authenticateControllerOrMigration)
 
-	// The target host drives these with an Atlas-signed token, not the static token.
+	// The target host calls these with an Atlas-signed token.
 	sourceRoutes := router.Group("/v1/migrations")
 	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource, s.requireScopes(token.ScopeReadVirtualMachine, token.ScopeMigration))
 	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot, s.requireScopes(token.ScopeMigration))

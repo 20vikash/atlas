@@ -8,14 +8,14 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// migrationSourceResponse is the portable state the source returns to the target.
+// migrationSourceResponse is portable source state for the target.
 type migrationSourceResponse struct {
 	Config        vm.PortableConfig `json:"config"`
 	ObservedState vm.State          `json:"observed_state"`
 }
 
-// prepareMigrationSource locks the source VM and returns its portable state. The
-// token supplies the VM ID and caller, so the handler binds the claim to the VM.
+// prepareMigrationSource locks the source and returns portable state. The token
+// binds the caller and VM ID.
 func (s *Server) prepareMigrationSource(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -29,27 +29,26 @@ func (s *Server) prepareMigrationSource(c echo.Context) error {
 	return c.JSON(http.StatusOK, migrationSourceResponse{Config: handshake.Config, ObservedState: handshake.ObservedState})
 }
 
-// nextSnapshotRequest acknowledges the last received sequence.
+// nextSnapshotRequest acknowledges the last sequence.
 type nextSnapshotRequest struct {
 	ReceivedSequence int `json:"received_sequence"`
 }
 
-// snapshotResponse describes the next snapshot the target can pull.
+// snapshotResponse describes the next snapshot.
 type snapshotResponse struct {
 	Sequence  int    `json:"sequence"`
 	SizeBytes int64  `json:"size_bytes"`
 	GUID      string `json:"guid"`
 }
 
-// streamSnapshotRequest names the snapshot stream the target wants. The optional
-// throughput limit caps the source disk during this interval.
+// streamSnapshotRequest names a snapshot stream and optional disk limit.
 type streamSnapshotRequest struct {
 	Sequence        int    `json:"sequence"`
 	ResumeToken     string `json:"resume_token"`
 	ThroughputMiBps int    `json:"throughput_mibps"`
 }
 
-// createMigrationSnapshot returns the next source snapshot for the target.
+// createMigrationSnapshot returns the next source snapshot.
 func (s *Server) createMigrationSnapshot(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -67,8 +66,7 @@ func (s *Server) createMigrationSnapshot(c echo.Context) error {
 	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
 }
 
-// streamMigrationSnapshot streams one snapshot to the target. The handler writes
-// no status until the first byte, so a validation error still maps to a code.
+// streamMigrationSnapshot streams one snapshot. It writes no status until data.
 func (s *Server) streamMigrationSnapshot(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -84,8 +82,8 @@ func (s *Server) streamMigrationSnapshot(c echo.Context) error {
 	return err
 }
 
-// stopMigrationSource stops the source, removes its network, and returns the
-// final snapshot for the target to pull.
+// stopMigrationSource stops the source, removes its network, and returns its
+// final snapshot.
 func (s *Server) stopMigrationSource(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -99,7 +97,7 @@ func (s *Server) stopMigrationSource(c echo.Context) error {
 	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
 }
 
-// startMigrationSource restores the source VM during a rollback.
+// startMigrationSource restores the source during rollback.
 func (s *Server) startMigrationSource(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -112,7 +110,7 @@ func (s *Server) startMigrationSource(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// deleteMigrationSource unlocks the source VM and removes its migration state.
+// deleteMigrationSource unlocks the source and removes migration state.
 func (s *Server) deleteMigrationSource(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {

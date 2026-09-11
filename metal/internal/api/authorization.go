@@ -6,11 +6,10 @@ import (
 	"github.com/frappe/atlas/metal/internal/token"
 )
 
-// claimsContextKey names the validated claims in the request context.
+// claimsContextKey identifies validated claims in the request context.
 const claimsContextKey = "atlas_token_claims"
 
-// requireScopes accepts only an Atlas-signed token that carries every named
-// scope. The static API token cannot pass it.
+// requireScopes accepts Atlas tokens carrying every named scope.
 func (s *Server) requireScopes(scopes ...token.Scope) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -30,8 +29,7 @@ func (s *Server) requireScopes(scopes ...token.Scope) echo.MiddlewareFunc {
 	}
 }
 
-// tokenClaims returns the claims that requireScopes validated. The handler must
-// match the returned VM identifier to the VM its own request addresses.
+// tokenClaims returns claims validated by requireScopes.
 func tokenClaims(c echo.Context) token.Claims {
 	claims, _ := c.Get(claimsContextKey).(token.Claims)
 	return claims

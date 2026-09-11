@@ -26,7 +26,7 @@ type snapshotUploadOwner interface {
 	Shutdown(context.Context) error
 }
 
-// migrationShutdownOwner stops the background disk transfers at shutdown.
+// migrationShutdownOwner stops transfers at shutdown.
 type migrationShutdownOwner interface {
 	Shutdown(context.Context) error
 }
@@ -58,7 +58,7 @@ type daemon struct {
 	migrations       migrationShutdownOwner
 }
 
-// OwnMigrations makes the daemon stop the migration transfers at shutdown.
+// OwnMigrations makes the daemon stop migration transfers at shutdown.
 func (daemon *daemon) OwnMigrations(migrations migrationShutdownOwner) {
 	daemon.migrations = migrations
 }

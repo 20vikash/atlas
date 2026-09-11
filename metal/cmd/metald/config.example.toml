@@ -39,6 +39,5 @@ uplink = "eno1.1878"
 enabled = true
 
 [migration]
-# Incremental size at or below which the target stops the source and takes the
-# final snapshot, in MiB.
+# Final-delta threshold in MiB.
 final_delta_mib = 512

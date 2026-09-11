@@ -60,9 +60,8 @@ type StorageCapacitySource interface {
 	Capacity(context.Context) (storage.Capacity, error)
 }
 
-// MigrationReservations returns the capacity that incoming migration targets
-// hold. A target is not a normal VM yet, so it is absent from the VM list and
-// must be added to the reservation here. A nil value reserves nothing.
+// MigrationReservations returns capacity held by incoming migration targets.
+// Targets are absent from the VM list until reconstructed.
 type MigrationReservations func(context.Context) ([]vm.TargetReservation, error)
 
 // Dependencies contains host synchronization services.
@@ -155,8 +154,7 @@ func (service *Service) Capacity(ctx context.Context) (Capacity, error) {
 }
 
 // capacityOf reports capacity against reservations the caller already listed.
-// An incoming migration target reserves capacity before its data arrives, so it
-// is subtracted here even though the host has not yet used it.
+// Incoming targets reserve capacity before their data arrives.
 func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Information) (Capacity, error) {
 	reservedCPUCount := 0
 	for _, information := range virtualMachines {

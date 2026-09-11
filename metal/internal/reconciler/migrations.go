@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// defaultMigrationOperationTimeout bounds one migration handshake step. The step
-// makes one call to the source and writes local records, so the limit is short.
+// defaultMigrationOperationTimeout bounds one handshake and record write.
 const defaultMigrationOperationTimeout = 5 * time.Minute
 
 // MigrationDriver lists and advances active target migrations.
@@ -22,8 +21,7 @@ type MigrationConfig struct {
 	OperationTimeout time.Duration
 }
 
-// MigrationReconciler advances every active target migration on an interval and
-// on demand. metald owns its goroutine and wakes it after a migration request.
+// MigrationReconciler advances target migrations on an interval or on demand.
 type MigrationReconciler struct {
 	passScheduler
 
@@ -32,7 +30,7 @@ type MigrationReconciler struct {
 	logger           *slog.Logger
 }
 
-// NewMigrationReconciler returns a migration reconciler that runs at interval.
+// NewMigrationReconciler returns an interval-based migration reconciler.
 func NewMigrationReconciler(driver MigrationDriver, interval time.Duration, configuration MigrationConfig) *MigrationReconciler {
 	if configuration.OperationTimeout <= 0 {
 		configuration.OperationTimeout = defaultMigrationOperationTimeout
@@ -81,8 +79,7 @@ func (r *MigrationReconciler) advance(ctx context.Context, virtualMachineID stri
 	}
 }
 
-// logFailure reports an error unless ctx ended, because a canceled pass fails
-// every step still in flight and those errors say nothing about the host.
+// logFailure reports errors unless cancellation caused them.
 func (r *MigrationReconciler) logFailure(ctx context.Context, message string, err error, fields ...any) {
 	if ctx.Err() != nil {
 		return

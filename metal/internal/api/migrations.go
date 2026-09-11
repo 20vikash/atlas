@@ -9,17 +9,17 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// errInvalidMigrationRequest reports a target request that is missing a field.
+// errInvalidMigrationRequest reports a target request missing a field.
 var errInvalidMigrationRequest = errors.New("virtual_machine_id, source, and token are required")
 
-// createMigrationRequest is the target-pull request that Atlas sends the target.
+// createMigrationRequest is Atlas's target-pull request.
 type createMigrationRequest struct {
 	VirtualMachineID string `json:"virtual_machine_id"`
 	Source           string `json:"source"`
 	Token            string `json:"token"`
 }
 
-// validate rejects a request that is missing a required field.
+// validate rejects a request missing a required field.
 func (r createMigrationRequest) validate() error {
 	if r.VirtualMachineID == "" || r.Source == "" || r.Token == "" {
 		return errInvalidMigrationRequest
@@ -27,7 +27,7 @@ func (r createMigrationRequest) validate() error {
 	return nil
 }
 
-// migrationResponse is the public view of one migration.
+// migrationResponse is the public migration view.
 type migrationResponse struct {
 	ID               string                  `json:"id"`
 	VirtualMachineID string                  `json:"virtual_machine_id"`
@@ -38,7 +38,7 @@ type migrationResponse struct {
 	Error            *migrationErrorResponse `json:"error,omitempty"`
 }
 
-// snapshotProgress is the public transfer progress of one interval.
+// snapshotProgress is transfer progress for one interval.
 type snapshotProgress struct {
 	DurationSeconds  int   `json:"duration_seconds"`
 	BytesTransferred int64 `json:"bytes_transferred"`
@@ -46,13 +46,13 @@ type snapshotProgress struct {
 	Completed        bool  `json:"completed"`
 }
 
-// migrationErrorResponse is the safe error detail of one migration.
+// migrationErrorResponse is safe migration error detail.
 type migrationErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-// createMigration creates or resumes a target migration and starts the worker.
+// createMigration creates or resumes a target migration and starts its worker.
 func (s *Server) createMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *Server) createMigration(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, toMigration(record))
 }
 
-// getMigration returns the status of one target migration.
+// getMigration returns target migration status.
 func (s *Server) getMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -87,9 +87,8 @@ func (s *Server) getMigration(c echo.Context) error {
 	return c.JSON(http.StatusOK, toMigration(record))
 }
 
-// finishMigration serves both finish calls on one path. The static controller
-// token records a finish request on the target. A migration token destroys the
-// source on another host.
+// finishMigration serves both finish calls. The static token records the target
+// request; a migration token destroys the remote source.
 func (s *Server) finishMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -109,7 +108,7 @@ func (s *Server) finishMigration(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// abortMigration removes a target migration that has not finished.
+// abortMigration removes an unfinished target migration.
 func (s *Server) abortMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -144,7 +143,7 @@ func toMigration(record vm.TargetMigrationRecord) migrationResponse {
 	return response
 }
 
-// migrationIdentifier reads and validates the migration ID in the request path.
+// migrationIdentifier reads and validates the path migration ID.
 func migrationIdentifier(c echo.Context) (string, error) {
 	identifier := c.Param("id")
 	if !validResourceID(identifier) {

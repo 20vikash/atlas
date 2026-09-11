@@ -312,7 +312,7 @@ func newServerWithServices(
 	return server
 }
 
-// newServerWithTrustedKeys also returns the store that a key sync writes into.
+// newServerWithTrustedKeys also returns the key-sync store.
 func newServerWithTrustedKeys(
 	t *testing.T,
 	virtualMachineManager VirtualMachineManager,
