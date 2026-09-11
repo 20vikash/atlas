@@ -153,8 +153,12 @@ class VirtualMachineImage(Document):
 			"disk_mib": self.memory_snapshot_disk_mib,
 		}
 
+	@frappe.whitelist()
 	def get_presigned_download_url(self, artifact: Artifact) -> ImageDownload:
 		"""Return one signed artifact URL with its size, digest, and expiry time."""
+		if artifact not in ("rootfs", "kernel"):
+			frappe.throw(_("Artifact must be rootfs or kernel."))
+
 		self.validate_is_available()
 		if self.is_stored_in_site_file:
 			frappe.throw(

@@ -100,6 +100,11 @@ class TestVirtualMachineImage(UnitTestCase):
 
 		self.assertEqual(get_download_url.call_count, 2)
 
+	def test_an_unknown_artifact_is_refused(self) -> None:
+		image = self.make_image()
+		with self.assertRaisesRegex(frappe.ValidationError, "rootfs or kernel"):
+			image.get_presigned_download_url("memory")
+
 	def test_a_site_file_image_has_no_signed_download(self) -> None:
 		image = self.make_image(
 			artifact_storage="Site File", image_file="file-rootfs", kernel_file="file-kernel"
