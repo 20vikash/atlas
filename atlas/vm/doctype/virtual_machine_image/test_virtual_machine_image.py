@@ -111,7 +111,7 @@ class TestVirtualMachineImage(UnitTestCase):
 	def test_only_a_system_image_can_use_site_file_storage(self) -> None:
 		image = self.make_image(
 			artifact_storage="Site File",
-			image_type="Machine",
+			image_type="machine",
 			image_file="file-rootfs",
 			kernel_file="file-kernel",
 		)
@@ -121,7 +121,7 @@ class TestVirtualMachineImage(UnitTestCase):
 
 	def test_a_site_file_image_requires_both_files(self) -> None:
 		image = self.make_image(
-			artifact_storage="Site File", image_type="System", image_file="file-rootfs", kernel_file=None
+			artifact_storage="Site File", image_type="system", image_file="file-rootfs", kernel_file=None
 		)
 
 		with self.assertRaises(frappe.ValidationError):

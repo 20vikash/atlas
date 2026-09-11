@@ -1,6 +1,6 @@
 frappe.ui.form.on("Virtual Machine Image", {
 	refresh(frm) {
-		if (frm.doc.image_type === "Machine" && frm.doc.status === "Failed") {
+		if (frm.doc.image_type === "machine" && frm.doc.status === "Failed") {
 			frm.add_custom_button(__("Retry Transfer"), () => {
 				frm.call("retry_transfer").then(() => frm.reload_doc());
 			});

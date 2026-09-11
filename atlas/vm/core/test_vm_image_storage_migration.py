@@ -16,7 +16,7 @@ def build_image(**overrides) -> SimpleNamespace:
 	"""Return one bootstrap System image that site files hold."""
 	values = {
 		"name": "image-1",
-		"image_type": "System",
+		"image_type": "system",
 		"status": "Available",
 		"artifact_storage": "Site File",
 		"is_stored_in_site_file": True,
