@@ -25,6 +25,14 @@ func RunInNetworkNamespace(ctx context.Context, namespace, name string, args ...
 	return Output(ctx, "ip", arguments...)
 }
 
+// CombinedOutput runs a host command and returns its combined stdout and stderr,
+// including the output when the command fails. Use it when a command writes the
+// value to read on stderr, such as a verbose dry run.
+func CombinedOutput(ctx context.Context, name string, args ...string) (string, error) {
+	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	return string(output), err
+}
+
 // Output runs a host command and returns stdout. A failure includes stderr.
 func Output(ctx context.Context, name string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer

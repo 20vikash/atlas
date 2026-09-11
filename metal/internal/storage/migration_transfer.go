@@ -32,8 +32,7 @@ func (platformRunner) Output(ctx context.Context, name string, args ...string) (
 }
 
 func (platformRunner) CombinedOutput(ctx context.Context, name string, args ...string) (string, error) {
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
-	return string(output), err
+	return platform.CombinedOutput(ctx, name, args...)
 }
 
 // MigrationTransfer runs the ZFS operations of one VM disk migration: snapshot,
