@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
 type fakeRunner struct {
@@ -36,7 +38,7 @@ func (f *fakeRunner) CombinedOutput(_ context.Context, _ string, args ...string)
 	return f.combined[commandKey(args...)], nil
 }
 
-func newTransfer(runner commandRunner) *MigrationTransfer {
+func newTransfer(runner platform.Runner) *MigrationTransfer {
 	return &MigrationTransfer{pool: &ZFSPool{name: "metal"}, runner: runner}
 }
 
@@ -186,8 +188,7 @@ func TestParseSendSizeBytesRejectsMissingSize(t *testing.T) {
 	}
 }
 
-// TestZFSTransferRoundTrip exercises the streaming send and receive against real
-// ZFS. It runs only when METAL_ZFS_TEST_POOL names a writable pool.
+// TestZFSTransferRoundTrip tests streaming send and receive on a writable pool.
 func TestZFSTransferRoundTrip(t *testing.T) {
 	poolName := os.Getenv("METAL_ZFS_TEST_POOL")
 	if poolName == "" {
