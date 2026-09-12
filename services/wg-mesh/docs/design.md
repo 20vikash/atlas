@@ -74,6 +74,8 @@ Neighbour advertisements are not authenticated, so a host with access to the sha
 | --- | --- | -- |
 | VM interface | `handle_vm_packet` | Route local traffic, encapsulate remote traffic. |
 | Shared VLAN interface | `handle_ndp_packet` | Add the Atlas option to outgoing advertisements, learn locations from incoming ones, register neighbours. |
+| Shared VLAN interface | `handle_ndp_unicast_egress` | Unicast mode, attached instead of `handle_ndp_packet`: add the Atlas options, wrap solicitation and advertisement packets in IPv4, and send them to peers. |
+| Shared VLAN interface | `handle_ndp_unicast_ingress` | Unicast mode, attached instead of `handle_ndp_packet`: validate the peer, learn requester, owner, and neighbour, remove the outer IPv4 header. |
 | WireGuard interface | `handle_wireguard_packet` | Remove tunnel headers for local VMs, drop tunnels for others. |
 
 The VLAN hook is attached to both TC directions: egress adds the option to this host's own answers, ingress learns from other hosts' answers.
@@ -82,6 +84,8 @@ The VLAN hook is attached to both TC directions: egress adds the option to this 
 | --- | --- |
 | `config` | Host configuration, including this host's WireGuard address. |
 | `local_vms`, `remote_vms` | Local ownership and learned remote locations. |
+| `peer_list` | Unicast mode: peer IPv4 addresses, kept in sync from the peer file. |
+| `vm_peer_map`, `ndp_requesters` | Unicast mode: last answering peer per VM, and peers waiting for an answer. |
 | `privileged_tenant_allowed_addresses` | Privileged-tenant VM addresses permitted to communicate across tenants. |
 | `debug_config`, `debug_stats`, `debug_events` | Optional debug state and events. |
 | `build_hash` | Installed BPF object hash. |
@@ -217,9 +221,19 @@ When an owner fails, senders keep their managed neighbour entries, so Linux NUD 
 atlas-wg-mesh remote purge --host fdab::2
 ```
 
-## Unicast discovery relay
+## Unicast NDP transport
 
-The [discovery relay](unicast-network.md) is a legacy fallback mechanism for networks that cannot carry the multicast announcement path. It is unchanged by the NDP architecture. See the [unicast network guide](unicast-network.md).
+Hosts without a shared Layer-2 VLAN use the [unicast mode](unicast-network.md). The same NDP packets travel inside an outer IPv4 header between configured peers, so Linux neighbour discovery, proxy NDP, the Atlas option, and the WireGuard datapath stay unchanged.
+
+The unicast hooks and `handle_ndp_packet` never run together. A host runs either the multicast NDP hook on the uplink, or the two unicast hooks, never both. The `unicast start` daemon owns the choice: it attaches the unicast hooks and removes the multicast filters, and a clean stop reverses the swap.
+
+The egress unicast hook owns the whole advertisement path. For a solicitation, it appends a requester option that carries this host's IPv4 address, wraps the packet in IPv4, and sends one clone per peer with `bpf_clone_redirect`, which is copy on write. When `vm_peer_map` holds the last peer that answered for the target, only that peer receives a copy, and the entry is removed. For an answer, it appends the TLLAO and Atlas options itself, wraps the packet, and returns it to the requester alone.
+
+The ingress unicast hook owns the whole learning path. It accepts a wrapped packet only from a configured peer, records the requester, removes the outer header, and restores the Ethernet type. For an answer with a valid Atlas option, it records the owning peer in `vm_peer_map`, the owner in `remote_vms`, and the neighbour entry through the Atlas kfunc, so Linux NUD owns liveness exactly as in multicast mode.
+
+A one-shot owner entry makes the fan-out self healing. When the owner never answers, for example after a VM moved, the next solicitation finds no entry and fans out to every peer, and the new owner restores both `vm_peer_map` and `remote_vms`.
+
+The `unicast start` daemon owns the peer file. It rewrites the `peer_list` map when the file changes. It processes no packets. A start or stop passes through a short window where both hook sets are attached; that window is safe, because the unicast hooks skip work that the multicast hook already did and every learning step is an idempotent replacement.
 
 ## Code map
 
@@ -228,6 +242,7 @@ The [discovery relay](unicast-network.md) is a legacy fallback mechanism for net
 | `bpf/bpf.c` | Build one BPF object from all source fragments. |
 | `bpf/vm_hook.h` | Process packets from VM interfaces. |
 | `bpf/ndp_hook.h` | Process NDP packets on the shared VLAN interface. |
+| `bpf/ndp_unicast_hook.h` | Transport NDP packets over a routed IPv4 underlay. |
 | `bpf/wireguard_hook.h` | Process Atlas WG Mesh tunnels. |
 | `bpf/state.h` | Define host and VM BPF state. |
 | `bpf/debug.h` | Define debug maps and event helpers. |
