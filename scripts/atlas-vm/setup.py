@@ -259,7 +259,7 @@ class Setup:
 		# The branch has to be set before init clones the framework.
 		self.configure_bench()
 		if not os.access(configuration.bench_path / "env/bin/python", os.X_OK):
-			self.pilot("init")
+			self.pilot("init --no-dev")
 		self.configure_common_site_config()
 
 	def configure_bench(self) -> None:
