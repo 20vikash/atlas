@@ -26,6 +26,17 @@ def script_enrolment_variables() -> list[str]:
 	return declaration.group(1).replace("\\\n", " ").split()
 
 
+STORAGE_CLUSTER_JSON = (
+	'{"storage_node_count":3,"replication_factor":3,'
+	'"gateway":{"cpu":2,"ram_gb":4,"disk_gb":20},"storage":{"cpu":4,"ram_gb":8,"disk_gb":500}}'
+)
+
+
+def stored_storage_cluster():
+	"""Stand in for the cluster the provision request stored."""
+	return patch.object(provisioning, "storage_cluster_config_json", return_value=STORAGE_CLUSTER_JSON)
+
+
 def cargo_server(**values) -> SimpleNamespace:
 	defaults = {
 		"name": "Cargo Server",
@@ -135,6 +146,7 @@ class TestCargoInstallation(UnitTestCase):
 			patch.object(provisioner.__class__, "settings", new=property(lambda self: settings)),
 			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
 			patch.object(provisioning, "issue_token", side_effect=["atlas-token", "proxy-token"]) as issue,
+			stored_storage_cluster(),
 		):
 			environment = provisioner.install_environment()
 
@@ -165,6 +177,7 @@ class TestCargoInstallation(UnitTestCase):
 		self.assertEqual(environment["JWKS_URL"], "https://atlas.example.com/api/atlas/jwks.json")
 		self.assertEqual(environment["SITE"], "cargo.example.com")
 		self.assertEqual(environment["ADMIN_DOMAIN"], "cargo-pilot.example.com")
+		self.assertEqual(environment["DEFAULT_STORAGE_CLUSTER_CONFIG"], STORAGE_CLUSTER_JSON)
 
 	def test_every_enrolment_variable_the_script_requires_is_supplied(self) -> None:
 		settings = atlas_settings()
@@ -173,6 +186,7 @@ class TestCargoInstallation(UnitTestCase):
 			patch.object(provisioner.__class__, "settings", new=property(lambda self: settings)),
 			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
 			patch.object(provisioning, "issue_token", side_effect=["atlas-token", "proxy-token"]),
+			stored_storage_cluster(),
 		):
 			environment = provisioner.install_environment()
 
@@ -204,6 +218,7 @@ class TestCargoInstallation(UnitTestCase):
 		with (
 			patch.object(provisioner.__class__, "settings", new=property(lambda self: settings)),
 			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
+			stored_storage_cluster(),
 		):
 			environment = provisioner.install_environment()
 

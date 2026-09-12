@@ -12,6 +12,11 @@ from frappe.model.document import Document
 from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 
+from atlas.service.core.cargo.storage_cluster import (
+	remove_storage_cluster_config,
+	store_storage_cluster_config,
+)
+
 if TYPE_CHECKING:
 	from collections.abc import Iterator
 
@@ -53,6 +58,7 @@ class CargoServer(Document):
 		with cargo_lifecycle_lock():
 			cargo_server: CargoServer = frappe.get_single("Cargo Server")
 			cargo_server._validate_provision_request(values)
+			store_storage_cluster_config(values.get("storage_cluster"))
 			cargo_server.status = "Pending"
 			cargo_server.failure_message = None
 			cargo_server.installation_task = None
@@ -93,6 +99,7 @@ class CargoServer(Document):
 				frappe.db.commit()  # nosemgrep
 				raise
 
+			remove_storage_cluster_config()
 			cargo_server.status = "Archived"
 			cargo_server.failure_message = None
 			cargo_server.virtual_machine = None
