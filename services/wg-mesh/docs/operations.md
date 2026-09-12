@@ -53,6 +53,8 @@ Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 
 Discovery uses IPv6 NDP on the shared VLAN. Neighbour advertisements are not authenticated, so restrict the VLAN to trusted participating hosts. Cross-tenant traffic is permitted only when one endpoint is a controller-whitelisted privileged tenant-`0` VM address, so reserve those addresses for trusted platform services.
 
+Hosts without a shared Layer-2 domain use [unicast NDP transport](unicast-network.md) over a routed IPv4 underlay instead.
+
 ## Build a release
 
 Run this command on a Linux build host with Go and clang:

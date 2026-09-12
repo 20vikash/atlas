@@ -6,7 +6,7 @@ For Go code, follow the repository [Go anti-pattern rules](../../llm/go-code-rev
 
 ## Scope
 
-Atlas WG Mesh is a region-scoped private network. A VM keeps its address when it moves, and routing needs no controller or daemon. It requires a trusted shared VLAN for NDP and does not manage WireGuard peers, keys, NAT, DNS, DHCP, or firewall rules.
+Atlas WG Mesh is a region-scoped private network. A VM keeps its address when it moves, and routing needs no controller or daemon. It requires a trusted shared VLAN for NDP, or the unicast mode for routed networks, and does not manage WireGuard peers, keys, NAT, DNS, DHCP, or firewall rules.
 
 ## Limitations
 
@@ -16,7 +16,7 @@ Atlas WG Mesh does not provide inter-region VM connectivity yet.
 
 - [Operations guide](docs/operations.md): requirements, build, installation, VM lifecycle, debugging, and upgrades.
 - [Design guide](docs/design.md): addressing, [trust model](docs/design.md#trust-model), NDP discovery, BPF maps and hooks, and packet paths.
-- [Unicast network guide](docs/unicast-network.md): the legacy discovery relay fallback.
+- [Unicast network guide](docs/unicast-network.md): NDP transport over a routed IPv4 underlay.
 - [Benchmark results](docs/benchmark.md): throughput, packet rate, and debug cost.
 - [Debug in production](docs/debug-in-production.md): inspect routes and packet decisions.
 
