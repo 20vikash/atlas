@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0 */
-/* Atlas WG Mesh state shared by the three TC programs and the integration. */
+/* Atlas WG Mesh state shared by the TC programs and the integration. */
 #ifndef ATLAS_STATE_H
 #define ATLAS_STATE_H
 
@@ -34,7 +34,45 @@ struct
 	__uint(max_entries, 262144);
 } remote_vms SEC(".maps");
 
-/* Host configuration. The first two fields serve the unicast discovery relay. */
+/* Peer capacity of the peer_list map. The unicast hooks use the same limit to
+ * bound their loops. */
+#define ATLAS_UNICAST_PEER_LIMIT 256
+
+/* Peer IPv4 addresses for unicast NDP transport. The unicast daemon fills this
+ * map from the peer file on disk. Peers occupy the low indexes densely; the
+ * first zero value ends the list. */
+struct
+{
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__type(key, __u32);
+	__type(value, __be32);
+	__uint(max_entries, ATLAS_UNICAST_PEER_LIMIT);
+} peer_list SEC(".maps");
+
+/* Last known owner peer for each remote VM. The unicast egress hook sends one
+ * solicitation to that peer and removes the entry. A missing answer therefore
+ * makes the next solicitation fan out to every peer. */
+struct
+{
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, struct in6_addr);
+	__type(value, __be32);
+	__uint(max_entries, 262144);
+} vm_peer_map SEC(".maps");
+
+/* Peers that asked this host about a VM. The key is the requester address from
+ * a transported solicitation, and the value is the IPv4 address from the
+ * requester option. The unicast egress hook wraps the answer to that peer. */
+struct
+{
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, struct in6_addr);
+	__type(value, __be32);
+	__uint(max_entries, 4096);
+} ndp_requesters SEC(".maps");
+
+/* Host configuration. The discovery index records the configured uplink, and
+ * the underlay IPv4 address also sources the unicast NDP transport. */
 struct config
 {
 	__u32 discovery_ifindex;

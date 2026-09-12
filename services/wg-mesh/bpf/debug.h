@@ -8,7 +8,8 @@ enum debug_hook
 {
 	DEBUG_VM,
 	DEBUG_NDP,
-	DEBUG_WIREGUARD
+	DEBUG_WIREGUARD,
+	DEBUG_UNICAST
 };
 
 enum debug_verdict
@@ -131,6 +132,7 @@ static __always_inline void emit_packet_debug_event(
 	record_debug_stats(packet_action, DEBUG_NO_DIRECTION);
 
 	event = bpf_ringbuf_reserve(&debug_events, sizeof(*event), 0);
+
 	if (!event)
 	{
 		/* Events are best-effort; forwarding must not wait for a reader. */
@@ -168,6 +170,7 @@ static __always_inline void emit_protocol_debug_event(
 	record_debug_stats(DEBUG_ACCEPT, protocol_direction);
 
 	event = bpf_ringbuf_reserve(&debug_events, sizeof(*event), 0);
+
 	if (!event)
 	{
 		/* Keep the loss count visible for protocol-only troubleshooting. */

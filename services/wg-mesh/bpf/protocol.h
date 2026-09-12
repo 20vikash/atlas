@@ -3,7 +3,7 @@
  * Atlas WG Mesh protocol definitions.
  *
  * This file contains the values that must match on every Atlas WG Mesh host.
- * The Atlas NDP option is part of the on-wire neighbour advertisement.
+ * The Atlas NDP options are part of the on-wire neighbour messages.
  */
 #ifndef ATLAS_PROTOCOL_H
 #define ATLAS_PROTOCOL_H
@@ -54,6 +54,28 @@ struct atlas_ndp_option
 	__u8 length;
 	struct in6_addr host;
 	__u8 pad[6];
+};
+
+/*
+ * The Atlas neighbour solicitation option. NDP option type 254 is reserved
+ * for experiments. A requesting host adds this option before unicast
+ * transport, so the answering peer knows which IPv4 address must receive
+ * the neighbour advertisement.
+ */
+#define ATLAS_NS_OPTION_TYPE 254
+#define ATLAS_NS_OPTION_UNITS 1
+
+/*
+ * The length field follows the Atlas option convention: logical units plus
+ * one. Real padding fills the claimed size, so every option walker sees a
+ * complete option. Total wire size: 16 bytes.
+ */
+struct atlas_ns_option
+{
+	__u8 type;
+	__u8 length; /* ATLAS_NS_OPTION_UNITS + 1 */
+	__u8 peer_ipv4[4];
+	__u8 pad[10];
 };
 
 /* The fixed part of a neighbour solicitation or advertisement. */
