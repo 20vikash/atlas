@@ -149,9 +149,9 @@ __bpf_kfunc int atlas_register_neigh_v3(
 	return result;
 }
 
-BTF_KFUNCS_START(atlas_neigh_v3_kfunc_ids)
+BTF_SET8_START(atlas_neigh_v3_kfunc_ids)
 BTF_ID_FLAGS(func, atlas_register_neigh_v3)
-BTF_KFUNCS_END(atlas_neigh_v3_kfunc_ids)
+BTF_SET8_END(atlas_neigh_v3_kfunc_ids)
 
 static const struct btf_kfunc_id_set atlas_neigh_v3_kfunc_set = {
 	.owner = THIS_MODULE,
