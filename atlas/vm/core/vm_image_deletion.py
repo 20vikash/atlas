@@ -43,6 +43,19 @@ class VirtualMachineImageDeletionService:
 
 		return cast(str, image.status)
 
+	def reclaim_archived(self) -> None:
+		"""Delete each archived Machine image that lost its last virtual machine."""
+		for name in frappe.get_all(
+			"Virtual Machine Image",
+			filters={"image_type": "machine", "status": "Archived"},
+			pluck="name",
+		):
+			if frappe.db.exists("Virtual Machine", {"virtual_machine_image": name}):
+				continue
+
+			frappe.db.set_value("Virtual Machine Image", name, "status", "Deleting")
+			self.enqueue(name)
+
 	@staticmethod
 	def is_reclaimable(image: VirtualMachineImage) -> bool:
 		"""Return whether the stored artifacts can be removed now.
@@ -115,15 +128,16 @@ class VirtualMachineImageDeletionService:
 
 
 def enqueue_pending_virtual_machine_image_deletions() -> None:
-	"""Resume Machine image deletions that did not finish."""
-	names = frappe.get_all(
+	"""Resume unfinished deletions and reclaim an archived image that is now unused."""
+	service = VirtualMachineImageDeletionService()
+	for name in frappe.get_all(
 		"Virtual Machine Image",
 		filters={"image_type": "machine", "status": "Deleting"},
 		pluck="name",
-	)
-	service = VirtualMachineImageDeletionService()
-	for name in names:
+	):
 		service.enqueue(name)
+
+	service.reclaim_archived()
 
 
 @run_as_admin
