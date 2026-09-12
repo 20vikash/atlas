@@ -39,6 +39,11 @@ class DnsProvider(ABC):
 		...
 
 	@abstractmethod
+	def find_public_zone_id(self, domain: str) -> str | None:
+		"""Return the ID of an existing public zone for the exact domain."""
+		...
+
+	@abstractmethod
 	def upsert_record(self, record_type: str, name: str, values: list[str], ttl: int = 300) -> None:
 		"""Create the DNS record if missing, or update it to match the given values."""
 		...

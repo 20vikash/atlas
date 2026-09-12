@@ -25,6 +25,39 @@ def _build_provider() -> Route53Provider:
 
 
 class TestRoute53Provider(UnitTestCase):
+	def test_find_public_zone_skips_a_private_zone(self) -> None:
+		provider = _build_provider()
+		provider.client.list_hosted_zones_by_name.return_value = {
+			"HostedZones": [
+				{
+					"Id": "/hostedzone/private",
+					"Name": "example.com.",
+					"Config": {"PrivateZone": True},
+				},
+				{
+					"Id": "/hostedzone/public",
+					"Name": "example.com.",
+					"Config": {"PrivateZone": False},
+				},
+			],
+		}
+
+		self.assertEqual(provider.find_public_zone_id("example.com"), "public")
+
+	def test_find_public_zone_refuses_a_private_zone(self) -> None:
+		provider = _build_provider()
+		provider.client.list_hosted_zones_by_name.return_value = {
+			"HostedZones": [
+				{
+					"Id": "/hostedzone/private",
+					"Name": "example.com.",
+					"Config": {"PrivateZone": True},
+				}
+			],
+		}
+
+		self.assertIsNone(provider.find_public_zone_id("example.com"))
+
 	def test_bootstrap_creates_the_wildcard_cname(self) -> None:
 		provider = _build_provider()
 		provider.settings.save = MagicMock()

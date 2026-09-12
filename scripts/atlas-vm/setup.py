@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
+import json
 import os
 import shlex
 import shutil
@@ -21,6 +23,17 @@ PILOT_INSTALL_URL = "https://raw.githubusercontent.com/frappe/pilot/develop/inst
 PYTHON_VERSION = "3.14"
 SETUP_GRANT = "/etc/sudoers.d/{user}-atlas-setup"
 IMAGE_BUILDER_GRANT = "/etc/sudoers.d/{user}-atlas-image-builder"
+SCALEWAY_ZONES = {
+	"fr-par-1",
+	"fr-par-2",
+	"fr-par-3",
+	"nl-ams-1",
+	"nl-ams-2",
+	"nl-ams-3",
+	"pl-waw-1",
+	"pl-waw-2",
+	"pl-waw-3",
+}
 
 
 class SetupError(Exception):
@@ -47,6 +60,8 @@ class Configuration:
 	letsencrypt_email: str = ""
 	atlas_repository: str = "https://github.com/frappe/atlas"
 	atlas_branch: str = "develop"
+	atlas_base_url: str = ""
+	atlas_setup_values: dict[str, object] = field(default_factory=dict)
 	images: list[tuple[str, str, bool]] = field(default_factory=list)
 
 	@classmethod
@@ -54,16 +69,18 @@ class Configuration:
 		if not path.is_file():
 			raise SetupError(f"no configuration at {path}")
 		document = tomllib.loads(path.read_text())
+		validate_configuration(document, path)
 		pilot = document.get("pilot", {})
 		atlas = document.get("atlas", {})
 
 		site = pilot.get("site", "")
 		password = pilot.get("password", "")
-		if not site or not password:
-			raise SetupError(f"{path} needs pilot.site and pilot.password")
-
 		images = [
-			(str(image.get("version", "24.04")), image.get("architecture", "amd64"), bool(image.get("minimal")))
+			(
+				image.get("version", "24.04"),
+				image.get("architecture", "amd64"),
+				image.get("minimal", False),
+			)
 			for image in document.get("image", [{"version": "24.04"}])
 		]
 		return cls(
@@ -74,6 +91,8 @@ class Configuration:
 			letsencrypt_email=pilot.get("letsencrypt_email", ""),
 			atlas_repository=atlas.get("repository", "https://github.com/frappe/atlas"),
 			atlas_branch=atlas.get("branch", "develop"),
+			atlas_base_url=atlas["base_url"],
+			atlas_setup_values=read_atlas_setup_values(atlas),
 			images=images,
 		)
 
@@ -89,6 +108,179 @@ class Configuration:
 	def image_builder_path(self) -> Path:
 		return self.bench_path / "apps/atlas/atlas/vm/scripts/build_ubuntu_server_image.sh"
 
+	@property
+	def fleet_private_key_path(self) -> Path:
+		return Path(f"/home/{self.bench_user}/.ssh/id_ed25519")
+
+
+def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
+	"""Return the Atlas command input from the TOML tables."""
+	scaleway = atlas["scaleway"]
+	route53 = atlas["route53"]
+	letsencrypt = atlas["letsencrypt"]
+	return {
+		"server_provider": atlas["server_provider"],
+		"dns_provider": atlas["dns_provider"],
+		"region_name": atlas["region_name"].strip().lower(),
+		"region_id": atlas["region_id"],
+		"wildcard_domain": atlas["wildcard_domain"],
+		"private_network_cidr": atlas["private_network_cidr"],
+		"private_network_mtu": atlas["private_network_mtu"],
+		"central_jwks_url": atlas["central_jwks_url"],
+		"scaleway_organization_id": scaleway["organization_id"],
+		"scaleway_project_id": scaleway["project_id"],
+		"scaleway_zone": scaleway["zone"],
+		"scaleway_machine_billing_cycle": scaleway["machine_billing_cycle"],
+		"scaleway_access_key": scaleway["access_key"],
+		"scaleway_secret_key": scaleway["secret_key"],
+		"route53_access_key_id": route53["access_key_id"],
+		"route53_access_key_secret": route53["secret_access_key"],
+		"letsencrypt_email": letsencrypt["email"],
+		"is_letsencrypt_staging": letsencrypt["staging"],
+		"is_wildcard_tls_auto_renew_enabled": letsencrypt["auto_renew"],
+	}
+
+
+def validate_configuration(document: dict, path: Path) -> None:
+	"""Reject a configuration that cannot complete Atlas setup."""
+	_keys(document, {"vm", "pilot", "atlas", "image"}, path, "")
+	vm = document.get("vm", {})
+	if not isinstance(vm, dict):
+		raise SetupError(f"{path}: vm must be a table")
+	_keys(vm, {"vcpu_count", "memory_mib", "disk_gib", "ssh_port"}, path, "vm")
+	for key in ("vcpu_count", "memory_mib", "disk_gib", "ssh_port"):
+		value = vm.get(key)
+		if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+			raise SetupError(f"{path}: vm.{key} must be a positive integer")
+	if vm.get("ssh_port", 2222) > 65_535:
+		raise SetupError(f"{path}: vm.ssh_port must be at most 65535")
+	pilot = _table(document, "pilot", path)
+	_keys(pilot, {"site", "admin_domain", "password", "user", "letsencrypt_email"}, path, "pilot")
+	for key in ("site", "password", "letsencrypt_email"):
+		_string(pilot, key, path, "pilot")
+	for key in ("admin_domain", "user"):
+		if key in pilot:
+			_string(pilot, key, path, "pilot")
+
+	atlas = _table(document, "atlas", path)
+	_keys(
+		atlas,
+		{
+			"repository",
+			"branch",
+			"base_url",
+			"server_provider",
+			"dns_provider",
+			"region_name",
+			"region_id",
+			"wildcard_domain",
+			"private_network_cidr",
+			"private_network_mtu",
+			"central_jwks_url",
+			"scaleway",
+			"route53",
+			"letsencrypt",
+		},
+		path,
+		"atlas",
+	)
+	for key in ("base_url", "server_provider", "dns_provider", "region_name", "wildcard_domain"):
+		_string(atlas, key, path, "atlas")
+	for key in ("private_network_cidr", "private_network_mtu", "central_jwks_url"):
+		if key not in atlas:
+			raise SetupError(f"{path}: atlas.{key} is required")
+	for key in ("repository", "branch", "central_jwks_url"):
+		if key in atlas and not isinstance(atlas[key], str):
+			raise SetupError(f"{path}: atlas.{key} must be a string")
+	if atlas["server_provider"] != "Scaleway" or atlas["dns_provider"] != "Route53":
+		raise SetupError(f"{path}: Atlas setup supports Scaleway and Route53")
+	if atlas["wildcard_domain"].startswith("*.") or "." not in atlas["wildcard_domain"]:
+		raise SetupError(f"{path}: atlas.wildcard_domain must be a domain without '*.'")
+	region_id = atlas.get("region_id")
+	if not isinstance(region_id, int) or isinstance(region_id, bool) or not 0 <= region_id <= 65_535:
+		raise SetupError(f"{path}: atlas.region_id must be an integer from 0 through 65535")
+	try:
+		network = ipaddress.ip_network(atlas.get("private_network_cidr", "10.1.0.0/20"), strict=False)
+	except ValueError as error:
+		raise SetupError(f"{path}: atlas.private_network_cidr is invalid: {error}") from error
+	if network.version != 4 or not 20 <= network.prefixlen <= 29:
+		raise SetupError(f"{path}: atlas.private_network_cidr must be an IPv4 network from /20 through /29")
+	private_network_mtu = atlas.get("private_network_mtu")
+	if (
+		not isinstance(private_network_mtu, int)
+		or isinstance(private_network_mtu, bool)
+		or private_network_mtu <= 0
+	):
+		raise SetupError(f"{path}: atlas.private_network_mtu must be a positive integer")
+
+	scaleway = _table(atlas, "scaleway", path, "atlas")
+	_keys(
+		scaleway,
+		{"organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"},
+		path,
+		"atlas.scaleway",
+	)
+	for key in ("organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"):
+		_string(scaleway, key, path, "atlas.scaleway")
+	if scaleway["zone"] not in SCALEWAY_ZONES:
+		raise SetupError(f"{path}: atlas.scaleway.zone is not supported")
+	if scaleway["machine_billing_cycle"] not in {"Hourly", "Monthly"}:
+		raise SetupError(f"{path}: atlas.scaleway.machine_billing_cycle must be Hourly or Monthly")
+
+	route53 = _table(atlas, "route53", path, "atlas")
+	_keys(route53, {"access_key_id", "secret_access_key"}, path, "atlas.route53")
+	for key in ("access_key_id", "secret_access_key"):
+		_string(route53, key, path, "atlas.route53")
+	letsencrypt = _table(atlas, "letsencrypt", path, "atlas")
+	_keys(letsencrypt, {"email", "staging", "auto_renew"}, path, "atlas.letsencrypt")
+	_string(letsencrypt, "email", path, "atlas.letsencrypt")
+	for key in ("staging", "auto_renew"):
+		if key not in letsencrypt:
+			raise SetupError(f"{path}: atlas.letsencrypt.{key} is required")
+		if not isinstance(letsencrypt[key], bool):
+			raise SetupError(f"{path}: atlas.letsencrypt.{key} must be true or false")
+	images = document.get("image", [])
+	if not isinstance(images, list) or any(not isinstance(image, dict) for image in images):
+		raise SetupError(f"{path}: image must be an array of tables")
+	for image in images:
+		_keys(image, {"version", "architecture", "minimal"}, path, "image")
+		version = image.get("version", "24.04")
+		architecture = image.get("architecture", "amd64")
+		minimal = image.get("minimal", False)
+		if not isinstance(version, str):
+			raise SetupError(f"{path}: image.version must be a string")
+		if not isinstance(architecture, str):
+			raise SetupError(f"{path}: image.architecture must be a string")
+		if not isinstance(minimal, bool):
+			raise SetupError(f"{path}: image.minimal must be true or false")
+		if version not in {"22.04", "24.04"}:
+			raise SetupError(f"{path}: unsupported Ubuntu version {version!r}")
+		if architecture != "amd64":
+			raise SetupError(f"{path}: unsupported image architecture {architecture!r}")
+		if minimal and version != "24.04":
+			raise SetupError(f"{path}: minimal images need Ubuntu 24.04")
+
+
+def _keys(values: dict, allowed: set[str], path: Path, prefix: str) -> None:
+	for key in values.keys() - allowed:
+		name = f"{prefix}.{key}" if prefix else key
+		raise SetupError(f"{path}: unknown configuration key {name}")
+
+
+def _table(values: dict, key: str, path: Path, prefix: str = "") -> dict:
+	name = f"{prefix}.{key}" if prefix else key
+	value = values.get(key)
+	if not isinstance(value, dict):
+		raise SetupError(f"{path}: {name} must be a table")
+	return value
+
+
+def _string(values: dict, key: str, path: Path, prefix: str) -> str:
+	value = values.get(key)
+	if not isinstance(value, str) or not value.strip():
+		raise SetupError(f"{path}: {prefix}.{key} must be a non-empty string")
+	return value
+
 
 class Setup:
 	"""Every stage the VM runs, in order."""
@@ -98,8 +290,12 @@ class Setup:
 		self.setup_grant = SETUP_GRANT.format(user=configuration.bench_user)
 		self.image_builder_grant = IMAGE_BUILDER_GRANT.format(user=configuration.bench_user)
 
-	def as_bench(self, command: str) -> None:
-		run(["su", "-", self.configuration.bench_user, "-c", command])
+	def as_bench(self, command: str, *, input_text: str | None = None) -> None:
+		run(
+			["su", "-", self.configuration.bench_user, "-c", command],
+			input=input_text,
+			text=input_text is not None,
+		)
 
 	def bench_output(self, command: str) -> str:
 		result = run(
@@ -107,8 +303,8 @@ class Setup:
 		)
 		return result.stdout.strip()
 
-	def pilot(self, arguments: str) -> None:
-		self.as_bench(f"pilot {arguments} --bench {self.configuration.bench_name}")
+	def pilot(self, arguments: str, *, input_text: str | None = None) -> None:
+		self.as_bench(f"pilot {arguments} --bench {self.configuration.bench_name}", input_text=input_text)
 
 	def install_grant(self, path: str, content: str) -> None:
 		with tempfile.NamedTemporaryFile("w", delete=False) as staged:
@@ -123,8 +319,22 @@ class Setup:
 		environment = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
 		run(["apt-get", "update", "-qq"], env=environment)
 		run(
-			["apt-get", "install", "-y", "-qq", "wget", "curl", "git", "make", "clang",
-			 "libbpf-dev", "linux-libc-dev", "squashfs-tools", "zstd", "e2fsprogs"],
+			[
+				"apt-get",
+				"install",
+				"-y",
+				"-qq",
+				"wget",
+				"curl",
+				"git",
+				"make",
+				"clang",
+				"libbpf-dev",
+				"linux-libc-dev",
+				"squashfs-tools",
+				"zstd",
+				"e2fsprogs",
+			],
 			env=environment,
 		)
 
@@ -144,7 +354,9 @@ class Setup:
 		step(f"stage 4: python {PYTHON_VERSION} for {self.configuration.bench_user}")
 		self.as_bench("command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh")
 		self.as_bench(f"uv python install {PYTHON_VERSION}")
-		self.as_bench(f'mkdir -p ~/.local/bin && ln -sf "$(uv python find {PYTHON_VERSION})" ~/.local/bin/python3')
+		self.as_bench(
+			f'mkdir -p ~/.local/bin && ln -sf "$(uv python find {PYTHON_VERSION})" ~/.local/bin/python3'
+		)
 		reported = self.bench_output("python3 --version")
 		if PYTHON_VERSION not in reported:
 			raise SetupError(
@@ -175,7 +387,9 @@ class Setup:
 		step(f"stage 7: site {configuration.site}")
 		site_config = configuration.bench_path / "sites" / configuration.site / "site_config.json"
 		if not site_config.is_file():
-			self.pilot(f"new-site {configuration.site} --admin-password {shlex.quote(configuration.password)}")
+			self.pilot(
+				f"new-site {configuration.site} --admin-password {shlex.quote(configuration.password)}"
+			)
 
 	def get_atlas(self) -> None:
 		# Pilot skips an app that is already there, so this stage is safe to repeat.
@@ -202,9 +416,27 @@ class Setup:
 		step(f"stage 10: install atlas on {configuration.site}")
 		self.pilot(f"install-app {configuration.site} atlas")
 
+	def configure_atlas(self) -> None:
+		configuration = self.configuration
+		step(f"stage 11: configure Atlas on {configuration.site}")
+		private_key = configuration.fleet_private_key_path
+		if not private_key.exists():
+			if private_key.with_suffix(".pub").exists():
+				raise SetupError(f"public key exists without its private key: {private_key}.pub")
+			self.as_bench("install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519")
+		public_key = self.bench_output("ssh-keygen -y -f ~/.ssh/id_ed25519")
+		values = {**configuration.atlas_setup_values, "public_ssh_key": public_key}
+		self.pilot(
+			f"frappe --site {configuration.site} set-config atlas_base_url {shlex.quote(configuration.atlas_base_url)}"
+		)
+		self.pilot(
+			f"frappe --site {configuration.site} configure-atlas",
+			input_text=json.dumps(values),
+		)
+
 	def grant_image_builder_sudo(self) -> None:
 		# The image builder runs its root file system build through sudo on every build.
-		step("stage 11: sudo grant for the image builder")
+		step("stage 12: sudo grant for the image builder")
 		self.install_grant(
 			self.image_builder_grant,
 			f"{self.configuration.bench_user} ALL=(ALL) NOPASSWD: {self.configuration.image_builder_path} *",
@@ -213,16 +445,15 @@ class Setup:
 	def build_images(self) -> None:
 		# Bootstrap has no object storage credentials yet, so every image is a site file.
 		configuration = self.configuration
-		step(f"stage 12: guest images ({len(configuration.images)})")
+		step(f"stage 13: guest images ({len(configuration.images)})")
 		for version, architecture, minimal in configuration.images:
 			step(f"image {version} {architecture} {'minimal' if minimal else 'server'}")
-			arguments = f"--version {version} --architecture {architecture} --storage site-file"
+			arguments = (
+				f"--version {version} --architecture {architecture} --storage site-file --skip-existing"
+			)
 			if minimal:
 				arguments += " --minimal"
-			self.as_bench(
-				f"pilot --bench {configuration.bench_name} --site {configuration.site}"
-				f" build-ubuntu-base-image {arguments}"
-			)
+			self.pilot(f"frappe --site {configuration.site} build-ubuntu-base-image {arguments}")
 
 	def run(self) -> None:
 		self.install_packages()
@@ -236,6 +467,7 @@ class Setup:
 			self.get_atlas()
 			self.setup_production()
 			self.install_atlas()
+			self.configure_atlas()
 		finally:
 			Path(self.setup_grant).unlink(missing_ok=True)
 		self.grant_image_builder_sudo()
@@ -257,8 +489,7 @@ def remove_pilot_installation(configuration: Configuration) -> None:
 	if identifier.returncode == 0:
 		user_id = identifier.stdout.strip()
 		environment = (
-			f"XDG_RUNTIME_DIR=/run/user/{user_id}"
-			f" DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user_id}/bus"
+			f"XDG_RUNTIME_DIR=/run/user/{user_id} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user_id}/bus"
 		)
 		for action in (f"stop {units}", f"disable {units}", "daemon-reload", "reset-failed"):
 			subprocess.run(

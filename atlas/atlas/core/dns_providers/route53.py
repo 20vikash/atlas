@@ -74,6 +74,22 @@ class Route53Provider(DnsProvider):
 		return None
 
 	@override
+	def find_public_zone_id(self, domain: str) -> str | None:
+		"""Return the ID of an existing public zone for the exact domain."""
+		try:
+			result = self.client.list_hosted_zones_by_name(DNSName=domain, MaxItems="100")
+		except (BotoCoreError, ClientError) as error:
+			raise Route53Error(f"Failed to list zones for {domain}: {error}") from error
+
+		for zone in result.get("HostedZones", []):
+			if zone["Name"].rstrip(".") != domain:
+				break
+			if not zone.get("Config", {}).get("PrivateZone", False):
+				return self._zone_id(zone["Id"])
+
+		return None
+
+	@override
 	def create_zone(self, domain: str) -> str:
 		"""Return the existing zone ID for the domain, or create one."""
 		if self.settings.route53_dns_zone_id:

@@ -388,6 +388,13 @@ class AtlasSettings(Document):
 			enqueue_after_commit=True,
 		)
 
+	def issue_wildcard_certificate(self) -> None:
+		"""Issue and store one wildcard TLS certificate now."""
+		issued = self.letsencrypt_controller.issue_wildcard_certificate()
+		self.wildcard_tls_certificate = issued.certificate_pem
+		self.wildcard_tls_private_key = issued.private_key_pem
+		self.save(ignore_permissions=True)
+
 	# Internal methods
 
 	def _sync_server_images(self) -> None:
@@ -411,10 +418,7 @@ class AtlasSettings(Document):
 		self.save(ignore_permissions=True)
 
 	def _renew_wildcard_certificate(self) -> None:
-		issued = self.letsencrypt_controller.issue_wildcard_certificate()
-		self.wildcard_tls_certificate = issued.certificate_pem
-		self.wildcard_tls_private_key = issued.private_key_pem
-		self.save()
+		self.issue_wildcard_certificate()
 
 
 def renew_expiring_wildcard_certificate() -> None:
