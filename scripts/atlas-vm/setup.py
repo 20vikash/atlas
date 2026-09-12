@@ -267,7 +267,6 @@ class Setup:
 		# Production setup does not enable nginx, and the VM must serve after a reboot.
 		run(["systemctl", "enable", "nginx"])
 		run(["systemctl", "reload", "nginx"])
-		self.pilot("build --force")
 
 	def install_atlas(self) -> None:
 		# Production runs Redis and the workers, which an install hook can reach.
