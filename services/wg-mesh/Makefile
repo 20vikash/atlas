@@ -9,9 +9,12 @@ CLI_NAME := atlas-wg-mesh
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GO_BUILD_FLAGS := -trimpath -buildvcs=false -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: bpf build clean version
+.PHONY: bpf module build clean version
 
 bpf: $(BPF_OBJECT)
+
+module:
+	$(MAKE) -C kernel
 
 # Debian keeps the asm headers in a multiarch directory. The bpfel target stops
 # clang from searching it, so name it. The directory is absent on other layouts.
