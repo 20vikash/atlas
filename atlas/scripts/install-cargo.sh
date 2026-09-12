@@ -9,7 +9,6 @@
 # terminated by the proxy in front of this host.
 set -euo pipefail
 
-PILOT_VERSION="${PILOT_VERSION:-v0.0.29-pre-alpha}"
 BENCH="${BENCH:-cargo}"
 SITE="${SITE:-cargo.localhost}"
 ADMIN_DOMAIN="${ADMIN_DOMAIN:-}"
@@ -34,8 +33,8 @@ PROXY_URL="${PROXY_URL:-}" # Proxy control API URL for this region
 PROXY_TOKEN="${PROXY_TOKEN:-}" # restricted token for the Proxy control API
 WILDCARD_DOMAIN="${WILDCARD_DOMAIN:-}"
 BENCH_USER="${BENCH_USER:-frappe}" # pilot refuses to run as root, so the bench gets its own user
-BENCH_UID="${BENCH_UID:-1001}"
-BENCH_GID="${BENCH_GID:-1001}"
+BENCH_UID="${BENCH_UID:-1000}"
+BENCH_GID="${BENCH_GID:-1000}"
 
 if [ -z "$PILOT_ADMIN_PASSWORD" ] || [ -z "$SITE_PASSWORD" ]; then
 	echo "Set PILOT_ADMIN_PASSWORD and SITE_PASSWORD before running." >&2
@@ -91,7 +90,7 @@ as_bench_user() {
 	su - "$BENCH_USER" -c "$1"
 }
 
-INSTALLER="https://raw.githubusercontent.com/frappe/pilot/${PILOT_VERSION}/install.sh"
+INSTALLER="https://raw.githubusercontent.com/frappe/pilot/develop/install.sh"
 
 q_installer=$(printf '%q' "$INSTALLER")
 q_bench=$(printf '%q' "$BENCH")
@@ -116,7 +115,7 @@ as_bench_user "curl -fsSL $q_installer | bash"
 # `new` only writes bench.toml. `init` is what builds the bench: virtualenv, framework,
 # Node and Redis. Without it there is nothing for a site to be created in.
 as_bench_user "pilot --yes new $q_bench --database mariadb --admin-password $q_admin_password"
-as_bench_user "pilot --yes -b $q_bench init"
+as_bench_user "pilot --yes -b $q_bench init --no-dev"
 as_bench_user "pilot --yes -b $q_bench new-site $q_site --admin-password $q_site_password"
 as_bench_user "pilot --yes -b $q_bench get-app $q_repo --branch $q_branch --install-dependencies"
 
