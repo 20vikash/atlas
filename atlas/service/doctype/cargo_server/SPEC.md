@@ -55,6 +55,8 @@ Cargo returns the secret key one time and keeps no copy. Atlas writes the bucket
 
 Atlas never replaces object storage that is already configured. A second attempt writes an Error Log entry instead, because a replaced key makes the objects under the current bucket unreachable. Clear the Atlas Settings object storage fields to provision another bucket.
 
+After the bucket exists and each available bootstrap image has moved from Site File storage to Object Storage, Atlas enables the Cargo Pilot release tracker. Cargo then builds images for new Pilot prereleases. Cargo Server records this state in Auto Build Pilot Images. System Managers can enable or disable the tracker from Actions after Cargo Server becomes Active.
+
 ## Access and failures
 
 Only System Managers with System User accounts can operate Cargo Server. An Active Cargo Server has a Reset Pilot Admin Password action. Atlas generates a password, runs `pilot set-admin-password` through SSH as the Cargo bench user, and shows the password once after a successful command. Atlas does not store the reset password or command output.

@@ -34,6 +34,8 @@ The job runs every minute until it succeeds, so no operator action is needed. At
 
 Atlas does not replace object storage that is already set. To provision another bucket, clear the Object Storage fields in Atlas Settings first. The objects under the old bucket become unreachable when its key is replaced.
 
+After Atlas moves each available bootstrap image to object storage, it enables Cargo to build images for new Pilot prereleases. Cargo Server shows this state as Auto Build Pilot Images. Use Actions to enable or disable it later.
+
 ## Investigate a failure
 
 Read Failure on Cargo Server. The value starts with the failed phase, such as `installation`, `proxy-routes`, or `readiness`.

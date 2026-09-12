@@ -12,6 +12,7 @@ from frappe.model.document import Document
 from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 
+from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.ssh import SSHRunner
 from atlas.service.core.cargo.storage_cluster import (
 	remove_storage_cluster_config,
@@ -26,6 +27,10 @@ PROVISIONABLE_STATUSES = ("Not Provisioned", "Archived")
 PILOT_ADMIN_PASSWORD_RESET_COMMAND = """set -euo pipefail
 quoted_password=$(printf '%q' "$PILOT_ADMIN_PASSWORD")
 su - frappe -c "pilot set-admin-password --password $quoted_password"
+"""
+PILOT_RELEASE_TRACKER_COMMAND = """set -euo pipefail
+quoted_site=$(printf '%q' "$CARGO_SITE")
+su - frappe -c "pilot --yes -b cargo --site $quoted_site $PILOT_RELEASE_TRACKER_COMMAND"
 """
 
 
@@ -42,6 +47,8 @@ class CargoServer(Document):
 
 		failure_message: DF.SmallText | None
 		installation_task: DF.Link | None
+		auto_build_pilot_images: DF.Check
+		pilot_release_tracker_pending: DF.Check
 		status: DF.Literal["Not Provisioned", "Pending", "Provisioning", "Active", "Failed", "Archived"]
 		virtual_machine: DF.Link | None
 	# end: auto-generated types
@@ -110,6 +117,22 @@ class CargoServer(Document):
 				frappe.throw(_("The Pilot administration password reset failed."))
 
 		return {"password": password, "domain": cargo_server.pilot_domain}
+
+	@frappe.whitelist(methods=["POST"])
+	def enable_pilot_release_tracker(self) -> None:
+		"""Enable image builds for new Pilot releases."""
+		_validate_system_manager()
+		with cargo_lifecycle_lock():
+			cargo_server: CargoServer = frappe.get_single("Cargo Server")
+			cargo_server._set_pilot_release_tracker(enabled=True)
+
+	@frappe.whitelist(methods=["POST"])
+	def disable_pilot_release_tracker(self) -> None:
+		"""Disable image builds for new Pilot releases."""
+		_validate_system_manager()
+		with cargo_lifecycle_lock():
+			cargo_server: CargoServer = frappe.get_single("Cargo Server")
+			cargo_server._set_pilot_release_tracker(enabled=False)
 
 	@frappe.whitelist(methods=["POST"])
 	def archive(self) -> None:
@@ -208,6 +231,26 @@ class CargoServer(Document):
 			self.failure_message = f"virtual-machine: {error}"
 			return True
 
+	def _set_pilot_release_tracker(self, enabled: bool) -> None:
+		"""Set Cargo release tracking after its image storage is ready."""
+		if self.status != "Active":
+			frappe.throw(_("Cargo Server must be Active to change Pilot release tracking."))
+		if enabled and not can_enable_pilot_release_tracker():
+			frappe.throw(_("Wait for object storage and all available bootstrap image migrations."))
+
+		virtual_machine = frappe.get_doc("Virtual Machine", self.virtual_machine)
+		command = "enable-pilot-release-tracker" if enabled else "disable-pilot-release-tracker"
+		result = SSHRunner(virtual_machine.ssh_host).run_command(
+			PILOT_RELEASE_TRACKER_COMMAND,
+			data={"CARGO_SITE": self.domain, "PILOT_RELEASE_TRACKER_COMMAND": command},
+		)
+		if not result.is_success:
+			frappe.throw(_("Cargo could not change Pilot release tracking."))
+
+		self.auto_build_pilot_images = enabled
+		self.pilot_release_tracker_pending = False
+		self.save(ignore_permissions=True)
+
 
 @contextmanager
 def cargo_lifecycle_lock() -> Iterator[None]:
@@ -224,6 +267,49 @@ def _validate_system_manager() -> None:
 	user_type = frappe.get_cached_value("User", frappe.session.user, "user_type")
 	if user_type != "System User":
 		frappe.throw(_("Only System Users can manage Cargo Server."), frappe.PermissionError)
+
+
+def has_site_file_images() -> bool:
+	"""Return true while an available bootstrap image uses site file storage."""
+	return frappe.db.exists("Virtual Machine Image", {"artifact_storage": "Site File", "status": "Available"})
+
+
+def can_enable_pilot_release_tracker() -> bool:
+	"""Return true when Cargo can build new images in object storage."""
+	return frappe.get_single("Atlas Settings").is_object_storage_configured and not has_site_file_images()
+
+
+def enqueue_pilot_release_tracker_enable(enqueue_after_commit: bool = True) -> None:
+	"""Queue release tracking when bootstrap image migration makes it possible."""
+	frappe.enqueue(
+		"atlas.service.doctype.cargo_server.cargo_server.enable_pilot_release_tracker_after_migration",
+		queue="long",
+		timeout=120,
+		job_id="atlas||cargo-server||enable-pilot-release-tracker",
+		deduplicate=True,
+		enqueue_after_commit=enqueue_after_commit,
+	)
+
+
+def enqueue_pending_pilot_release_tracker_enable() -> None:
+	"""Retry automatic release tracking while it remains pending."""
+	cargo_server: CargoServer = frappe.get_single("Cargo Server")
+	if cargo_server.pilot_release_tracker_pending:
+		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+
+
+@run_as_admin
+def enable_pilot_release_tracker_after_migration() -> None:
+	"""Enable Cargo release tracking after the last bootstrap image migration."""
+	with cargo_lifecycle_lock():
+		cargo_server: CargoServer = frappe.get_single("Cargo Server")
+		if (
+			not cargo_server.pilot_release_tracker_pending
+			or cargo_server.status != "Active"
+			or not can_enable_pilot_release_tracker()
+		):
+			return
+		cargo_server._set_pilot_release_tracker(enabled=True)
 
 
 def enqueue_pending_cargo_provisioning() -> None:

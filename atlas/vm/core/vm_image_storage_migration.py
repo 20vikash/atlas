@@ -61,6 +61,10 @@ class VirtualMachineImageStorageMigration:
 		image.save()
 		frappe.db.commit()  # nosemgrep
 
+		from atlas.service.doctype.cargo_server.cargo_server import enqueue_pilot_release_tracker_enable
+
+		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+
 		for file_name in replaced_files:
 			if file_name:
 				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)

@@ -173,6 +173,22 @@ function showPilotAdminPassword(response) {
 	dialog.show();
 }
 
+function setPilotReleaseTracker(frm, method, enabled) {
+	const action = enabled ? __("enable") : __("disable");
+	frappe.confirm(__("{0} automatic Pilot image builds?", [action]), () =>
+		frm
+			.call({
+				method,
+				doc: frm.doc,
+				freeze: true,
+				freeze_message: enabled
+					? __("Enabling automatic Pilot image builds...")
+					: __("Disabling automatic Pilot image builds..."),
+			})
+			.then(() => frm.refresh())
+	);
+}
+
 frappe.ui.form.on("Cargo Server", {
 	refresh(frm) {
 		frm.disable_save();
@@ -199,6 +215,21 @@ frappe.ui.form.on("Cargo Server", {
 									freeze_message: __("Resetting the Pilot admin password..."),
 								})
 								.then((response) => showPilotAdminPassword(response.message))
+					),
+				__("Actions")
+			);
+
+			frm.add_custom_button(
+				frm.doc.auto_build_pilot_images
+					? __("Disable Auto Build Pilot Images")
+					: __("Enable Auto Build Pilot Images"),
+				() =>
+					setPilotReleaseTracker(
+						frm,
+						frm.doc.auto_build_pilot_images
+							? "disable_pilot_release_tracker"
+							: "enable_pilot_release_tracker",
+						!frm.doc.auto_build_pilot_images
 					),
 				__("Actions")
 			);
