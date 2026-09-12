@@ -649,8 +649,6 @@ func TestInformationStopsRetryingAPairThatStaysTorn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A removal unlinks the two records in turn. A read between them must not
-	// report a virtual machine that still exists as gone.
 	if err := os.Remove(manager.store.observedPath("machine-1")); err != nil {
 		t.Fatal(err)
 	}

@@ -92,11 +92,7 @@ class MetalServerIPAddress(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def reset_tenant(self) -> None:
-		"""Drop tenant ownership of this unattached address from the desk.
-
-		The comment is the audit record. It keeps the losing tenant, the acting
-		user, and the time, which the address itself no longer holds afterwards.
-		"""
+		"""Drop tenant ownership of this unattached address from the desk."""
 		frappe.only_for("System Manager")
 		if self.tenant_id == UNOWNED_TENANT_ID:
 			frappe.throw(_("IP address {0} is already in the shared pool.").format(self.address))

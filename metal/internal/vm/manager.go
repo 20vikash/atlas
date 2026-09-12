@@ -22,12 +22,8 @@ import (
 // defaultFastApplyTimeout bounds an immediate guest update.
 const defaultFastApplyTimeout = 2 * time.Second
 
-// informationAttempts bounds the reads that settle a record pair caught mid
-// removal. The window is one file unlink, so a second read almost always agrees.
 const informationAttempts = 3
 
-// informationRetryDelay separates those reads. It has to outlast one unlink, or
-// every attempt lands in the same window and the pair never settles.
 const informationRetryDelay = 5 * time.Millisecond
 
 // ManagerConfig contains persistent VM manager settings.
@@ -217,18 +213,11 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 	return manager.store.listIDs()
 }
 
-// information reads both records without taking the VM lock.
-//
-// A removal unlinks the two records one after the other, so a lock-free read can
-// find one present and the other already gone. Reporting that as ErrNotFound
-// would tell a caller the VM is destroyed while it still exists, and a caller
-// acts on that, so the pair is read again until it agrees.
+// information retries a read when removal leaves one record temporarily absent.
 func (manager *Manager) information(identifier string) (Information, error) {
 	var lastError error
 
 	for attempt := range informationAttempts {
-		// Back off before reading again. Immediate reads are fast enough to land
-		// inside one removal, which would settle nothing.
 		if attempt > 0 {
 			time.Sleep(informationRetryDelay)
 		}
@@ -248,8 +237,7 @@ func (manager *Manager) information(identifier string) (Information, error) {
 	return Information{}, lastError
 }
 
-// isTornRemoval reports whether one record is gone while the other is present,
-// which only a removal in progress produces.
+// isTornRemoval reports whether removal left one record temporarily absent.
 func isTornRemoval(desiredError, observedError error) bool {
 	if errors.Is(desiredError, ErrNotFound) && observedError == nil {
 		return true

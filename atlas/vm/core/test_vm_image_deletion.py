@@ -86,7 +86,6 @@ class TestMachineImageDeletionRequest(UnitTestCase):
 
 class TestArchivedImageReclamation(UnitTestCase):
 	def reclaim(self, is_referenced: bool):
-		"""Run one reclamation pass over a single archived image."""
 		service = VirtualMachineImageDeletionService()
 		database = Mock(exists=Mock(return_value=is_referenced), set_value=Mock())
 

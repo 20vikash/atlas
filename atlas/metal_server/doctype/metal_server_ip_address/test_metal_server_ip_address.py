@@ -31,7 +31,6 @@ class TestServerIPAddress(UnitTestCase):
 		address.release_to_pool.assert_called_once()
 
 	def test_reset_tenant_records_the_losing_tenant(self) -> None:
-		"""The address keeps no trace of its old owner, so the comment must."""
 		address = SimpleNamespace(
 			address="203.0.113.10", tenant_id=7, release_to_pool=Mock(), add_comment=Mock()
 		)
