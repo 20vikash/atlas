@@ -124,10 +124,12 @@ as_bench_user "pilot --yes -b $q_bench init --no-dev"
 as_bench_user "pilot --yes -b $q_bench new-site $q_site --admin-password $q_site_password"
 
 # A new site pauses the scheduler, and Cargo needs its scheduled jobs to run often.
-as_bench_user "pilot --yes -b $q_bench frappe set-config -g -p scheduler_tick_interval 5"
-as_bench_user "pilot --yes -b $q_bench frappe --site $q_site enable-scheduler"
+# `frappe` must be the first argument after the bench: pilot forwards the rest to Frappe
+# verbatim only then, and its own argparse rejects `--site` otherwise.
+as_bench_user "pilot -b $q_bench frappe set-config -g -p scheduler_tick_interval 5"
+as_bench_user "pilot -b $q_bench frappe --site $q_site enable-scheduler"
 # `-p` keeps the value JSON. Stored as a string, Cargo's spawner refuses it.
-as_bench_user "pilot --yes -b $q_bench frappe --site $q_site set-config -p default_storage_cluster_config $q_cluster_config"
+as_bench_user "pilot -b $q_bench frappe --site $q_site set-config -p default_storage_cluster_config $q_cluster_config"
 as_bench_user "pilot --yes -b $q_bench get-app $q_repo --branch $q_branch --install-dependencies"
 
 # Production before the app: it brings up Redis and the workload, which installing Cargo
