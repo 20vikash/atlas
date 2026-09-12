@@ -50,12 +50,15 @@ func init() {
 	remotePurgeCommand.MarkFlagRequired("host")
 	upgradeCommand.Flags().BoolVar(&upgradeForce, "force", false, "allow a state-breaking upgrade")
 
+	unicastStartCommand.Flags().BoolVar(&unicastVerbose, "verbose", false, "log every peer list update")
+
 	virtualMachineCommand.AddCommand(addVirtualMachineCommand, removeVirtualMachineCommand, listVirtualMachinesCommand)
 	privilegedVMCommand.AddCommand(addPrivilegedVMCommand, removePrivilegedVMCommand, listPrivilegedVMCommand)
 	debugCommand.AddCommand(debugStatusCommand, debugEnableCommand, debugDisableCommand, inspectCommand, dumpCommand, topCommand)
 	remoteCommand.AddCommand(remotePurgeCommand)
-	discoveryRelayCommand.Flags().BoolVar(&discoveryVerbose, "verbose", false, "log relayed discovery messages")
-	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, remoteCommand, debugCommand, discoveryRelayCommand, upgradeCommand, versionCommand, resetCommand)
+	unicastCommand.AddCommand(unicastPeerCommand, unicastStartCommand)
+	unicastPeerCommand.AddCommand(unicastPeerAddCommand, unicastPeerRemoveCommand, unicastPeerListCommand)
+	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, remoteCommand, debugCommand, unicastCommand, upgradeCommand, versionCommand, resetCommand)
 }
 
 func main() {

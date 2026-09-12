@@ -323,6 +323,7 @@ func hookName(hook uint8) string {
 			"VM",
 			"NDP",
 			"WIREGUARD",
+			"UNICAST",
 		},
 	)
 }
@@ -365,6 +366,29 @@ func vmOperationName(operation uint8) string {
 			"ENCAP_SUCCEEDED",
 		},
 	)
+}
+
+const debugUnicastHook uint8 = 3
+
+func unicastOperationName(operation uint8) string {
+	return enumName(operation, []string{
+		"",
+		"UNICAST_TX_KNOWN_PEER",
+		"UNICAST_TX_FAN_OUT",
+		"UNICAST_TX_SEND_FAILED",
+		"UNICAST_TX_ADVERTISEMENT",
+		"UNICAST_TX_NO_REQUESTER",
+		"UNICAST_TX_APPEND_FAILED",
+		"UNICAST_TX_WRAP_FAILED",
+		"UNICAST_RX_ACCEPTED",
+		"UNICAST_RX_PEER_REJECTED",
+		"UNICAST_RX_REQUESTER_STORED",
+		"UNICAST_RX_LOCATION_LEARNED",
+		"UNICAST_RX_REMOTE_LEARNED",
+		"UNICAST_RX_KFUNC_FAILED",
+		"UNICAST_RX_NO_ATLAS_OPTION",
+		"UNICAST_TX_ATLAS_APPEND_FAILED",
+	})
 }
 
 // Operations 1 to 4 are the legacy discovery relay protocol.
@@ -419,6 +443,10 @@ func debugOperationName(event debugEvent) string {
 
 	if event.Hook == debugVMHook {
 		return vmOperationName(event.Operation)
+	}
+
+	if event.Hook == debugUnicastHook {
+		return unicastOperationName(event.Operation)
 	}
 
 	return operationName(event.Operation)

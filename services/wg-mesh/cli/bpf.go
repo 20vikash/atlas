@@ -19,13 +19,17 @@ const (
 	vmBPFProgram     = "handle_vm_packet"
 	ndpProgram       = "handle_ndp_packet"
 	wireguardProgram = "handle_wireguard_packet"
+
+	ndpUnicastEgressProgram  = "handle_ndp_unicast_egress"
+	ndpUnicastIngressProgram = "handle_ndp_unicast_ingress"
 )
 
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
 
-// Must match struct config in bpf/state.h. The discovery fields serve the
-// unicast discovery relay.
+// Must match struct config in bpf/state.h. The discovery index records the
+// configured uplink, and the underlay IPv4 address also sources the unicast
+// NDP transport.
 type hostConfig struct {
 	DiscoveryIndex uint32
 	UplinkIPv4     [4]byte
