@@ -132,14 +132,19 @@ func publicIPv4RuleCheck(step []string) []string {
 	return check
 }
 
-// publicIPv4Steps maps the public address to the guest: DNAT in, SNAT out,
-// forwarding both ways, and a second DNAT inside the namespace. The SNAT rule is
-// inserted first, so it wins over any wider masquerade rule.
+// publicIPv4Steps maps the public address to the guest: DNAT in for forwarded and
+// host-originated traffic, SNAT out, forwarding both ways, and a second DNAT inside
+// the namespace. The SNAT rule is inserted first, so it wins over any wider
+// masquerade rule.
 func publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespaceIPAddress, publicIPv4 string) [][]string {
 	comment := publicIPv4Comment(virtualMachineID)
 	return [][]string{
 		// Inbound: the public address becomes the namespace transit address.
 		{"iptables", "-t", "nat", "-A", "PREROUTING", "-d", publicIPv4, "-m", "comment", "--comment", comment, "-j", "DNAT", "--to-destination", namespaceIPAddress},
+
+		// Host-originated: a local process reaches a co-located VM through its
+		// public address. Such a packet skips PREROUTING, so OUTPUT repeats the map.
+		{"iptables", "-t", "nat", "-A", "OUTPUT", "-d", publicIPv4, "-m", "comment", "--comment", comment, "-j", "DNAT", "--to-destination", namespaceIPAddress},
 
 		// Outbound: the VM leaves as its public address. Inserted at position 1,
 		// so it wins over the wider masquerade rule that egress adds.
