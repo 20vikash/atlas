@@ -4,6 +4,8 @@ Use this guide to create one test virtual machine. Use a test Scaleway project a
 
 Keep the Frappe worker active. Provider setup, catalog sync, and Metal Server provisioning run in background jobs.
 
+Use [`atlas-vm`](../../scripts/atlas-vm/README.md) for an automatic installation in a Firecracker VM. It installs Atlas and completes the settings, provider, DNS, catalog, and system image steps. It does not create a Metal Server.
+
 
 ## 1. Install build tools
 
@@ -32,7 +34,7 @@ For now, a Metal Server must reach the Atlas site to download `metald` and Atlas
 Set the URL as `atlas_base_url`:
 
 ```sh
-pilot --site <site> set-config atlas_base_url https://<public-atlas-url>
+pilot frappe --site <site> set-config atlas_base_url https://<public-atlas-url>
 ```
 
 Build and publish the host binaries:

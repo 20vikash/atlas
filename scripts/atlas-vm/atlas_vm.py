@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import secrets
@@ -40,14 +41,37 @@ FIRECRACKER_VERSION = "v1.16.1"
 HOST_ADDRESS = "172.16.100.1"
 VM_ADDRESS = "172.16.100.2"
 FORWARD_PORTS = (80, 443)
+SCALEWAY_ZONES = {
+	"fr-par-1",
+	"fr-par-2",
+	"fr-par-3",
+	"nl-ams-1",
+	"nl-ams-2",
+	"nl-ams-3",
+	"pl-waw-1",
+	"pl-waw-2",
+	"pl-waw-3",
+}
 REQUIRED_COMMANDS = (
-	"curl", "ip", "iptables", "unsquashfs", "mkfs.ext4", "truncate", "ssh", "scp", "ssh-keygen",
+	"curl",
+	"ip",
+	"iptables",
+	"unsquashfs",
+	"mkfs.ext4",
+	"truncate",
+	"ssh",
+	"scp",
+	"ssh-keygen",
 )
 SSH_OPTIONS = (
-	"-o", "StrictHostKeyChecking=no",
-	"-o", "UserKnownHostsFile=/dev/null",
-	"-o", "LogLevel=ERROR",
-	"-o", "ConnectTimeout=5",
+	"-o",
+	"StrictHostKeyChecking=no",
+	"-o",
+	"UserKnownHostsFile=/dev/null",
+	"-o",
+	"LogLevel=ERROR",
+	"-o",
+	"ConnectTimeout=5",
 )
 
 
@@ -106,8 +130,7 @@ class Settings:
 		vm = document.get("vm", {})
 		pilot = document.get("pilot", {})
 		atlas = document.get("atlas", {})
-		if not pilot.get("site") or not pilot.get("password"):
-			raise AtlasVmError(f"{path} needs pilot.site and pilot.password")
+		validate_configuration(document, path)
 		validate_images(document.get("image", []), path)
 
 		repository = atlas.get("repository", "https://github.com/frappe/atlas").removesuffix(".git")
@@ -138,17 +161,178 @@ class Settings:
 		self.path.write_text("\n".join(lines) + "\n")
 
 
+def validate_configuration(document: dict, path: Path) -> None:
+	"""Reject an incomplete deployment configuration before the VM changes."""
+	_validate_keys(document, {"vm", "pilot", "atlas", "image"}, path, "")
+	_validate_vm_configuration(document.get("vm", {}), path)
+	_validate_pilot_configuration(_required_table(document, "pilot", path), path)
+	_validate_atlas_configuration(_required_table(document, "atlas", path), path)
+
+
+def _validate_vm_configuration(vm: object, path: Path) -> None:
+	if not isinstance(vm, dict):
+		raise AtlasVmError(f"{path}: vm must be a table")
+	_validate_keys(vm, {"vcpu_count", "memory_mib", "disk_gib", "ssh_port"}, path, "vm")
+	for key in ("vcpu_count", "memory_mib", "disk_gib", "ssh_port"):
+		value = vm.get(key)
+		if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+			raise AtlasVmError(f"{path}: vm.{key} must be a positive integer")
+	if vm.get("ssh_port", 2222) > 65_535:
+		raise AtlasVmError(f"{path}: vm.ssh_port must be at most 65535")
+
+
+def _validate_pilot_configuration(pilot: dict, path: Path) -> None:
+	_validate_keys(pilot, {"site", "admin_domain", "user", "letsencrypt_email"}, path, "pilot")
+	for key in ("site", "letsencrypt_email"):
+		_required_string(pilot, key, path, "pilot")
+	for key in ("admin_domain", "user"):
+		if key in pilot:
+			_required_string(pilot, key, path, "pilot")
+
+
+def _validate_atlas_configuration(atlas: dict, path: Path) -> None:
+	_validate_keys(
+		atlas,
+		{
+			"repository",
+			"branch",
+			"base_url",
+			"server_provider",
+			"dns_provider",
+			"region_name",
+			"region_id",
+			"wildcard_domain",
+			"private_network_cidr",
+			"private_network_mtu",
+			"central_jwks_url",
+			"scaleway",
+			"route53",
+			"letsencrypt",
+		},
+		path,
+		"atlas",
+	)
+	for key in ("server_provider", "dns_provider", "region_name", "wildcard_domain"):
+		_required_string(atlas, key, path, "atlas")
+	for key in ("private_network_cidr", "private_network_mtu", "central_jwks_url"):
+		if key not in atlas:
+			raise AtlasVmError(f"{path}: atlas.{key} is required")
+	for key in ("repository", "branch", "base_url", "central_jwks_url"):
+		if key in atlas and not isinstance(atlas[key], str):
+			raise AtlasVmError(f"{path}: atlas.{key} must be a string")
+	if atlas["server_provider"] != "Scaleway":
+		raise AtlasVmError(f"{path}: atlas.server_provider must be Scaleway")
+	if atlas["dns_provider"] != "Route53":
+		raise AtlasVmError(f"{path}: atlas.dns_provider must be Route53")
+	if atlas["wildcard_domain"].startswith("*.") or "." not in atlas["wildcard_domain"]:
+		raise AtlasVmError(f"{path}: atlas.wildcard_domain must be a domain without '*.'")
+	_validate_network_configuration(atlas, path)
+	_validate_scaleway_configuration(_required_table(atlas, "scaleway", path, "atlas"), path)
+	_validate_route53_configuration(_required_table(atlas, "route53", path, "atlas"), path)
+	_validate_letsencrypt_configuration(_required_table(atlas, "letsencrypt", path, "atlas"), path)
+
+
+def _validate_network_configuration(atlas: dict, path: Path) -> None:
+	region_id = _required_integer(atlas, "region_id", path, "atlas")
+	if not 0 <= region_id <= 65_535:
+		raise AtlasVmError(f"{path}: atlas.region_id must be from 0 through 65535")
+	private_network_mtu = _required_integer(atlas, "private_network_mtu", path, "atlas")
+	if private_network_mtu <= 0:
+		raise AtlasVmError(f"{path}: atlas.private_network_mtu must be a positive integer")
+	try:
+		network = ipaddress.ip_network(atlas.get("private_network_cidr", "10.1.0.0/20"), strict=False)
+	except ValueError as error:
+		raise AtlasVmError(f"{path}: atlas.private_network_cidr is invalid: {error}") from error
+	if network.version != 4 or not 20 <= network.prefixlen <= 29:
+		raise AtlasVmError(f"{path}: atlas.private_network_cidr must be an IPv4 network from /20 through /29")
+
+
+def _validate_scaleway_configuration(scaleway: dict, path: Path) -> None:
+	_validate_keys(
+		scaleway,
+		{"organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"},
+		path,
+		"atlas.scaleway",
+	)
+	for key in ("organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"):
+		_required_string(scaleway, key, path, "atlas.scaleway")
+	if scaleway["zone"] not in SCALEWAY_ZONES:
+		raise AtlasVmError(f"{path}: atlas.scaleway.zone is not supported")
+	if scaleway["machine_billing_cycle"] not in {"Hourly", "Monthly"}:
+		raise AtlasVmError(f"{path}: atlas.scaleway.machine_billing_cycle must be Hourly or Monthly")
+
+
+def _validate_route53_configuration(route53: dict, path: Path) -> None:
+	_validate_keys(route53, {"access_key_id", "secret_access_key"}, path, "atlas.route53")
+	for key in ("access_key_id", "secret_access_key"):
+		_required_string(route53, key, path, "atlas.route53")
+
+
+def _validate_letsencrypt_configuration(letsencrypt: dict, path: Path) -> None:
+	_validate_keys(letsencrypt, {"email", "staging", "auto_renew"}, path, "atlas.letsencrypt")
+	_required_string(letsencrypt, "email", path, "atlas.letsencrypt")
+	for key in ("staging", "auto_renew"):
+		if key not in letsencrypt:
+			raise AtlasVmError(f"{path}: atlas.letsencrypt.{key} is required")
+		if not isinstance(letsencrypt[key], bool):
+			raise AtlasVmError(f"{path}: atlas.letsencrypt.{key} must be true or false")
+
+
+def _validate_keys(values: dict, allowed: set[str], path: Path, prefix: str) -> None:
+	for key in values.keys() - allowed:
+		name = f"{prefix}.{key}" if prefix else key
+		raise AtlasVmError(f"{path}: unknown configuration key {name}")
+
+
+def _required_table(values: dict, key: str, path: Path, prefix: str = "") -> dict:
+	name = f"{prefix}.{key}" if prefix else key
+	table = values.get(key)
+	if not isinstance(table, dict):
+		raise AtlasVmError(f"{path}: {name} must be a table")
+	return table
+
+
+def _required_string(values: dict, key: str, path: Path, prefix: str) -> str:
+	value = values.get(key)
+	if not isinstance(value, str) or not value.strip():
+		raise AtlasVmError(f"{path}: {prefix}.{key} must be a non-empty string")
+	return value
+
+
+def _required_integer(values: dict, key: str, path: Path, prefix: str) -> int:
+	value = values.get(key)
+	if not isinstance(value, int) or isinstance(value, bool):
+		raise AtlasVmError(f"{path}: {prefix}.{key} must be an integer")
+	return value
+
+
 def validate_images(images: list[dict], path: Path) -> None:
 	"""Refuse an image the builder cannot make, before the VM boots."""
+	if not isinstance(images, list):
+		raise AtlasVmError(f"{path}: image must be an array of tables")
 	for image in images:
-		version = str(image.get("version", "24.04"))
-		architecture = image.get("architecture", "amd64")
-		if version not in ("22.04", "24.04"):
-			raise AtlasVmError(f"{path} asks for Ubuntu {version}; only 22.04 and 24.04 are supported")
-		if architecture != "amd64":
-			raise AtlasVmError(f"{path} asks for {architecture}; only amd64 is supported")
-		if image.get("minimal") and version != "24.04":
-			raise AtlasVmError(f"{path} asks for a minimal Ubuntu {version}; only 24.04 has one")
+		_validate_image(image, path)
+
+
+def _validate_image(image: object, path: Path) -> None:
+	if not isinstance(image, dict):
+		raise AtlasVmError(f"{path}: each image must be a table")
+	_validate_keys(image, {"version", "architecture", "minimal"}, path, "image")
+	version = image.get("version", "24.04")
+	architecture = image.get("architecture", "amd64")
+	minimal = image.get("minimal", False)
+	if not isinstance(version, str):
+		raise AtlasVmError(f"{path}: image.version must be a string")
+	if not isinstance(architecture, str):
+		raise AtlasVmError(f"{path}: image.architecture must be a string")
+	if not isinstance(minimal, bool):
+		raise AtlasVmError(f"{path}: image.minimal must be true or false")
+	if version not in ("22.04", "24.04"):
+		raise AtlasVmError(f"{path} asks for Ubuntu {version}; only 22.04 and 24.04 are supported")
+	if architecture != "amd64":
+		raise AtlasVmError(f"{path} asks for {architecture}; only amd64 is supported")
+	if minimal and version != "24.04":
+		raise AtlasVmError(f"{path} asks for a minimal Ubuntu {version}; only 24.04 has one")
 
 
 def generate_password(length: int = 24) -> str:
@@ -338,7 +522,7 @@ class ConsoleReader:
 			guest(line)
 
 
-NETWORK_SCRIPT_BODY = r'''
+NETWORK_SCRIPT_BODY = r"""
 # The tap device is excluded from PREROUTING, so guest traffic to a forwarded
 # port leaves the host instead of returning to the VM.
 rules() {
@@ -397,7 +581,7 @@ case "${1:-}" in
 	stop) stop ;;
 	*) echo "usage: network start|stop" >&2; exit 2 ;;
 esac
-'''
+"""
 
 
 class VirtualMachine:
@@ -427,8 +611,10 @@ class VirtualMachine:
 	def ssh_arguments(self, command: list[str] | None = None) -> list[str]:
 		arguments = [
 			"ssh",
-			"-i", str(self.private_key),
-			"-p", str(self.settings.ssh_port),
+			"-i",
+			str(self.private_key),
+			"-p",
+			str(self.settings.ssh_port),
 			*SSH_OPTIONS,
 			f"root@{HOST_ADDRESS}",
 		]
@@ -439,8 +625,10 @@ class VirtualMachine:
 		run(
 			[
 				"scp",
-				"-i", str(self.private_key),
-				"-P", str(self.settings.ssh_port),
+				"-i",
+				str(self.private_key),
+				"-P",
+				str(self.settings.ssh_port),
 				*SSH_OPTIONS,
 				str(source),
 				f"root@{HOST_ADDRESS}:{target}",
@@ -528,10 +716,16 @@ WantedBy=multi-user.target
 		version = FIRECRACKER_VERSION
 		archive = self.paths.downloads / "firecracker.tgz"
 		step(f"install firecracker {version}")
-		run([
-			"curl", "-fL", *CURL_PROGRESS, "-o", str(archive),
-			f"https://github.com/firecracker-microvm/firecracker/releases/download/{version}/firecracker-{version}-x86_64.tgz",
-		])
+		run(
+			[
+				"curl",
+				"-fL",
+				*CURL_PROGRESS,
+				"-o",
+				str(archive),
+				f"https://github.com/firecracker-microvm/firecracker/releases/download/{version}/firecracker-{version}-x86_64.tgz",
+			]
+		)
 		run(["tar", "-xzf", str(archive), "-C", str(self.paths.downloads)])
 		released = self.paths.downloads / f"release-{version}-x86_64" / f"firecracker-{version}-x86_64"
 		self.paths.firecracker_binary.parent.mkdir(parents=True, exist_ok=True)
@@ -597,9 +791,12 @@ WantedBy=multi-user.target
 		# The file holds the site password, so the guest keeps it for this run only.
 		self.write_in_guest("/root/atlas-vm.toml", self.settings.path.read_text())
 		try:
-			with subprocess.Popen(
-				self.ssh_arguments([command]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-			) as process, self.paths.setup_log.open("w") as log:
+			with (
+				subprocess.Popen(
+					self.ssh_arguments([command]), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+				) as process,
+				self.paths.setup_log.open("w") as log,
+			):
 				for line in process.stdout:
 					print(line, end="", flush=True)
 					log.write(line)
@@ -726,13 +923,17 @@ def command_status(machine: VirtualMachine, arguments: argparse.Namespace) -> No
 	forwards = ", ".join(f"{host} -> {guest}" for host, guest in machine.port_forwards)
 	print(f"service:  {SERVICE_NAME} ({state})")
 	print(f"vm:       {VM_NAME} in {paths.vm_directory}")
-	print(f"machine:  {settings.vcpu_count} vCPU, {settings.memory_mib} MiB memory, {settings.disk_gib} GiB disk")
+	print(
+		f"machine:  {settings.vcpu_count} vCPU, {settings.memory_mib} MiB memory, {settings.disk_gib} GiB disk"
+	)
 	print(f"address:  {VM_ADDRESS} through {HOST_ADDRESS} on {machine.tap_device}")
 	print(f"ports:    {forwards}")
 	if paths.rootfs_image.exists():
 		# The image is sparse: the host gives it blocks as the guest writes them.
 		allocated_gib = paths.rootfs_image.stat().st_blocks * 512 / 1024**3
-		print(f"disk:     {settings.disk_gib} GiB in the guest, {allocated_gib:.1f} GiB allocated on the host")
+		print(
+			f"disk:     {settings.disk_gib} GiB in the guest, {allocated_gib:.1f} GiB allocated on the host"
+		)
 	print(f"config:   {CONFIG_FILE}")
 	print(f"logs:     {paths.console_log}, {paths.setup_log}")
 	print("ssh:      atlas-vm ssh")
@@ -868,14 +1069,20 @@ def build_parser() -> argparse.ArgumentParser:
 		"--config", type=Path, help="configuration file to build the VM from (default: ./atlas-vm.toml)"
 	)
 	create.add_argument("--skip-setup", action="store_true", help="do not run setup.py")
-	create.add_argument("--script", type=Path, help="run this local setup.py instead of the one in the repository")
+	create.add_argument(
+		"--script", type=Path, help="run this local setup.py instead of the one in the repository"
+	)
 	create.add_argument("--rebuild", action="store_true", help="delete the guest disk and build it again")
 	create.set_defaults(handler=command_create)
 
 	subparsers.add_parser("start", help="start the VM").set_defaults(handler=command_start)
-	subparsers.add_parser("stop", help="stop the VM and remove its host network").set_defaults(handler=command_stop)
+	subparsers.add_parser("stop", help="stop the VM and remove its host network").set_defaults(
+		handler=command_stop
+	)
 	subparsers.add_parser("restart", help="stop and start the VM").set_defaults(handler=command_restart)
-	subparsers.add_parser("status", help="report the VM, its size, and its ports").set_defaults(handler=command_status)
+	subparsers.add_parser("status", help="report the VM, its size, and its ports").set_defaults(
+		handler=command_status
+	)
 	ssh = subparsers.add_parser("ssh", help="open a shell or run one command in the VM")
 	ssh.add_argument("command", nargs=argparse.REMAINDER, help="command to run in the VM")
 	ssh.set_defaults(handler=command_ssh)
@@ -884,11 +1091,11 @@ def build_parser() -> argparse.ArgumentParser:
 	logs.add_argument("--follow", "-f", action="store_true", help="follow the log")
 	logs.set_defaults(handler=command_logs)
 	setup = subparsers.add_parser("setup", help="run setup.py again in a running VM")
-	setup.add_argument("--script", type=Path, help="run this local setup.py instead of the one in the repository")
-	setup.set_defaults(handler=command_setup)
-	reset_password = subparsers.add_parser(
-		"reset-password", help="set a new random password and print it"
+	setup.add_argument(
+		"--script", type=Path, help="run this local setup.py instead of the one in the repository"
 	)
+	setup.set_defaults(handler=command_setup)
+	reset_password = subparsers.add_parser("reset-password", help="set a new random password and print it")
 	reset_password.add_argument(
 		"target", choices=("pilot", "site"), help="the Pilot admin panel or the site Administrator"
 	)
@@ -928,8 +1135,7 @@ def resolve_config_file(given: Path | None) -> Path:
 		if candidate.is_file():
 			return candidate
 	raise AtlasVmError(
-		"no configuration file; copy atlas-vm.example.toml to atlas-vm.toml"
-		" and pass it with --config"
+		"no configuration file; copy atlas-vm.example.toml to atlas-vm.toml and pass it with --config"
 	)
 
 

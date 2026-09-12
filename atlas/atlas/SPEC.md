@@ -15,6 +15,7 @@ This module also holds site settings, the regional token key, the wildcard TLS c
 | Type | Owns |
 |---|---|
 | `AtlasSettings` (DocType) | Provider selection, credentials, the regional token key, and the published binary links. |
+| `AtlasSetup` | Applies deployer settings and completes provider, DNS, catalog, and certificate setup. |
 | `ServerProvider` | The contract every server provider implements. |
 | `registry` | The map from a stable provider name to its implementation. |
 | `DNSProvider`, `Route53Provider` | The DNS contract and its Route 53 implementation. |
@@ -60,6 +61,16 @@ Do not put a key or password in `script` or `environment`. These fields are stor
 A build runs only when its source hash changes. Atlas publishes the result as a public File because a host has no Atlas credential.
 
 `artifacts` publishes build output and its download URL. It keeps a replaced File until no Atlas Settings link refers to it. The [Service module](../service/SPEC.md) uses the same helper for its package.
+
+## Automatic setup
+
+The `configure-atlas` site command reads one JSON document from standard input. The `atlas-vm` setup script uses this command and does not put secrets in process arguments.
+
+The command keeps provider resource identifiers after each successful setup phase. A repeated command updates mutable settings and rejects changes to completed provider identities.
+
+Each external setup phase commits its local state. A cloud or certificate operation cannot roll back, so the next run needs this state for reconciliation.
+
+The command uses an existing public Route53 zone. It does not create a hosted zone. It gets both Metal Server catalogs and issues the wildcard certificate before it reports success.
 
 ## Related
 

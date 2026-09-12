@@ -10,13 +10,39 @@ ssh_port = 2222
 [pilot]
 site = "atlas.example.com"
 admin_domain = "admin.example.com"
-password = "Atlas#Bench2026x"
 user = "frappe"
-letsencrypt_email = "tanmoy@example.com"
+letsencrypt_email = "ops@example.com"
 
 [atlas]
 repository = "https://github.com/frappe/atlas"
 branch = "develop"
+server_provider = "Scaleway"
+dns_provider = "Route53"
+region_name = "par-1"
+region_id = 1
+wildcard_domain = "par-1.example.com"
+private_network_cidr = "10.1.0.0/20"
+private_network_mtu = 1500
+
+# Set this URL when Central sends requests to this Atlas region.
+central_jwks_url = ""
+
+[atlas.scaleway]
+organization_id = "change-me"
+project_id = "change-me"
+zone = "fr-par-1"
+machine_billing_cycle = "Hourly"
+access_key = "change-me"
+secret_key = "change-me"
+
+[atlas.route53]
+access_key_id = "change-me"
+secret_access_key = "change-me"
+
+[atlas.letsencrypt]
+email = "ops@example.com"
+staging = false
+auto_renew = true
 
 # The guest images the VM builds after setup. Give one [[image]] table for each
 # variant. Every image is published as a site file, which is the only storage

@@ -13,9 +13,21 @@ curl -fsSL https://raw.githubusercontent.com/frappe/atlas/develop/scripts/atlas-
 
 ```sh
 curl -fsSLo atlas-vm.toml https://raw.githubusercontent.com/frappe/atlas/develop/scripts/atlas-vm/atlas-vm.example.toml
-# Set pilot.site and pilot.password. Add one [[image]] table for each guest image.
+# Set each value that contains change-me. Set the site names and email addresses.
 sudo atlas-vm create
 ```
+
+The configuration must contain the Atlas region, Scaleway, Route53, and Let's Encrypt values. Route53 must contain an existing public zone for `atlas.wildcard_domain`. Do not add `*.` to the domain.
+
+Atlas uses the `pilot.site` value with HTTPS as its public URL. Set `atlas.base_url` only if the public URL is different.
+
+The setup generates a temporary password for Pilot and the site Administrator. It does not put this password in the configuration or output.
+
+The setup creates one Secure Shell key for the `pilot.user`. Atlas uses this key to manage Metal Servers. The setup keeps this key when you run it again.
+
+The setup creates the Scaleway network resources and Route53 records. It also gets the provider catalogs and a wildcard certificate. Each `[[image]]` table creates one system image in site-file storage. Cargo configures object storage later.
+
+The configuration contains provider secrets. `atlas-vm` stores its copy at `/var/lib/atlas-vm/atlas-vm.toml` with mode `0600`.
 
 ## Use the VM
 
@@ -24,10 +36,12 @@ sudo atlas-vm status
 sudo atlas-vm ssh
 sudo atlas-vm logs --setup --follow
 sudo atlas-vm restart
-sudo atlas-vm setup                        # run setup.py again
-sudo atlas-vm reset-password pilot               # or: site. New random password, printed once
-sudo atlas-vm resize --vcpu 8 --disk 60    # reboots the VM; a disk can only grow
+sudo atlas-vm setup                         # Apply the configuration again.
+sudo atlas-vm reset-password pilot          # Use site for the site password.
+sudo atlas-vm resize --vcpu 8 --disk 60     # This restarts the VM. A disk can only grow.
 ```
+
+`atlas-vm setup` updates credentials and other mutable values. It stops if the configuration changes a region or provider value after provider setup.
 
 The VM answers on port 2222, and host ports 80 and 443 reach it.
 

@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import secrets
 import shlex
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
@@ -40,13 +43,15 @@ class Configuration:
 	"""What the VM needs to build the bench, the site, and the images."""
 
 	site: str
-	password: str
+	bootstrap_password: str
 	admin_domain: str
 	bench_name: str = "atlas"
 	bench_user: str = "frappe"
 	letsencrypt_email: str = ""
 	atlas_repository: str = "https://github.com/frappe/atlas"
 	atlas_branch: str = "develop"
+	atlas_base_url: str = ""
+	atlas_setup_values: dict[str, object] = field(default_factory=dict)
 	images: list[tuple[str, str, bool]] = field(default_factory=list)
 
 	@classmethod
@@ -54,26 +59,29 @@ class Configuration:
 		if not path.is_file():
 			raise SetupError(f"no configuration at {path}")
 		document = tomllib.loads(path.read_text())
+		# atlas_vm validates this root-owned file before it copies the file into the guest.
 		pilot = document.get("pilot", {})
 		atlas = document.get("atlas", {})
 
 		site = pilot.get("site", "")
-		password = pilot.get("password", "")
-		if not site or not password:
-			raise SetupError(f"{path} needs pilot.site and pilot.password")
-
 		images = [
-			(str(image.get("version", "24.04")), image.get("architecture", "amd64"), bool(image.get("minimal")))
+			(
+				image.get("version", "24.04"),
+				image.get("architecture", "amd64"),
+				image.get("minimal", False),
+			)
 			for image in document.get("image", [{"version": "24.04"}])
 		]
 		return cls(
 			site=site,
-			password=password,
+			bootstrap_password=generate_password(),
 			admin_domain=pilot.get("admin_domain", f"admin.{site}"),
 			bench_user=pilot.get("user", "frappe"),
 			letsencrypt_email=pilot.get("letsencrypt_email", ""),
 			atlas_repository=atlas.get("repository", "https://github.com/frappe/atlas"),
 			atlas_branch=atlas.get("branch", "develop"),
+			atlas_base_url=atlas.get("base_url", f"https://{site}"),
+			atlas_setup_values=read_atlas_setup_values(atlas),
 			images=images,
 		)
 
@@ -89,6 +97,48 @@ class Configuration:
 	def image_builder_path(self) -> Path:
 		return self.bench_path / "apps/atlas/atlas/vm/scripts/build_ubuntu_server_image.sh"
 
+	@property
+	def fleet_private_key_path(self) -> Path:
+		return Path(f"/home/{self.bench_user}/.ssh/id_ed25519")
+
+
+def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
+	"""Return the Atlas command input from the TOML tables."""
+	scaleway = atlas["scaleway"]
+	route53 = atlas["route53"]
+	letsencrypt = atlas["letsencrypt"]
+	return {
+		"server_provider": atlas["server_provider"],
+		"dns_provider": atlas["dns_provider"],
+		"region_name": atlas["region_name"].strip().lower(),
+		"region_id": atlas["region_id"],
+		"wildcard_domain": atlas["wildcard_domain"],
+		"private_network_cidr": atlas["private_network_cidr"],
+		"private_network_mtu": atlas["private_network_mtu"],
+		"central_jwks_url": atlas["central_jwks_url"],
+		"scaleway_organization_id": scaleway["organization_id"],
+		"scaleway_project_id": scaleway["project_id"],
+		"scaleway_zone": scaleway["zone"],
+		"scaleway_machine_billing_cycle": scaleway["machine_billing_cycle"],
+		"scaleway_access_key": scaleway["access_key"],
+		"scaleway_secret_key": scaleway["secret_key"],
+		"route53_access_key_id": route53["access_key_id"],
+		"route53_access_key_secret": route53["secret_access_key"],
+		"letsencrypt_email": letsencrypt["email"],
+		"is_letsencrypt_staging": letsencrypt["staging"],
+		"is_wildcard_tls_auto_renew_enabled": letsencrypt["auto_renew"],
+	}
+
+
+def generate_password(length: int = 24) -> str:
+	"""Create one password that Pilot and Frappe accept."""
+	character_groups = (string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%^&*-_=+")
+	characters = "".join(character_groups)
+	while True:
+		password = "".join(secrets.choice(characters) for _ in range(length))
+		if all(any(character in group for character in password) for group in character_groups):
+			return password
+
 
 class Setup:
 	"""Every stage the VM runs, in order."""
@@ -98,8 +148,12 @@ class Setup:
 		self.setup_grant = SETUP_GRANT.format(user=configuration.bench_user)
 		self.image_builder_grant = IMAGE_BUILDER_GRANT.format(user=configuration.bench_user)
 
-	def as_bench(self, command: str) -> None:
-		run(["su", "-", self.configuration.bench_user, "-c", command])
+	def as_bench(self, command: str, *, input_text: str | None = None) -> None:
+		run(
+			["su", "-", self.configuration.bench_user, "-c", command],
+			input=input_text,
+			text=input_text is not None,
+		)
 
 	def bench_output(self, command: str) -> str:
 		result = run(
@@ -107,8 +161,8 @@ class Setup:
 		)
 		return result.stdout.strip()
 
-	def pilot(self, arguments: str) -> None:
-		self.as_bench(f"pilot {arguments} --bench {self.configuration.bench_name}")
+	def pilot(self, arguments: str, *, input_text: str | None = None) -> None:
+		self.as_bench(f"pilot {arguments} --bench {self.configuration.bench_name}", input_text=input_text)
 
 	def install_grant(self, path: str, content: str) -> None:
 		with tempfile.NamedTemporaryFile("w", delete=False) as staged:
@@ -123,8 +177,22 @@ class Setup:
 		environment = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
 		run(["apt-get", "update", "-qq"], env=environment)
 		run(
-			["apt-get", "install", "-y", "-qq", "wget", "curl", "git", "make", "clang",
-			 "libbpf-dev", "linux-libc-dev", "squashfs-tools", "zstd", "e2fsprogs"],
+			[
+				"apt-get",
+				"install",
+				"-y",
+				"-qq",
+				"wget",
+				"curl",
+				"git",
+				"make",
+				"clang",
+				"libbpf-dev",
+				"linux-libc-dev",
+				"squashfs-tools",
+				"zstd",
+				"e2fsprogs",
+			],
 			env=environment,
 		)
 
@@ -144,7 +212,9 @@ class Setup:
 		step(f"stage 4: python {PYTHON_VERSION} for {self.configuration.bench_user}")
 		self.as_bench("command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh")
 		self.as_bench(f"uv python install {PYTHON_VERSION}")
-		self.as_bench(f'mkdir -p ~/.local/bin && ln -sf "$(uv python find {PYTHON_VERSION})" ~/.local/bin/python3')
+		self.as_bench(
+			f'mkdir -p ~/.local/bin && ln -sf "$(uv python find {PYTHON_VERSION})" ~/.local/bin/python3'
+		)
 		reported = self.bench_output("python3 --version")
 		if PYTHON_VERSION not in reported:
 			raise SetupError(
@@ -161,7 +231,7 @@ class Setup:
 		# Guard each step on what it produces, so a stopped run continues here.
 		configuration = self.configuration
 		step(f"stage 6: bench {configuration.bench_name}")
-		password = shlex.quote(configuration.password)
+		password = shlex.quote(configuration.bootstrap_password)
 		if not (configuration.bench_path / "bench.toml").is_file():
 			self.as_bench(
 				f"pilot new {configuration.bench_name} --admin-password {password}"
@@ -175,7 +245,10 @@ class Setup:
 		step(f"stage 7: site {configuration.site}")
 		site_config = configuration.bench_path / "sites" / configuration.site / "site_config.json"
 		if not site_config.is_file():
-			self.pilot(f"new-site {configuration.site} --admin-password {shlex.quote(configuration.password)}")
+			self.pilot(
+				f"new-site {configuration.site}"
+				f" --admin-password {shlex.quote(configuration.bootstrap_password)}"
+			)
 
 	def get_atlas(self) -> None:
 		# Pilot skips an app that is already there, so this stage is safe to repeat.
@@ -202,9 +275,27 @@ class Setup:
 		step(f"stage 10: install atlas on {configuration.site}")
 		self.pilot(f"install-app {configuration.site} atlas")
 
+	def configure_atlas(self) -> None:
+		configuration = self.configuration
+		step(f"stage 11: configure Atlas on {configuration.site}")
+		private_key = configuration.fleet_private_key_path
+		if not private_key.exists():
+			if private_key.with_suffix(".pub").exists():
+				raise SetupError(f"public key exists without its private key: {private_key}.pub")
+			self.as_bench("install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519")
+		public_key = self.bench_output("ssh-keygen -y -f ~/.ssh/id_ed25519")
+		values = {**configuration.atlas_setup_values, "public_ssh_key": public_key}
+		self.pilot(
+			f"frappe --site {configuration.site} set-config atlas_base_url {shlex.quote(configuration.atlas_base_url)}"
+		)
+		self.pilot(
+			f"frappe --site {configuration.site} configure-atlas",
+			input_text=json.dumps(values),
+		)
+
 	def grant_image_builder_sudo(self) -> None:
 		# The image builder runs its root file system build through sudo on every build.
-		step("stage 11: sudo grant for the image builder")
+		step("stage 12: sudo grant for the image builder")
 		self.install_grant(
 			self.image_builder_grant,
 			f"{self.configuration.bench_user} ALL=(ALL) NOPASSWD: {self.configuration.image_builder_path} *",
@@ -213,16 +304,15 @@ class Setup:
 	def build_images(self) -> None:
 		# Bootstrap has no object storage credentials yet, so every image is a site file.
 		configuration = self.configuration
-		step(f"stage 12: guest images ({len(configuration.images)})")
+		step(f"stage 13: guest images ({len(configuration.images)})")
 		for version, architecture, minimal in configuration.images:
 			step(f"image {version} {architecture} {'minimal' if minimal else 'server'}")
-			arguments = f"--version {version} --architecture {architecture} --storage site-file"
+			arguments = (
+				f"--version {version} --architecture {architecture} --storage site-file --skip-existing"
+			)
 			if minimal:
 				arguments += " --minimal"
-			self.as_bench(
-				f"pilot --bench {configuration.bench_name} --site {configuration.site}"
-				f" build-ubuntu-base-image {arguments}"
-			)
+			self.pilot(f"frappe --site {configuration.site} build-ubuntu-base-image {arguments}")
 
 	def run(self) -> None:
 		self.install_packages()
@@ -236,6 +326,7 @@ class Setup:
 			self.get_atlas()
 			self.setup_production()
 			self.install_atlas()
+			self.configure_atlas()
 		finally:
 			Path(self.setup_grant).unlink(missing_ok=True)
 		self.grant_image_builder_sudo()
@@ -257,8 +348,7 @@ def remove_pilot_installation(configuration: Configuration) -> None:
 	if identifier.returncode == 0:
 		user_id = identifier.stdout.strip()
 		environment = (
-			f"XDG_RUNTIME_DIR=/run/user/{user_id}"
-			f" DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user_id}/bus"
+			f"XDG_RUNTIME_DIR=/run/user/{user_id} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user_id}/bus"
 		)
 		for action in (f"stop {units}", f"disable {units}", "daemon-reload", "reset-failed"):
 			subprocess.run(
