@@ -26,6 +26,10 @@ const defaultFastApplyTimeout = 2 * time.Second
 // removal. The window is one file unlink, so a second read almost always agrees.
 const informationAttempts = 3
 
+// informationRetryDelay separates those reads. It has to outlast one unlink, or
+// every attempt lands in the same window and the pair never settles.
+const informationRetryDelay = 5 * time.Millisecond
+
 // ManagerConfig contains persistent VM manager settings.
 type ManagerConfig struct {
 	MachinesDirectory string
@@ -222,7 +226,13 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 func (manager *Manager) information(identifier string) (Information, error) {
 	var lastError error
 
-	for range informationAttempts {
+	for attempt := range informationAttempts {
+		// Back off before reading again. Immediate reads are fast enough to land
+		// inside one removal, which would settle nothing.
+		if attempt > 0 {
+			time.Sleep(informationRetryDelay)
+		}
+
 		desired, desiredError := manager.store.readDesired(identifier)
 		observed, observedError := manager.store.readObserved(identifier)
 		if desiredError == nil && observedError == nil {
