@@ -30,7 +30,7 @@ su - frappe -c "pilot set-admin-password --password $quoted_password"
 """
 PILOT_RELEASE_TRACKER_COMMAND = """set -euo pipefail
 quoted_site=$(printf '%q' "$CARGO_SITE")
-su - frappe -c "pilot --yes -b cargo --site $quoted_site $PILOT_RELEASE_TRACKER_COMMAND"
+su - frappe -c "pilot -b cargo --site $quoted_site $PILOT_RELEASE_TRACKER_COMMAND"
 """
 
 
