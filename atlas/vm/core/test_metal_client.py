@@ -37,6 +37,38 @@ class TestMetalClientRetries(UnitTestCase):
 		self.assertEqual(body, {"state": "running"})
 		self.assertEqual(request.call_count, 2)
 
+	def test_retries_share_one_deadline(self) -> None:
+		"""Three attempts must not cost three full read timeouts."""
+		client = build_client()
+		clock = iter(range(0, 400))
+		seen: list[tuple[float, float]] = []
+
+		def record(*_args, **kwargs):
+			seen.append(kwargs["timeout"])
+			raise requests.ReadTimeout("read timed out")
+
+		with (
+			patch("atlas.vm.core.metal_client.monotonic", lambda: next(clock) * 10),
+			patch("atlas.vm.core.metal_client.requests.request", side_effect=record),
+		):
+			with self.assertRaises(MetalClientError):
+				client._request("GET", "/v1/vms/VM-00001", timeout=(5, 30), attempts=3, budget_seconds=30)
+
+		# Every attempt is narrowed to what the shared deadline still allows, so
+		# the repeated call never costs more than a single 30 second read.
+		self.assertLessEqual(sum(read for _, read in seen), 30)
+		self.assertLess(seen[-1][1], seen[0][1])
+
+	def test_a_fast_failure_still_retries_inside_the_budget(self) -> None:
+		client = build_client()
+		responses = [requests.ConnectionError("refused"), build_response(200, {"state": "running"})]
+
+		with patch("atlas.vm.core.metal_client.requests.request", side_effect=responses) as request:
+			body = client._request("GET", "/v1/vms/VM-00001", timeout=(5, 30), attempts=3, budget_seconds=30)
+
+		self.assertEqual(body, {"state": "running"})
+		self.assertEqual(request.call_count, 2)
+
 	def test_migration_polling_is_not_repeated(self) -> None:
 		"""The migration worker runs its own poll loop, so one read must not retry."""
 		client = build_client()

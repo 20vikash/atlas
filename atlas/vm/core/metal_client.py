@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import time
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -46,6 +47,7 @@ class MetalClient:
 	create_timeout_seconds = (5, 60)
 	status_timeout_seconds = (5, 30)
 	status_attempts = 3
+	status_budget_seconds = 30
 	retry_delay_seconds = 2
 	snapshot_timeout_seconds = (5, 3600)
 
@@ -95,6 +97,7 @@ class MetalClient:
 			f"/v1/vms/{quote(virtual_machine_id, safe='')}",
 			timeout=self.status_timeout_seconds,
 			attempts=self.status_attempts,
+			budget_seconds=self.status_budget_seconds,
 		)
 		return self._virtual_machine(response)
 
@@ -290,9 +293,18 @@ class MetalClient:
 		expected_status: int | tuple[int, ...] | None = None,
 		uncertain_on_failure: bool = False,
 		attempts: int = 1,
+		budget_seconds: float | None = None,
 		**kwargs: Any,
 	) -> dict[str, Any]:
-		"""Send one request. Repeat a retryable failure only when the caller allows it."""
+		"""Send one request, and repeat a retryable failure within the caller budget.
+
+		Every attempt shares one deadline, so a repeated call never waits longer
+		than a single call would. A caller that reads state while a user waits
+		keeps its own latency.
+		"""
+		timeout = kwargs.pop("timeout", self.timeout_seconds)
+		deadline = monotonic() + budget_seconds if budget_seconds else None
+
 		for attempt in range(1, attempts + 1):
 			try:
 				return self._send(
@@ -300,14 +312,26 @@ class MetalClient:
 					path,
 					expected_status=expected_status,
 					uncertain_on_failure=uncertain_on_failure,
+					timeout=self._attempt_timeout(timeout, deadline),
 					**kwargs,
 				)
 			except MetalClientError as error:
 				if not error.retryable or attempt == attempts:
 					raise
+				if deadline and monotonic() + self.retry_delay_seconds >= deadline:
+					raise
 				time.sleep(self.retry_delay_seconds)
 
 		raise AssertionError("unreachable")
+
+	@staticmethod
+	def _attempt_timeout(timeout: tuple[float, float], deadline: float | None) -> tuple[float, float]:
+		"""Return the timeout for one attempt, narrowed to the remaining budget."""
+		if deadline is None:
+			return timeout
+
+		connect, read = timeout
+		return (connect, max(0.1, min(read, deadline - monotonic())))
 
 	def _send(
 		self,
