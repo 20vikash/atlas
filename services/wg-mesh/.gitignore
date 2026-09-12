@@ -6,6 +6,7 @@ dist/
 
 # Kernel module build output.
 kernel/*.ko
+kernel/*.mod.c
 kernel/*.o
 kernel/*.mod
 kernel/.*.cmd
