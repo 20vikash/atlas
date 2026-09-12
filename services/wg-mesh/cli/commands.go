@@ -154,6 +154,12 @@ func removeHost(force bool) error {
 			if err := detachHook(name); err != nil {
 				return err
 			}
+			// A host that ran the unicast daemon also holds the
+			// unicast filters on its uplink.
+			if name == interfaces.uplinkName {
+				detachUnicastHookWarning(name, "ingress")
+				detachUnicastHookWarning(name, "egress")
+			}
 			detached[name] = struct{}{}
 		}
 	}
