@@ -45,6 +45,7 @@ def cargo_server(**values) -> SimpleNamespace:
 		"installation_task": None,
 		"virtual_machine": "vm-00001",
 		"domain": "cargo.example.com",
+		"pilot_domain": "cargo-pilot.example.com",
 		"save": Mock(),
 	}
 	return SimpleNamespace(**(defaults | values))
