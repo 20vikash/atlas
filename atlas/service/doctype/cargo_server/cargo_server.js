@@ -139,6 +139,40 @@ function showProvisionDialog(frm) {
 	dialog.show();
 }
 
+function showPilotAdminPassword(response) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("New Pilot Admin Password"),
+		fields: [
+			{
+				fieldname: "domain",
+				fieldtype: "Data",
+				label: __("Admin Panel"),
+				read_only: 1,
+				default: `https://${response.domain}`,
+			},
+			{
+				fieldname: "password",
+				fieldtype: "Data",
+				label: __("Password"),
+				read_only: 1,
+				default: response.password,
+			},
+			{
+				fieldtype: "HTML",
+				options: `<p class="text-muted small">${__(
+					"Atlas shows this password once."
+				)}</p>`,
+			},
+		],
+		primary_action_label: __("Copy Password"),
+		primary_action() {
+			frappe.utils.copy_to_clipboard(response.password);
+			dialog.hide();
+		},
+	});
+	dialog.show();
+}
+
 frappe.ui.form.on("Cargo Server", {
 	refresh(frm) {
 		frm.disable_save();
@@ -148,6 +182,26 @@ frappe.ui.form.on("Cargo Server", {
 
 		if (!frm.doc.virtual_machine && ["Not Provisioned", "Archived"].includes(frm.doc.status)) {
 			frm.page.set_primary_action(__("Provision"), () => showProvisionDialog(frm));
+		}
+
+		if (frm.doc.status === "Active") {
+			frm.add_custom_button(
+				__("Reset Pilot Admin Password"),
+				() =>
+					frappe.confirm(
+						__("Reset the Pilot administration password on the Cargo host?"),
+						() =>
+							frm
+								.call({
+									method: "reset_pilot_admin_password",
+									doc: frm.doc,
+									freeze: true,
+									freeze_message: __("Resetting the Pilot admin password..."),
+								})
+								.then((response) => showPilotAdminPassword(response.message))
+					),
+				__("Actions")
+			);
 		}
 
 		if (frm.doc.virtual_machine) {

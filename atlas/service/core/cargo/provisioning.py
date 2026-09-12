@@ -162,7 +162,7 @@ class CargoServerProvisioner:
 			"PILOT_ADMIN_PASSWORD": generate_installer_password(),
 			"SITE_PASSWORD": generate_installer_password(),
 			"SITE": domain,
-			"ADMIN_DOMAIN": f"cargo-pilot.{settings.wildcard_domain}",
+			"ADMIN_DOMAIN": self.cargo_server.pilot_domain,
 			"CENTRAL_URL": "https://central.invalid",
 			"CENTRAL_WEBHOOK_SECRET": "not-configured",
 			"ATLAS_URL": atlas_url,

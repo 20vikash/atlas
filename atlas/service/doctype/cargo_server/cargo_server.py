@@ -12,6 +12,7 @@ from frappe.model.document import Document
 from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 
+from atlas.atlas.core.ssh import SSHRunner
 from atlas.service.core.cargo.storage_cluster import (
 	remove_storage_cluster_config,
 	store_storage_cluster_config,
@@ -22,6 +23,10 @@ if TYPE_CHECKING:
 
 LIFECYCLE_LOCK_NAME = "atlas:cargo-server:lifecycle"
 PROVISIONABLE_STATUSES = ("Not Provisioned", "Archived")
+PILOT_ADMIN_PASSWORD_RESET_COMMAND = """set -euo pipefail
+quoted_password=$(printf '%q' "$PILOT_ADMIN_PASSWORD")
+su - frappe -c "pilot set-admin-password --password $quoted_password"
+"""
 
 
 class CargoServer(Document):
@@ -44,8 +49,17 @@ class CargoServer(Document):
 	@property
 	def domain(self) -> str:
 		"""Return the public Cargo domain."""
-		wildcard_domain = frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
-		return f"cargo.{wildcard_domain}"
+		return f"cargo.{self.wildcard_domain}"
+
+	@property
+	def pilot_domain(self) -> str:
+		"""Return the domain of the Pilot administration panel on the Cargo host."""
+		return f"cargo-pilot.{self.wildcard_domain}"
+
+	@property
+	def wildcard_domain(self) -> str:
+		"""Return the regional wildcard domain."""
+		return frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
 
 	@frappe.whitelist(methods=["POST"])
 	def provision(self, request: str | dict[str, Any]) -> dict[str, str | bool]:
@@ -74,6 +88,28 @@ class CargoServer(Document):
 		else:
 			frappe.msgprint(_("Cargo Server setup has been queued. Please check after some time."))
 		return {"name": cargo_server.name, "is_draft": is_draft}
+
+	@frappe.whitelist(methods=["POST"])
+	def reset_pilot_admin_password(self) -> dict[str, str]:
+		"""Set a new Pilot administration password on the Cargo host and return it."""
+		_validate_system_manager()
+		with cargo_lifecycle_lock():
+			cargo_server: CargoServer = frappe.get_single("Cargo Server")
+			if cargo_server.status != "Active":
+				frappe.throw(_("Cargo Server must be Active to reset the Pilot administration password."))
+
+			from atlas.service.core.cargo.provisioning import generate_installer_password
+
+			password = generate_installer_password()
+			virtual_machine = frappe.get_doc("Virtual Machine", cargo_server.virtual_machine)
+			result = SSHRunner(virtual_machine.ssh_host).run_command(
+				PILOT_ADMIN_PASSWORD_RESET_COMMAND,
+				data={"PILOT_ADMIN_PASSWORD": password},
+			)
+			if not result.is_success:
+				frappe.throw(_("The Pilot administration password reset failed."))
+
+		return {"password": password, "domain": cargo_server.pilot_domain}
 
 	@frappe.whitelist(methods=["POST"])
 	def archive(self) -> None:

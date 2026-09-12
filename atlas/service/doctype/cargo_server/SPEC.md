@@ -57,6 +57,8 @@ Atlas never replaces object storage that is already configured. A second attempt
 
 ## Access and failures
 
-Only System Managers with System User accounts can operate Cargo Server. Atlas stores the failed phase and the failure message. The phase is one of `secure-shell`, `installation`, `proxy-routes`, `readiness`, `virtual-machine`, or `archive`. System Managers can read the installation secrets and output in the linked SSH Task.
+Only System Managers with System User accounts can operate Cargo Server. An Active Cargo Server has a Reset Pilot Admin Password action. Atlas generates a password, runs `pilot set-admin-password` through SSH as the Cargo bench user, and shows the password once after a successful command. Atlas does not store the reset password or command output.
+
+Atlas stores the failed phase and the failure message. The phase is one of `secure-shell`, `installation`, `proxy-routes`, `readiness`, `virtual-machine`, or `archive`. System Managers can read the installation secrets and output in the linked SSH Task.
 
 Use [Cargo Server operations](../../../docs/cargo-server.md) for the operator workflow. Use [Proxy control daemon](../../../../services/http-proxy/docs/control-daemon.md) for the site map interface.

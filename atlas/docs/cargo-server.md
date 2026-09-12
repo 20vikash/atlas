@@ -22,6 +22,10 @@ Atlas creates the virtual machine and sets Pending. A Pending service can stay i
 
 Atlas changes the status to Provisioning when the virtual machine is ready. It waits for SSH on the public IPv4 address, installs Cargo with `cargo-pilot.<wildcard-domain>` as the Pilot administration domain, maps both public domains to the mesh IPv6 address, and checks the Cargo ping route. A successful check sets Active.
 
+## Reset the Pilot administration password
+
+When Cargo Server is Active, select Reset Pilot Admin Password. Atlas generates a password, runs the reset command on the Cargo host, and then shows the new password once. Store the password before you close the dialog. Atlas does not retain this password.
+
 ## Object storage
 
 Cargo brings up its Garage object storage cluster after it activates. Atlas waits for this and then asks Cargo for one bucket named `atlas-<region-name>`.
