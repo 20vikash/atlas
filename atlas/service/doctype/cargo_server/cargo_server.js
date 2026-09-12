@@ -115,7 +115,11 @@ function showProvisionDialog(frm) {
 				label: __("Public IPv4 Address"),
 				options: "Metal Server IP Address",
 				reqd: 1,
-				filters: { status: "Allocated", tenant_id: 0, virtual_machine: ["is", "not set"] },
+				filters: {
+					status: "Allocated",
+					tenant_id: ["in", [-1, 0]],
+					virtual_machine: ["is", "not set"],
+				},
 			},
 		],
 		primary_action_label: __("Provision"),
