@@ -32,3 +32,16 @@ func TestDefaultRouteStepsAreSafeToRepeat(t *testing.T) {
 		t.Fatalf("default route step = %v, want replace", steps[0])
 	}
 }
+
+func TestPublicIPv4StepsMapHostOriginatedTraffic(t *testing.T) {
+	steps := publicIPv4Steps("vm-10", "metal-vm-10", "vpeer0", "10.6.26.130", "203.0.113.7")
+
+	want := []string{
+		"iptables", "-t", "nat", "-A", "OUTPUT", "-d", "203.0.113.7",
+		"-m", "comment", "--comment", "metal-public-ipv4-vm-10",
+		"-j", "DNAT", "--to-destination", "10.6.26.130",
+	}
+	if !slices.ContainsFunc(steps, func(step []string) bool { return slices.Equal(step, want) }) {
+		t.Fatalf("steps = %v, want one matching %v", steps, want)
+	}
+}
