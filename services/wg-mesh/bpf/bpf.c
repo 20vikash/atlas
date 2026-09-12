@@ -9,7 +9,7 @@
 #include "debug.h"
 #include "state.h"
 #include "vm_hook.h"
-#include "uplink_hook.h"
+#include "ndp_hook.h"
 #include "wireguard_hook.h"
 
 /* The kernel BPF ABI requires this string for GPL-only helper access. */
