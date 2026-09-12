@@ -22,7 +22,7 @@ const (
 	// Multicast is unreliable, so repeat announcements to replace stale caches.
 	// RFC 5227 uses two ARP announcements and QEMU sends five after migration;
 	// both space them because back-to-back packets can be lost together. Three
-	// give the discovery relay fallback enough redundancy.
+	// give the multicast announcement enough redundancy.
 	meshAnnouncementAttempts = 3
 	meshAnnouncementInterval = 50 * time.Millisecond
 
@@ -164,24 +164,15 @@ func meshTenant(address [16]byte) uint32 {
 }
 
 func announceVirtualMachine(address [16]byte, config hostConfig) error {
-	destination, multicast, err := discoveryAnnouncementDestination(config)
-	if err != nil {
-		return err
-	}
-	localAddress := (*net.UDPAddr)(nil)
-	if !multicast {
-		localAddress = &net.UDPAddr{IP: net.IP(config.UplinkIPv4[:])}
-	}
-	conn, err := net.ListenUDP("udp4", localAddress)
+	destination := &net.UDPAddr{IP: net.ParseIP(meshMulticastAddress), Port: meshPort}
+	conn, err := net.ListenUDP("udp4", nil)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	if multicast {
-		if err := configureMulticastSocket(conn, config.UplinkIPv4); err != nil {
-			return err
-		}
+	if err := configureMulticastSocket(conn, config.UplinkIPv4); err != nil {
+		return err
 	}
 	message := make([]byte, meshAnnouncementSize)
 	message[0] = 1
@@ -198,21 +189,6 @@ func announceVirtualMachine(address [16]byte, config hostConfig) error {
 		}
 	}
 	return nil
-}
-
-func discoveryAnnouncementDestination(config hostConfig) (*net.UDPAddr, bool, error) {
-	uplinkName := interfaceWithIPv4(config.UplinkIPv4)
-	if uplinkName == "" {
-		return nil, false, errors.New("cannot find the configured uplink")
-	}
-	uplink, err := net.InterfaceByName(uplinkName)
-	if err != nil {
-		return nil, false, err
-	}
-	if config.DiscoveryIndex != uint32(uplink.Index) {
-		return &net.UDPAddr{IP: net.IP(config.UplinkIPv4[:]), Port: meshPort}, false, nil
-	}
-	return &net.UDPAddr{IP: net.ParseIP(meshMulticastAddress), Port: meshPort}, true, nil
 }
 
 func configureMulticastSocket(conn *net.UDPConn, source [4]byte) error {
