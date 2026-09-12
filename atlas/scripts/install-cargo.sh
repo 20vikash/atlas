@@ -117,6 +117,10 @@ as_bench_user "curl -fsSL $q_installer | bash"
 as_bench_user "pilot --yes new $q_bench --database mariadb --admin-password $q_admin_password"
 as_bench_user "pilot --yes -b $q_bench init --no-dev"
 as_bench_user "pilot --yes -b $q_bench new-site $q_site --admin-password $q_site_password"
+
+# A new site pauses the scheduler, and Cargo needs its scheduled jobs to run often.
+as_bench_user "pilot --yes -b $q_bench frappe set-config -g -p scheduler_tick_interval 5"
+as_bench_user "pilot --yes -b $q_bench frappe --site $q_site enable-scheduler"
 as_bench_user "pilot --yes -b $q_bench get-app $q_repo --branch $q_branch --install-dependencies"
 
 # Production before the app: it brings up Redis and the workload, which installing Cargo
