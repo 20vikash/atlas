@@ -266,12 +266,11 @@ class VirtualMachineImageTransferService:
 		image.save()
 
 
-def enqueue_pending_machine_image_transfers() -> None:
-	"""Resume Machine image transfers that did not finish."""
+def enqueue_pending_virtual_machine_image_transfers() -> None:
+	"""Resume Virtual Machine image transfers that did not finish."""
 	names = frappe.get_all(
 		"Virtual Machine Image",
 		filters={
-			"image_type": "machine",
 			"status": ["in", ["Pending", "Uploading", "Completing", "Cleaning"]],
 		},
 		pluck="name",
