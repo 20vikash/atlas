@@ -84,6 +84,39 @@ class TestMachineImageDeletionRequest(UnitTestCase):
 		enqueue.assert_called_once_with("image-1")
 
 
+class TestArchivedImageReclamation(UnitTestCase):
+	def reclaim(self, is_referenced: bool):
+		"""Run one reclamation pass over a single archived image."""
+		service = VirtualMachineImageDeletionService()
+		database = Mock(exists=Mock(return_value=is_referenced), set_value=Mock())
+
+		with (
+			patch("atlas.vm.core.vm_image_deletion.frappe.db", database),
+			patch("atlas.vm.core.vm_image_deletion.frappe.get_all", return_value=["image-1"]) as get_all,
+			patch.object(service, "enqueue") as enqueue,
+		):
+			service.reclaim_archived()
+
+		return database, get_all, enqueue
+
+	def test_an_unused_archived_image_moves_to_deleting_and_queues_cleanup(self) -> None:
+		database, _get_all, enqueue = self.reclaim(is_referenced=False)
+
+		database.set_value.assert_called_once_with("Virtual Machine Image", "image-1", "status", "Deleting")
+		enqueue.assert_called_once_with("image-1")
+
+	def test_an_archived_image_a_virtual_machine_still_uses_is_left_alone(self) -> None:
+		database, _get_all, enqueue = self.reclaim(is_referenced=True)
+
+		database.set_value.assert_not_called()
+		enqueue.assert_not_called()
+
+	def test_only_archived_machine_images_are_considered(self) -> None:
+		_database, get_all, _enqueue = self.reclaim(is_referenced=False)
+
+		self.assertEqual(get_all.call_args.kwargs["filters"], {"image_type": "machine", "status": "Archived"})
+
+
 class TestMachineImageCleanup(UnitTestCase):
 	def test_cleanup_removes_uploads_objects_and_staged_data(self) -> None:
 		service = VirtualMachineImageDeletionService()
