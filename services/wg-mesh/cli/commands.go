@@ -233,7 +233,7 @@ func addVirtualMachine(interfaceName, addressText string, mtu uint32) error {
 	// Release the state lock before the network notification.
 	unlock()
 
-	// The discovery relay fallback consumes the announcement.
+	// Send the multicast announcement on the shared VLAN.
 	if err := announceVirtualMachine(address, config); err != nil {
 		fmt.Fprintf(os.Stderr, "atlas-wg-mesh: warning: announce %s: %v\n", addressText, err)
 	}
@@ -349,16 +349,16 @@ func showStatus() error {
 	return nil
 }
 
-// discoveryInterfaceName names where WHO_HAS is sent. A relay killed without
-// its cleanup leaves an index no interface owns, which drops every WHO_HAS, so
-// report that rather than a bare number.
+// discoveryInterfaceName names the interface that carries neighbour
+// discovery. A configure run records the uplink, so any other index means the
+// state is stale and configure must run again.
 func discoveryInterfaceName(config hostConfig) string {
 	device, err := net.InterfaceByIndex(int(config.DiscoveryIndex))
 	if err != nil {
-		return fmt.Sprintf("ifindex:%d (missing; rerun the discovery relay or configure)", config.DiscoveryIndex)
+		return fmt.Sprintf("ifindex:%d (missing; rerun configure)", config.DiscoveryIndex)
 	}
 	if device.Name == interfaceWithIPv4(config.UplinkIPv4) {
 		return device.Name + " (multicast)"
 	}
-	return device.Name + " (relay)"
+	return device.Name
 }

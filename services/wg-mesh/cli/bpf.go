@@ -36,29 +36,6 @@ type hostConfig struct {
 	WireGuardIPv6  [16]byte
 }
 
-// setDiscoveryInterface rewrites one field of the shared host config, so it
-// takes the same lock as the other commands that replace it wholesale.
-func setDiscoveryInterface(index uint32) error {
-	unlock, err := lockVMState()
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
-	configMap, err := openMap("config")
-	if err != nil {
-		return err
-	}
-	defer configMap.Close()
-
-	var config hostConfig
-	if err := configMap.Lookup(uint32(0), &config); err != nil {
-		return err
-	}
-	config.DiscoveryIndex = index
-	return configMap.Put(uint32(0), config)
-}
-
 // programPath returns the pin for a program. A fresh install pins at the top
 // level of the pin directory. An upgrade pins under releases/<hash> and
 // removes the top level pin, so look for the installed release first.
