@@ -25,7 +25,7 @@ Archive removes both Proxy routes before it requests virtual machine termination
 
 ## Virtual machine
 
-Provision requires an Active Proxy Server, an enabled Available System image, and an unattached Allocated Metal Server IP Address. Atlas creates the virtual machine for tenant `0` with privileged mesh access, `uplink` egress, hostname `cargo`, and the Atlas public SSH key.
+Provision requires an Active Proxy Server, an enabled Available System image, and an unattached Allocated Metal Server IP Address from the shared pool (`tenant_id` -1) or from tenant `0`. Atlas claims a shared pool address for tenant `0` when it attaches it. Atlas creates the virtual machine for tenant `0` with privileged mesh access, `uplink` egress, hostname `cargo`, and the Atlas public SSH key.
 
 The public IPv4 address is for SSH and operations. The Cargo and Pilot HTTP routes always use the virtual machine WireGuard mesh IPv6 address.
 
