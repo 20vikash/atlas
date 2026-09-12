@@ -38,11 +38,15 @@ def get_owned_image(image_id: str) -> VirtualMachineImage:
 def list_images(query: ImageListQuery) -> Page[ImageResponse]:
 	"""List images.
 
-	Returns one page of System and Machine images owned by the tenant in newest-first order. Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both.
+	Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both.
 	"""
+	filters: dict[str, str | int] = {"enabled": 1}
+	if query.image_type:
+		filters["image_type"] = query.image_type
+
 	rows: list[VirtualMachineImage] = frappe.get_list(
 		"Virtual Machine Image",
-		filters={"image_type": query.image_type} if query.image_type else None,
+		filters=filters,
 		or_filters={"tenant_id": get_current_tenant_id(), "image_type": "system"},
 		fields=[
 			"name",

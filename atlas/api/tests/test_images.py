@@ -113,6 +113,16 @@ class TestImageAccess(IntegrationTestCase):
 		self.assertNotIn(self.system_image, names)
 		self.assertNotIn(self.other_image, names)
 
+	def test_a_disabled_image_is_left_out(self) -> None:
+		disabled = insert_image(TENANT_ID, "machine", enabled=0)
+		disabled_system = insert_image(TENANT_ID, "system", enabled=0)
+
+		names = self.list_names(TENANT_ID)
+
+		self.assertNotIn(disabled, names)
+		self.assertNotIn(disabled_system, names)
+		self.assertIn(self.own_image, names)
+
 	def test_an_unknown_image_type_is_refused(self) -> None:
 		with api_request(
 			"GET", "/api/atlas/images", tenant_id=TENANT_ID, query_string={"image_type": "bogus"}
