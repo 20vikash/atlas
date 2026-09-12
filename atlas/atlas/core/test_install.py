@@ -1,8 +1,10 @@
 from unittest.mock import patch
 
-from frappe.tests import UnitTestCase
+import frappe
+from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import add_to_date, get_datetime, now_datetime
 
-from atlas.atlas.core.install import complete_setup_wizard
+from atlas.atlas.core.install import complete_setup_wizard, realign_scheduled_job_baselines
 
 
 class TestSetupWizard(UnitTestCase):
@@ -36,3 +38,45 @@ class TestSetupWizard(UnitTestCase):
 			complete_setup_wizard()
 
 		set_single_value.assert_not_called()
+
+
+class TestScheduledJobBaselines(IntegrationTestCase):
+	def setUp(self) -> None:
+		self.job = frappe.get_doc(
+			doctype="Scheduled Job Type",
+			method="atlas.tests.realign_probe",
+			frequency="Hourly",
+		).insert(ignore_permissions=True)
+		self.addCleanup(self.job.delete)
+
+	def baseline(self):
+		job = frappe.get_doc("Scheduled Job Type", self.job.name)
+		return job.last_execution or job.creation
+
+	def test_a_baseline_ahead_of_the_clock_is_brought_back(self) -> None:
+		self.job.db_set("last_execution", add_to_date(now_datetime(), hours=6), update_modified=False)
+
+		realign_scheduled_job_baselines()
+
+		self.assertLessEqual(get_datetime(self.baseline()), now_datetime())
+
+	def test_a_cold_job_stamped_in_the_future_becomes_reachable(self) -> None:
+		self.job.db_set("creation", add_to_date(now_datetime(), hours=6), update_modified=False)
+		self.job.db_set("last_execution", None, update_modified=False)
+		unreachable = frappe.get_doc("Scheduled Job Type", self.job.name).get_next_execution()
+
+		realign_scheduled_job_baselines()
+
+		self.assertGreater(unreachable, add_to_date(now_datetime(), hours=5))
+		self.assertLessEqual(
+			frappe.get_doc("Scheduled Job Type", self.job.name).get_next_execution(),
+			add_to_date(now_datetime(), hours=1),
+		)
+
+	def test_a_healthy_job_is_left_alone(self) -> None:
+		last_execution = add_to_date(now_datetime(), hours=-2)
+		self.job.db_set("last_execution", last_execution, update_modified=False)
+
+		realign_scheduled_job_baselines()
+
+		self.assertEqual(get_datetime(self.baseline()), last_execution)

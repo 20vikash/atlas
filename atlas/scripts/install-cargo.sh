@@ -9,7 +9,6 @@
 # terminated by the proxy in front of this host.
 set -euo pipefail
 
-PILOT_VERSION="${PILOT_VERSION:-v0.0.29-pre-alpha}"
 BENCH="${BENCH:-cargo}"
 SITE="${SITE:-cargo.localhost}"
 ADMIN_DOMAIN="${ADMIN_DOMAIN:-}"
@@ -33,9 +32,13 @@ ATLAS_TENANT_ID="${ATLAS_TENANT_ID:-}" # the tenant every Atlas call of this hos
 PROXY_URL="${PROXY_URL:-}" # Proxy control API URL for this region
 PROXY_TOKEN="${PROXY_TOKEN:-}" # restricted token for the Proxy control API
 WILDCARD_DOMAIN="${WILDCARD_DOMAIN:-}"
+# Site config, not a Cargo Settings field: Cargo reads it to build its storage cluster on
+# first boot. JSON with storage_node_count, replication_factor, and a gateway and storage
+# block of cpu, ram_gb and disk_gb.
+DEFAULT_STORAGE_CLUSTER_CONFIG="${DEFAULT_STORAGE_CLUSTER_CONFIG:-}"
 BENCH_USER="${BENCH_USER:-frappe}" # pilot refuses to run as root, so the bench gets its own user
-BENCH_UID="${BENCH_UID:-1001}"
-BENCH_GID="${BENCH_GID:-1001}"
+BENCH_UID="${BENCH_UID:-1000}"
+BENCH_GID="${BENCH_GID:-1000}"
 
 if [ -z "$PILOT_ADMIN_PASSWORD" ] || [ -z "$SITE_PASSWORD" ]; then
 	echo "Set PILOT_ADMIN_PASSWORD and SITE_PASSWORD before running." >&2
@@ -69,7 +72,7 @@ ENROLMENT_VARS="CENTRAL_URL JWKS_URL ATLAS_URL CARGO_URL CENTRAL_WEBHOOK_SECRET 
 	ATLAS_TOKEN ATLAS_TENANT_ID PROXY_URL PROXY_TOKEN WILDCARD_DOMAIN"
 
 missing=""
-for name in $ENROLMENT_VARS; do
+for name in $ENROLMENT_VARS DEFAULT_STORAGE_CLUSTER_CONFIG; do
 	[ -n "${!name}" ] || missing="$missing $name"
 done
 
@@ -91,7 +94,7 @@ as_bench_user() {
 	su - "$BENCH_USER" -c "$1"
 }
 
-INSTALLER="https://raw.githubusercontent.com/frappe/pilot/${PILOT_VERSION}/install.sh"
+INSTALLER="https://raw.githubusercontent.com/frappe/pilot/develop/install.sh"
 
 q_installer=$(printf '%q' "$INSTALLER")
 q_bench=$(printf '%q' "$BENCH")
@@ -101,6 +104,7 @@ q_branch=$(printf '%q' "$BRANCH")
 q_admin_password=$(printf '%q' "$PILOT_ADMIN_PASSWORD")
 q_site_password=$(printf '%q' "$SITE_PASSWORD")
 q_admin_domain=$(printf '%q' "$ADMIN_DOMAIN")
+q_cluster_config=$(printf '%q' "$DEFAULT_STORAGE_CLUSTER_CONFIG")
 # The install hook reads these, so they are quoted once and exported into that one command.
 enrolment=""
 for name in $ENROLMENT_VARS; do
@@ -116,8 +120,14 @@ as_bench_user "curl -fsSL $q_installer | bash"
 # `new` only writes bench.toml. `init` is what builds the bench: virtualenv, framework,
 # Node and Redis. Without it there is nothing for a site to be created in.
 as_bench_user "pilot --yes new $q_bench --database mariadb --admin-password $q_admin_password"
-as_bench_user "pilot --yes -b $q_bench init"
+as_bench_user "pilot --yes -b $q_bench init --no-dev"
 as_bench_user "pilot --yes -b $q_bench new-site $q_site --admin-password $q_site_password"
+
+# A new site pauses the scheduler, and Cargo needs its scheduled jobs to run often.
+as_bench_user "pilot --yes -b $q_bench frappe set-config -g -p scheduler_tick_interval 5"
+as_bench_user "pilot --yes -b $q_bench frappe --site $q_site enable-scheduler"
+# `-p` keeps the value JSON. Stored as a string, Cargo's spawner refuses it.
+as_bench_user "pilot --yes -b $q_bench frappe --site $q_site set-config -p default_storage_cluster_config $q_cluster_config"
 as_bench_user "pilot --yes -b $q_bench get-app $q_repo --branch $q_branch --install-dependencies"
 
 # Production before the app: it brings up Redis and the workload, which installing Cargo

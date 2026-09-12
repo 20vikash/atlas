@@ -17,6 +17,7 @@ from atlas.atlas.core.ssh import wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.auth.issuer import issue_token
 from atlas.service.core.cargo.bucket import enqueue_bucket_provisioning
+from atlas.service.core.cargo.storage_cluster import storage_cluster_config_json
 from atlas.service.doctype.cargo_server.cargo_server import cargo_lifecycle_lock
 
 if TYPE_CHECKING:
@@ -174,6 +175,7 @@ class CargoServerProvisioner:
 			"PROXY_URL": self.proxy_url,
 			"PROXY_TOKEN": proxy_token,
 			"WILDCARD_DOMAIN": settings.wildcard_domain,
+			"DEFAULT_STORAGE_CLUSTER_CONFIG": storage_cluster_config_json(),
 		}
 
 	def update_proxy_routes(self) -> None:
