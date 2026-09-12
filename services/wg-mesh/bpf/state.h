@@ -25,7 +25,7 @@ struct
 	__uint(max_entries, 4096);
 } privileged_tenant_allowed_addresses SEC(".maps");
 
-/* Learned remote VM-to-WireGuard-host locations. A miss sends WHO_HAS. */
+/* Learned remote VM-to-WireGuard-host locations, filled from NDP advertisements. */
 struct
 {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
@@ -34,17 +34,12 @@ struct
 	__uint(max_entries, 262144);
 } remote_vms SEC(".maps");
 
-/* Host configuration. */
+/* Host configuration. The first two fields serve the unicast discovery relay. */
 struct config
 {
-	/* Destination for locally generated WHO_HAS frames. */
 	__u32 discovery_ifindex;
 	__be32 underlay_ip4;
-	__u8 uplink_mac[ETH_ALEN];
-	__u8 pad[2];
 	struct in6_addr wg_ip6; /* This host's WireGuard address. */
-	__u32 who_has_rate;		/* Sustained WHO_HAS per second, per VM. 0 disables. */
-	__u32 who_has_burst;	/* Discovery bucket capacity. */
 };
 
 /* One host configuration entry. The integration writes it during setup. */
