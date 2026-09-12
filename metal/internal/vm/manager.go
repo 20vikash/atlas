@@ -22,6 +22,10 @@ import (
 // defaultFastApplyTimeout bounds an immediate guest update.
 const defaultFastApplyTimeout = 2 * time.Second
 
+const informationAttempts = 3
+
+const informationRetryDelay = 5 * time.Millisecond
+
 // ManagerConfig contains persistent VM manager settings.
 type ManagerConfig struct {
 	MachinesDirectory string
@@ -163,18 +167,16 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 	return informationFromRecords(desired, observed, DiskUsage{}), nil
 }
 
-// Information returns the persisted desired and observed VM state.
-func (manager *Manager) Information(ctx context.Context, identifier string) (Information, error) {
-	virtualMachine := manager.newVirtualMachine(identifier)
-	unlock, err := virtualMachine.lock(ctx)
-	if err != nil {
-		return Information{}, err
-	}
-	defer unlock()
+// Information returns the persisted desired and observed VM state. It takes no
+// operation lock, because a status read must not wait for the reconcile pass
+// that holds the lock across an image pull and a boot. Each record is written
+// atomically, so a read sees whole records.
+func (manager *Manager) Information(_ context.Context, identifier string) (Information, error) {
 	// Incoming migration targets are not normal VMs.
 	if manager.isTargetReserved(identifier) {
 		return Information{}, ErrNotFound
 	}
+
 	return manager.information(identifier)
 }
 
@@ -211,17 +213,37 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 	return manager.store.listIDs()
 }
 
-// information reads both records without taking the VM lock.
+// information retries a read when removal leaves one record temporarily absent.
 func (manager *Manager) information(identifier string) (Information, error) {
-	desired, err := manager.store.readDesired(identifier)
-	if err != nil {
-		return Information{}, err
+	var lastError error
+
+	for attempt := range informationAttempts {
+		if attempt > 0 {
+			time.Sleep(informationRetryDelay)
+		}
+
+		desired, desiredError := manager.store.readDesired(identifier)
+		observed, observedError := manager.store.readObserved(identifier)
+		if desiredError == nil && observedError == nil {
+			return informationFromRecords(desired, observed, observed.Disk), nil
+		}
+
+		lastError = errors.Join(desiredError, observedError)
+		if !isTornRemoval(desiredError, observedError) {
+			return Information{}, lastError
+		}
 	}
-	observed, err := manager.store.readObserved(identifier)
-	if err != nil {
-		return Information{}, err
+
+	return Information{}, lastError
+}
+
+// isTornRemoval reports whether removal left one record temporarily absent.
+func isTornRemoval(desiredError, observedError error) bool {
+	if errors.Is(desiredError, ErrNotFound) && observedError == nil {
+		return true
 	}
-	return informationFromRecords(desired, observed, observed.Disk), nil
+
+	return errors.Is(observedError, ErrNotFound) && desiredError == nil
 }
 
 // allocateUserID returns a host user ID that no stored or temporary VM holds.

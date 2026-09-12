@@ -76,8 +76,9 @@ def sync_detailed(
 ) -> Response[Any | ImageResponse]:
     """ Delete image
 
-     Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored
-    artifacts and remaining host snapshot data.
+     Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored
+    artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes
+    Archived and keeps its artifacts.
 
     Args:
         image_id (str):
@@ -113,8 +114,9 @@ def sync(
 ) -> Any | ImageResponse | None:
     """ Delete image
 
-     Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored
-    artifacts and remaining host snapshot data.
+     Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored
+    artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes
+    Archived and keeps its artifacts.
 
     Args:
         image_id (str):
@@ -145,8 +147,9 @@ async def asyncio_detailed(
 ) -> Response[Any | ImageResponse]:
     """ Delete image
 
-     Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored
-    artifacts and remaining host snapshot data.
+     Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored
+    artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes
+    Archived and keeps its artifacts.
 
     Args:
         image_id (str):
@@ -182,8 +185,9 @@ async def asyncio(
 ) -> Any | ImageResponse | None:
     """ Delete image
 
-     Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored
-    artifacts and remaining host snapshot data.
+     Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored
+    artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes
+    Archived and keeps its artifacts.
 
     Args:
         image_id (str):

@@ -328,6 +328,33 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 
 		update_network.assert_called_once_with({"public_network_throughput_mibps": 25})
 
+	def test_an_unowned_pool_address_is_claimed_for_the_tenant(self) -> None:
+		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
+		address = SimpleNamespace(
+			tenant_id=-1, status="Allocated", virtual_machine=None, begin_assignment=Mock()
+		)
+
+		with patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address):
+			VirtualMachineService(virtual_machine).assign_ip_address("203.0.113.10")
+
+		self.assertEqual(address.tenant_id, 7)
+		address.begin_assignment.assert_called_once_with("server-1", "VM-00001")
+
+	def test_an_attached_pool_address_is_not_claimed(self) -> None:
+		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
+		address = SimpleNamespace(
+			tenant_id=-1, status="Attached", virtual_machine=None, begin_assignment=Mock()
+		)
+
+		with (
+			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address),
+			self.assertRaises(frappe.ValidationError),
+		):
+			VirtualMachineService(virtual_machine).assign_ip_address("203.0.113.10")
+
+		self.assertEqual(address.tenant_id, -1)
+		address.begin_assignment.assert_not_called()
+
 	def test_an_ip_address_from_another_tenant_is_rejected(self) -> None:
 		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
 		address = SimpleNamespace(tenant_id=8, status="Allocated", virtual_machine=None)

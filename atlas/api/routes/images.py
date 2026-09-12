@@ -6,7 +6,6 @@ import frappe
 
 from atlas.api.core.base import (
 	ApiResult,
-	ListQuery,
 	Page,
 	build_page,
 	get_owned_document,
@@ -16,7 +15,12 @@ from atlas.api.core.errors import (
 	ResourceConflict,
 	ResourceNotFound,
 )
-from atlas.api.models import ImageDownloadQuery, ImageDownloadResponse, ImageResponse
+from atlas.api.models import (
+	ImageDownloadQuery,
+	ImageDownloadResponse,
+	ImageListQuery,
+	ImageResponse,
+)
 from atlas.api.router import images
 from atlas.auth.identity import get_current_tenant_id
 
@@ -31,13 +35,18 @@ def get_owned_image(image_id: str) -> VirtualMachineImage:
 
 @images.get("")
 @api_docs()
-def list_images(query: ListQuery) -> Page[ImageResponse]:
+def list_images(query: ImageListQuery) -> Page[ImageResponse]:
 	"""List images.
 
-	Returns one page of System and Machine images owned by the tenant in newest-first order.
+	Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both.
 	"""
+	filters: dict[str, str | int] = {"enabled": 1}
+	if query.image_type:
+		filters["image_type"] = query.image_type
+
 	rows: list[VirtualMachineImage] = frappe.get_list(
 		"Virtual Machine Image",
+		filters=filters,
 		or_filters={"tenant_id": get_current_tenant_id(), "image_type": "system"},
 		fields=[
 			"name",
@@ -93,13 +102,13 @@ def download_image(image_id: str, query: ImageDownloadQuery) -> ApiResult[ImageD
 @api_docs(
 	responses={
 		202: {"description": "Deletion started. Poll the image route."},
-		409: {"description": "A virtual machine uses this image, or another tenant owns it."},
+		409: {"description": "Another tenant owns this System image."},
 	},
 )
 def delete_image(image_id: str) -> ApiResult[ImageResponse]:
 	"""Delete image.
 
-	Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored artifacts and remaining host snapshot data.
+	Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts.
 	"""
 	image = get_owned_image(image_id)
 	if image.tenant_id != get_current_tenant_id():

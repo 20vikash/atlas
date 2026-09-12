@@ -70,7 +70,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Pending\nSnapshotting\nUploading\nCompleting\nCleaning\nAvailable\nFailed\nDeleting",
+   "options": "Pending\nSnapshotting\nUploading\nCompleting\nCleaning\nAvailable\nFailed\nDeleting\nArchived",
    "read_only": 1,
    "reqd": 1
   },
@@ -377,6 +377,10 @@
   {
    "color": "Red",
    "title": "Deleting"
+  },
+  {
+   "color": "Gray",
+   "title": "Archived"
   }
  ],
  "title_field": "title"

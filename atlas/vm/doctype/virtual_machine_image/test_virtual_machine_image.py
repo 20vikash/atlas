@@ -50,6 +50,12 @@ class TestVirtualMachineImage(UnitTestCase):
 			setattr(image, key, value)
 		return image
 
+	def test_an_archived_image_cannot_boot_a_virtual_machine(self) -> None:
+		image = self.make_image(status="Archived")
+
+		with self.assertRaises(frappe.ValidationError):
+			image.validate_is_available()
+
 	def test_download_returns_only_the_selected_artifact(self) -> None:
 		image = self.make_image()
 		with (

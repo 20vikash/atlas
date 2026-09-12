@@ -23,6 +23,22 @@ frappe.ui.form.on("Virtual Machine Image", {
 			});
 		}
 
+		if (["Available", "Failed"].includes(frm.doc.status)) {
+			frm.add_custom_button(
+				__("Delete Image"),
+				() => {
+					frappe.confirm(
+						__(
+							"Delete {0}? New virtual machines cannot use it. Its artifacts stay while a virtual machine still needs them.",
+							[frm.doc.title]
+						),
+						() => frm.call("request_deletion").then(() => frm.reload_doc())
+					);
+				},
+				__("Dangerous Actions")
+			);
+		}
+
 		if (frm.doc.artifact_storage === "Site File" && frm.doc.status === "Available") {
 			frm.add_custom_button(__("Migrate to Object Storage"), () => {
 				frm.call("migrate_to_object_storage").then(() => frm.reload_doc());

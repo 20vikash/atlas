@@ -54,6 +54,10 @@ An address carries a desired intent and an intent version. Reconciliation applie
 
 An address also carries the tenant that reserved it. An address without a tenant is in the shared pool. `IPAddressService` owns reservation and release. A reservation uses the shared pool or the provider. A pool claim locks one unowned row before it writes the tenant, so two requests never take the same address, and an empty pool is an error instead of a silent provider reservation. A release clears the tenant, keeps the provider reservation, and refuses an attached or detaching address.
 
+A virtual machine can attach an address that its own tenant holds, or an unowned address from the shared pool. Attaching an unowned address claims it for the tenant of the virtual machine. An address that another tenant holds is refused.
+
+Reset Tenant returns one unattached address to the shared pool from the desk. It needs the System Manager role, and it refuses an address that is already unowned. The action adds a comment that records the losing tenant, because the address keeps no trace of its previous owner.
+
 ## Related
 
 - [docs/metal-server-lifecycle.md](../docs/metal-server-lifecycle.md) describes the lifecycle and its reasons.

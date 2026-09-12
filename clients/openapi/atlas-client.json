@@ -1283,7 +1283,7 @@
   "paths": {
     "/api/atlas/images": {
       "get": {
-        "description": "Returns one page of System and Machine images owned by the tenant in newest-first order.",
+        "description": "Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both.",
         "operationId": "list_images",
         "parameters": [
           {
@@ -1319,6 +1319,27 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "image_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "system",
+                    "machine"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Image Type"
+            }
           }
         ],
         "responses": {
@@ -1341,7 +1362,7 @@
     },
     "/api/atlas/images/{image_id}": {
       "delete": {
-        "description": "Starts deletion of an unused Available image that the tenant owns. A cleanup job removes its stored artifacts and remaining host snapshot data.",
+        "description": "Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts.",
         "operationId": "delete_image",
         "parameters": [
           {
@@ -1376,7 +1397,7 @@
             "description": "Deletion started. Poll the image route."
           },
           "409": {
-            "description": "A virtual machine uses this image, or another tenant owns it."
+            "description": "Another tenant owns this System image."
           }
         },
         "summary": "Delete image",

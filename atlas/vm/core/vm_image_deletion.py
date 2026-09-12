@@ -29,18 +29,44 @@ class VirtualMachineImageInUse(AtlasUserError):
 class VirtualMachineImageDeletionService:
 	"""Own the deletion of one Machine image."""
 
-	def request(self, image: VirtualMachineImage) -> None:
-		"""Mark one unused Machine image for deletion and queue its cleanup."""
-		if image.image_type != "machine":
-			frappe.throw(_("Only a Machine image can be deleted."), exc=AtlasUserError)
-		if image.status != "Available":
-			frappe.throw(_("Only an Available Machine image can be deleted."), exc=AtlasUserError)
-		self.validate_is_unused(cast(str, image.name))
+	def request(self, image: VirtualMachineImage) -> str:
+		"""Retire one image, and reclaim its artifacts when nothing needs them."""
+		if image.status not in ("Available", "Failed"):
+			frappe.throw(_("Only an Available or Failed image can be deleted."), exc=AtlasUserError)
 
-		image.status = "Deleting"
+		image.status = "Deleting" if self.is_reclaimable(image) else "Archived"
 		image.enabled = 0
 		image.save()
-		self.enqueue(cast(str, image.name))
+
+		if image.status == "Deleting":
+			self.enqueue(cast(str, image.name))
+
+		return cast(str, image.status)
+
+	def reclaim_archived(self) -> None:
+		"""Delete each archived Machine image that lost its last virtual machine."""
+		for name in frappe.get_all(
+			"Virtual Machine Image",
+			filters={"image_type": "machine", "status": "Archived"},
+			pluck="name",
+		):
+			if frappe.db.exists("Virtual Machine", {"virtual_machine_image": name}):
+				continue
+
+			frappe.db.set_value("Virtual Machine Image", name, "status", "Deleting")
+			self.enqueue(name)
+
+	@staticmethod
+	def is_reclaimable(image: VirtualMachineImage) -> bool:
+		"""Return whether the stored artifacts can be removed now.
+
+		A System image stays shared, so only a Machine image that no virtual
+		machine references releases its storage.
+		"""
+		if image.image_type != "machine":
+			return False
+
+		return not frappe.db.exists("Virtual Machine", {"virtual_machine_image": image.name})
 
 	def enqueue(self, image_name: str) -> None:
 		"""Enqueue one repeatable Machine image cleanup."""
@@ -102,15 +128,16 @@ class VirtualMachineImageDeletionService:
 
 
 def enqueue_pending_virtual_machine_image_deletions() -> None:
-	"""Resume Machine image deletions that did not finish."""
-	names = frappe.get_all(
+	"""Resume unfinished deletions and reclaim an archived image that is now unused."""
+	service = VirtualMachineImageDeletionService()
+	for name in frappe.get_all(
 		"Virtual Machine Image",
 		filters={"image_type": "machine", "status": "Deleting"},
 		pluck="name",
-	)
-	service = VirtualMachineImageDeletionService()
-	for name in names:
+	):
 		service.enqueue(name)
+
+	service.reclaim_archived()
 
 
 @run_as_admin

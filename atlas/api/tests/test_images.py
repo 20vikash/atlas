@@ -80,9 +80,12 @@ class TestImageAccess(IntegrationTestCase):
 		self.own_image = insert_image(TENANT_ID)
 		self.other_image = insert_image(OTHER_TENANT_ID)
 
-	def list_names(self, tenant_id: int) -> set[str]:
+	def list_names(self, tenant_id: int, image_type: str | None = None) -> set[str]:
 		"""Return the image identifiers that one tenant can list."""
-		with api_request("GET", "/api/atlas/images", tenant_id=tenant_id, query_string={"limit": "100"}):
+		query = {"limit": "100"}
+		if image_type:
+			query["image_type"] = image_type
+		with api_request("GET", "/api/atlas/images", tenant_id=tenant_id, query_string=query):
 			status, body = call_route(list_images)
 
 		self.assertEqual(status, 200)
@@ -95,6 +98,38 @@ class TestImageAccess(IntegrationTestCase):
 		self.assertIn(self.own_image, names)
 		self.assertNotIn(self.other_image, names)
 		self.assertIn(self.zero_tenant_image, names)
+
+	def test_the_system_type_returns_only_system_images(self) -> None:
+		names = self.list_names(TENANT_ID, "system")
+
+		self.assertIn(self.system_image, names)
+		self.assertIn(self.zero_tenant_image, names)
+		self.assertNotIn(self.own_image, names)
+
+	def test_the_machine_type_returns_only_owned_machine_images(self) -> None:
+		names = self.list_names(TENANT_ID, "machine")
+
+		self.assertIn(self.own_image, names)
+		self.assertNotIn(self.system_image, names)
+		self.assertNotIn(self.other_image, names)
+
+	def test_a_disabled_image_is_left_out(self) -> None:
+		disabled = insert_image(TENANT_ID, "machine", enabled=0)
+		disabled_system = insert_image(TENANT_ID, "system", enabled=0)
+
+		names = self.list_names(TENANT_ID)
+
+		self.assertNotIn(disabled, names)
+		self.assertNotIn(disabled_system, names)
+		self.assertIn(self.own_image, names)
+
+	def test_an_unknown_image_type_is_refused(self) -> None:
+		with api_request(
+			"GET", "/api/atlas/images", tenant_id=TENANT_ID, query_string={"image_type": "bogus"}
+		):
+			status, _body = call_route(list_images)
+
+		self.assertEqual(status, 400)
 
 	def test_another_tenant_cannot_read_a_machine_image(self) -> None:
 		with api_request("GET", "/api/atlas/images/x", tenant_id=OTHER_TENANT_ID):

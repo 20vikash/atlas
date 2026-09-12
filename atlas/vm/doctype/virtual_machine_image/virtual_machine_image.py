@@ -77,6 +77,7 @@ class VirtualMachineImage(Document):
 			"Available",
 			"Failed",
 			"Deleting",
+			"Archived",
 		]
 		tenant_id: DF.Int
 		title: DF.Data
@@ -270,10 +271,10 @@ class VirtualMachineImage(Document):
 		VirtualMachineImageStorageMigration().request(self)
 
 	@frappe.whitelist(methods=["POST"])
-	def request_deletion(self) -> None:
-		"""Queue deletion of this unused Machine image."""
+	def request_deletion(self) -> str:
+		"""Retire this image and return the status it reached."""
 		self.check_permission("write")
 
 		from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
 
-		VirtualMachineImageDeletionService().request(self)
+		return VirtualMachineImageDeletionService().request(self)
