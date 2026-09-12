@@ -17,6 +17,7 @@ from .ip_address_assignment_payload import IPAddressAssignmentPayload
 from .ip_address_response import IPAddressResponse
 from .json_web_key import JSONWebKey
 from .json_web_key_set_response import JSONWebKeySetResponse
+from .list_images_image_type_type_0 import ListImagesImageTypeType0
 from .metadata_replacement_payload import MetadataReplacementPayload
 from .metadata_replacement_payload_metadata import MetadataReplacementPayloadMetadata
 from .network_update_payload import NetworkUpdatePayload
@@ -56,6 +57,7 @@ __all__ = (
     "IPAddressResponse",
     "JSONWebKey",
     "JSONWebKeySetResponse",
+    "ListImagesImageTypeType0",
     "MetadataReplacementPayload",
     "MetadataReplacementPayloadMetadata",
     "NetworkUpdatePayload",

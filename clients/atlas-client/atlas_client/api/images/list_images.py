@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.list_images_image_type_type_0 import ListImagesImageTypeType0
 from ...models.page_image_response import PageImageResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -18,6 +19,7 @@ def _get_kwargs(
     *,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -34,6 +36,15 @@ def _get_kwargs(
     params["offset"] = offset
 
     params["limit"] = limit
+
+    json_image_type: None | str | Unset
+    if isinstance(image_type, Unset):
+        json_image_type = UNSET
+    elif isinstance(image_type, ListImagesImageTypeType0):
+        json_image_type = image_type.value
+    else:
+        json_image_type = image_type
+    params["image_type"] = json_image_type
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -79,16 +90,20 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> Response[PageImageResponse]:
     """ List images
 
-     Returns one page of System and Machine images owned by the tenant in newest-first order.
+     Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
+    disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as
+    `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
     Raises:
@@ -103,6 +118,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         offset=offset,
 limit=limit,
+image_type=image_type,
 x_tenant_id=x_tenant_id,
 
     )
@@ -118,16 +134,20 @@ def sync(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> PageImageResponse | None:
     """ List images
 
-     Returns one page of System and Machine images owned by the tenant in newest-first order.
+     Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
+    disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as
+    `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
     Raises:
@@ -143,6 +163,7 @@ def sync(
         client=client,
 offset=offset,
 limit=limit,
+image_type=image_type,
 x_tenant_id=x_tenant_id,
 
     ).parsed
@@ -152,16 +173,20 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> Response[PageImageResponse]:
     """ List images
 
-     Returns one page of System and Machine images owned by the tenant in newest-first order.
+     Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
+    disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as
+    `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
     Raises:
@@ -176,6 +201,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         offset=offset,
 limit=limit,
+image_type=image_type,
 x_tenant_id=x_tenant_id,
 
     )
@@ -191,16 +217,20 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> PageImageResponse | None:
     """ List images
 
-     Returns one page of System and Machine images owned by the tenant in newest-first order.
+     Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
+    disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as
+    `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
     Raises:
@@ -216,6 +246,7 @@ async def asyncio(
         client=client,
 offset=offset,
 limit=limit,
+image_type=image_type,
 x_tenant_id=x_tenant_id,
 
     )).parsed
