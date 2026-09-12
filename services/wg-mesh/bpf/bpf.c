@@ -2,7 +2,7 @@
 /*
  * Atlas WG Mesh BPF object assembly file.
  *
- * BPF maps and all three TC hooks are deliberately compiled as one object.
+ * BPF maps and all TC hooks are deliberately compiled as one object.
  * That lets the loader pin one shared set of maps for every hook.
  */
 
@@ -10,6 +10,7 @@
 #include "state.h"
 #include "vm_hook.h"
 #include "ndp_hook.h"
+#include "ndp_unicast_hook.h"
 #include "wireguard_hook.h"
 
 /* The kernel BPF ABI requires this string for GPL-only helper access. */
