@@ -45,13 +45,27 @@ Atlas saves both multipart upload IDs before it asks Metal to start. A failed st
 
 Retry Transfer uses these durable values. It does not create a second image record. Atlas does not log signed URLs.
 
-## Deletion
+## Listing
 
-Only an Available Machine image can enter deletion. Deletion marks the image `Deleting` and queues a cleanup job. The job deletes the root file system and kernel objects, removes the Metal staging data, and then deletes the record.
+`GET /api/atlas/images` returns the enabled images that the tenant owns, and every enabled System image. A disabled image cannot boot a virtual machine, so the list leaves it out. Retirement disables an image, so a retired image also leaves the list.
 
-Atlas refuses deletion while a virtual machine uses the image. A System image cannot be deleted through the tenant API.
+Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both. Any other value is a `400`.
+
+`GET /api/atlas/images/<image ID>` returns one image by its identifier, and it also returns a disabled image. Use it to follow a retiring image.
+
+## Retirement and deletion
+
+An Available or Failed image can be retired. Retirement always disables the image, so no new virtual machine can use it.
+
+Atlas reclaims the stored artifacts only when nothing needs them. A Machine image that no virtual machine uses becomes `Deleting` and queues a cleanup job. Every other image becomes `Archived` and keeps its artifacts. A System image is shared, so it always becomes `Archived`.
+
+The cleanup job deletes the root file system and kernel objects, removes the Metal staging data, and then deletes the record.
+
+A scheduled pass reclaims an `Archived` Machine image after its last virtual machine is deleted. The pass moves the image to `Deleting` and queues the same cleanup job. An `Archived` System image stays.
 
 If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and tries the job again every 30 seconds.
+
+A retiring image keeps its record until the cleanup job removes it, so a caller can read the image by its identifier and follow the status.
 
 ## Cached and warm artifacts
 
