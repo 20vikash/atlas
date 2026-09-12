@@ -6,7 +6,6 @@ import frappe
 
 from atlas.api.core.base import (
 	ApiResult,
-	ListQuery,
 	Page,
 	build_page,
 	get_owned_document,
@@ -16,7 +15,12 @@ from atlas.api.core.errors import (
 	ResourceConflict,
 	ResourceNotFound,
 )
-from atlas.api.models import ImageDownloadQuery, ImageDownloadResponse, ImageResponse
+from atlas.api.models import (
+	ImageDownloadQuery,
+	ImageDownloadResponse,
+	ImageListQuery,
+	ImageResponse,
+)
 from atlas.api.router import images
 from atlas.auth.identity import get_current_tenant_id
 
@@ -31,13 +35,14 @@ def get_owned_image(image_id: str) -> VirtualMachineImage:
 
 @images.get("")
 @api_docs()
-def list_images(query: ListQuery) -> Page[ImageResponse]:
+def list_images(query: ImageListQuery) -> Page[ImageResponse]:
 	"""List images.
 
-	Returns one page of System and Machine images owned by the tenant in newest-first order.
+	Returns one page of System and Machine images owned by the tenant in newest-first order. Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both.
 	"""
 	rows: list[VirtualMachineImage] = frappe.get_list(
 		"Virtual Machine Image",
+		filters={"image_type": query.image_type} if query.image_type else None,
 		or_filters={"tenant_id": get_current_tenant_id(), "image_type": "system"},
 		fields=[
 			"name",

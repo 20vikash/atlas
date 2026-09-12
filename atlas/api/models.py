@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from frappe.utils import get_datetime, get_system_timezone
 from pydantic import BaseModel, ConfigDict, Field
 
-from atlas.api.core.base import PatchPayload, StrictModel
+from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
 from atlas.vm.core.models import VirtualMachineCreateRequest
 
 if TYPE_CHECKING:
@@ -160,6 +160,12 @@ class ImageResponse(BaseModel):
 			transfer_error=image.transfer_error or None,
 			created_at=to_unix_timestamp(image.creation),
 		)
+
+
+class ImageListQuery(ListQuery):
+	"""Page through images, and narrow them to one image type when asked."""
+
+	image_type: Literal["system", "machine"] | None = None
 
 
 class ImageDownloadQuery(StrictModel):
