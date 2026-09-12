@@ -15,8 +15,6 @@ func init() {
 	configureCommand.Flags().StringVar(&wireGuardName, "wireguard", "", "WireGuard interface")
 	configureCommand.MarkFlagRequired("uplink")
 	configureCommand.MarkFlagRequired("wireguard")
-	configureCommand.Flags().Uint32Var(&whoHasRate, "who-has-rate", defaultWhoHasRate, "sustained WHO_HAS per second per VM (0 disables)")
-	configureCommand.Flags().Uint32Var(&whoHasBurst, "who-has-burst", defaultWhoHasBurst, "discovery burst capacity per VM")
 
 	addVirtualMachineCommand.Flags().StringVar(&addInterfaceName, "interface", "", "VM interface")
 	addVirtualMachineCommand.Flags().StringVar(&addAddressText, "address", "", "VM private IPv6 address")
