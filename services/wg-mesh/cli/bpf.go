@@ -17,22 +17,19 @@ import (
 
 const (
 	vmBPFProgram     = "handle_vm_packet"
-	uplinkProgram    = "handle_uplink_packet"
+	ndpProgram       = "handle_ndp_packet"
 	wireguardProgram = "handle_wireguard_packet"
 )
 
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
 
-// Must match struct config in bpf/state.h.
+// Must match struct config in bpf/state.h. The discovery fields serve the
+// unicast discovery relay.
 type hostConfig struct {
 	DiscoveryIndex uint32
 	UplinkIPv4     [4]byte
-	UplinkMAC      [6]byte
-	Padding        [2]byte
 	WireGuardIPv6  [16]byte
-	WhoHasRate     uint32
-	WhoHasBurst    uint32
 }
 
 // setDiscoveryInterface rewrites one field of the shared host config, so it
@@ -239,7 +236,7 @@ func localVirtualMachines() ([]localVirtualMachine, error) {
 }
 
 // remoteLocationCount returns learned-cache occupancy and capacity.
-// A full LRU evicts entries, which are rediscovered with WHO_HAS.
+// A full LRU evicts entries, which NDP learns again.
 func remoteLocationCount() (int, uint32, error) {
 	remoteMap, err := openMap("remote_vms")
 	if err != nil {
