@@ -8,6 +8,7 @@
   "column_break_status",
   "virtual_machine",
   "installation_task",
+  "auto_build_pilot_images",
   "failure_section",
   "failure_message"
  ],
@@ -36,6 +37,19 @@
    "fieldtype": "Link",
    "label": "Installation Task",
    "options": "SSH Task",
+   "read_only": 1
+  },
+  {
+   "fieldname": "auto_build_pilot_images",
+   "fieldtype": "Check",
+   "label": "Auto Build Pilot Images",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "pilot_release_tracker_pending",
+   "fieldtype": "Check",
+   "hidden": 1,
    "read_only": 1
   },
   {

@@ -231,6 +231,7 @@ scheduler_events = {
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
 			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_cargo_provisioning",
 			"atlas.service.core.cargo.bucket.enqueue_pending_bucket_provisioning",
+			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_pilot_release_tracker_enable",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
 			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],
