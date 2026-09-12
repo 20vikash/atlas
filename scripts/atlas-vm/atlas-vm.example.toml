@@ -10,14 +10,12 @@ ssh_port = 2222
 [pilot]
 site = "atlas.example.com"
 admin_domain = "admin.example.com"
-password = "Atlas#Bench2026x"
 user = "frappe"
 letsencrypt_email = "ops@example.com"
 
 [atlas]
 repository = "https://github.com/frappe/atlas"
 branch = "develop"
-base_url = "https://atlas.example.com"
 server_provider = "Scaleway"
 dns_provider = "Route53"
 region_name = "par-1"

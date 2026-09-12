@@ -76,7 +76,8 @@ class AtlasSetupConfiguration:
 			if not isinstance(values[field], bool):
 				raise ValueError(f"Atlas setup field {field} must be true or false")
 
-		return cls(**values)
+		normalized_values = {**values, "region_name": values["region_name"].strip().lower()}
+		return cls(**normalized_values)
 
 	def settings_values(self) -> dict[str, object]:
 		"""Return the values that belong to Atlas Settings."""
@@ -105,9 +106,9 @@ class AtlasSetup:
 	def run(self) -> None:
 		"""Apply settings and complete each setup phase."""
 		self._validate_immutable_values()
+		self._clear_certificate_for_environment_change()
 		self.settings.update(self.configuration.settings_values())
 		self.settings.save(ignore_permissions=True)
-		frappe.db.commit()  # nosemgrep: a setup checkpoint must survive a later provider failure
 
 		self._setup_server_provider()
 		self._setup_dns_provider()
@@ -115,6 +116,8 @@ class AtlasSetup:
 		self._sync_central_keys()
 		self._issue_wildcard_certificate()
 		self._validate_result()
+		# A site command has no request transaction. Keep the completed reconciliation.
+		frappe.db.commit()  # nosemgrep
 
 	def _validate_immutable_values(self) -> None:
 		if self.settings.is_server_provider_setup_completed:
@@ -133,12 +136,27 @@ class AtlasSetup:
 					)
 				)
 
+	def _clear_certificate_for_environment_change(self) -> None:
+		if bool(self.settings.is_letsencrypt_staging) == self.configuration.is_letsencrypt_staging:
+			return
+		if not self.settings.wildcard_tls_certificate:
+			return
+
+		self.settings.wildcard_tls_certificate = None
+		self.settings.wildcard_tls_private_key = None
+
 	def _setup_server_provider(self) -> None:
 		if self.settings.is_server_provider_setup_completed:
 			return
 
-		self.settings.server_provider_controller.setup_infrastructure()
-		frappe.db.commit()  # nosemgrep: keep provider resource IDs when a later phase fails
+		try:
+			self.settings.server_provider_controller.setup_infrastructure()
+		except Exception:
+			# Keep IDs for cloud resources that the failed provider call created.
+			frappe.db.commit()  # nosemgrep
+			raise
+		# Keep provider resource IDs when a later external phase fails.
+		frappe.db.commit()  # nosemgrep
 
 	def _setup_dns_provider(self) -> None:
 		provider = self.settings.dns_provider_controller
@@ -160,28 +178,34 @@ class AtlasSetup:
 			return
 
 		self.settings.route53_dns_zone_id = zone_id
-		provider.bootstrap()
-		frappe.db.commit()  # nosemgrep: keep DNS setup when a later phase fails
+		try:
+			provider.bootstrap()
+		except Exception:
+			# Keep the zone ID and records that the failed provider call created.
+			frappe.db.commit()  # nosemgrep
+			raise
+		# Keep DNS state when a later external phase fails.
+		frappe.db.commit()  # nosemgrep
 
 	def _sync_catalogs(self) -> None:
 		catalog = CatalogSynchronizer(self.settings.server_provider_controller)
 		catalog.sync_server_sizes()
 		catalog.sync_server_images()
-		frappe.db.commit()  # nosemgrep: keep catalog data when a later phase fails
 
 	def _sync_central_keys(self) -> None:
 		if not sync_central_jwks():
 			frappe.throw(_("Atlas could not get the configured Central JSON Web Key Set."))
-		frappe.db.commit()  # nosemgrep: keep a valid key set when certificate issuance fails
+		self.settings.reload()
 
 	def _issue_wildcard_certificate(self) -> None:
-		if not self._certificate_needs_renewal():
+		if not self._does_certificate_need_renewal():
 			return
 
 		self.settings.issue_wildcard_certificate()
-		frappe.db.commit()  # nosemgrep: certificate issuance is an external setup checkpoint
+		# Keep the issued certificate because the ACME request cannot roll back.
+		frappe.db.commit()  # nosemgrep
 
-	def _certificate_needs_renewal(self) -> bool:
+	def _does_certificate_need_renewal(self) -> bool:
 		expires_on = self.settings.wildcard_tls_expires_on
 		if not expires_on:
 			return True

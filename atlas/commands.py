@@ -155,7 +155,7 @@ def build_ubuntu_base_image(
 	target_sites = context.sites
 	if skip_existing:
 		target_sites = [
-			site for site in context.sites if not image_is_available(site, title, version, architecture)
+			site for site in context.sites if not is_image_available(site, title, version, architecture)
 		]
 	if not target_sites:
 		click.echo(f"Image {title} is already available")
@@ -185,7 +185,7 @@ def build_ubuntu_base_image(
 			frappe.destroy()
 
 
-def image_is_available(site: str, title: str, version: str, architecture: str) -> bool:
+def is_image_available(site: str, title: str, version: str, architecture: str) -> bool:
 	"""Return true when a site has the requested system image."""
 	try:
 		frappe.init(site)

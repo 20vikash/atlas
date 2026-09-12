@@ -163,9 +163,13 @@ class Settings:
 
 def validate_configuration(document: dict, path: Path) -> None:
 	"""Reject an incomplete deployment configuration before the VM changes."""
-	allowed_top_level = {"vm", "pilot", "atlas", "image"}
-	_validate_keys(document, allowed_top_level, path, "")
-	vm = document.get("vm", {})
+	_validate_keys(document, {"vm", "pilot", "atlas", "image"}, path, "")
+	_validate_vm_configuration(document.get("vm", {}), path)
+	_validate_pilot_configuration(_required_table(document, "pilot", path), path)
+	_validate_atlas_configuration(_required_table(document, "atlas", path), path)
+
+
+def _validate_vm_configuration(vm: object, path: Path) -> None:
 	if not isinstance(vm, dict):
 		raise AtlasVmError(f"{path}: vm must be a table")
 	_validate_keys(vm, {"vcpu_count", "memory_mib", "disk_gib", "ssh_port"}, path, "vm")
@@ -175,15 +179,18 @@ def validate_configuration(document: dict, path: Path) -> None:
 			raise AtlasVmError(f"{path}: vm.{key} must be a positive integer")
 	if vm.get("ssh_port", 2222) > 65_535:
 		raise AtlasVmError(f"{path}: vm.ssh_port must be at most 65535")
-	pilot = _required_table(document, "pilot", path)
-	_validate_keys(pilot, {"site", "admin_domain", "password", "user", "letsencrypt_email"}, path, "pilot")
-	for key in ("site", "password", "letsencrypt_email"):
+
+
+def _validate_pilot_configuration(pilot: dict, path: Path) -> None:
+	_validate_keys(pilot, {"site", "admin_domain", "user", "letsencrypt_email"}, path, "pilot")
+	for key in ("site", "letsencrypt_email"):
 		_required_string(pilot, key, path, "pilot")
 	for key in ("admin_domain", "user"):
 		if key in pilot:
 			_required_string(pilot, key, path, "pilot")
 
-	atlas = _required_table(document, "atlas", path)
+
+def _validate_atlas_configuration(atlas: dict, path: Path) -> None:
 	_validate_keys(
 		atlas,
 		{
@@ -205,12 +212,12 @@ def validate_configuration(document: dict, path: Path) -> None:
 		path,
 		"atlas",
 	)
-	for key in ("base_url", "server_provider", "dns_provider", "region_name", "wildcard_domain"):
+	for key in ("server_provider", "dns_provider", "region_name", "wildcard_domain"):
 		_required_string(atlas, key, path, "atlas")
 	for key in ("private_network_cidr", "private_network_mtu", "central_jwks_url"):
 		if key not in atlas:
 			raise AtlasVmError(f"{path}: atlas.{key} is required")
-	for key in ("repository", "branch", "central_jwks_url"):
+	for key in ("repository", "branch", "base_url", "central_jwks_url"):
 		if key in atlas and not isinstance(atlas[key], str):
 			raise AtlasVmError(f"{path}: atlas.{key} must be a string")
 	if atlas["server_provider"] != "Scaleway":
@@ -219,7 +226,13 @@ def validate_configuration(document: dict, path: Path) -> None:
 		raise AtlasVmError(f"{path}: atlas.dns_provider must be Route53")
 	if atlas["wildcard_domain"].startswith("*.") or "." not in atlas["wildcard_domain"]:
 		raise AtlasVmError(f"{path}: atlas.wildcard_domain must be a domain without '*.'")
+	_validate_network_configuration(atlas, path)
+	_validate_scaleway_configuration(_required_table(atlas, "scaleway", path, "atlas"), path)
+	_validate_route53_configuration(_required_table(atlas, "route53", path, "atlas"), path)
+	_validate_letsencrypt_configuration(_required_table(atlas, "letsencrypt", path, "atlas"), path)
 
+
+def _validate_network_configuration(atlas: dict, path: Path) -> None:
 	region_id = _required_integer(atlas, "region_id", path, "atlas")
 	if not 0 <= region_id <= 65_535:
 		raise AtlasVmError(f"{path}: atlas.region_id must be from 0 through 65535")
@@ -233,7 +246,8 @@ def validate_configuration(document: dict, path: Path) -> None:
 	if network.version != 4 or not 20 <= network.prefixlen <= 29:
 		raise AtlasVmError(f"{path}: atlas.private_network_cidr must be an IPv4 network from /20 through /29")
 
-	scaleway = _required_table(atlas, "scaleway", path, "atlas")
+
+def _validate_scaleway_configuration(scaleway: dict, path: Path) -> None:
 	_validate_keys(
 		scaleway,
 		{"organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"},
@@ -247,12 +261,14 @@ def validate_configuration(document: dict, path: Path) -> None:
 	if scaleway["machine_billing_cycle"] not in {"Hourly", "Monthly"}:
 		raise AtlasVmError(f"{path}: atlas.scaleway.machine_billing_cycle must be Hourly or Monthly")
 
-	route53 = _required_table(atlas, "route53", path, "atlas")
+
+def _validate_route53_configuration(route53: dict, path: Path) -> None:
 	_validate_keys(route53, {"access_key_id", "secret_access_key"}, path, "atlas.route53")
 	for key in ("access_key_id", "secret_access_key"):
 		_required_string(route53, key, path, "atlas.route53")
 
-	letsencrypt = _required_table(atlas, "letsencrypt", path, "atlas")
+
+def _validate_letsencrypt_configuration(letsencrypt: dict, path: Path) -> None:
 	_validate_keys(letsencrypt, {"email", "staging", "auto_renew"}, path, "atlas.letsencrypt")
 	_required_string(letsencrypt, "email", path, "atlas.letsencrypt")
 	for key in ("staging", "auto_renew"):
@@ -295,24 +311,28 @@ def validate_images(images: list[dict], path: Path) -> None:
 	if not isinstance(images, list):
 		raise AtlasVmError(f"{path}: image must be an array of tables")
 	for image in images:
-		if not isinstance(image, dict):
-			raise AtlasVmError(f"{path}: each image must be a table")
-		_validate_keys(image, {"version", "architecture", "minimal"}, path, "image")
-		version = image.get("version", "24.04")
-		architecture = image.get("architecture", "amd64")
-		minimal = image.get("minimal", False)
-		if not isinstance(version, str):
-			raise AtlasVmError(f"{path}: image.version must be a string")
-		if not isinstance(architecture, str):
-			raise AtlasVmError(f"{path}: image.architecture must be a string")
-		if not isinstance(minimal, bool):
-			raise AtlasVmError(f"{path}: image.minimal must be true or false")
-		if version not in ("22.04", "24.04"):
-			raise AtlasVmError(f"{path} asks for Ubuntu {version}; only 22.04 and 24.04 are supported")
-		if architecture != "amd64":
-			raise AtlasVmError(f"{path} asks for {architecture}; only amd64 is supported")
-		if minimal and version != "24.04":
-			raise AtlasVmError(f"{path} asks for a minimal Ubuntu {version}; only 24.04 has one")
+		_validate_image(image, path)
+
+
+def _validate_image(image: object, path: Path) -> None:
+	if not isinstance(image, dict):
+		raise AtlasVmError(f"{path}: each image must be a table")
+	_validate_keys(image, {"version", "architecture", "minimal"}, path, "image")
+	version = image.get("version", "24.04")
+	architecture = image.get("architecture", "amd64")
+	minimal = image.get("minimal", False)
+	if not isinstance(version, str):
+		raise AtlasVmError(f"{path}: image.version must be a string")
+	if not isinstance(architecture, str):
+		raise AtlasVmError(f"{path}: image.architecture must be a string")
+	if not isinstance(minimal, bool):
+		raise AtlasVmError(f"{path}: image.minimal must be true or false")
+	if version not in ("22.04", "24.04"):
+		raise AtlasVmError(f"{path} asks for Ubuntu {version}; only 22.04 and 24.04 are supported")
+	if architecture != "amd64":
+		raise AtlasVmError(f"{path} asks for {architecture}; only amd64 is supported")
+	if minimal and version != "24.04":
+		raise AtlasVmError(f"{path} asks for a minimal Ubuntu {version}; only 24.04 has one")
 
 
 def generate_password(length: int = 24) -> str:

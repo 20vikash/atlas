@@ -51,6 +51,9 @@ class TestAtlasSetupConfiguration(UnitTestCase):
 		with self.assertRaisesRegex(ValueError, "private_network_mtu must be an integer"):
 			AtlasSetupConfiguration.from_dict(values)
 
+	def test_region_name_is_normalized(self) -> None:
+		self.assertEqual(configuration(region_name=" PAR-1 ").region_name, "par-1")
+
 
 class TestAtlasSetup(UnitTestCase):
 	def setup(self, settings: object, **changes: object) -> AtlasSetup:
@@ -108,3 +111,25 @@ class TestAtlasSetup(UnitTestCase):
 		setup._issue_wildcard_certificate()
 
 		settings.issue_wildcard_certificate.assert_not_called()
+
+	def test_environment_change_clears_the_current_certificate(self) -> None:
+		settings = SimpleNamespace(
+			is_letsencrypt_staging=1,
+			wildcard_tls_certificate="staging certificate",
+			wildcard_tls_private_key="staging key",
+		)
+		setup = self.setup(settings, is_letsencrypt_staging=False)
+
+		setup._clear_certificate_for_environment_change()
+
+		self.assertIsNone(settings.wildcard_tls_certificate)
+		self.assertIsNone(settings.wildcard_tls_private_key)
+
+	def test_central_key_sync_reloads_settings(self) -> None:
+		settings = MagicMock()
+		setup = self.setup(settings)
+
+		with patch("atlas.atlas.core.setup.sync_central_jwks", return_value=True):
+			setup._sync_central_keys()
+
+		settings.reload.assert_called_once_with()

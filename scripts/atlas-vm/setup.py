@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
+import secrets
 import shlex
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
@@ -23,17 +24,6 @@ PILOT_INSTALL_URL = "https://raw.githubusercontent.com/frappe/pilot/develop/inst
 PYTHON_VERSION = "3.14"
 SETUP_GRANT = "/etc/sudoers.d/{user}-atlas-setup"
 IMAGE_BUILDER_GRANT = "/etc/sudoers.d/{user}-atlas-image-builder"
-SCALEWAY_ZONES = {
-	"fr-par-1",
-	"fr-par-2",
-	"fr-par-3",
-	"nl-ams-1",
-	"nl-ams-2",
-	"nl-ams-3",
-	"pl-waw-1",
-	"pl-waw-2",
-	"pl-waw-3",
-}
 
 
 class SetupError(Exception):
@@ -53,7 +43,7 @@ class Configuration:
 	"""What the VM needs to build the bench, the site, and the images."""
 
 	site: str
-	password: str
+	bootstrap_password: str
 	admin_domain: str
 	bench_name: str = "atlas"
 	bench_user: str = "frappe"
@@ -69,12 +59,11 @@ class Configuration:
 		if not path.is_file():
 			raise SetupError(f"no configuration at {path}")
 		document = tomllib.loads(path.read_text())
-		validate_configuration(document, path)
+		# atlas_vm validates this root-owned file before it copies the file into the guest.
 		pilot = document.get("pilot", {})
 		atlas = document.get("atlas", {})
 
 		site = pilot.get("site", "")
-		password = pilot.get("password", "")
 		images = [
 			(
 				image.get("version", "24.04"),
@@ -85,13 +74,13 @@ class Configuration:
 		]
 		return cls(
 			site=site,
-			password=password,
+			bootstrap_password=generate_password(),
 			admin_domain=pilot.get("admin_domain", f"admin.{site}"),
 			bench_user=pilot.get("user", "frappe"),
 			letsencrypt_email=pilot.get("letsencrypt_email", ""),
 			atlas_repository=atlas.get("repository", "https://github.com/frappe/atlas"),
 			atlas_branch=atlas.get("branch", "develop"),
-			atlas_base_url=atlas["base_url"],
+			atlas_base_url=atlas.get("base_url", f"https://{site}"),
 			atlas_setup_values=read_atlas_setup_values(atlas),
 			images=images,
 		)
@@ -141,145 +130,14 @@ def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
 	}
 
 
-def validate_configuration(document: dict, path: Path) -> None:
-	"""Reject a configuration that cannot complete Atlas setup."""
-	_keys(document, {"vm", "pilot", "atlas", "image"}, path, "")
-	vm = document.get("vm", {})
-	if not isinstance(vm, dict):
-		raise SetupError(f"{path}: vm must be a table")
-	_keys(vm, {"vcpu_count", "memory_mib", "disk_gib", "ssh_port"}, path, "vm")
-	for key in ("vcpu_count", "memory_mib", "disk_gib", "ssh_port"):
-		value = vm.get(key)
-		if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
-			raise SetupError(f"{path}: vm.{key} must be a positive integer")
-	if vm.get("ssh_port", 2222) > 65_535:
-		raise SetupError(f"{path}: vm.ssh_port must be at most 65535")
-	pilot = _table(document, "pilot", path)
-	_keys(pilot, {"site", "admin_domain", "password", "user", "letsencrypt_email"}, path, "pilot")
-	for key in ("site", "password", "letsencrypt_email"):
-		_string(pilot, key, path, "pilot")
-	for key in ("admin_domain", "user"):
-		if key in pilot:
-			_string(pilot, key, path, "pilot")
-
-	atlas = _table(document, "atlas", path)
-	_keys(
-		atlas,
-		{
-			"repository",
-			"branch",
-			"base_url",
-			"server_provider",
-			"dns_provider",
-			"region_name",
-			"region_id",
-			"wildcard_domain",
-			"private_network_cidr",
-			"private_network_mtu",
-			"central_jwks_url",
-			"scaleway",
-			"route53",
-			"letsencrypt",
-		},
-		path,
-		"atlas",
-	)
-	for key in ("base_url", "server_provider", "dns_provider", "region_name", "wildcard_domain"):
-		_string(atlas, key, path, "atlas")
-	for key in ("private_network_cidr", "private_network_mtu", "central_jwks_url"):
-		if key not in atlas:
-			raise SetupError(f"{path}: atlas.{key} is required")
-	for key in ("repository", "branch", "central_jwks_url"):
-		if key in atlas and not isinstance(atlas[key], str):
-			raise SetupError(f"{path}: atlas.{key} must be a string")
-	if atlas["server_provider"] != "Scaleway" or atlas["dns_provider"] != "Route53":
-		raise SetupError(f"{path}: Atlas setup supports Scaleway and Route53")
-	if atlas["wildcard_domain"].startswith("*.") or "." not in atlas["wildcard_domain"]:
-		raise SetupError(f"{path}: atlas.wildcard_domain must be a domain without '*.'")
-	region_id = atlas.get("region_id")
-	if not isinstance(region_id, int) or isinstance(region_id, bool) or not 0 <= region_id <= 65_535:
-		raise SetupError(f"{path}: atlas.region_id must be an integer from 0 through 65535")
-	try:
-		network = ipaddress.ip_network(atlas.get("private_network_cidr", "10.1.0.0/20"), strict=False)
-	except ValueError as error:
-		raise SetupError(f"{path}: atlas.private_network_cidr is invalid: {error}") from error
-	if network.version != 4 or not 20 <= network.prefixlen <= 29:
-		raise SetupError(f"{path}: atlas.private_network_cidr must be an IPv4 network from /20 through /29")
-	private_network_mtu = atlas.get("private_network_mtu")
-	if (
-		not isinstance(private_network_mtu, int)
-		or isinstance(private_network_mtu, bool)
-		or private_network_mtu <= 0
-	):
-		raise SetupError(f"{path}: atlas.private_network_mtu must be a positive integer")
-
-	scaleway = _table(atlas, "scaleway", path, "atlas")
-	_keys(
-		scaleway,
-		{"organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"},
-		path,
-		"atlas.scaleway",
-	)
-	for key in ("organization_id", "project_id", "zone", "machine_billing_cycle", "access_key", "secret_key"):
-		_string(scaleway, key, path, "atlas.scaleway")
-	if scaleway["zone"] not in SCALEWAY_ZONES:
-		raise SetupError(f"{path}: atlas.scaleway.zone is not supported")
-	if scaleway["machine_billing_cycle"] not in {"Hourly", "Monthly"}:
-		raise SetupError(f"{path}: atlas.scaleway.machine_billing_cycle must be Hourly or Monthly")
-
-	route53 = _table(atlas, "route53", path, "atlas")
-	_keys(route53, {"access_key_id", "secret_access_key"}, path, "atlas.route53")
-	for key in ("access_key_id", "secret_access_key"):
-		_string(route53, key, path, "atlas.route53")
-	letsencrypt = _table(atlas, "letsencrypt", path, "atlas")
-	_keys(letsencrypt, {"email", "staging", "auto_renew"}, path, "atlas.letsencrypt")
-	_string(letsencrypt, "email", path, "atlas.letsencrypt")
-	for key in ("staging", "auto_renew"):
-		if key not in letsencrypt:
-			raise SetupError(f"{path}: atlas.letsencrypt.{key} is required")
-		if not isinstance(letsencrypt[key], bool):
-			raise SetupError(f"{path}: atlas.letsencrypt.{key} must be true or false")
-	images = document.get("image", [])
-	if not isinstance(images, list) or any(not isinstance(image, dict) for image in images):
-		raise SetupError(f"{path}: image must be an array of tables")
-	for image in images:
-		_keys(image, {"version", "architecture", "minimal"}, path, "image")
-		version = image.get("version", "24.04")
-		architecture = image.get("architecture", "amd64")
-		minimal = image.get("minimal", False)
-		if not isinstance(version, str):
-			raise SetupError(f"{path}: image.version must be a string")
-		if not isinstance(architecture, str):
-			raise SetupError(f"{path}: image.architecture must be a string")
-		if not isinstance(minimal, bool):
-			raise SetupError(f"{path}: image.minimal must be true or false")
-		if version not in {"22.04", "24.04"}:
-			raise SetupError(f"{path}: unsupported Ubuntu version {version!r}")
-		if architecture != "amd64":
-			raise SetupError(f"{path}: unsupported image architecture {architecture!r}")
-		if minimal and version != "24.04":
-			raise SetupError(f"{path}: minimal images need Ubuntu 24.04")
-
-
-def _keys(values: dict, allowed: set[str], path: Path, prefix: str) -> None:
-	for key in values.keys() - allowed:
-		name = f"{prefix}.{key}" if prefix else key
-		raise SetupError(f"{path}: unknown configuration key {name}")
-
-
-def _table(values: dict, key: str, path: Path, prefix: str = "") -> dict:
-	name = f"{prefix}.{key}" if prefix else key
-	value = values.get(key)
-	if not isinstance(value, dict):
-		raise SetupError(f"{path}: {name} must be a table")
-	return value
-
-
-def _string(values: dict, key: str, path: Path, prefix: str) -> str:
-	value = values.get(key)
-	if not isinstance(value, str) or not value.strip():
-		raise SetupError(f"{path}: {prefix}.{key} must be a non-empty string")
-	return value
+def generate_password(length: int = 24) -> str:
+	"""Create one password that Pilot and Frappe accept."""
+	character_groups = (string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%^&*-_=+")
+	characters = "".join(character_groups)
+	while True:
+		password = "".join(secrets.choice(characters) for _ in range(length))
+		if all(any(character in group for character in password) for group in character_groups):
+			return password
 
 
 class Setup:
@@ -373,7 +231,7 @@ class Setup:
 		# Guard each step on what it produces, so a stopped run continues here.
 		configuration = self.configuration
 		step(f"stage 6: bench {configuration.bench_name}")
-		password = shlex.quote(configuration.password)
+		password = shlex.quote(configuration.bootstrap_password)
 		if not (configuration.bench_path / "bench.toml").is_file():
 			self.as_bench(
 				f"pilot new {configuration.bench_name} --admin-password {password}"
@@ -388,7 +246,8 @@ class Setup:
 		site_config = configuration.bench_path / "sites" / configuration.site / "site_config.json"
 		if not site_config.is_file():
 			self.pilot(
-				f"new-site {configuration.site} --admin-password {shlex.quote(configuration.password)}"
+				f"new-site {configuration.site}"
+				f" --admin-password {shlex.quote(configuration.bootstrap_password)}"
 			)
 
 	def get_atlas(self) -> None:

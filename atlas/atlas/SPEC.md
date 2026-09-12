@@ -68,6 +68,8 @@ The `configure-atlas` site command reads one JSON document from standard input. 
 
 The command keeps provider resource identifiers after each successful setup phase. A repeated command updates mutable settings and rejects changes to completed provider identities.
 
+Each external setup phase commits its local state. A cloud or certificate operation cannot roll back, so the next run needs this state for reconciliation.
+
 The command uses an existing public Route53 zone. It does not create a hosted zone. It gets both Metal Server catalogs and issues the wildcard certificate before it reports success.
 
 ## Related
