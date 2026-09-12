@@ -22,6 +22,10 @@ import (
 // defaultFastApplyTimeout bounds an immediate guest update.
 const defaultFastApplyTimeout = 2 * time.Second
 
+// informationAttempts bounds the reads that settle a record pair caught mid
+// removal. The window is one file unlink, so a second read almost always agrees.
+const informationAttempts = 3
+
 // ManagerConfig contains persistent VM manager settings.
 type ManagerConfig struct {
 	MachinesDirectory string
@@ -210,16 +214,38 @@ func (manager *Manager) ListIDs(_ context.Context) ([]string, error) {
 }
 
 // information reads both records without taking the VM lock.
+//
+// A removal unlinks the two records one after the other, so a lock-free read can
+// find one present and the other already gone. Reporting that as ErrNotFound
+// would tell a caller the VM is destroyed while it still exists, and a caller
+// acts on that, so the pair is read again until it agrees.
 func (manager *Manager) information(identifier string) (Information, error) {
-	desired, err := manager.store.readDesired(identifier)
-	if err != nil {
-		return Information{}, err
+	var lastError error
+
+	for range informationAttempts {
+		desired, desiredError := manager.store.readDesired(identifier)
+		observed, observedError := manager.store.readObserved(identifier)
+		if desiredError == nil && observedError == nil {
+			return informationFromRecords(desired, observed, observed.Disk), nil
+		}
+
+		lastError = errors.Join(desiredError, observedError)
+		if !isTornRemoval(desiredError, observedError) {
+			return Information{}, lastError
+		}
 	}
-	observed, err := manager.store.readObserved(identifier)
-	if err != nil {
-		return Information{}, err
+
+	return Information{}, lastError
+}
+
+// isTornRemoval reports whether one record is gone while the other is present,
+// which only a removal in progress produces.
+func isTornRemoval(desiredError, observedError error) bool {
+	if errors.Is(desiredError, ErrNotFound) && observedError == nil {
+		return true
 	}
-	return informationFromRecords(desired, observed, observed.Disk), nil
+
+	return errors.Is(observedError, ErrNotFound) && desiredError == nil
 }
 
 // allocateUserID returns a host user ID that no stored or temporary VM holds.

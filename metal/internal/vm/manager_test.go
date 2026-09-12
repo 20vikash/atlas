@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -639,5 +640,53 @@ func TestRunTemporaryRejectsInvalidIdentifier(t *testing.T) {
 	})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("temporary machine error = %v, want conflict", err)
+	}
+}
+
+func TestInformationStopsRetryingAPairThatStaysTorn(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+
+	// A removal unlinks the two records in turn. A read between them must not
+	// report a virtual machine that still exists as gone.
+	if err := os.Remove(manager.store.observedPath("machine-1")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := manager.Information(context.Background(), "machine-1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound once the retries give up, got %v", err)
+	}
+}
+
+func TestInformationReadsAWholePair(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	if _, err := manager.Create(context.Background(), "machine-1", testSpecification()); err != nil {
+		t.Fatal(err)
+	}
+
+	information, err := manager.Information(context.Background(), "machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if information.ID != "machine-1" {
+		t.Fatalf("want machine-1, got %q", information.ID)
+	}
+}
+
+func TestATornRemovalIsOnlyOneMissingRecord(t *testing.T) {
+	if !isTornRemoval(fmt.Errorf("read: %w", ErrNotFound), nil) {
+		t.Fatal("a missing desired record with an observed record present is torn")
+	}
+	if !isTornRemoval(nil, fmt.Errorf("read: %w", ErrNotFound)) {
+		t.Fatal("a missing observed record with a desired record present is torn")
+	}
+	if isTornRemoval(fmt.Errorf("read: %w", ErrNotFound), fmt.Errorf("read: %w", ErrNotFound)) {
+		t.Fatal("both records missing is a completed removal, not a torn read")
+	}
+	if isTornRemoval(errors.New("permission denied"), nil) {
+		t.Fatal("an unrelated failure is not a torn read")
 	}
 }
