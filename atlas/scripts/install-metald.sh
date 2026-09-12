@@ -132,7 +132,7 @@ zfs list "$storage_pool_name/warm" >/dev/null 2>&1 || zfs create -o mountpoint=n
 
 
 # mesh_sections appends the WireGuard and Atlas WG Mesh settings. Atlas owns the
-# uplink name, because only Atlas knows which interface carries discovery.
+# uplink name, because only Atlas knows which interface carries Atlas NDP.
 mesh_sections() {
 	cat >> "$config_file" <<EOF
 

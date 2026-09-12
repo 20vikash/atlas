@@ -30,8 +30,9 @@ interface = "wg0"
 # Set false to disable Atlas WG Mesh on this host.
 enabled = true
 binary_path = "/usr/local/bin/atlas-wg-mesh"
-# Interface that carries discovery. Atlas WG Mesh attaches its uplink hook here,
-# so use the VLAN itself, not its parent. Required.
+# The shared VLAN interface that carries Atlas NDP. Atlas WG Mesh attaches its
+# NDP hook and its proxy NDP entries here, so name the VLAN itself and never
+# its parent. Required.
 uplink = "eno1.1878"
 
 [traffic_monitor]

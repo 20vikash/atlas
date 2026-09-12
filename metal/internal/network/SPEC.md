@@ -83,7 +83,17 @@ fixed guest IPv4 ---+
 per-VM mesh IPv6 ---+
 ```
 
+<<<<<<< Updated upstream
 `ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver an IP packet while Firecracker is stopped.
+=======
+`Mesh` runs the `atlas-wg-mesh` CLI. `EnsureHost` configures the host when `status` reports no configuration. `Add` and `Remove` register one address on `vh-<user-id>`. `IsRegistered` reads `vm list --json`, so `Remove` is safe for an address this host does not own.
+
+The CLI also holds a proxy NDP entry for each address on the shared VLAN. The `atlas_neigh` kernel module must be loaded before the CLI configures a host.
+
+`ApplyPrivilegedAddresses` replaces the privileged VM whitelist with the complete desired set. Only those tenant-0 addresses cross tenants.
+
+The registration follows the veth pair. `uplink` and `mesh` have it. `none` removes it. `Release` removes the registration before the namespace, because deleting the namespace also deletes the veth pair.
+>>>>>>> Stashed changes
 
 ## Atlas WG Mesh
 
