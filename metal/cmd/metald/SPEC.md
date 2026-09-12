@@ -55,7 +55,7 @@ The source migration listener binds the migration `transfer_port` (default 9001)
 
 `wg_mesh.enabled = false` does not disable managed WireGuard peers.
 
-`wg_mesh.uplink` has no default. The Atlas WG Mesh uplink hook consumes discovery traffic for every VLAN under the interface it attaches to, so a parent interface silently blackholes discovery for its own VLANs. Only the controller knows which interface carries discovery, so metald requires the name.
+`wg_mesh.uplink` has no default. The Atlas WG Mesh NDP hook and its proxy NDP entries attach to this interface, so it must name the shared VLAN itself and never its parent. Only the controller knows which interface carries Atlas NDP, so metald requires the name.
 
 ## Config keys
 
