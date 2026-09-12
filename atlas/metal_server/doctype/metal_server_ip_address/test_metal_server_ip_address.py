@@ -20,7 +20,9 @@ class TestServerIPAddress(UnitTestCase):
 			reserved.address = "203.0.113.11"
 
 	def test_reset_tenant_returns_the_address_to_the_pool(self) -> None:
-		address = SimpleNamespace(address="203.0.113.10", tenant_id=7, release_to_pool=Mock())
+		address = SimpleNamespace(
+			address="203.0.113.10", tenant_id=7, release_to_pool=Mock(), add_comment=Mock()
+		)
 
 		with patch("frappe.only_for") as only_for:
 			MetalServerIPAddress.reset_tenant(address)
@@ -28,8 +30,24 @@ class TestServerIPAddress(UnitTestCase):
 		only_for.assert_called_once_with("System Manager")
 		address.release_to_pool.assert_called_once()
 
+	def test_reset_tenant_records_the_losing_tenant(self) -> None:
+		"""The address keeps no trace of its old owner, so the comment must."""
+		address = SimpleNamespace(
+			address="203.0.113.10", tenant_id=7, release_to_pool=Mock(), add_comment=Mock()
+		)
+
+		with patch("frappe.only_for"):
+			MetalServerIPAddress.reset_tenant(address)
+
+		address.add_comment.assert_called_once()
+		kind, message = address.add_comment.call_args.args
+		self.assertEqual(kind, "Info")
+		self.assertIn("7", message)
+
 	def test_reset_tenant_needs_a_system_manager(self) -> None:
-		address = SimpleNamespace(address="203.0.113.10", tenant_id=7, release_to_pool=Mock())
+		address = SimpleNamespace(
+			address="203.0.113.10", tenant_id=7, release_to_pool=Mock(), add_comment=Mock()
+		)
 
 		with patch("frappe.only_for", side_effect=frappe.PermissionError):
 			with self.assertRaises(frappe.PermissionError):
@@ -38,7 +56,9 @@ class TestServerIPAddress(UnitTestCase):
 		address.release_to_pool.assert_not_called()
 
 	def test_an_unowned_address_is_already_in_the_pool(self) -> None:
-		address = SimpleNamespace(address="203.0.113.10", tenant_id=-1, release_to_pool=Mock())
+		address = SimpleNamespace(
+			address="203.0.113.10", tenant_id=-1, release_to_pool=Mock(), add_comment=Mock()
+		)
 
 		with patch("frappe.only_for"), self.assertRaises(frappe.ValidationError):
 			MetalServerIPAddress.reset_tenant(address)
