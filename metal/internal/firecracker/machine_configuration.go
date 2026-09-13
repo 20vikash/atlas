@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
@@ -60,13 +59,7 @@ func configure(
 	}
 
 	for driveIndex, drive := range bootConfiguration.Drives {
-		request := api.Drive{
-			DriveID:      "drive" + strconv.Itoa(driveIndex),
-			PathOnHost:   drive.Path,
-			IsRootDevice: drive.Root,
-			IsReadOnly:   drive.ReadOnly,
-			RateLimiter:  driveRateLimiter(specification.Disk),
-		}
+		request := driveRequest(driveIndex, drive, specification.Disk)
 		if err := client.PutDrive(operationContext, request); err != nil {
 			return err
 		}
