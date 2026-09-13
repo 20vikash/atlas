@@ -52,7 +52,7 @@ Atlas WG Mesh is required. metald refuses to run without the CLI, because a VM w
 
 Tenant 0 is the privileged tenant. A tenant-0 VM crosses tenants only when its address is in the Atlas WG Mesh whitelist, which `POST /v1/sync` carries in full.
 
-A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes.
+A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes. The service then resets the guest resolver and time sync, because both resume backed off. See [Per-VM metadata](../../atlas/vm/SPEC.md#per-vm-metadata).
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
