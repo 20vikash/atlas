@@ -1,7 +1,10 @@
 package firecracker
 
 import (
+	"strconv"
+
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -23,4 +26,18 @@ func driveRateLimiter(disk vm.Disk) *api.RateLimiter {
 		return nil
 	}
 	return &limiter
+}
+
+// driveRequest builds the Firecracker drive for one boot drive. Every drive is
+// write-back cached so that a guest flush reaches the host file, which a disk
+// snapshot taken from outside the guest then sees.
+func driveRequest(index int, drive storage.Drive, disk vm.Disk) api.Drive {
+	return api.Drive{
+		DriveID:      "drive" + strconv.Itoa(index),
+		PathOnHost:   drive.Path,
+		IsRootDevice: drive.Root,
+		IsReadOnly:   drive.ReadOnly,
+		CacheType:    api.CacheTypeWriteback,
+		RateLimiter:  driveRateLimiter(disk),
+	}
 }

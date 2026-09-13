@@ -3,6 +3,8 @@ package firecracker
 import (
 	"testing"
 
+	"github.com/frappe/atlas/metal/internal/firecracker/api"
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -40,5 +42,18 @@ func TestDriveRateLimiterSkipsUnlimitedValues(t *testing.T) {
 	}
 	if limiter := driveRateLimiter(vm.Disk{IOPS: 500}); limiter.Bandwidth != nil {
 		t.Fatalf("bandwidth = %+v, want none", limiter.Bandwidth)
+	}
+}
+
+// Firecracker's default cache type drops guest flushes, which loses the last
+// writes of a guest that syncs before its disk is photographed.
+func TestDriveRequestIsWriteBackCached(t *testing.T) {
+	request := driveRequest(0, storage.Drive{Path: "/rootfs.img", Root: true}, vm.Disk{})
+
+	if request.CacheType != api.CacheTypeWriteback {
+		t.Fatalf("cache type = %q, want %q", request.CacheType, api.CacheTypeWriteback)
+	}
+	if request.DriveID != "drive0" || request.PathOnHost != "/rootfs.img" || !request.IsRootDevice {
+		t.Fatalf("drive = %+v", request)
 	}
 }
