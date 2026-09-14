@@ -56,9 +56,10 @@ func init() {
 	privilegedVMCommand.AddCommand(addPrivilegedVMCommand, removePrivilegedVMCommand, listPrivilegedVMCommand)
 	debugCommand.AddCommand(debugStatusCommand, debugEnableCommand, debugDisableCommand, inspectCommand, dumpCommand, topCommand)
 	remoteCommand.AddCommand(remotePurgeCommand)
+	moduleCommand.AddCommand(moduleInstallCommand)
 	unicastCommand.AddCommand(unicastPeerCommand, unicastStartCommand)
 	unicastPeerCommand.AddCommand(unicastPeerAddCommand, unicastPeerRemoveCommand, unicastPeerListCommand)
-	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, remoteCommand, debugCommand, unicastCommand, upgradeCommand, versionCommand, resetCommand)
+	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, remoteCommand, debugCommand, unicastCommand, moduleCommand, upgradeCommand, versionCommand, resetCommand)
 }
 
 func main() {
