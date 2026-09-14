@@ -31,12 +31,12 @@ Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give 
 Build and load the Atlas neighbour kernel module on every host before you configure Atlas WG Mesh. The NDP hook calls its kfunc, so the BPF object cannot load without it:
 
 ```sh
-make module
-make -C kernel install
-modprobe atlas_neigh
+atlas-wg-mesh module install
 ```
 
-The module needs kernel headers and a kernel with BTF kfunc support. Build it on the host that runs it, so the module matches the running kernel.
+The command writes the embedded module sources to `/usr/src`, builds them against the running kernel headers, links the module into `/lib/modules`, and loads it. The build takes the kernel BTF from `/sys/kernel/btf/vmlinux`, so the module carries the BTF section that the BPF object needs. The host needs the `build-essential`, `dwarves`, and `linux-headers-$(uname -r)` packages. The metald install script runs the command automatically.
+
+Run the command again after a kernel upgrade, because a module of one kernel release cannot serve another.
 
 Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 
