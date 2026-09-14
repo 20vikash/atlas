@@ -189,7 +189,7 @@ func printDebugTop(pairs map[debugPair]debugPairStats) {
 
 func printDebugEvent(event debugEvent, first uint64) {
 	elapsed := time.Duration(
-		event.Timestamp-first,
+		event.Timestamp - first,
 	).Seconds()
 
 	/*
@@ -235,7 +235,7 @@ func printDebugEvent(event debugEvent, first uint64) {
 			elapsed,
 			hookName(event.Hook),
 			directionName(event.Direction),
-			operationName(event.Operation),
+			debugOperationName(event),
 			netip.AddrFrom16(event.VM),
 			netip.AddrFrom16(event.Host),
 			binary.BigEndian.Uint32(event.Tenant[:]),
@@ -253,4 +253,3 @@ func printDebugEvent(event debugEvent, first uint64) {
 		binary.BigEndian.Uint32(event.Tenant[:]),
 	)
 }
-

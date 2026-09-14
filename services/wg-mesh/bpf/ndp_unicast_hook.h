@@ -48,6 +48,11 @@ enum unicast_debug_operation
 	UNICAST_OPERATION_INGRESS_KFUNC_FAILED,
 	UNICAST_OPERATION_INGRESS_NO_ATLAS_OPTION,
 	UNICAST_OPERATION_EGRESS_ATLAS_APPEND_FAILED,
+	UNICAST_OPERATION_EGRESS_CSUM_FAILED,
+	UNICAST_OPERATION_EGRESS_FIB_FAILED,
+	UNICAST_OPERATION_EGRESS_DST_MAC_FAILED,
+	UNICAST_OPERATION_EGRESS_SRC_MAC_FAILED,
+	UNICAST_OPERATION_EGRESS_REDIRECT_FAILED,
 };
 
 /*
@@ -108,11 +113,8 @@ struct atlas_unicast_advertisement_append
 /*
  * Fold a one's-complement checksum down to 16 bits.
  */
-static __always_inline __u16 atlas_unicast_csum_fold(__u64 sum)
+static __always_inline __u16 atlas_unicast_csum_fold(__u32 sum)
 {
-	sum = (sum & 0xffffffff) + (sum >> 32);
-	sum = (sum & 0xffffffff) + (sum >> 32);
-
 	sum = (sum & 0xffff) + (sum >> 16);
 	sum = (sum & 0xffff) + (sum >> 16);
 
@@ -158,44 +160,91 @@ static __always_inline int atlas_unicast_is_known_peer(__be32 peer)
  */
 static __always_inline int atlas_unicast_find_requester(
 	struct __sk_buff *packet,
-	struct ndp_message *message,
-	void *end,
+	const struct ipv6hdr *ip6,
+	__u32 packet_ipv6_offset,
 	__be32 *peer_address)
 {
-	__u8 *cursor = (__u8 *)(message + 1);
-	__u8 *limit = end;
+	__u16 payload_length;
+	__u32 options_length;
+	__u32 options_offset;
+	__u32 offset;
+	__u8 option_header[2];
 	__u8 type;
 	__u8 length;
-	__u32 option_offset;
+	__u32 option_size;
+	__u32 option_address_offset;
 	int step;
 
+	/*
+	 * The IPv6 payload length is the authoritative boundary for the
+	 * ICMPv6/NDP message. Do not use outer data_end as the option boundary:
+	 * this packet is an IPv6 packet carried inside an outer IPv4 packet.
+	 */
+	payload_length = bpf_ntohs(ip6->payload_len);
+
+	if (payload_length < sizeof(struct ndp_message))
+		return 0;
+
+	options_length =
+		(__u32)payload_length - sizeof(struct ndp_message);
+
+	/*
+	 * A solicitation only needs a small option area. The kernel normally
+	 * supplies a source link-layer option, followed by our 16-byte Atlas
+	 * option. Keep the bound verifier-friendly and reject malformed packets.
+	 */
+	if (options_length > ATLAS_UNICAST_NS_OPTIONS_LIMIT)
+		return 0;
+
+	options_offset =
+		packet_ipv6_offset +
+		sizeof(struct ipv6hdr) +
+		sizeof(struct ndp_message);
+
+	offset = 0;
+
 	for (step = 0; step < ATLAS_UNICAST_NS_OPTION_WALK_LIMIT; step++) {
-		if (cursor + 2 > limit)
+		if (offset >= options_length)
+			break;
+
+		if (options_length - offset < 2)
 			return 0;
 
-		type = cursor[0];
-		length = cursor[1];
+		if (bpf_skb_load_bytes(
+			    packet,
+			    options_offset + offset,
+			    option_header,
+			    sizeof(option_header)))
+			return 0;
+
+		type = option_header[0];
+		length = option_header[1];
 
 		if (length == 0)
 			return 0;
 
-		if (cursor + length * 8 > limit)
+		option_size = (__u32)length * 8;
+
+		if (option_size > options_length - offset)
 			return 0;
 
 		if (type == ATLAS_NS_OPTION_TYPE) {
 			if (length != ATLAS_NS_OPTION_UNITS + 1)
 				return 0;
 
-			option_offset =
-				ETH_HLEN +
-				sizeof(struct ipv6hdr) +
-				sizeof(struct ndp_message) +
-				(cursor - (__u8 *)(message + 1)) +
+			option_address_offset =
+				options_offset +
+				offset +
 				ATLAS_UNICAST_PEER_ADDRESS_OFFSET;
+
+			if (option_size <
+			    ATLAS_UNICAST_PEER_ADDRESS_OFFSET +
+			    sizeof(*peer_address))
+				return 0;
 
 			if (bpf_skb_load_bytes(
 				    packet,
-				    option_offset,
+				    option_address_offset,
 				    peer_address,
 				    sizeof(*peer_address)))
 				return 0;
@@ -203,7 +252,7 @@ static __always_inline int atlas_unicast_find_requester(
 			return 1;
 		}
 
-		cursor += length * 8;
+		offset += option_size;
 	}
 
 	return 0;
@@ -218,44 +267,84 @@ static __always_inline int atlas_unicast_find_requester(
  */
 static __always_inline int atlas_unicast_find_atlas_host(
 	struct __sk_buff *packet,
-	struct ndp_message *message,
-	void *end,
+	const struct ipv6hdr *ip6,
+	__u32 packet_ipv6_offset,
 	struct in6_addr *host)
 {
-	__u8 *cursor = (__u8 *)(message + 1);
-	__u8 *limit = end;
+	__u16 payload_length;
+	__u32 options_length;
+	__u32 options_offset;
+	__u32 offset;
+	__u8 option_header[2];
 	__u8 type;
 	__u8 length;
-	__u32 option_offset;
+	__u32 option_size;
+	__u32 option_address_offset;
 	int step;
 
+	/*
+	 * Use the inner IPv6 payload length as the NDP option boundary.
+	 */
+	payload_length = bpf_ntohs(ip6->payload_len);
+
+	if (payload_length < sizeof(struct ndp_message))
+		return 0;
+
+	options_length =
+		(__u32)payload_length - sizeof(struct ndp_message);
+
+	if (options_length > 128)
+		return 0;
+
+	options_offset =
+		packet_ipv6_offset +
+		sizeof(struct ipv6hdr) +
+		sizeof(struct ndp_message);
+
+	offset = 0;
+
 	for (step = 0; step < ATLAS_UNICAST_NA_OPTION_WALK_LIMIT; step++) {
-		if (cursor + 2 > limit)
+		if (offset >= options_length)
+			break;
+
+		if (options_length - offset < 2)
 			return 0;
 
-		type = cursor[0];
-		length = cursor[1];
+		if (bpf_skb_load_bytes(
+			    packet,
+			    options_offset + offset,
+			    option_header,
+			    sizeof(option_header)))
+			return 0;
+
+		type = option_header[0];
+		length = option_header[1];
 
 		if (length == 0)
 			return 0;
 
-		if (cursor + length * 8 > limit)
+		option_size = (__u32)length * 8;
+
+		if (option_size > options_length - offset)
 			return 0;
 
 		if (type == ATLAS_NDP_OPTION_TYPE) {
 			if (length != ATLAS_NDP_OPTION_LENGTH + 1)
 				return 0;
 
-			option_offset =
-				ETH_HLEN +
-				sizeof(struct ipv6hdr) +
-				sizeof(struct ndp_message) +
-				(cursor - (__u8 *)(message + 1)) +
+			option_address_offset =
+				options_offset +
+				offset +
 				ATLAS_UNICAST_HOST_ADDRESS_OFFSET;
+
+			if (option_size <
+			    ATLAS_UNICAST_HOST_ADDRESS_OFFSET +
+			    sizeof(*host))
+				return 0;
 
 			if (bpf_skb_load_bytes(
 				    packet,
-				    option_offset,
+				    option_address_offset,
 				    host,
 				    sizeof(*host)))
 				return 0;
@@ -263,7 +352,7 @@ static __always_inline int atlas_unicast_find_atlas_host(
 			return 1;
 		}
 
-		cursor += length * 8;
+		offset += option_size;
 	}
 
 	return 0;
@@ -299,14 +388,7 @@ static __always_inline int atlas_unicast_append_requester_option(
 	struct in6_addr source;
 	struct in6_addr destination;
 
-	__be16 *word = (__be16 *)((__u8 *)(message + 1));
-
-	__s64 fixed_sum = 0;
-	__s64 option_sum = 0;
-	__s64 pseudo_sum = 0;
-
-	__u64 options_sum = 0;
-	__u64 total_sum;
+	__s64 checksum_sum = 0;
 
 	__u16 checksum;
 	__u16 wire_payload_length;
@@ -315,7 +397,8 @@ static __always_inline int atlas_unicast_append_requester_option(
 	__u32 option_bytes;
 	__u32 options_offset;
 
-	int step;
+	__u32 step;
+	__be32 option_word;
 
 	old_payload_length = bpf_ntohs(ip6->payload_len);
 
@@ -343,21 +426,6 @@ static __always_inline int atlas_unicast_append_requester_option(
 
 	fixed_message.icmp.icmp6_cksum = 0;
 
-	/* Sum the preserved options as network-order 16-bit words. A bounded
-	 * walk of direct reads keeps every verifier state converging, and a
-	 * zero word cannot change a one's-complement sum, so the walk can
-	 * stop at the real option length. */
-	for (step = 0; step < ATLAS_UNICAST_NS_OPTION_WORD_LIMIT; step++) {
-		if (step * 2 >= option_bytes)
-			break;
-
-		if ((void *)(word + 1) > end)
-			return 0;
-
-		options_sum += bpf_ntohs(*word);
-		word++;
-	}
-
 	option.type = ATLAS_NS_OPTION_TYPE;
 	option.length = ATLAS_NS_OPTION_UNITS + 1;
 	__builtin_memcpy(option.peer_ipv4, &peer_address, sizeof(option.peer_ipv4));
@@ -366,27 +434,66 @@ static __always_inline int atlas_unicast_append_requester_option(
 		old_payload_length + sizeof(option);
 	wire_payload_length = bpf_htons(*new_payload_length);
 
-	fixed_sum = bpf_csum_diff(
-		NULL, 0, (__be32 *)&fixed_message, sizeof(fixed_message), 0);
+	options_offset =
+		ETH_HLEN +
+		sizeof(struct ipv6hdr) +
+		sizeof(struct ndp_message);
 
-	if (fixed_sum < 0)
-		return 0;
-
-	option_sum = bpf_csum_diff(
-		NULL, 0, (__be32 *)&option, sizeof(option), 0);
-
-	if (option_sum < 0)
-		return 0;
-
+	/*
+	 * bpf_csum_diff() returns a Linux __wsum/partial checksum. Its seed is
+	 * explicitly designed to be the result of a previous bpf_csum_diff()
+	 * call, so checksum components must be cascaded rather than added as
+	 * ordinary integers.
+	 *
+	 * The order here is the actual ICMPv6 checksum input:
+	 *   IPv6 pseudo-header + ICMPv6 fixed message + existing NDP options
+	 *   + the new Atlas requester option.
+	 */
 	pseudo.saddr = source;
 	pseudo.daddr = destination;
 	pseudo.length = bpf_htonl(*new_payload_length);
 	pseudo.nexthdr = IPPROTO_ICMPV6;
 
-	pseudo_sum = bpf_csum_diff(
+	checksum_sum = bpf_csum_diff(
 		NULL, 0, (__be32 *)&pseudo, sizeof(pseudo), 0);
+	if (checksum_sum < 0)
+		return 0;
 
-	if (pseudo_sum < 0)
+	checksum_sum = bpf_csum_diff(
+		NULL, 0, (__be32 *)&fixed_message, sizeof(fixed_message),
+		(__wsum)checksum_sum);
+	if (checksum_sum < 0)
+		return 0;
+
+	/*
+	 * Preserve every byte of the original NDP options. The option area is
+	 * bounded to 32 bytes and is always a multiple of 8 bytes, so eight
+	 * bounded 4-byte helper calls are sufficient and verifier-friendly.
+	 */
+	for (step = 0;
+		 step < ATLAS_UNICAST_NS_OPTION_WORD_LIMIT / 2;
+		 step++) {
+		if (step * 4 >= option_bytes)
+			break;
+
+		if (bpf_skb_load_bytes(
+				packet,
+				options_offset + step * 4,
+				&option_word,
+				sizeof(option_word)))
+			return 0;
+
+		checksum_sum = bpf_csum_diff(
+				NULL, 0, &option_word, sizeof(option_word),
+				(__wsum)checksum_sum);
+		if (checksum_sum < 0)
+			return 0;
+	}
+
+	checksum_sum = bpf_csum_diff(
+		NULL, 0, (__be32 *)&option, sizeof(option),
+		(__wsum)checksum_sum);
+	if (checksum_sum < 0)
 		return 0;
 
 	options_offset =
@@ -416,13 +523,7 @@ static __always_inline int atlas_unicast_append_requester_option(
 		    0))
 		return 0;
 
-	total_sum =
-		(__u32)fixed_sum +
-		options_sum +
-		(__u32)option_sum +
-		(__u32)pseudo_sum;
-
-	checksum = atlas_unicast_csum_fold(total_sum);
+	checksum = atlas_unicast_csum_fold((__u32)checksum_sum);
 
 	if (bpf_skb_store_bytes(
 		    packet,
@@ -467,11 +568,7 @@ static __always_inline int atlas_unicast_add_atlas_option(
 	struct in6_addr source;
 	struct in6_addr destination;
 
-	__s64 fixed_sum = 0;
-	__s64 append_sum = 0;
-	__s64 pseudo_sum = 0;
-
-	__u64 total_sum;
+	__s64 checksum_sum = 0;
 
 	__u16 checksum;
 	__u16 wire_payload_length;
@@ -482,6 +579,10 @@ static __always_inline int atlas_unicast_add_atlas_option(
 	__u32 append_length;
 	__u32 append_offset;
 	__u32 checksum_offset;
+	__u32 existing_options_length;
+	__u32 existing_options_offset;
+	__u32 checksum_step;
+	__be32 existing_option_word;
 
 	append.tllao.type = ATLAS_UNICAST_TLLAO_TYPE;
 	append.tllao.length = ATLAS_UNICAST_TLLAO_LENGTH;
@@ -523,27 +624,61 @@ static __always_inline int atlas_unicast_add_atlas_option(
 		old_payload_length + append_length;
 	wire_payload_length = bpf_htons(new_payload_length);
 
-	fixed_sum = bpf_csum_diff(
-		NULL, 0, (__be32 *)&fixed_message, sizeof(fixed_message), 0);
-
-	if (fixed_sum < 0)
-		return 0;
-
-	append_sum = bpf_csum_diff(
-		NULL, 0, (__be32 *)&append, sizeof(append), 0);
-
-	if (append_sum < 0)
-		return 0;
-
 	pseudo.saddr = source;
 	pseudo.daddr = destination;
 	pseudo.length = bpf_htonl(new_payload_length);
 	pseudo.nexthdr = IPPROTO_ICMPV6;
 
-	pseudo_sum = bpf_csum_diff(
+	/*
+	 * Cascade bpf_csum_diff() through the complete ICMPv6 checksum input:
+	 * pseudo-header + fixed NA + existing options + appended options.
+	 */
+	checksum_sum = bpf_csum_diff(
 		NULL, 0, (__be32 *)&pseudo, sizeof(pseudo), 0);
+	if (checksum_sum < 0)
+		return 0;
 
-	if (pseudo_sum < 0)
+	checksum_sum = bpf_csum_diff(
+		NULL, 0, (__be32 *)&fixed_message, sizeof(fixed_message),
+		(__wsum)checksum_sum);
+	if (checksum_sum < 0)
+		return 0;
+
+	existing_options_length =
+		old_payload_length - sizeof(struct ndp_message);
+	existing_options_offset =
+		ETH_HLEN + sizeof(struct ipv6hdr) + sizeof(struct ndp_message);
+
+	if (existing_options_length > 128 ||
+		(existing_options_length & 3))
+		return 0;
+
+	for (checksum_step = 0;
+		 checksum_step < 32;
+		 checksum_step++) {
+		if (checksum_step * 4 >= existing_options_length)
+			break;
+
+		if (bpf_skb_load_bytes(
+				packet,
+				existing_options_offset + checksum_step * 4,
+				&existing_option_word,
+				sizeof(existing_option_word)))
+			return 0;
+
+		checksum_sum = bpf_csum_diff(
+				NULL, 0,
+				&existing_option_word,
+				sizeof(existing_option_word),
+				(__wsum)checksum_sum);
+		if (checksum_sum < 0)
+			return 0;
+	}
+
+	checksum_sum = bpf_csum_diff(
+		NULL, 0, (__be32 *)&append, sizeof(append),
+		(__wsum)checksum_sum);
+	if (checksum_sum < 0)
 		return 0;
 
 	if (bpf_skb_change_tail(
@@ -573,12 +708,7 @@ static __always_inline int atlas_unicast_add_atlas_option(
 		    0))
 		return 0;
 
-	total_sum =
-		(__u32)fixed_sum +
-		(__u32)append_sum +
-		(__u32)pseudo_sum;
-
-	checksum = atlas_unicast_csum_fold(total_sum);
+	checksum = atlas_unicast_csum_fold((__u32)checksum_sum);
 
 	checksum_offset =
 		ETH_HLEN +
@@ -674,65 +804,165 @@ static __always_inline int atlas_unicast_store_base_header(
  * Send one copy of the wrapped packet to a peer.
  *
  * The base outer header is already stored. This function stores the peer
- * destination and the checksum it adds, resolves the underlay next hop with
- * bpf_fib_lookup(), and emits the copy with bpf_clone_redirect(). Every
- * clone therefore shares the packet data until the next write.
+ * destination and checksum contribution, then resolves the underlay route
+ * with bpf_fib_lookup() and emits the copy with bpf_clone_redirect().
  *
- * The fan-out is best effort, like multicast delivery: only the failures
- * that change the decision are checked. A failed store or checksum can at
- * worst lose one copy, and the next solicitation repairs the state.
+ * For BPF_FIB_LOOKUP_OUTPUT, route.ifindex is an input to the FIB lookup.
+ * It must contain the L3 device index on which the lookup is being made;
+ * the helper replaces it with the selected egress device on success.
  *
- * The peer address is a map value or stack memory, so it stays readable
- * across the helper calls.
- *
- * Returns 0 on success.
+ * Returns 0 on success, otherwise the failing helper/FIB result.
  */
 static __always_inline int atlas_unicast_send_to_peer(
 	struct __sk_buff *packet,
 	__be32 *peer_address,
 	__be32 source_address,
 	__u16 wrapped_length,
-	__s64 base_sum)
+	__s64 base_sum,
+	const struct in6_addr *debug_target)
 {
 	struct bpf_fib_lookup route = {};
-
 	__u16 checksum;
-
 	__s64 peer_sum;
+	int fib_result;
+	int redirect_result;
 
+	/*
+	 * Continue the IPv4 checksum from the partial checksum produced
+	 * for the base header. bpf_csum_diff() expects its seed to be the
+	 * previous partial checksum.
+	 */
 	peer_sum = bpf_csum_diff(
-		NULL, 0, (__be32 *)peer_address, sizeof(*peer_address), 0);
-
-	checksum = atlas_unicast_csum_fold(
-		(__u64)base_sum + (__u32)peer_sum);
-
-	bpf_skb_store_bytes(
-		packet,
-		ETH_HLEN + ATLAS_UNICAST_IPV4_DESTINATION_OFFSET,
-		peer_address,
+		NULL,
+		0,
+		(__be32 *)peer_address,
 		sizeof(*peer_address),
-		BPF_F_INVALIDATE_HASH);
+		(__wsum)base_sum);
 
-	bpf_skb_store_bytes(
-		packet,
-		ETH_HLEN + ATLAS_UNICAST_IPV4_CHECKSUM_OFFSET,
-		&checksum,
-		sizeof(checksum),
-		0);
+	if (peer_sum < 0) {
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_CSUM_FAILED,
+			debug_target,
+			NULL);
+		return -1;
+	}
 
+	checksum = atlas_unicast_csum_fold((__u32)peer_sum);
+
+	if (bpf_skb_store_bytes(
+			packet,
+			ETH_HLEN + ATLAS_UNICAST_IPV4_DESTINATION_OFFSET,
+			peer_address,
+			sizeof(*peer_address),
+			BPF_F_INVALIDATE_HASH)) {
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_CSUM_FAILED,
+			debug_target,
+			NULL);
+		return -1;
+	}
+
+	if (bpf_skb_store_bytes(
+			packet,
+			ETH_HLEN + ATLAS_UNICAST_IPV4_CHECKSUM_OFFSET,
+			&checksum,
+			sizeof(checksum),
+			0)) {
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_CSUM_FAILED,
+			debug_target,
+			NULL);
+		return -1;
+	}
+
+	if (wrapped_length < sizeof(struct iphdr))
+		return -1;
+
+	/*
+	 * bpf_fib_lookup() expects tot_len as the host-order L3 length.
+	 * ifindex is the input L3 device; on success the helper replaces
+	 * it with the selected egress device.
+	 */
 	route.family = ATLAS_UNICAST_AF_INET;
-	route.tot_len = bpf_htons(wrapped_length);
+	route.tot_len = wrapped_length;
+	route.ifindex = packet->ifindex;
 	route.ipv4_src = source_address;
 	route.ipv4_dst = *peer_address;
 
-	if (bpf_fib_lookup(
-		    packet, &route, sizeof(route), BPF_FIB_LOOKUP_OUTPUT))
+	fib_result = bpf_fib_lookup(
+		packet,
+		&route,
+		sizeof(route),
+		BPF_FIB_LOOKUP_OUTPUT);
+
+	if (fib_result)
+	{
+		struct in6_addr fib_debug = {};
+
+		fib_debug.s6_addr32[0] = bpf_htonl(fib_result);
+
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_FIB_FAILED,
+			debug_target,
+			&fib_debug);
+
+		return fib_result;
+	}
+
+	if (bpf_skb_store_bytes(
+			packet,
+			0,
+			route.dmac,
+			ETH_ALEN,
+			0)) {
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_DST_MAC_FAILED,
+			debug_target,
+			NULL);
 		return -1;
+	}
 
-	bpf_skb_store_bytes(packet, 0, route.dmac, ETH_ALEN, 0);
-	bpf_skb_store_bytes(packet, ETH_ALEN, route.smac, ETH_ALEN, 0);
+	if (bpf_skb_store_bytes(
+			packet,
+			ETH_ALEN,
+			route.smac,
+			ETH_ALEN,
+			0)) {
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_SRC_MAC_FAILED,
+			debug_target,
+			NULL);
+		return -1;
+	}
 
-	return bpf_clone_redirect(packet, route.ifindex, 0);
+	redirect_result = bpf_clone_redirect(
+		packet,
+		route.ifindex,
+		0);
+
+	if (redirect_result) {
+		emit_protocol_debug_event(
+			DEBUG_UNICAST,
+			DEBUG_SEND,
+			UNICAST_OPERATION_EGRESS_REDIRECT_FAILED,
+			debug_target,
+			NULL);
+		return redirect_result;
+	}
+
+	return 0;
 }
 
 /*
@@ -797,6 +1027,9 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 	if (ip6->nexthdr != IPPROTO_ICMPV6)
 		return TC_ACT_OK;
 
+	if (bpf_ntohs(ip6->payload_len) < sizeof(struct ndp_message))
+		return TC_ACT_OK;
+
 	message = (void *)(ip6 + 1);
 
 	if ((void *)(message + 1) > end)
@@ -825,7 +1058,7 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 		/* Do not transport a solicitation that already carries the
 		 * requester option. This guards against a loop. */
 		if (atlas_unicast_find_requester(
-			    packet, message, end, &present_requester))
+			    packet, ip6, ETH_HLEN, &present_requester))
 			return TC_ACT_OK;
 
 		local_config = get_config();
@@ -892,7 +1125,8 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 				    known_peer,
 				    local_config->underlay_ip4,
 				    wrapped_length,
-				    base_sum))
+				    base_sum,
+				    &target))
 				emit_protocol_debug_event(
 					DEBUG_UNICAST,
 					DEBUG_SEND,
@@ -928,12 +1162,20 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 			if (!peer_address || *peer_address == 0)
 				continue;
 
-			atlas_unicast_send_to_peer(
-				packet,
-				peer_address,
-				local_config->underlay_ip4,
-				wrapped_length,
-				base_sum);
+			if (atlas_unicast_send_to_peer(
+					packet,
+					peer_address,
+					local_config->underlay_ip4,
+					wrapped_length,
+					base_sum,
+					&target)) {
+				emit_protocol_debug_event(
+					DEBUG_UNICAST,
+					DEBUG_SEND,
+					UNICAST_OPERATION_EGRESS_SEND_FAILED,
+					&target,
+					NULL);
+			}
 		}
 
 		emit_protocol_debug_event(
@@ -975,7 +1217,7 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 		 * NDP hook is not attached in a unicast environment. Do not
 		 * append it twice. */
 		if (!atlas_unicast_find_atlas_host(
-			    packet, message, end, &host) &&
+			    packet, ip6, ETH_HLEN, &host) &&
 			!atlas_unicast_add_atlas_option(
 			    packet, eth, ip6, message, local_config)) {
 			emit_protocol_debug_event(
@@ -1024,7 +1266,8 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 			    &requester_address,
 			    local_config->underlay_ip4,
 			    wrapped_length,
-			    base_sum)) {
+			    base_sum,
+			    &target)) {
 			emit_protocol_debug_event(
 				DEBUG_UNICAST,
 				DEBUG_SEND,
@@ -1110,6 +1353,11 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 	if (ip4->version != 4 || ip4->ihl != 5)
 		return TC_ACT_OK;
 
+	if (bpf_ntohs(ip4->tot_len) <
+			sizeof(struct iphdr) + sizeof(struct ipv6hdr) +
+			sizeof(struct ndp_message))
+		return TC_ACT_OK;
+
 	if (ip4->protocol != IPPROTO_IPV6)
 		return TC_ACT_OK;
 
@@ -1141,6 +1389,9 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 	if (ip6->nexthdr != IPPROTO_ICMPV6)
 		return TC_ACT_OK;
 
+	if (bpf_ntohs(ip6->payload_len) < sizeof(struct ndp_message))
+		return TC_ACT_OK;
+
 	message = (void *)(ip6 + 1);
 
 	if ((void *)(message + 1) > end)
@@ -1155,7 +1406,8 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 
 	if (type == NDISC_NEIGHBOUR_SOLICITATION) {
 		if (atlas_unicast_find_requester(
-			    packet, message, end, &requester_address) &&
+			    packet, ip6, ETH_HLEN + sizeof(struct iphdr),
+			    &requester_address) &&
 			requester_address == ip4->saddr) {
 			int map_result = bpf_map_update_elem(
 				&ndp_requesters, &source, &requester_address, BPF_ANY);
@@ -1172,7 +1424,7 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 		/* Only a remote VM records a location. */
 		if (!is_local_virtual_machine(&target) &&
 			atlas_unicast_find_atlas_host(
-				packet, message, end, &host) &&
+				packet, ip6, ETH_HLEN + sizeof(struct iphdr), &host) &&
 			is_underlay_address(&host)) {
 			int peer_result = bpf_map_update_elem(
 				&vm_peer_map, &target, &ip4->saddr, BPF_ANY);
