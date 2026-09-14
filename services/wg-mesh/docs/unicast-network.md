@@ -8,7 +8,7 @@ The unicast mode transports the same NDP packets over the routed IPv4 underlay. 
 
 ## Requirements
 
-- Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`. The Atlas neighbour kernel module is required in unicast mode, exactly as in multicast mode.
+- Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`. The Atlas neighbour kernel module is required in unicast mode, exactly as in multicast mode: load it with `atlas-wg-mesh module install`.
 - Permit IPv4 protocol 41 between the participating hosts.
 - Keep one peer file on every host with the reachable uplink IPv4 address of every other participating host. The same complete file can be copied everywhere: the local host drops its own address, so the file can list it too.
 - Keep the peer file writable only by trusted administrators. Transported NDP is not authenticated, and a host with a listed address can influence learned VM locations.
