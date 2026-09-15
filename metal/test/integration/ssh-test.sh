@@ -83,9 +83,29 @@ for _ in $(seq 1 30); do
 		-o StrictHostKeyChecking=no -o ConnectTimeout=3 \
 		"$ssh_user@172.16.0.2" 'echo metal-ok' 2>/dev/null | grep -q metal-ok; then
 		echo "SSH OK - VM $virtual_machine_id is reachable"
+		break
+	fi
+	sleep 2
+done
+
+if ! ip netns exec "metal-$virtual_machine_id" ssh -i "$private_key" \
+	-o StrictHostKeyChecking=no -o ConnectTimeout=3 \
+	"$ssh_user@172.16.0.2" 'echo metal-ok' 2>/dev/null | grep -q metal-ok; then
+	echo "FAILED: could not ssh into VM $virtual_machine_id" >&2
+	exit 1
+fi
+
+# The guest learns its mesh address from MMDS after boot, so wait for it
+# separately: metadata application lags SSH readiness.
+echo "waiting for mesh address..."
+for _ in $(seq 1 30); do
+	if ip netns exec "metal-$virtual_machine_id" ssh -i "$private_key" \
+		-o StrictHostKeyChecking=no -o ConnectTimeout=3 \
+		"$ssh_user@172.16.0.2" 'ip -6 addr show dev eth0' 2>/dev/null | grep -q "fdaa::2/128"; then
+		echo "MESH OK - VM $virtual_machine_id carries fdaa::2"
 		exit 0
 	fi
 	sleep 2
 done
-echo "FAILED: could not ssh into VM $virtual_machine_id" >&2
+echo "FAILED: guest has no fdaa::2 mesh address" >&2
 exit 1
