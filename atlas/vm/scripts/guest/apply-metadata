@@ -8,7 +8,6 @@ import time
 METADATA_ADDRESS = ("169.254.169.254", 80)
 METADATA_PATH_PREFIX = "/latest"
 DROP_IN_PATH = pathlib.Path("/run/systemd/network/10-atlas.network.d/mesh.conf")
-GUEST_INTERFACE = "eth0"
 MESH_GATEWAY = "fe80::1"
 MESH_PREFIX = "fdaa::/16"
 MESH_MTU = 1380
@@ -97,33 +96,8 @@ def apply_mesh_network(address):
 
     DROP_IN_PATH.parent.mkdir(parents=True, exist_ok=True)
     DROP_IN_PATH.write_text(drop_in)
-
-    # Apply the address and the route directly. The drop-in keeps them across
-    # a network daemon restart, but only the kernel state makes the address
-    # usable now, independent of how the daemon handles the reload.
-    subprocess.run(
-        ["ip", "-6", "addr", "replace", f"{address}/128", "dev", GUEST_INTERFACE],
-        check=True,
-    )
-    subprocess.run(
-        [
-            "ip",
-            "-6",
-            "route",
-            "replace",
-            MESH_PREFIX,
-            "via",
-            MESH_GATEWAY,
-            "dev",
-            GUEST_INTERFACE,
-            "mtu",
-            str(MESH_MTU),
-        ],
-        check=True,
-    )
     subprocess.run(["networkctl", "reload"], check=True)
     reset_network_services()
-    print(f"applied mesh address {address}", flush=True)
 
 
 def reset_network_services():
