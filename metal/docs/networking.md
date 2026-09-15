@@ -104,6 +104,8 @@ The first packet can be lost while Firecracker starts. Clients must retry. A met
 
 Each peer endpoint is a public address, so the tunnel crosses the uplink. Atlas WG Mesh discovery uses the private network. The WireGuard MTU follows the uplink MTU for this reason.
 
+Runtime `wg set` installs no system routes, so the manager also owns one `/128` route per peer into `wg0`. The encapsulated tunnel traffic from the mesh reaches `wg0` only through these routes. A peer that leaves the set loses its peer entry and its route; a missing route is reinstalled on the next apply, because routes do not survive a reboot while the managed peer state does.
+
 ## Design notes
 
 - A namespace for each VM lets every guest use the same private IPv4 address.
