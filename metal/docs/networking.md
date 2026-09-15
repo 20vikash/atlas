@@ -92,6 +92,8 @@ The first packet can be lost while Firecracker starts. Clients must retry. A met
 
 `POST /v1/sync` supplies the complete managed peer set. Metal applies it to `wg0` and records what it applied, so it never disturbs peers added by other tools.
 
+Runtime `wg set` installs no system routes, so the manager also owns one `/128` route per peer into `wg0`. The encapsulated tunnel traffic from the mesh reaches `wg0` only through these routes. A peer that leaves the set loses its peer entry and its route; a missing route is reinstalled on the next apply, because routes do not survive a reboot while the managed peer state does.
+
 ## Design notes
 
 - A namespace for each VM lets every guest use the same private IPv4 address.
