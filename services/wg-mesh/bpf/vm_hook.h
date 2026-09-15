@@ -60,6 +60,297 @@ static __always_inline void emit_vm_debug_event(
 	bpf_ringbuf_submit(event, 0);
 }
 
+
+/*
+ * Build the IPv6 solicited-node multicast address:
+ *
+ *     ff02::1:ffXX:XXXX
+ *
+ * where XX:XXXX are the low 24 bits of the target address.
+ */
+static __always_inline void make_solicited_node_address(
+	const struct in6_addr *target,
+	struct in6_addr *destination)
+{
+	__builtin_memset(
+		destination,
+		0,
+		sizeof(*destination));
+
+	destination->s6_addr[0] = 0xff;
+	destination->s6_addr[1] = 0x02;
+
+	destination->s6_addr[11] = 0x01;
+	destination->s6_addr[12] = 0xff;
+
+	destination->s6_addr[13] = target->s6_addr[13];
+	destination->s6_addr[14] = target->s6_addr[14];
+	destination->s6_addr[15] = target->s6_addr[15];
+}
+
+
+/*
+ * Fold a checksum returned by bpf_csum_diff().
+ */
+static __always_inline __u16 fold_checksum(__s64 checksum)
+{
+	checksum = (checksum & 0xffffffff) +
+		   (checksum >> 32);
+
+	checksum = (checksum & 0xffff) +
+		   (checksum >> 16);
+
+	checksum = (checksum & 0xffff) +
+		   (checksum >> 16);
+
+	return (__u16)~checksum;
+}
+
+
+/*
+ * Construct and checksum an ICMPv6 Neighbor Solicitation.
+ *
+ * The checksum covers:
+ *
+ *   IPv6 pseudo-header
+ *   ICMPv6 NS header
+ *   Target Address
+ *   Source Link-Layer Address option
+ */
+static __always_inline int checksum_neighbor_solicitation(
+	const struct ipv6hdr *ip6,
+	void *message,
+	__u32 message_length,
+	__u16 *checksum)
+{
+	struct
+	{
+		struct in6_addr source;
+		struct in6_addr destination;
+		__be32 length;
+		__u8 zero[3];
+		__u8 next_header;
+	} pseudo = {};
+
+	__s64 sum;
+
+	pseudo.source = ip6->saddr;
+	pseudo.destination = ip6->daddr;
+	pseudo.length = bpf_htonl(message_length);
+	pseudo.next_header = IPPROTO_ICMPV6;
+
+	sum = bpf_csum_diff(
+		0,
+		0,
+		(__be32 *)&pseudo,
+		sizeof(pseudo),
+		0);
+
+	if (sum < 0)
+		return -1;
+
+	sum = bpf_csum_diff(
+		0,
+		0,
+		(__be32 *)message,
+		message_length,
+		sum);
+
+	if (sum < 0)
+		return -1;
+
+	*checksum = fold_checksum(sum);
+
+	return 0;
+}
+
+
+/*
+ * Replace the current VM packet with a standard multicast
+ * ICMPv6 Neighbor Solicitation.
+ *
+ * Result:
+ *
+ *   Ethernet
+ *   IPv6
+ *   ICMPv6 Neighbor Solicitation
+ *   Source Link-Layer Address option
+ *
+ * The caller redirects the resulting packet to discovery_ifindex.
+ */
+static __always_inline int send_neighbor_solicitation(
+	struct __sk_buff *packet,
+	struct config *local_config,
+	const struct in6_addr *source,
+	const struct in6_addr *target)
+{
+	struct ethhdr eth = {};
+	struct ipv6hdr ip6 = {};
+
+	struct in6_addr solicited_node;
+
+	struct
+	{
+		struct icmp6hdr icmp6;
+
+		struct in6_addr target;
+
+		struct
+		{
+			__u8 type;
+			__u8 length;
+			__u8 address[ETH_ALEN];
+		} slla;
+	} __attribute__((packed)) message = {};
+
+	__u16 checksum;
+
+	const __u32 message_length =
+		sizeof(message);
+
+	const __u32 packet_length =
+		sizeof(eth) +
+		sizeof(ip6) +
+		sizeof(message);
+
+	/*
+	 * ff02::1:ffXX:XXXX
+	 */
+	make_solicited_node_address(
+		target,
+		&solicited_node);
+
+	/*
+	 * IPv6 multicast maps to:
+	 *
+	 * 33:33:ff:XX:XX:XX
+	 */
+	eth.h_dest[0] = 0x33;
+	eth.h_dest[1] = 0x33;
+	eth.h_dest[2] = solicited_node.s6_addr[12];
+	eth.h_dest[3] = solicited_node.s6_addr[13];
+	eth.h_dest[4] = solicited_node.s6_addr[14];
+	eth.h_dest[5] = solicited_node.s6_addr[15];
+
+	/*
+	 * This packet is transmitted on the discovery interface,
+	 * not the VM interface.
+	 */
+	__builtin_memcpy(
+		eth.h_source,
+		local_config->discovery_mac,
+		ETH_ALEN);
+
+	eth.h_proto = bpf_htons(ETH_P_IPV6);
+
+	/*
+	 * IPv6 header.
+	 */
+	ip6.version = 6;
+	ip6.payload_len = bpf_htons(message_length);
+	ip6.nexthdr = IPPROTO_ICMPV6;
+	ip6.hop_limit = 255;
+
+	/*
+	 * The source is the VM that triggered discovery.
+	 */
+	ip6.saddr = *source;
+	ip6.daddr = solicited_node;
+
+	/*
+	 * ICMPv6 Neighbor Solicitation.
+	 */
+	message.icmp6.icmp6_type =
+		NDISC_NEIGHBOUR_SOLICITATION;
+
+	message.icmp6.icmp6_code = 0;
+	message.icmp6.icmp6_cksum = 0;
+
+	/*
+	 * Reserved field in struct icmp6hdr is already zero
+	 * because message was initialized with {}.
+	 */
+
+	/*
+	 * Target address.
+	 */
+	message.target = *target;
+
+	/*
+	 * Source Link-Layer Address option.
+	 *
+	 * Type   = 1
+	 * Length = 1 (one 8-byte unit)
+	 */
+	message.slla.type = 1;
+	message.slla.length = 1;
+
+	__builtin_memcpy(
+		message.slla.address,
+		local_config->discovery_mac,
+		ETH_ALEN);
+
+	/*
+	 * ICMPv6 checksum.
+	 */
+	if (checksum_neighbor_solicitation(
+		&ip6,
+		&message,
+		message_length,
+		&checksum))
+		return -1;
+
+	message.icmp6.icmp6_cksum = checksum;
+
+	/*
+	 * Replace the original VM packet with the NS.
+	 *
+	 * bpf_skb_change_tail() may invalidate packet pointers,
+	 * so everything above is built from local stack objects.
+	 */
+	if (bpf_skb_change_tail(
+		packet,
+		packet_length,
+		0))
+		return -1;
+
+	/*
+	 * Ethernet header.
+	 */
+	if (bpf_skb_store_bytes(
+		packet,
+		0,
+		&eth,
+		sizeof(eth),
+		BPF_F_INVALIDATE_HASH))
+		return -1;
+
+	/*
+	 * IPv6 header.
+	 */
+	if (bpf_skb_store_bytes(
+		packet,
+		ETH_HLEN,
+		&ip6,
+		sizeof(ip6),
+		BPF_F_INVALIDATE_HASH))
+		return -1;
+
+	/*
+	 * ICMPv6 NS + target + SLLAO.
+	 */
+	if (bpf_skb_store_bytes(
+		packet,
+		ETH_HLEN + sizeof(ip6),
+		&message,
+		sizeof(message),
+		BPF_F_INVALIDATE_HASH))
+		return -1;
+
+	return 0;
+}
+
+
 static __always_inline int add_tunnel_header(
 	struct __sk_buff *packet,
 	struct config *local_config,
@@ -121,6 +412,7 @@ static __always_inline int add_tunnel_header(
 
 	return TC_ACT_OK;
 }
+
 
 /*
  * Attached to TC ingress on every VM interface.
@@ -205,7 +497,9 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/*
 	 * Only a registered local VM may inject mesh traffic.
 	 */
-	if (!owns_source_address(&src, packet->ifindex))
+	if (!owns_source_address(
+		&src,
+		packet->ifindex))
 	{
 		emit_vm_debug_event(
 			DEBUG_DROP,
@@ -219,7 +513,9 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/*
 	 * Enforce tenant isolation.
 	 */
-	if (!tenants_can_communicate(&src, &dst))
+	if (!tenants_can_communicate(
+		&src,
+		&dst))
 	{
 		emit_vm_debug_event(
 			DEBUG_DROP,
@@ -252,16 +548,55 @@ int handle_vm_packet(struct __sk_buff *packet)
 	if (!remote_host)
 	{
 		/*
-		 * Unknown location: let Linux perform NDP on the
-		 * shared VLAN. The NDP hook will learn the owner.
+		 * The remote VM is unknown locally.
+		 *
+		 * Trigger multicast NDP discovery for this VM.
 		 */
+		local_config = get_config();
+
+		if (!local_config)
+		{
+			emit_vm_debug_event(
+				DEBUG_DROP,
+				DEBUG_VM_NO_CONFIG,
+				&src,
+				&dst);
+
+			return TC_ACT_SHOT;
+		}
+
+		/*
+		 * Replace this VM packet with a multicast
+		 * Neighbor Solicitation.
+		 */
+		if (send_neighbor_solicitation(
+			packet,
+			local_config,
+			&src,
+			&dst))
+		{
+			emit_vm_debug_event(
+				DEBUG_DROP,
+				DEBUG_VM_ENCAP_FAILED,
+				&src,
+				&dst);
+
+			return TC_ACT_SHOT;
+		}
+
 		emit_vm_debug_event(
-			DEBUG_ACCEPT,
+			DEBUG_REDIRECT,
 			DEBUG_VM_REMOTE_UNKNOWN,
 			&src,
 			&dst);
 
-		return TC_ACT_OK;
+		/*
+		 * Send the newly constructed NS through the
+		 * shared discovery VLAN.
+		 */
+		return bpf_redirect(
+			local_config->discovery_ifindex,
+			0);
 	}
 
 	local_config = get_config();
