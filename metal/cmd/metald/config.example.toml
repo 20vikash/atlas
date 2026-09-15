@@ -34,6 +34,9 @@ binary_path = "/usr/local/bin/atlas-wg-mesh"
 # NDP hook and its proxy NDP entries here, so name the VLAN itself and never
 # its parent. Required.
 uplink = "eno1.1878"
+# The unicast peer file that metald writes and the unicast daemon reads.
+# Optional; the default sits under base_dir.
+peers_file = "/var/lib/metal/unicast-peers"
 
 [traffic_monitor]
 # Set false to disable VM traffic monitoring on this host.

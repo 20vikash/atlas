@@ -50,6 +50,22 @@ The daemon checks the peer file modification time once per second. When the file
 
 The daemon performs no packet processing. All transport runs inside the BPF hooks.
 
+## Atlas-managed unicast
+
+When the Atlas app manages the host, the controller drives the unicast mode:
+
+1. The `Use Unicast Networking` flag in Atlas Settings switches the region to unicast. The flag is off by default, and the region uses multicast NDP.
+2. Every synchronization sends the complete `unicast_peers` set to each host with `POST /v1/sync`. The set lists the private IPv4 address of every running Metal Server, so every host receives the same set.
+3. metald writes the set into the configured peer file and enables `atlas-wg-mesh-unicast.service`. The unit waits until `atlas-wg-mesh status` succeeds, so the daemon starts only after metald configured the host, and its start removes the multicast NDP filters that the configure run attached.
+4. The daemon watches the peer file. A later synchronization that changes the set rewrites the file, and the daemon reloads the peer list map.
+5. A synchronization without the `unicast_peers` field stops and disables the unit. The clean stop restores the multicast filters, so turning the flag off returns the region to multicast on the next synchronization.
+
+A host that would keep no remote peer after it drops its own address does not run the daemon, so a single-host region stays in multicast mode.
+
+The host installation writes the unit file and the peer file path into the metald configuration. A host that was installed before the unit existed must run the host installation again before the controller can switch it to unicast.
+
+The `unicast peer` commands above remain for manual operation without the Atlas app.
+
 ## How discovery works
 
 1. The host route for `fdaa::/16` still selects the uplink, so Linux sends a multicast solicitation on that interface when a VM location is unknown.

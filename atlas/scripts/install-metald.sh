@@ -20,6 +20,8 @@ machines_dir=$base_dir/machines
 images_dir=$base_dir/images
 sockets_dir=/run/metal
 config_file=$base_dir/metald.toml
+unicast_peers_file=$base_dir/unicast-peers
+unicast_unit=/etc/systemd/system/atlas-wg-mesh-unicast.service
 
 if [ "$(id -u)" -ne 0 ]; then
 	echo "install-metald must run as root" >&2
@@ -153,7 +155,18 @@ interface = "$wireguard_interface"
 [wg_mesh]
 binary_path = "$mesh_binary_path"
 uplink = "$MESH_UPLINK_INTERFACE"
+peers_file = "$unicast_peers_file"
 EOF
+}
+
+# ensure_mesh_peers_file_setting keeps the unicast peer file path in an existing
+# configuration, because metald and the unicast unit must agree on it.
+ensure_mesh_peers_file_setting() {
+	if grep -q '^peers_file = ' "$config_file"; then
+		sed -i "s|^peers_file = .*|peers_file = \"$unicast_peers_file\"|" "$config_file"
+	else
+		sed -i "/^\\[wg_mesh\\]/a peers_file = \"$unicast_peers_file\"" "$config_file"
+	fi
 }
 
 step "config ($config_file)"
@@ -167,6 +180,7 @@ if [ -f "$config_file" ]; then
 	if grep -q '^\[wg_mesh\]' "$config_file"; then
 		sed -i "s|^uplink = .*|uplink = \"$MESH_UPLINK_INTERFACE\"|" "$config_file"
 		sed -i "s|^binary_path = \"/usr/local/bin/atlas-wg-mesh\"|binary_path = \"$mesh_binary_path\"|" "$config_file"
+		ensure_mesh_peers_file_setting
 	else
 		mesh_sections
 	fi
@@ -240,13 +254,36 @@ After=network.target
 Type=exec
 EnvironmentFile=$machines_dir/%i/jailer.env
 ExecStart=/usr/bin/jailer \$JAILER_ARGS
-StandardInput=tty-force
-StandardOutput=tty
+StandardInput=ty-force
+StandardOutput=ty
 StandardError=journal
 TTYPath=/run/metal/consoles/%i
 TTYReset=yes
 TTYVHangup=yes
 Restart=no
+EOF
+
+# The unicast daemon replaces the multicast NDP filters with the unicast hooks.
+# It stays disabled here: metald enables it when the controller syncs a unicast
+# peer set, and disables it when the controller returns to multicast.
+cat > "$unicast_unit" <<EOF
+[Unit]
+Description=Atlas WG Mesh unicast NDP transport
+Requires=metal.service
+After=metal.service network-online.target
+Wants=network-online.target
+
+[Service]
+# metald configures Atlas WG Mesh on every boot, and the daemon must wait for
+# that, because its start removes the multicast NDP filters that configure
+# attaches.
+ExecStartPre=/bin/sh -c 'for waiting_second in \$(seq 30); do "$mesh_binary_path" status >/dev/null 2>&1 && exit 0; sleep 1; done; echo "Atlas WG Mesh is not configured" >&2; exit 1'
+ExecStart=$mesh_binary_path unicast start $unicast_peers_file
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
 
