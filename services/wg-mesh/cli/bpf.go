@@ -27,13 +27,22 @@ const (
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
 
-// Must match struct config in bpf/state.h. The discovery index records the
-// configured uplink, and the underlay IPv4 address also sources the unicast
-// NDP transport.
+// Must match struct config in bpf/state.h.
+//
+// DiscoveryIndex identifies the shared VLAN/uplink interface used for
+// multicast NDP discovery.
+//
+// DiscoveryMAC is the MAC address of that same interface. The VM TC hook
+// uses it when constructing a multicast Neighbor Solicitation.
+//
+// The trailing padding keeps the Go representation aligned with the BPF
+// struct layout.
 type hostConfig struct {
 	DiscoveryIndex uint32
 	UplinkIPv4     [4]byte
 	WireGuardIPv6  [16]byte
+	DiscoveryMAC   [6]byte
+	_              [2]byte
 }
 
 // programPath returns the pin for a program. A fresh install pins at the top
@@ -41,47 +50,93 @@ type hostConfig struct {
 // removes the top level pin, so look for the installed release first.
 func programPath(program string) (string, error) {
 	if hash, err := readInstalledHash(); err == nil {
-		release := filepath.Join(pinDirectory, "releases", hex.EncodeToString(hash[:]), program)
+		release := filepath.Join(
+			pinDirectory,
+			"releases",
+			hex.EncodeToString(hash[:]),
+			program,
+		)
+
 		if _, err := os.Stat(release); err == nil {
 			return release, nil
 		}
 	}
+
 	top := filepath.Join(pinDirectory, program)
+
 	if _, err := os.Stat(top); err != nil {
-		return "", fmt.Errorf("no pinned program %s: run configure or upgrade", program)
+		return "", fmt.Errorf(
+			"no pinned program %s: run configure or upgrade",
+			program,
+		)
 	}
+
 	return top, nil
 }
 
-func pinCollection(collection *ebpf.Collection, config hostConfig) error {
+func pinCollection(
+	collection *ebpf.Collection,
+	config hostConfig,
+) error {
 	if err := os.MkdirAll(pinDirectory, 0755); err != nil {
 		return err
 	}
+
 	for name, bpfMap := range collection.Maps {
-		if err := bpfMap.Pin(filepath.Join(pinDirectory, name)); err != nil {
+		if err := bpfMap.Pin(
+			filepath.Join(pinDirectory, name),
+		); err != nil {
 			return err
 		}
 	}
+
 	for name, program := range collection.Programs {
-		if err := program.Pin(filepath.Join(pinDirectory, name)); err != nil {
+		if err := program.Pin(
+			filepath.Join(pinDirectory, name),
+		); err != nil {
 			return err
 		}
 	}
-	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
+
+	if err := collection.Maps["config"].Put(
+		uint32(0),
+		config,
+	); err != nil {
 		return err
 	}
-	return collection.Maps["build_hash"].Put(uint32(0), bpfHash())
+
+	return collection.Maps["build_hash"].Put(
+		uint32(0),
+		bpfHash(),
+	)
 }
 
-func loadCollection(replacements map[string]*ebpf.Map) (*ebpf.Collection, error) {
-	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfObject))
+func loadCollection(
+	replacements map[string]*ebpf.Map,
+) (*ebpf.Collection, error) {
+	spec, err := ebpf.LoadCollectionSpecFromReader(
+		bytes.NewReader(bpfObject),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("read embedded BPF object: %w", err)
+		return nil, fmt.Errorf(
+			"read embedded BPF object: %w",
+			err,
+		)
 	}
-	collection, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{MapReplacements: replacements})
+
+	collection, err := ebpf.NewCollectionWithOptions(
+		spec,
+		ebpf.CollectionOptions{
+			MapReplacements: replacements,
+		},
+	)
 	if err != nil {
-		return nil, fmt.Errorf("load BPF programs: %w", err)
+		return nil, fmt.Errorf(
+			"load BPF programs: %w",
+			err,
+		)
 	}
+
 	return collection, nil
 }
 
@@ -97,14 +152,22 @@ func readInstalledHash() ([32]byte, error) {
 	defer buildMap.Close()
 
 	var hash [32]byte
-	if err := buildMap.Lookup(uint32(0), &hash); err != nil {
+
+	if err := buildMap.Lookup(
+		uint32(0),
+		&hash,
+	); err != nil {
 		return [32]byte{}, err
 	}
+
 	return hash, nil
 }
 
 func openMap(name string) (*ebpf.Map, error) {
-	return ebpf.LoadPinnedMap(filepath.Join(pinDirectory, name), nil)
+	return ebpf.LoadPinnedMap(
+		filepath.Join(pinDirectory, name),
+		nil,
+	)
 }
 
 func clearPinDirectory() error {
@@ -112,11 +175,15 @@ func clearPinDirectory() error {
 	if err != nil {
 		return err
 	}
+
 	for _, entry := range entries {
-		if err := os.RemoveAll(filepath.Join(pinDirectory, entry.Name())); err != nil {
+		if err := os.RemoveAll(
+			filepath.Join(pinDirectory, entry.Name()),
+		); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -128,23 +195,36 @@ func readPinnedConfig() (hostConfig, error) {
 	defer configMap.Close()
 
 	var config hostConfig
-	if err := configMap.Lookup(uint32(0), &config); err != nil {
+
+	if err := configMap.Lookup(
+		uint32(0),
+		&config,
+	); err != nil {
 		return hostConfig{}, err
 	}
+
 	return config, nil
 }
 
-func addLocalVirtualMachine(address [16]byte, ifindex uint32) error {
+func addLocalVirtualMachine(
+	address [16]byte,
+	ifindex uint32,
+) error {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
 		return err
 	}
 	defer vmMap.Close()
 
-	return vmMap.Put(address, ifindex)
+	return vmMap.Put(
+		address,
+		ifindex,
+	)
 }
 
-func removeLocalVirtualMachine(address [16]byte) error {
+func removeLocalVirtualMachine(
+	address [16]byte,
+) error {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
 		return err
@@ -154,7 +234,10 @@ func removeLocalVirtualMachine(address [16]byte) error {
 	return vmMap.Delete(address)
 }
 
-func hasOtherLocalVirtualMachineOnInterface(address [16]byte, ifindex uint32) (bool, error) {
+func hasOtherLocalVirtualMachineOnInterface(
+	address [16]byte,
+	ifindex uint32,
+) (bool, error) {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
 		return false, err
@@ -163,12 +246,19 @@ func hasOtherLocalVirtualMachineOnInterface(address [16]byte, ifindex uint32) (b
 
 	var otherAddress [16]byte
 	var otherIndex uint32
+
 	iterator := vmMap.Iterate()
-	for iterator.Next(&otherAddress, &otherIndex) {
-		if otherAddress != address && otherIndex == ifindex {
+
+	for iterator.Next(
+		&otherAddress,
+		&otherIndex,
+	) {
+		if otherAddress != address &&
+			otherIndex == ifindex {
 			return true, nil
 		}
 	}
+
 	return false, iterator.Err()
 }
 
@@ -182,7 +272,11 @@ func (virtualMachine localVirtualMachine) interfaceLabel() string {
 	if virtualMachine.interfaceName != "" {
 		return virtualMachine.interfaceName
 	}
-	return fmt.Sprintf("ifindex:%d", virtualMachine.ifindex)
+
+	return fmt.Sprintf(
+		"ifindex:%d",
+		virtualMachine.ifindex,
+	)
 }
 
 func localVirtualMachines() ([]localVirtualMachine, error) {
@@ -192,27 +286,51 @@ func localVirtualMachines() ([]localVirtualMachine, error) {
 	}
 	defer vmMap.Close()
 
-	virtualMachines := make([]localVirtualMachine, 0)
+	virtualMachines := make(
+		[]localVirtualMachine,
+		0,
+	)
+
 	var address [16]byte
 	var ifindex uint32
+
 	iterator := vmMap.Iterate()
-	for iterator.Next(&address, &ifindex) {
+
+	for iterator.Next(
+		&address,
+		&ifindex,
+	) {
 		interfaceName := ""
-		if device, err := net.InterfaceByIndex(int(ifindex)); err == nil {
+
+		if device, err := net.InterfaceByIndex(
+			int(ifindex),
+		); err == nil {
 			interfaceName = device.Name
 		}
-		virtualMachines = append(virtualMachines, localVirtualMachine{
-			address:       netip.AddrFrom16(address),
-			ifindex:       ifindex,
-			interfaceName: interfaceName,
-		})
+
+		virtualMachines = append(
+			virtualMachines,
+			localVirtualMachine{
+				address:       netip.AddrFrom16(address),
+				ifindex:       ifindex,
+				interfaceName: interfaceName,
+			},
+		)
 	}
+
 	if err := iterator.Err(); err != nil {
 		return nil, err
 	}
-	sort.Slice(virtualMachines, func(left, right int) bool {
-		return virtualMachines[left].address.Less(virtualMachines[right].address)
-	})
+
+	sort.Slice(
+		virtualMachines,
+		func(left, right int) bool {
+			return virtualMachines[left].address.Less(
+				virtualMachines[right].address,
+			)
+		},
+	)
+
 	return virtualMachines, nil
 }
 
@@ -227,10 +345,16 @@ func remoteLocationCount() (int, uint32, error) {
 
 	var vm, host [16]byte
 	count := 0
+
 	iterator := remoteMap.Iterate()
-	for iterator.Next(&vm, &host) {
+
+	for iterator.Next(
+		&vm,
+		&host,
+	) {
 		count++
 	}
+
 	return count, remoteMap.MaxEntries(), iterator.Err()
 }
 
@@ -244,9 +368,15 @@ func localVirtualMachineCount() (int, error) {
 	var address [16]byte
 	var value uint32
 	count := 0
+
 	iterator := vmMap.Iterate()
-	for iterator.Next(&address, &value) {
+
+	for iterator.Next(
+		&address,
+		&value,
+	) {
 		count++
 	}
+
 	return count, iterator.Err()
 }

@@ -77,7 +77,8 @@ struct config
 {
 	__u32 discovery_ifindex;
 	__be32 underlay_ip4;
-	struct in6_addr wg_ip6; /* This host's WireGuard address. */
+	struct in6_addr wg_ip6;
+	__u8 discovery_mac[ETH_ALEN];
 };
 
 /* One host configuration entry. The integration writes it during setup. */
