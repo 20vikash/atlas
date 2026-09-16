@@ -66,6 +66,7 @@ class VirtualMachineImage(Document):
 		memory_snapshot_memory_mib: DF.Int
 		memory_snapshot_virtual_cpu_count: DF.Int
 		rootfs_multipart_upload_id: DF.Data | None
+		site_file_retention_until: DF.Datetime | None
 		source_local_snapshot_id: DF.Data | None
 		source_server: DF.Data | None
 		source_virtual_machine: DF.Data | None

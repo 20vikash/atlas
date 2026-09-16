@@ -32,6 +32,7 @@
   "kernel_file",
   "kernel_sha256",
   "kernel_size_mib",
+  "site_file_retention_until",
   "section_break_source",
   "source_virtual_machine",
   "column_break_igol",
@@ -311,11 +312,20 @@
    "label": "Tags"
   },
   {
-   "description": "Arbitrary key and value labels used to select an image.",
+   "description": "Your own key and value labels for this image, such as os and Ubuntu. Use them to find it again.",
    "fieldname": "tags",
    "fieldtype": "Table",
    "label": "Tags",
    "options": "Atlas Tag",
+   "show_description_on_click": 1
+  },
+  {
+   "depends_on": "eval: doc.site_file_retention_until",
+   "description": "This image now lives in object storage. Its old site files stay until this time, so a host that is still downloading one is not cut off.",
+   "fieldname": "site_file_retention_until",
+   "fieldtype": "Datetime",
+   "label": "Site Files Kept Until",
+   "read_only": 1,
    "show_description_on_click": 1
   }
  ],

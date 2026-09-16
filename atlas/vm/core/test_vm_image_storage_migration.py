@@ -1,13 +1,17 @@
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
 from frappe.tests import UnitTestCase
+from frappe.utils import now_datetime
 
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.vm_image_storage_migration import (
+	SITE_FILE_RETENTION,
 	VirtualMachineImageStorageMigration,
+	delete_expired_site_files,
 	enqueue_site_file_image_migrations,
 )
 
@@ -26,6 +30,7 @@ def build_image(**overrides) -> SimpleNamespace:
 		"kernel_object_key": None,
 		"image_sha256": "a" * 64,
 		"kernel_sha256": "b" * 64,
+		"site_file_retention_until": None,
 		"save": Mock(),
 	}
 	values.update(overrides)
@@ -53,7 +58,7 @@ class TestVirtualMachineImageStorageMigrationRequest(UnitTestCase):
 
 
 class TestVirtualMachineImageStorageMigration(UnitTestCase):
-	def test_migration_uploads_moves_the_record_and_then_drops_the_files(self) -> None:
+	def test_migration_uploads_and_keeps_the_files_for_their_retention_time(self) -> None:
 		image = build_image()
 		client = Mock()
 
@@ -80,11 +85,16 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 		self.assertEqual(image.image_object_key, f"vm-images/sha256/{'a' * 64}/rootfs.ext4")
 		self.assertEqual(image.kernel_object_key, f"vm-images/sha256/{'b' * 64}/kernel")
 		self.assertEqual(image.artifact_storage, "Object Storage")
-		self.assertIsNone(image.image_file)
-		self.assertIsNone(image.kernel_file)
+		self.assertEqual(image.image_file, "file-rootfs")
+		self.assertEqual(image.kernel_file, "file-kernel")
+		self.assertAlmostEqual(
+			image.site_file_retention_until,
+			now_datetime() + SITE_FILE_RETENTION,
+			delta=timedelta(minutes=1),
+		)
 		image.save.assert_called_once()
 		self.assertEqual(validate_stored_size.call_count, 2)
-		self.assertEqual([call.args[1] for call in delete_doc.call_args_list], ["file-rootfs", "file-kernel"])
+		delete_doc.assert_not_called()
 
 	def test_a_migrated_image_is_left_alone(self) -> None:
 		image = build_image(artifact_storage="Object Storage", is_stored_in_site_file=False)
@@ -141,3 +151,54 @@ class TestSiteFileImageMigrationTrigger(UnitTestCase):
 			{"artifact_storage": "Site File", "status": "Available"},
 		)
 		self.assertEqual([call.args[0] for call in enqueue.call_args_list], ["image-1", "image-2"])
+
+
+class TestExpiredSiteFileRemoval(UnitTestCase):
+	def delete(self, image: SimpleNamespace) -> Mock:
+		"""Run one site file cleanup against a stubbed database."""
+		with (
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.db", Mock()),
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.delete_doc") as delete_doc,
+		):
+			VirtualMachineImageStorageMigration().delete_site_files("image-1")
+
+		return delete_doc
+
+	def test_the_record_drops_both_references_before_the_files_go(self) -> None:
+		image = build_image(
+			artifact_storage="Object Storage",
+			is_stored_in_site_file=False,
+			site_file_retention_until="2026-09-16 10:00:00",
+		)
+
+		delete_doc = self.delete(image)
+
+		self.assertIsNone(image.image_file)
+		self.assertIsNone(image.kernel_file)
+		self.assertIsNone(image.site_file_retention_until)
+		image.save.assert_called_once()
+		self.assertEqual([call.args[1] for call in delete_doc.call_args_list], ["file-rootfs", "file-kernel"])
+
+	def test_a_site_file_image_keeps_its_files(self) -> None:
+		image = build_image()
+
+		delete_doc = self.delete(image)
+
+		self.assertEqual(image.image_file, "file-rootfs")
+		image.save.assert_not_called()
+		delete_doc.assert_not_called()
+
+	def test_only_images_past_their_retention_time_are_swept(self) -> None:
+		with (
+			patch(
+				"atlas.vm.core.vm_image_storage_migration.frappe.get_all", return_value=["image-1"]
+			) as get_all,
+			patch.object(VirtualMachineImageStorageMigration, "delete_site_files") as delete_site_files,
+		):
+			delete_expired_site_files()
+
+		filters = get_all.call_args.kwargs["filters"]
+		self.assertEqual(filters["artifact_storage"], "Object Storage")
+		self.assertEqual(filters["site_file_retention_until"][0], "<=")
+		delete_site_files.assert_called_once_with("image-1")
