@@ -173,14 +173,12 @@ class TestNetworkRules(unittest.TestCase):
 		).stdout.splitlines()
 
 	def test_a_forward_matches_only_the_host_address(self) -> None:
-		prerouting = [rule for rule in self.rules if "-A PREROUTING" in rule]
-		self.assertEqual(
-			prerouting,
-			[
-				f"-t nat -A PREROUTING -d {self.uplink_address} -p tcp --dport 443 "
-				f"-j DNAT --to-destination {atlas_vm.VM_ADDRESS}:443"
-			],
+		expected = (
+			f"-t nat -A PREROUTING -d {self.uplink_address} -p tcp --dport 443 "
+			f"-j DNAT --to-destination {atlas_vm.VM_ADDRESS}:443"
 		)
+		prerouting = [rule for rule in self.rules if "-A PREROUTING" in rule]
+		self.assertEqual(prerouting, [expected])
 
 	def test_the_host_reaches_a_forward_through_its_own_address(self) -> None:
 		destinations = [rule.split(" -d ")[1].split(" ")[0] for rule in self.rules if "-A OUTPUT" in rule]
