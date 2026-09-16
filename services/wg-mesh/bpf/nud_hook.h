@@ -12,7 +12,7 @@
  *
  *   20 consecutive failures
  *       -> remove VM from remote_vms
- *       -> clear the Linux neighbour entry for garbage collection
+ *       -> clear the Linux neighbour entry
  *       -> remove failure counter
  */
 #ifndef ATLAS_NUD_HOOK_H
@@ -27,7 +27,6 @@
 
 #define ATLAS_NUD_FAILURE_LIMIT 20
 
-/* The uapi headers carry no address families, and the value is a stable ABI. */
 #ifndef AF_INET6
 #define AF_INET6 10
 #endif
@@ -35,13 +34,13 @@
 /*
  * Raw tracepoint context for:
  *
- *     tracepoint/neigh/neigh_update
+ *     tracepoint/neigh/neigh_timer_handler
  *
  * Layout matches:
  *
- *     /sys/kernel/tracing/events/neigh/neigh_update/format
+ *     /sys/kernel/tracing/events/neigh/neigh_timer_handler/format
  */
-struct trace_event_raw_neigh_update
+struct trace_event_raw_neigh_timer_handler
 {
 	__u16 common_type;
 	__u8 common_flags;
@@ -68,17 +67,12 @@ struct trace_event_raw_neigh_update
 	unsigned long updated;
 	unsigned long used;
 
-	__u8 new_lladdr[32];
-	__u8 new_state;
-
-	__u32 update_flags;
-	__u32 pid;
+	__u32 err;
 };
 
+
 /*
- * Kernel kfunc provided by the Atlas neighbour module. The delete clears the
- * managed and externally-learned flags, and the neighbour garbage collector
- * then removes the entry.
+ * Kernel kfunc provided by the Atlas neighbour module.
  */
 extern int atlas_delete_neigh(
 	__u32 ifindex,
@@ -86,8 +80,11 @@ extern int atlas_delete_neigh(
 	__u64 addr_lo) __ksym;
 
 
+/*
+ * Get the IPv6 neighbour address from the tracepoint.
+ */
 static __always_inline void get_nud_address(
-	struct trace_event_raw_neigh_update *ctx,
+	struct trace_event_raw_neigh_timer_handler *ctx,
 	struct in6_addr *address)
 {
 	__builtin_memcpy(
@@ -97,6 +94,10 @@ static __always_inline void get_nud_address(
 }
 
 
+/*
+ * Convert the IPv6 address into the scalar arguments
+ * expected by atlas_delete_neigh().
+ */
 static __always_inline void split_address(
 	const struct in6_addr *address,
 	__u64 *addr_hi,
@@ -114,6 +115,9 @@ static __always_inline void split_address(
 }
 
 
+/*
+ * Reset the consecutive failure counter.
+ */
 static __always_inline void reset_nud_failures(
 	const struct in6_addr *vm)
 {
@@ -127,6 +131,11 @@ static __always_inline void reset_nud_failures(
 }
 
 
+/*
+ * Increment the consecutive failure counter.
+ *
+ * Returns the new count.
+ */
 static __always_inline __u32 increment_nud_failures(
 	const struct in6_addr *vm)
 {
@@ -162,6 +171,9 @@ static __always_inline __u32 increment_nud_failures(
 }
 
 
+/*
+ * Remove a failed remote VM.
+ */
 static __always_inline void remove_remote_vm(
 	const struct in6_addr *vm)
 {
@@ -174,69 +186,116 @@ static __always_inline void remove_remote_vm(
 	if (!local_config)
 		return;
 
+	/*
+	 * Remove the Atlas routing/discovery state.
+	 */
 	bpf_map_delete_elem(
 		&remote_vms,
 		vm);
 
+	/*
+	 * Convert the VM address to the scalar representation
+	 * required by the kernel kfunc.
+	 */
 	split_address(
 		vm,
 		&addr_hi,
 		&addr_lo);
 
+	/*
+	 * Clear the corresponding Linux neighbour entry.
+	 */
 	atlas_delete_neigh(
 		local_config->discovery_ifindex,
 		addr_hi,
 		addr_lo);
 
+	/*
+	 * Remove the NUD failure counter.
+	 */
 	bpf_map_delete_elem(
 		&nud_failures,
 		vm);
 }
 
 
-SEC("tracepoint/neigh/neigh_update")
+/*
+ * NUD timer handler hook.
+ */
+SEC("tracepoint/neigh/neigh_timer_handler")
 int handle_atlas_nud(
-	struct trace_event_raw_neigh_update *ctx)
+	struct trace_event_raw_neigh_timer_handler *ctx)
 {
 	struct in6_addr vm = {};
 	__u32 count;
 
+	/*
+	 * We only care about IPv6 neighbours.
+	 */
 	if (ctx->family != AF_INET6)
 		return 0;
 
+	/*
+	 * Extract the neighbour IPv6 address.
+	 */
 	get_nud_address(
 		ctx,
 		&vm);
 
+	/*
+	 * Only track addresses that Atlas currently knows
+	 * as remote VMs.
+	 */
 	if (!bpf_map_lookup_elem(
 		    &remote_vms,
 		    &vm))
 		return 0;
 
 	/*
-	 * The trace event carries the neighbour flags in one byte, so the
-	 * managed bit at bit 8 is lost. The externally-learned bit at bit 4
-	 * survives, and only Atlas registrations set it. The remote_vms
-	 * lookup above already limits the set to Atlas remote VMs.
+	 * The tracepoint exposes the neighbour flags as a u8.
+	 *
+	 * NTF_EXT_LEARNED is representable here and identifies
+	 * the externally learned Atlas neighbour.
 	 */
 	if (!(ctx->flags & NTF_EXT_LEARNED))
 		return 0;
 
-	if (ctx->new_state == NUD_REACHABLE)
+	/*
+	 * A reachable neighbour breaks the failure streak.
+	 */
+	if (ctx->nud_state == NUD_REACHABLE)
 	{
 		reset_nud_failures(&vm);
 
 		return 0;
 	}
 
-	if (ctx->new_state != NUD_FAILED)
+	/*
+	 * Only NUD_FAILED counts as a failure.
+	 */
+	if (ctx->nud_state != NUD_FAILED)
 		return 0;
 
+	/*
+	 * Increment the consecutive failure count.
+	 */
 	count = increment_nud_failures(&vm);
 
+	/*
+	 * Do nothing until we have 20 consecutive failures.
+	 */
 	if (count < ATLAS_NUD_FAILURE_LIMIT)
 		return 0;
 
+	/*
+	 * 20 consecutive failures.
+	 *
+	 * Remove:
+	 *
+	 *   1. remote_vms entry
+	 *   2. Linux neighbour entry
+	 *   3. NUD failure counter
+	 */
 	remove_remote_vm(&vm);
 
 	return 0;

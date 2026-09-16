@@ -27,10 +27,11 @@ const (
 	ndpUnicastIngressProgram = "handle_ndp_unicast_ingress"
 )
 
-// The NUD hook is not a tc hook: it attaches to the neigh_update tracepoint.
+// The NUD hook is not a tc hook: it attaches to the neigh_timer_handler
+// tracepoint.
 const nudTracepointCategory = "neigh"
 
-const nudTracepointName = "neigh_update"
+const nudTracepointName = "neigh_timer_handler"
 
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
@@ -93,9 +94,9 @@ func nudHookLinkPinPath() string {
 }
 
 // attachNUDHook attaches the NUD tracepoint program to the kernel
-// neigh_update tracepoint and pins the link. A perf event link cannot update
-// its program, so an existing link is replaced with one that runs the program
-// at the given path.
+// neigh_timer_handler tracepoint and pins the link. A perf event link cannot
+// update its program, so an existing link is replaced with one that runs the
+// program at the given path.
 func attachNUDHook(programPath string) error {
 	program, err := ebpf.LoadPinnedProgram(
 		programPath,
