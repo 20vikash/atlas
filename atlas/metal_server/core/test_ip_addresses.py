@@ -45,6 +45,28 @@ class TestIPAddressReservation(UnitTestCase):
 			"Metal Server IP Address", "203.0.113.11", {"tenant_id": TENANT_ID, "reserved": 1}
 		)
 
+	def test_a_borrow_locks_a_pool_address_without_a_write(self) -> None:
+		service = IPAddressService()
+		database = Mock(get_value=Mock(return_value="203.0.113.10"), set_value=Mock())
+
+		with (
+			patch.object(service, "get_pool_candidates", return_value=["203.0.113.10"]),
+			patch("atlas.metal_server.core.ip_address_service.frappe.db", database),
+		):
+			self.assertEqual(service.borrow_from_pool(), "203.0.113.10")
+
+		self.assertTrue(database.get_value.call_args.kwargs["for_update"])
+		database.set_value.assert_not_called()
+
+	def test_an_empty_pool_refuses_a_borrow(self) -> None:
+		service = IPAddressService()
+
+		with (
+			patch.object(service, "get_pool_candidates", return_value=[]),
+			self.assertRaises(IPAddressPoolEmpty),
+		):
+			service.borrow_from_pool()
+
 	def test_a_provider_reservation_lands_in_the_shared_pool(self) -> None:
 		provider = Mock()
 		provider.reserve_public_ipv4_address.return_value = SimpleNamespace(

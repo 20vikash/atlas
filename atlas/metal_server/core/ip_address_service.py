@@ -33,13 +33,12 @@ class IPAddressService:
 
 	def reserve(self, tenant_id: int) -> str:
 		"""Reserve one shared pool address for a tenant."""
-		address_name = self.claim_from_pool(tenant_id)
-		if not address_name:
-			frappe.throw(_("The shared IP address pool is empty."), exc=IPAddressPoolEmpty)
+		address_name = self.borrow_from_pool()
+		frappe.db.set_value("Metal Server IP Address", address_name, {"tenant_id": tenant_id, "reserved": 1})
 		return address_name
 
-	def claim_from_pool(self, tenant_id: int) -> str | None:
-		"""Claim and reserve one unowned address."""
+	def borrow_from_pool(self) -> str:
+		"""Lock one unused shared pool address. The caller decides whether it becomes a reservation."""
 		for name in self.get_pool_candidates():
 			locked = frappe.db.get_value(
 				"Metal Server IP Address",
@@ -48,10 +47,9 @@ class IPAddressService:
 				for_update=True,
 			)
 			if locked:
-				frappe.db.set_value("Metal Server IP Address", name, {"tenant_id": tenant_id, "reserved": 1})
 				return name
 
-		return None
+		frappe.throw(_("The shared IP address pool is empty."), exc=IPAddressPoolEmpty)
 
 	def get_pool_candidates(self) -> list[str]:
 		"""Return addresses that no tenant reserved and no virtual machine uses."""

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 EgressMode = Literal["uplink", "mesh", "none"]
+AUTO_IP_ADDRESS = "auto"
 
 
 def to_unix_timestamp(value: str | datetime) -> int:
@@ -317,7 +318,10 @@ class MetadataReplacementPayload(StrictModel):
 class IPAddressAssignmentPayload(StrictModel):
 	"""The public IPv4 address to attach."""
 
-	ip_address_id: str = Field(min_length=1)
+	ip_address_id: str = Field(
+		min_length=1,
+		description=f"A reserved address, or {AUTO_IP_ADDRESS} to borrow one from the shared pool.",
+	)
 
 
 class SnapshotPayload(StrictModel):

@@ -17,6 +17,7 @@ from atlas.api.core.errors import (
 	ResourceConflict,
 )
 from atlas.api.models import (
+	AUTO_IP_ADDRESS,
 	ComputeUpdatePayload,
 	ConsoleTokenPayload,
 	ConsoleTokenResponse,
@@ -42,6 +43,7 @@ from atlas.api.routes.images import get_owned_image
 from atlas.api.routes.ip_addresses import get_owned_ip_address
 from atlas.atlas.core.tags import read_tags_for
 from atlas.auth.identity import get_current_tenant_id
+from atlas.metal_server.core.ip_address_service import IPAddressService
 from atlas.vm.core.console_token import CONSOLE_TOKEN_TTL_SECONDS
 from atlas.vm.core.vm_state import get_reported_state_rows
 from atlas.vm.doctype.virtual_machine.virtual_machine import create as create_virtual_machine_request
@@ -78,6 +80,14 @@ def get_available_ip_address(ip_address_id: str) -> MetalServerIPAddress:
 		raise ResourceConflict("The IP address is not available.")
 
 	return ip_address
+
+
+def get_attachable_ip_address_name(ip_address_id: str) -> str:
+	"""Return the address to attach. The auto value borrows one from the shared pool."""
+	if ip_address_id == AUTO_IP_ADDRESS:
+		return IPAddressService().borrow_from_pool()
+
+	return get_available_ip_address(ip_address_id).name
 
 
 @virtual_machines.post("")
@@ -397,14 +407,17 @@ def replace_virtual_machine_metadata(
 @virtual_machine_configuration.put("<virtual_machine_id>/ip-address")
 @api_docs(
 	request_example={"ip_address_id": "203.0.113.10"},
-	responses=ACCEPTED_RESPONSE,
+	responses={
+		**ACCEPTED_RESPONSE,
+		409: {"description": "A different address is attached, or the shared pool is empty."},
+	},
 )
 def attach_virtual_machine_ip_address(
 	virtual_machine_id: str, payload: IPAddressAssignmentPayload
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Attach IP address.
 
-	Attaches one available IP address that the tenant reserved. Detach the current address before you attach a different one.
+	Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which returns it on detach. Detach the current address first.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	attached_ip_address_name = frappe.db.get_value(
@@ -415,8 +428,7 @@ def attach_virtual_machine_ip_address(
 	if attached_ip_address_name:
 		raise ResourceConflict("Detach the current IP address before you attach a different one.")
 
-	ip_address = get_available_ip_address(payload.ip_address_id)
-	virtual_machine.attach_ip_address(ip_address.name)
+	virtual_machine.attach_ip_address(get_attachable_ip_address_name(payload.ip_address_id))
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 

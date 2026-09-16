@@ -271,6 +271,7 @@
         "description": "The public IPv4 address to attach.",
         "properties": {
           "ip_address_id": {
+            "description": "A reserved address, or auto to borrow one from the shared pool.",
             "minLength": 1,
             "title": "Ip Address Id",
             "type": "string"
@@ -2530,7 +2531,7 @@
         ]
       },
       "put": {
-        "description": "Attaches one available IP address that the tenant reserved. Detach the current address before you attach a different one.",
+        "description": "Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which returns it on detach. Detach the current address first.",
         "operationId": "attach_virtual_machine_ip_address",
         "parameters": [
           {
@@ -2576,6 +2577,9 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "409": {
+            "description": "A different address is attached, or the shared pool is empty."
           }
         },
         "summary": "Attach IP address",
