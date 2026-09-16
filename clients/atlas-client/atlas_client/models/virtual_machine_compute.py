@@ -23,14 +23,14 @@ class VirtualMachineCompute:
     """ The compute shape of one virtual machine.
 
         Attributes:
+            cpu_millicores (int):
             memory_mib (int):
             sleep_after_idle_seconds (int):
-            vcpus (int):
      """
 
+    cpu_millicores: int
     memory_mib: int
     sleep_after_idle_seconds: int
-    vcpus: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -38,19 +38,19 @@ class VirtualMachineCompute:
 
 
     def to_dict(self) -> dict[str, Any]:
+        cpu_millicores = self.cpu_millicores
+
         memory_mib = self.memory_mib
 
         sleep_after_idle_seconds = self.sleep_after_idle_seconds
-
-        vcpus = self.vcpus
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "cpu_millicores": cpu_millicores,
             "memory_mib": memory_mib,
             "sleep_after_idle_seconds": sleep_after_idle_seconds,
-            "vcpus": vcpus,
         })
 
         return field_dict
@@ -60,16 +60,16 @@ class VirtualMachineCompute:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        cpu_millicores = d.pop("cpu_millicores")
+
         memory_mib = d.pop("memory_mib")
 
         sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
 
-        vcpus = d.pop("vcpus")
-
         virtual_machine_compute = cls(
+            cpu_millicores=cpu_millicores,
             memory_mib=memory_mib,
             sleep_after_idle_seconds=sleep_after_idle_seconds,
-            vcpus=vcpus,
         )
 
 

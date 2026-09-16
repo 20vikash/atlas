@@ -27,6 +27,7 @@ class VirtualMachineListResponse:
 
         Attributes:
             architecture (str):
+            cpu_millicores (int):
             created_at (int):
             disk_mib (int):
             id (str):
@@ -37,10 +38,10 @@ class VirtualMachineListResponse:
             state_synced_at (int | None):
             tags (VirtualMachineListResponseTags):
             tenant_id (int):
-            vcpus (int):
      """
 
     architecture: str
+    cpu_millicores: int
     created_at: int
     disk_mib: int
     id: str
@@ -51,7 +52,6 @@ class VirtualMachineListResponse:
     state_synced_at: int | None
     tags: VirtualMachineListResponseTags
     tenant_id: int
-    vcpus: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -61,6 +61,8 @@ class VirtualMachineListResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.virtual_machine_list_response_tags import VirtualMachineListResponseTags # noqa: PLC0415
         architecture = self.architecture
+
+        cpu_millicores = self.cpu_millicores
 
         created_at = self.created_at
 
@@ -83,13 +85,12 @@ class VirtualMachineListResponse:
 
         tenant_id = self.tenant_id
 
-        vcpus = self.vcpus
-
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
             "architecture": architecture,
+            "cpu_millicores": cpu_millicores,
             "created_at": created_at,
             "disk_mib": disk_mib,
             "id": id,
@@ -100,7 +101,6 @@ class VirtualMachineListResponse:
             "state_synced_at": state_synced_at,
             "tags": tags,
             "tenant_id": tenant_id,
-            "vcpus": vcpus,
         })
 
         return field_dict
@@ -112,6 +112,8 @@ class VirtualMachineListResponse:
         from ..models.virtual_machine_list_response_tags import VirtualMachineListResponseTags # noqa: PLC0415
         d = dict(src_dict)
         architecture = d.pop("architecture")
+
+        cpu_millicores = d.pop("cpu_millicores")
 
         created_at = d.pop("created_at")
 
@@ -142,10 +144,9 @@ class VirtualMachineListResponse:
 
         tenant_id = d.pop("tenant_id")
 
-        vcpus = d.pop("vcpus")
-
         virtual_machine_list_response = cls(
             architecture=architecture,
+            cpu_millicores=cpu_millicores,
             created_at=created_at,
             disk_mib=disk_mib,
             id=id,
@@ -156,7 +157,6 @@ class VirtualMachineListResponse:
             state_synced_at=state_synced_at,
             tags=tags,
             tenant_id=tenant_id,
-            vcpus=vcpus,
         )
 
 

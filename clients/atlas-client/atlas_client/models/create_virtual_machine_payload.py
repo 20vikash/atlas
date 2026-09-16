@@ -28,10 +28,10 @@ class CreateVirtualMachinePayload:
     """ Values that create one virtual machine.
 
         Attributes:
+            cpu_millicores (int):
             disk_mib (int):
             image_id (str):
             memory_mib (int):
-            vcpus (int):
             disk_iops (int | Unset):  Default: 0.
             disk_throughput_mibps (int | Unset):  Default: 0.
             egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
@@ -46,10 +46,10 @@ class CreateVirtualMachinePayload:
             user_data (str | Unset):  Default: ''.
      """
 
+    cpu_millicores: int
     disk_mib: int
     image_id: str
     memory_mib: int
-    vcpus: int
     disk_iops: int | Unset = 0
     disk_throughput_mibps: int | Unset = 0
     egress: CreateVirtualMachinePayloadEgress | Unset = CreateVirtualMachinePayloadEgress.UPLINK
@@ -69,13 +69,13 @@ class CreateVirtualMachinePayload:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata # noqa: PLC0415
+        cpu_millicores = self.cpu_millicores
+
         disk_mib = self.disk_mib
 
         image_id = self.image_id
 
         memory_mib = self.memory_mib
-
-        vcpus = self.vcpus
 
         disk_iops = self.disk_iops
 
@@ -118,10 +118,10 @@ class CreateVirtualMachinePayload:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "cpu_millicores": cpu_millicores,
             "disk_mib": disk_mib,
             "image_id": image_id,
             "memory_mib": memory_mib,
-            "vcpus": vcpus,
         })
         if disk_iops is not UNSET:
             field_dict["disk_iops"] = disk_iops
@@ -156,13 +156,13 @@ class CreateVirtualMachinePayload:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata # noqa: PLC0415
         d = dict(src_dict)
+        cpu_millicores = d.pop("cpu_millicores")
+
         disk_mib = d.pop("disk_mib")
 
         image_id = d.pop("image_id")
 
         memory_mib = d.pop("memory_mib")
-
-        vcpus = d.pop("vcpus")
 
         disk_iops = d.pop("disk_iops", UNSET)
 
@@ -214,10 +214,10 @@ class CreateVirtualMachinePayload:
         user_data = d.pop("user_data", UNSET)
 
         create_virtual_machine_payload = cls(
+            cpu_millicores=cpu_millicores,
             disk_mib=disk_mib,
             image_id=image_id,
             memory_mib=memory_mib,
-            vcpus=vcpus,
             disk_iops=disk_iops,
             disk_throughput_mibps=disk_throughput_mibps,
             egress=egress,
