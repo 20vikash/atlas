@@ -15,7 +15,10 @@ from atlas.vm.core.multipart_upload import (
 	get_multipart_part_count,
 )
 from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
-from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
+from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import (
+	MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT,
+	VirtualMachineImage,
+)
 
 
 def artifact_url(image, artifact, expiry_seconds=0) -> str:
@@ -167,6 +170,20 @@ class TestVirtualMachineImage(UnitTestCase):
 
 		with self.assertRaises(frappe.ValidationError):
 			image.validate_memory_snapshot_configuration()
+
+	def test_memory_snapshot_rejects_more_vcpus_than_firecracker_allows(self) -> None:
+		image = self.make_image(
+			memory_snapshot=1,
+			memory_snapshot_virtual_cpu_count=MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT + 1,
+			memory_snapshot_memory_mib=2048,
+			memory_snapshot_disk_mib=10240,
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.validate_memory_snapshot_configuration()
+
+		image.memory_snapshot_virtual_cpu_count = MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT
+		image.validate_memory_snapshot_configuration()
 
 	def test_memory_without_cache_remains_a_normal_image_request(self) -> None:
 		image = self.make_image(

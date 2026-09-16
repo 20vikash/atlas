@@ -12,8 +12,11 @@ from frappe.utils import add_to_date, now_datetime
 from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.tags import validate_tags
+from atlas.vm.core.models import MAXIMUM_CPU_MILLICORES
 
 SIGNED_URL_EXPIRY_SECONDS = 86400
+# Firecracker exposes whole vCPUs, so a warm image shape is capped in cores.
+MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT = MAXIMUM_CPU_MILLICORES // 1000
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 Artifact = Literal["rootfs", "kernel"]
@@ -208,6 +211,11 @@ class VirtualMachineImage(Document):
 			value = self.get(fieldname)
 			if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
 				frappe.throw(_("{0} must be a positive integer.").format(label))
+
+		if self.memory_snapshot_virtual_cpu_count > MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT:
+			frappe.throw(
+				_("Memory Snapshot vCPUs must not exceed {0}.").format(MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT)
+			)
 
 		if self.image_size_mib and self.memory_snapshot_disk_mib < self.image_size_mib:
 			frappe.throw(_("Memory Snapshot Disk must be at least {0} MiB.").format(self.image_size_mib))
