@@ -15,7 +15,7 @@ The Atlas document name is the Metal virtual machine ID. The committed draft mak
 
 ## Placement
 
-Placement uses a capacity sample that is less than 2 minutes old. It matches the image architecture and subtracts requests that the sample cannot include. Every uncertain draft remains a reservation.
+Placement uses a capacity sample that is less than 2 minutes old. It matches the image architecture and subtracts requests that the sample cannot include. Every uncertain draft remains a reservation. Memory and storage must be free for the request. Virtual CPUs are oversubscribed and do not limit placement.
 
 Atlas locks the candidate Metal Server row and checks capacity again. It commits the selected draft before it sends the Metal request.
 

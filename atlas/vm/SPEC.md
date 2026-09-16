@@ -46,6 +46,8 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
 Capacity comes from a Metal Server Usage sample, which Metal produced at some earlier moment. Placement subtracts every VM created after that sample and every uncertain draft, so a burst of requests cannot spend the same reported capacity twice.
 
+Only memory and storage limit placement. Virtual CPUs are oversubscribed: a host accepts a VM when memory and storage are free, whatever the sum of the virtual CPUs it already hosts. Available CPU stays in the ranking key, so placement still prefers the host with the fewest reserved virtual CPUs.
+
 The chosen Metal Server row is locked and its capacity rechecked before the draft is inserted. The lock is released by the commit, before Atlas calls Metal, so a slow host never holds a row.
 
 A sample older than the freshness limit is not used. Placement reports a synchronization fault instead of guessing.

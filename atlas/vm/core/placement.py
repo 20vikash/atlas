@@ -38,10 +38,10 @@ class PlacementCapacity:
 		)
 
 	def can_host(self, request: VirtualMachineCreateRequest, architecture: str) -> bool:
-		"""Return whether this capacity can hold the request."""
+		"""Return whether this capacity can hold the request. Virtual CPUs are
+		oversubscribed, so only memory and storage limit placement."""
 		return (
 			self.architecture == architecture
-			and self.available_cpu_count >= request.virtual_cpu_count
 			and self.available_memory_mib >= request.memory_mib
 			and self.available_storage_mib >= request.disk_mib
 		)

@@ -93,8 +93,8 @@ type TargetReservation struct {
 }
 
 // AvailableCapacity is free host capacity checked by a target reservation.
+// Virtual CPUs are oversubscribed, so they are not part of the check.
 type AvailableCapacity struct {
-	CPUCount   int
 	MemoryMiB  int
 	StorageMiB int
 }
