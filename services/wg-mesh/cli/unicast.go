@@ -325,7 +325,7 @@ func runUnicastDaemon(path string, verbose bool) error {
 
 	stopped := make(chan struct{})
 	defer close(stopped)
-	go watchUnicastPeerFile(path, config.UplinkIPv4, information.ModTime(), stopped, verbose)
+	go watchUnicastPeerFile(path, uplinkName, config.UplinkIPv4, information.ModTime(), stopped, verbose)
 
 	interrupted := make(chan os.Signal, 1)
 	signal.Notify(interrupted, os.Interrupt, syscall.SIGTERM)
@@ -378,7 +378,14 @@ func attachMulticastNeighbourHook(uplinkName string) error {
 
 // watchUnicastPeerFile adopts a changed peer file after a successful parse.
 // An invalid file keeps the previous list until it becomes valid again.
-func watchUnicastPeerFile(path string, self [4]byte, modified time.Time, stopped <-chan struct{}, verbose bool) {
+func watchUnicastPeerFile(
+	path,
+	uplinkName string,
+	self [4]byte,
+	modified time.Time,
+	stopped <-chan struct{},
+	verbose bool,
+) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -399,13 +406,22 @@ func watchUnicastPeerFile(path string, self [4]byte, modified time.Time, stopped
 			continue
 		}
 
+		peers := unicastTransportPeers(entries, self)
+
+		// The neighbour entries go in first, so a new peer has its entry
+		// before the map can send wrapped packets to it.
+		if err := installTransportNeighbours(peers, uplinkName); err != nil {
+			fmt.Fprintf(os.Stderr, "atlas-wg-mesh: warning: update transport neighbours: %v\n", err)
+			continue
+		}
+
 		if err := syncUnicastPeerMap(entries, self); err != nil {
 			fmt.Fprintf(os.Stderr, "atlas-wg-mesh: warning: update peer list map: %v\n", err)
 			continue
 		}
 
 		modified = information.ModTime()
-		logUnicastSync(verbose, unicastTransportPeers(entries, self))
+		logUnicastSync(verbose, peers)
 	}
 }
 
