@@ -122,16 +122,14 @@ static __always_inline struct config *get_config(void)
 }
 
 /* Check if the given address is a local VM. */
-static __always_inline int is_local_virtual_machine(
-	const struct in6_addr *virtual_machine)
+static __always_inline int is_local_virtual_machine(const struct in6_addr *virtual_machine)
 {
 	return bpf_map_lookup_elem(&local_vms, virtual_machine) != NULL;
 }
 
 /* True only when the VM is registered on this exact interface. A VM must not
  * send traffic with the source address of a VM on another interface. */
-static __always_inline int owns_source_address(
-	const struct in6_addr *virtual_machine, __u32 ifindex)
+static __always_inline int owns_source_address(const struct in6_addr *virtual_machine, __u32 ifindex)
 {
 	__u32 *owner = bpf_map_lookup_elem(&local_vms, virtual_machine);
 
@@ -140,27 +138,17 @@ static __always_inline int owns_source_address(
 
 /* Cross-tenant traffic is permitted only when one endpoint is a whitelisted
  * privileged-tenant address. This preserves request and response traffic. */
-static __always_inline int tenants_can_communicate(
-	const struct in6_addr *source, const struct in6_addr *destination)
+static __always_inline int tenants_can_communicate(const struct in6_addr *source, const struct in6_addr *destination)
 {
-	if (get_tenant(source) == get_tenant(destination))
-		return 1;
+	if (get_tenant(source) == get_tenant(destination)) return 1;
 
-	if (get_tenant(source) == 0 &&
-		bpf_map_lookup_elem(
-			&privileged_tenant_allowed_addresses,
-			source) != NULL)
-		return 1;
+	if (get_tenant(source) == 0 && bpf_map_lookup_elem(&privileged_tenant_allowed_addresses, source) != NULL) return 1;
 
-	return get_tenant(destination) == 0 &&
-		   bpf_map_lookup_elem(
-			   &privileged_tenant_allowed_addresses,
-			   destination) != NULL;
+	return get_tenant(destination) == 0 && bpf_map_lookup_elem(&privileged_tenant_allowed_addresses, destination) != NULL;
 }
 
 /* Get the remote location (WireGuard address of the bare metal host) of the given VM. */
-static __always_inline struct in6_addr *get_remote_location(
-	const struct in6_addr *virtual_machine)
+static __always_inline struct in6_addr *get_remote_location(const struct in6_addr *virtual_machine)
 {
 	return bpf_map_lookup_elem(&remote_vms, virtual_machine);
 }

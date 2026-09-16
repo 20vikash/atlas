@@ -65,9 +65,7 @@ func runModuleInstall() error {
 
 	buildDirectory := filepath.Join("/lib/modules", release, "build")
 	if information, err := os.Stat(buildDirectory); err != nil || !information.IsDir() {
-		return fmt.Errorf(
-			"kernel headers for %s are missing; install the linux-headers-%s package and run this command again",
-			release, release)
+		return fmt.Errorf("kernel headers for %s are missing; install the linux-headers-%s package and run this command again", release, release)
 	}
 
 	for _, tool := range []string{"make", "cc", "pahole"} {
@@ -77,11 +75,9 @@ func runModuleInstall() error {
 	}
 
 	stamp := moduleStamp(release)
-	storedStamp, stampError := os.ReadFile(
-		filepath.Join(kernelModuleSourceDirectory, kernelModuleStampFile))
+	storedStamp, stampError := os.ReadFile(filepath.Join(kernelModuleSourceDirectory, kernelModuleStampFile))
 
-	moduleObject := filepath.Join(
-		kernelModuleSourceDirectory, kernelModuleName+".ko")
+	moduleObject := filepath.Join(kernelModuleSourceDirectory, kernelModuleName+".ko")
 	_, objectError := os.Stat(moduleObject)
 
 	needBuild := stampError != nil || string(storedStamp) != stamp || objectError != nil
@@ -95,16 +91,11 @@ func runModuleInstall() error {
 			return err
 		}
 
-		if err := runCommand(
-			"make", "-C", buildDirectory,
-			"M="+kernelModuleSourceDirectory,
-			"clean", "modules"); err != nil {
+		if err := runCommand("make", "-C", buildDirectory, "M="+kernelModuleSourceDirectory, "clean", "modules"); err != nil {
 			return err
 		}
 
-		if err := os.WriteFile(
-			filepath.Join(kernelModuleSourceDirectory, kernelModuleStampFile),
-			[]byte(stamp), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(kernelModuleSourceDirectory, kernelModuleStampFile), []byte(stamp), 0644); err != nil {
 			return err
 		}
 	} else {
@@ -144,8 +135,7 @@ func runModuleInstall() error {
 	if err := os.MkdirAll(filepath.Dir(kernelModuleLoadFile), 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(
-		kernelModuleLoadFile, []byte(kernelModuleName+"\n"), 0644); err != nil {
+	if err := os.WriteFile(kernelModuleLoadFile, []byte(kernelModuleName+"\n"), 0644); err != nil {
 		return err
 	}
 
@@ -200,8 +190,7 @@ func writeKernelModuleSources(directory string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(
-			filepath.Join(directory, name.Name()), contents, 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(directory, name.Name()), contents, 0644); err != nil {
 			return err
 		}
 	}

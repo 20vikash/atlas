@@ -72,17 +72,11 @@ func readHostConfig(uplinkName, wireGuardName string) (hostConfig, error) {
 	 * Address option of the multicast Neighbor Solicitation.
 	 */
 	if len(uplinkInterface.HardwareAddr) != 6 {
-		return hostConfig{}, fmt.Errorf(
-			"%s has no valid Ethernet MAC address",
-			uplinkInterface.Name,
-		)
+		return hostConfig{}, fmt.Errorf("%s has no valid Ethernet MAC address", uplinkInterface.Name)
 	}
 
 	var discoveryMAC [6]byte
-	copy(
-		discoveryMAC[:],
-		uplinkInterface.HardwareAddr,
-	)
+	copy(discoveryMAC[:], uplinkInterface.HardwareAddr)
 
 	return hostConfig{
 		DiscoveryIndex: uint32(uplinkInterface.Index),
@@ -120,13 +114,9 @@ func configuredInterfaces() (hostInterfaces, error) {
 
 	interfaces := hostInterfaces{}
 
-	interfaces.uplinkName = interfaceWithIPv4(
-		config.UplinkIPv4,
-	)
+	interfaces.uplinkName = interfaceWithIPv4(config.UplinkIPv4)
 
-	if wireGuardName := interfaceWithAddress(
-		config.WireGuardIPv6,
-	); wireGuardName != "" {
+	if wireGuardName := interfaceWithAddress(config.WireGuardIPv6); wireGuardName != "" {
 		interfaces.wireGuardName = wireGuardName
 	}
 
@@ -186,11 +176,7 @@ func interfaceWithAddress(target [16]byte) string {
 	return ""
 }
 
-func interfaceAddress(
-	iface *net.Interface,
-	kind string,
-	match func(net.IP) bool,
-) (net.IP, error) {
+func interfaceAddress(iface *net.Interface, kind string, match func(net.IP) bool) (net.IP, error) {
 	addresses, err := iface.Addrs()
 	if err != nil {
 		return nil, err
@@ -203,30 +189,20 @@ func interfaceAddress(
 		}
 	}
 
-	return nil, fmt.Errorf(
-		"%s has no %s address",
-		iface.Name,
-		kind,
-	)
+	return nil, fmt.Errorf("%s has no %s address", iface.Name, kind)
 }
 
 func parseMeshAddress(addressText string) ([16]byte, error) {
 	address, err := netip.ParseAddr(addressText)
 	if err != nil || !address.Is6() {
-		return [16]byte{}, fmt.Errorf(
-			"%q is not an IPv6 address",
-			addressText,
-		)
+		return [16]byte{}, fmt.Errorf("%q is not an IPv6 address", addressText)
 	}
 
 	meshAddress := address.As16()
 
 	if meshAddress[0] != 0xfd ||
 		meshAddress[1] != 0xaa {
-		return [16]byte{}, fmt.Errorf(
-			"%q is not in fdaa::/16",
-			addressText,
-		)
+		return [16]byte{}, fmt.Errorf("%q is not in fdaa::/16", addressText)
 	}
 
 	return meshAddress, nil
@@ -236,10 +212,7 @@ func meshTenant(address [16]byte) uint32 {
 	return binary.BigEndian.Uint32(address[4:8])
 }
 
-func announceVirtualMachine(
-	address [16]byte,
-	config hostConfig,
-) error {
+func announceVirtualMachine(address [16]byte, config hostConfig) error {
 	destination := &net.UDPAddr{
 		IP:   net.ParseIP(meshMulticastAddress),
 		Port: meshPort,
@@ -251,10 +224,7 @@ func announceVirtualMachine(
 	}
 	defer conn.Close()
 
-	if err := configureMulticastSocket(
-		conn,
-		config.UplinkIPv4,
-	); err != nil {
+	if err := configureMulticastSocket(conn, config.UplinkIPv4); err != nil {
 		return err
 	}
 
@@ -263,25 +233,16 @@ func announceVirtualMachine(
 	message[0] = 1
 	message[1] = 4
 
-	copy(
-		message[4:20],
-		address[:],
-	)
+	copy(message[4:20], address[:])
 
-	copy(
-		message[20:],
-		config.WireGuardIPv6[:],
-	)
+	copy(message[20:], config.WireGuardIPv6[:])
 
 	for attempt := range meshAnnouncementAttempts {
 		if attempt > 0 {
 			time.Sleep(meshAnnouncementInterval)
 		}
 
-		if _, err := conn.WriteToUDP(
-			message,
-			destination,
-		); err != nil {
+		if _, err := conn.WriteToUDP(message, destination); err != nil {
 			return err
 		}
 	}
@@ -289,10 +250,7 @@ func announceVirtualMachine(
 	return nil
 }
 
-func configureMulticastSocket(
-	conn *net.UDPConn,
-	source [4]byte,
-) error {
+func configureMulticastSocket(conn *net.UDPConn, source [4]byte) error {
 	rawConn, err := conn.SyscallConn()
 	if err != nil {
 		return err
@@ -303,22 +261,12 @@ func configureMulticastSocket(
 	err = rawConn.Control(func(fileDescriptor uintptr) {
 		descriptor := int(fileDescriptor)
 
-		if err := syscall.SetsockoptInt(
-			descriptor,
-			syscall.IPPROTO_IP,
-			syscall.IP_MULTICAST_TTL,
-			1,
-		); err != nil {
+		if err := syscall.SetsockoptInt(descriptor, syscall.IPPROTO_IP, syscall.IP_MULTICAST_TTL, 1); err != nil {
 			socketError = err
 			return
 		}
 
-		socketError = syscall.SetsockoptInet4Addr(
-			descriptor,
-			syscall.IPPROTO_IP,
-			syscall.IP_MULTICAST_IF,
-			source,
-		)
+		socketError = syscall.SetsockoptInet4Addr(descriptor, syscall.IPPROTO_IP, syscall.IP_MULTICAST_IF, source)
 	})
 
 	if err != nil {
@@ -329,72 +277,28 @@ func configureMulticastSocket(
 }
 
 func mountBPFFileSystem() error {
-	if err := runCommand(
-		"mountpoint",
-		"-q",
-		"/sys/fs/bpf",
-	); err == nil {
+	if err := runCommand("mountpoint", "-q", "/sys/fs/bpf"); err == nil {
 		return nil
 	}
 
-	return runCommand(
-		"mount",
-		"-t",
-		"bpf",
-		"bpf",
-		"/sys/fs/bpf",
-	)
+	return runCommand("mount", "-t", "bpf", "bpf", "/sys/fs/bpf")
 }
 
 // attachHook attaches one pinned program to a TC direction of an interface.
 // The direction is "ingress" or "egress".
-func attachHook(
-	interfaceName,
-	program,
-	direction string,
-) error {
+func attachHook(interfaceName, program, direction string) error {
 	path, err := programPath(program)
 	if err != nil {
 		return err
 	}
 
-	return attachHookPath(
-		interfaceName,
-		path,
-		direction,
-	)
+	return attachHookPath(interfaceName, path, direction)
 }
 
-func attachHookPath(
-	interfaceName,
-	programPath,
-	direction string,
-) error {
-	_ = runCommand(
-		"tc",
-		"qdisc",
-		"add",
-		"dev",
-		interfaceName,
-		"clsact",
-	)
+func attachHookPath(interfaceName, programPath, direction string) error {
+	_ = runCommand("tc", "qdisc", "add", "dev", interfaceName, "clsact")
 
-	return runCommand(
-		"tc",
-		"filter",
-		"replace",
-		"dev",
-		interfaceName,
-		direction,
-		"prio",
-		"10",
-		"handle",
-		"1",
-		"bpf",
-		"direct-action",
-		"object-pinned",
-		programPath,
-	)
+	return runCommand("tc", "filter", "replace", "dev", interfaceName, direction, "prio", "10", "handle", "1", "bpf", "direct-action", "object-pinned", programPath)
 }
 
 // detachHook removes the TC filters of both directions from an interface. A
@@ -404,19 +308,7 @@ func detachHook(interfaceName string) error {
 		"ingress",
 		"egress",
 	} {
-		err := runCommand(
-			"tc",
-			"filter",
-			"del",
-			"dev",
-			interfaceName,
-			direction,
-			"prio",
-			"10",
-			"handle",
-			"1",
-			"bpf",
-		)
+		err := runCommand("tc", "filter", "del", "dev", interfaceName, direction, "prio", "10", "handle", "1", "bpf")
 
 		if err != nil && !deleteMissing(err) {
 			return err
@@ -431,50 +323,20 @@ func detachHook(interfaceName string) error {
 func deleteMissing(err error) bool {
 	message := strings.ToLower(err.Error())
 
-	return strings.Contains(
-		message,
-		"no such file or directory",
-	) ||
-		strings.Contains(
-			message,
-			"cannot find",
-		)
+	return strings.Contains(message, "no such file or directory") ||
+		strings.Contains(message, "cannot find")
 }
 
 // setProxyNeighbour makes the host answer neighbour solicitations for a VM
 // address on the shared VLAN interface.
-func setProxyNeighbour(
-	addressText,
-	uplinkName string,
-) error {
-	return runCommand(
-		"ip",
-		"-6",
-		"neigh",
-		"replace",
-		"proxy",
-		addressText,
-		"dev",
-		uplinkName,
-	)
+func setProxyNeighbour(addressText, uplinkName string) error {
+	return runCommand("ip", "-6", "neigh", "replace", "proxy", addressText, "dev", uplinkName)
 }
 
 // removeProxyNeighbour stops the host from answering for a VM address. An
 // absent entry is not an error.
-func removeProxyNeighbour(
-	addressText,
-	uplinkName string,
-) error {
-	err := runCommand(
-		"ip",
-		"-6",
-		"neigh",
-		"del",
-		"proxy",
-		addressText,
-		"dev",
-		uplinkName,
-	)
+func removeProxyNeighbour(addressText, uplinkName string) error {
+	err := runCommand("ip", "-6", "neigh", "del", "proxy", addressText, "dev", uplinkName)
 
 	if err != nil && !deleteMissing(err) {
 		return err
@@ -486,27 +348,11 @@ func removeProxyNeighbour(
 // setMeshRoute points VM destinations at the shared VLAN interface, so Linux
 // runs neighbour discovery for them on that link. It is not a WireGuard route.
 func setMeshRoute(uplinkName string) error {
-	return runCommand(
-		"ip",
-		"-6",
-		"route",
-		"replace",
-		meshRoutePrefix,
-		"dev",
-		uplinkName,
-	)
+	return runCommand("ip", "-6", "route", "replace", meshRoutePrefix, "dev", uplinkName)
 }
 
 func removeMeshRoute(uplinkName string) error {
-	err := runCommand(
-		"ip",
-		"-6",
-		"route",
-		"del",
-		meshRoutePrefix,
-		"dev",
-		uplinkName,
-	)
+	err := runCommand("ip", "-6", "route", "del", meshRoutePrefix, "dev", uplinkName)
 
 	if err != nil && !deleteMissing(err) {
 		return err
@@ -520,55 +366,29 @@ func removeMeshRoute(uplinkName string) error {
 func requireNeighbourKfunc() error {
 	symbols, err := os.ReadFile("/proc/kallsyms")
 	if err != nil {
-		return fmt.Errorf(
-			"read /proc/kallsyms: %w",
-			err,
-		)
+		return fmt.Errorf("read /proc/kallsyms: %w", err)
 	}
 
-	if bytes.Contains(
-		symbols,
-		[]byte("atlas_register_neigh"),
-	) {
+	if bytes.Contains(symbols, []byte("atlas_register_neigh")) {
 		return nil
 	}
 
-	return errors.New(
-		"the atlas_neigh kernel module is not loaded; build it with make module and load it before configure",
-	)
+	return errors.New("the atlas_neigh kernel module is not loaded; build it with make module and load it before configure")
 }
 
-func runCommand(
-	name string,
-	arguments ...string,
-) error {
-	_, err := commandOutput(
-		name,
-		arguments...,
-	)
+func runCommand(name string, arguments ...string) error {
+	_, err := commandOutput(name, arguments...)
 
 	return err
 }
 
-func commandOutput(
-	name string,
-	arguments ...string,
-) (string, error) {
-	command := exec.Command(
-		name,
-		arguments...,
-	)
+func commandOutput(name string, arguments ...string) (string, error) {
+	command := exec.Command(name, arguments...)
 
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return "",
-			fmt.Errorf(
-				"%s %s: %w: %s",
-				name,
-				strings.Join(arguments, " "),
-				err,
-				strings.TrimSpace(string(output)),
-			)
+			fmt.Errorf("%s %s: %w: %s", name, strings.Join(arguments, " "), err, strings.TrimSpace(string(output)))
 	}
 
 	return string(output), nil

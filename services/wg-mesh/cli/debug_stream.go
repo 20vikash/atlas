@@ -114,19 +114,12 @@ func readDebugEvent(reader *ringbuf.Reader) (debugEvent, error) {
 
 	var event debugEvent
 
-	err = binary.Read(
-		bytes.NewReader(record.RawSample),
-		binary.NativeEndian,
-		&event,
-	)
+	err = binary.Read(bytes.NewReader(record.RawSample), binary.NativeEndian, &event)
 
 	return event, err
 }
 
-func updateDebugPair(
-	pairs map[debugPair]debugPairStats,
-	event debugEvent,
-) {
+func updateDebugPair(pairs map[debugPair]debugPairStats, event debugEvent) {
 	pair := debugPair{
 		netip.AddrFrom16(event.Source),
 		netip.AddrFrom16(event.Destination),
@@ -176,21 +169,12 @@ func printDebugTop(pairs map[debugPair]debugPairStats) {
 	fmt.Println("src\tdst\taccept\tdrop\tredirect")
 
 	for _, row := range rows {
-		fmt.Printf(
-			"%s\t%s\t%d\t%d\t%d\n",
-			row.pair.source,
-			row.pair.destination,
-			row.stats.accepted,
-			row.stats.dropped,
-			row.stats.redirect,
-		)
+		fmt.Printf("%s\t%s\t%d\t%d\t%d\n", row.pair.source, row.pair.destination, row.stats.accepted, row.stats.dropped, row.stats.redirect)
 	}
 }
 
 func printDebugEvent(event debugEvent, first uint64) {
-	elapsed := time.Duration(
-		event.Timestamp - first,
-	).Seconds()
+	elapsed := time.Duration(event.Timestamp - first).Seconds()
 
 	/*
 	 * VM events are packet events and use the VM-specific
@@ -200,28 +184,11 @@ func printDebugEvent(event debugEvent, first uint64) {
 		operation := debugOperationName(event)
 
 		if operation != "" {
-			fmt.Printf(
-				"%8.3f %-9s %-8s op=%-18s src=%s dst=%s tenant=%d\n",
-				elapsed,
-				hookName(event.Hook),
-				verdictName(event.Verdict),
-				operation,
-				netip.AddrFrom16(event.Source),
-				netip.AddrFrom16(event.Destination),
-				binary.BigEndian.Uint32(event.Tenant[:]),
-			)
+			fmt.Printf("%8.3f %-9s %-8s op=%-18s src=%s dst=%s tenant=%d\n", elapsed, hookName(event.Hook), verdictName(event.Verdict), operation, netip.AddrFrom16(event.Source), netip.AddrFrom16(event.Destination), binary.BigEndian.Uint32(event.Tenant[:]))
 			return
 		}
 
-		fmt.Printf(
-			"%8.3f %-9s %-8s src=%s dst=%s tenant=%d\n",
-			elapsed,
-			hookName(event.Hook),
-			verdictName(event.Verdict),
-			netip.AddrFrom16(event.Source),
-			netip.AddrFrom16(event.Destination),
-			binary.BigEndian.Uint32(event.Tenant[:]),
-		)
+		fmt.Printf("%8.3f %-9s %-8s src=%s dst=%s tenant=%d\n", elapsed, hookName(event.Hook), verdictName(event.Verdict), netip.AddrFrom16(event.Source), netip.AddrFrom16(event.Destination), binary.BigEndian.Uint32(event.Tenant[:]))
 
 		return
 	}
@@ -230,26 +197,9 @@ func printDebugEvent(event debugEvent, first uint64) {
 	 * Non-VM events with an operation are protocol events.
 	 */
 	if event.Operation != 0 {
-		fmt.Printf(
-			"%8.3f %-9s %-2s %-10s vm=%s host=%s tenant=%d\n",
-			elapsed,
-			hookName(event.Hook),
-			directionName(event.Direction),
-			debugOperationName(event),
-			netip.AddrFrom16(event.VM),
-			netip.AddrFrom16(event.Host),
-			binary.BigEndian.Uint32(event.Tenant[:]),
-		)
+		fmt.Printf("%8.3f %-9s %-2s %-10s vm=%s host=%s tenant=%d\n", elapsed, hookName(event.Hook), directionName(event.Direction), debugOperationName(event), netip.AddrFrom16(event.VM), netip.AddrFrom16(event.Host), binary.BigEndian.Uint32(event.Tenant[:]))
 		return
 	}
 
-	fmt.Printf(
-		"%8.3f %-9s %-8s src=%s dst=%s tenant=%d\n",
-		elapsed,
-		hookName(event.Hook),
-		verdictName(event.Verdict),
-		netip.AddrFrom16(event.Source),
-		netip.AddrFrom16(event.Destination),
-		binary.BigEndian.Uint32(event.Tenant[:]),
-	)
+	fmt.Printf("%8.3f %-9s %-8s src=%s dst=%s tenant=%d\n", elapsed, hookName(event.Hook), verdictName(event.Verdict), netip.AddrFrom16(event.Source), netip.AddrFrom16(event.Destination), binary.BigEndian.Uint32(event.Tenant[:]))
 }
