@@ -674,6 +674,7 @@ class TestMetalVirtualMachineModel(UnitTestCase):
 		self.assertEqual(virtual_machine.disk_iops, 2000)
 		self.assertEqual(virtual_machine.private_network_throughput_mibps, 100)
 		self.assertEqual(virtual_machine.public_network_throughput_mibps, 50)
+		self.assertEqual(virtual_machine.firewall_summary, "")
 		self.assertEqual(virtual_machine.ssh_keys, "ssh-ed25519 AAAA")
 		self.assertEqual(virtual_machine.metadata, '{\n  "env": "prod"\n}')
 

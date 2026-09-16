@@ -178,6 +178,11 @@ class VirtualMachine(Document):
 		return information.desired.network.public_network_throughput_mibps if information else 0
 
 	@property
+	def firewall_summary(self) -> str:
+		"""Return the empty initial value that the form replaces after its explicit firewall read."""
+		return ""
+
+	@property
 	def ssh_keys(self) -> str:
 		"""Return the authorized keys as one newline-separated block."""
 		information = self.get_metal_vm_info()
