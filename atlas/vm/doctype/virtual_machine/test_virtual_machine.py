@@ -96,6 +96,19 @@ class TestVirtualMachineRequest(UnitTestCase):
 		self.assertEqual(request.cpu_millicores, 1500)
 		self.assertEqual(request.egress, "uplink")
 
+	def test_request_accepts_the_infrastructure_tenant(self) -> None:
+		request = VirtualMachineCreateRequest.from_value(
+			{
+				"virtual_machine_image": "Ubuntu 24.04",
+				"cpu_millicores": 1000,
+				"memory_mib": 2048,
+				"disk_mib": 10240,
+				"tenant_id": 0,
+			}
+		)
+
+		self.assertEqual(request.tenant_id, 0)
+
 	def test_request_rejects_cpu_above_the_firecracker_limit(self) -> None:
 		with self.assertRaisesRegex(ValueError, "must not exceed 32000"):
 			VirtualMachineCreateRequest.from_value(

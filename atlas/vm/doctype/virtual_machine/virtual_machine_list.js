@@ -83,8 +83,8 @@ function showCreateVirtualMachineDialog() {
 				fieldname: "tenant_id",
 				fieldtype: "Int",
 				label: __("Tenant ID"),
-				description: __("VMs in the same tenant can connect through the mesh."),
-				reqd: 1,
+				description: __("Same tenant connects through the mesh. 0 is infrastructure."),
+				default: 0,
 			},
 			{
 				fieldname: "is_privileged",
