@@ -143,6 +143,13 @@ func upgradeBPF(force bool) error {
 		}
 	}
 
+	// The NUD hook is a tracepoint link, so its attach owns no tc filter.
+	if err := attachNUDHook(
+		filepath.Join(release, nudProgram),
+	); err != nil {
+		return err
+	}
+
 	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
 		return err
 	}
@@ -223,6 +230,13 @@ func forceUpgrade(config hostConfig) error {
 		}
 	}
 
+	// The NUD hook is a tracepoint link, so its attach owns no tc filter.
+	if err := attachNUDHook(
+		filepath.Join(pinDirectory, nudProgram),
+	); err != nil {
+		return err
+	}
+
 	hash := bpfHash()
 
 	fmt.Printf(
@@ -276,6 +290,7 @@ func existingMaps() (map[string]*ebpf.Map, func(), error) {
 		"local_vms",
 		privilegedTenantAllowedAddressesMap,
 		"remote_vms",
+		"nud_failures",
 		"peer_list",
 		"vm_peer_map",
 		"ndp_requesters",

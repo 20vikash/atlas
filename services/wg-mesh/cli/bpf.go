@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -13,16 +14,23 @@ import (
 	"sort"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 )
 
 const (
 	vmBPFProgram     = "handle_vm_packet"
 	ndpProgram       = "handle_ndp_packet"
 	wireguardProgram = "handle_wireguard_packet"
+	nudProgram       = "handle_atlas_nud"
 
 	ndpUnicastEgressProgram  = "handle_ndp_unicast_egress"
 	ndpUnicastIngressProgram = "handle_ndp_unicast_ingress"
 )
+
+// The NUD hook is not a tc hook: it attaches to the neigh_update tracepoint.
+const nudTracepointCategory = "neigh"
+
+const nudTracepointName = "neigh_update"
 
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
@@ -72,6 +80,99 @@ func programPath(program string) (string, error) {
 	}
 
 	return top, nil
+}
+
+// nudHookLinkPinPath is the stable pin of the NUD tracepoint link. A pinned
+// link keeps the hook attached after this process exits.
+func nudHookLinkPinPath() string {
+	return filepath.Join(
+		pinDirectory,
+		"links",
+		nudProgram,
+	)
+}
+
+// attachNUDHook attaches the NUD tracepoint program to the kernel
+// neigh_update tracepoint and pins the link. A perf event link cannot update
+// its program, so an existing link is replaced with one that runs the program
+// at the given path.
+func attachNUDHook(programPath string) error {
+	program, err := ebpf.LoadPinnedProgram(
+		programPath,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"load the pinned NUD program %s: %w",
+			programPath,
+			err,
+		)
+	}
+	defer program.Close()
+
+	linkPinPath := nudHookLinkPinPath()
+
+	existingLink, err := link.LoadPinnedLink(
+		linkPinPath,
+		nil,
+	)
+	if err == nil {
+		unpinError := existingLink.Unpin()
+
+		var closeError error
+		if unpinError == nil {
+			// The pin held the last reference, so closing releases the
+			// link and detaches its program.
+			closeError = existingLink.Close()
+		}
+
+		if unpinError != nil || closeError != nil {
+			return fmt.Errorf(
+				"replace the pinned NUD link: %w",
+				errors.Join(unpinError, closeError),
+			)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf(
+			"open the pinned NUD link: %w",
+			err,
+		)
+	}
+
+	newLink, err := link.Tracepoint(
+		nudTracepointCategory,
+		nudTracepointName,
+		program,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"attach %s to the %s/%s tracepoint: %w",
+			nudProgram,
+			nudTracepointCategory,
+			nudTracepointName,
+			err,
+		)
+	}
+
+	if err := os.MkdirAll(
+		filepath.Dir(linkPinPath),
+		0755,
+	); err != nil {
+		newLink.Close()
+		return err
+	}
+
+	if err := newLink.Pin(linkPinPath); err != nil {
+		newLink.Close()
+		return fmt.Errorf(
+			"pin the NUD tracepoint link: %w",
+			err,
+		)
+	}
+
+	// The pin holds the attachment, so releasing this handle is safe.
+	return newLink.Close()
 }
 
 func pinCollection(
