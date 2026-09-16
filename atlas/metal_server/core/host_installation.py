@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 FAILURE_REASON_LINES = 3
 FAILURE_REASON_LENGTH = 500
-WIREGUARD_OVERHEAD_BYTES = 60
 WIREGUARD_CONFIGURE_TIMEOUT_SECONDS = 300
 METALD_INSTALL_TIMEOUT_SECONDS = 1_200
 
@@ -38,7 +37,6 @@ class HostInstallation:
 			environment={
 				"WIREGUARD_ADDRESS": self.server.wireguard_ip_address,
 				"WIREGUARD_LISTEN_PORT": self.server.port,
-				"WIREGUARD_MTU": self.server.settings.private_network_mtu - WIREGUARD_OVERHEAD_BYTES,
 			},
 			timeout_seconds=WIREGUARD_CONFIGURE_TIMEOUT_SECONDS,
 			run_in_background=False,

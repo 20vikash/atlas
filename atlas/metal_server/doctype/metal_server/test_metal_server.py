@@ -645,7 +645,6 @@ class TestServer(UnitTestCase):
 			{
 				"WIREGUARD_ADDRESS": "fdab:1::7",
 				"WIREGUARD_LISTEN_PORT": 51820,
-				"WIREGUARD_MTU": 1440,
 			},
 		)
 		self.assertFalse(arguments["run_in_background"])

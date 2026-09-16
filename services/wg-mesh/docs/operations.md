@@ -28,7 +28,7 @@ The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds 
 
 ## Requirements
 
-Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
+Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Use a prefix that covers every other host, because the VM hook returns the tunnel packet to Linux routing and the host must have a route to the remote host address. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
 
 Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 
