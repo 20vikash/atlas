@@ -47,7 +47,8 @@ __bpf_kfunc int atlas_register_neigh_v3(
 		return -ENODEV;
 
 	pr_info(
-		"atlas_v3: ifindex=%u dev=%s addr=%pI6 mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+		"atlas_v3: ifindex=%u dev=%s addr=%pI6 "
+		"mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
 		ifindex,
 		device->name,
 		&address,
@@ -120,13 +121,11 @@ __bpf_kfunc int atlas_register_neigh_v3(
 		neighbour->flags);
 
 	/*
-	 * Now set the persistent neighbour flags.
+	 * Set the persistent neighbour flags.
 	 *
-	 * This updates:
+	 * This sets:
 	 *   NTF_EXT_LEARNED
 	 *   NTF_MANAGED
-	 *
-	 * and puts the neighbour on the kernel managed_list.
 	 */
 	result = neigh_update(
 		neighbour,
@@ -149,8 +148,122 @@ __bpf_kfunc int atlas_register_neigh_v3(
 	return result;
 }
 
+__bpf_kfunc int atlas_delete_neigh_v3(
+	__u32 ifindex,
+	__u64 addr_hi,
+	__u64 addr_lo)
+{
+	struct net_device *device;
+	struct neighbour *neighbour;
+	struct in6_addr address;
+	int result;
+
+	__builtin_memset(&address, 0, sizeof(address));
+
+	__builtin_memcpy(
+		&address.s6_addr32[0],
+		&addr_hi,
+		sizeof(addr_hi));
+
+	__builtin_memcpy(
+		&address.s6_addr32[2],
+		&addr_lo,
+		sizeof(addr_lo));
+
+	device = dev_get_by_index(&init_net, ifindex);
+	if (!device)
+		return -ENODEV;
+
+	pr_info(
+		"atlas_v3: delete request "
+		"ifindex=%u dev=%s addr=%pI6\n",
+		ifindex,
+		device->name,
+		&address);
+
+	neighbour = neigh_lookup(
+		&nd_tbl,
+		&address,
+		device);
+
+	if (!neighbour) {
+		pr_info(
+			"atlas_v3: delete neighbour not found: "
+			"ifindex=%u addr=%pI6\n",
+			ifindex,
+			&address);
+
+		dev_put(device);
+		return -ENOENT;
+	}
+
+	pr_info(
+		"atlas_v3: delete neighbour found "
+		"state=0x%x flags=0x%x refcnt=%d\n",
+		neighbour->nud_state,
+		neighbour->flags,
+		refcount_read(&neighbour->refcnt));
+
+	/*
+	 * Only Atlas-managed externally-learned neighbours
+	 * may be removed.
+	 */
+	if (!(neighbour->flags & NTF_EXT_LEARNED) ||
+	    !(neighbour->flags & NTF_MANAGED)) {
+		pr_info(
+			"atlas_v3: refusing to delete "
+			"non-Atlas neighbour\n");
+
+		neigh_release(neighbour);
+		dev_put(device);
+		return -EPERM;
+	}
+
+	/*
+	 * Clear the managed and externally-learned flags and mark the
+	 * entry incomplete, exactly as the RTM_DELNEIGH path does. The
+	 * ADMIN update clears every omitted flag, and the neighbour
+	 * garbage collector then removes the entry. The kernel exports
+	 * no function that removes a neighbour from a module directly.
+	 */
+	result = neigh_update(
+		neighbour,
+		NULL,
+		NUD_INCOMPLETE,
+		NEIGH_UPDATE_F_ADMIN,
+		0);
+
+	if (result) {
+		pr_info(
+			"atlas_v3: delete update failed: %d\n",
+			result);
+
+		neigh_release(neighbour);
+		dev_put(device);
+		return result;
+	}
+
+	pr_info(
+		"atlas_v3: neighbour delete issued; "
+		"the garbage collector removes the entry: "
+		"ifindex=%u addr=%pI6\n",
+		ifindex,
+		&address);
+
+	/*
+	 * neigh_update() performed the entry cleanup.
+	 */
+	neigh_release(neighbour);
+	dev_put(device);
+
+	return 0;
+}
+
 BTF_SET8_START(atlas_neigh_v3_kfunc_ids)
+
 BTF_ID_FLAGS(func, atlas_register_neigh_v3)
+BTF_ID_FLAGS(func, atlas_delete_neigh_v3)
+
 BTF_SET8_END(atlas_neigh_v3_kfunc_ids)
 
 static const struct btf_kfunc_id_set atlas_neigh_v3_kfunc_set = {
@@ -162,25 +275,46 @@ static int __init atlas_neigh_v3_init(void)
 {
 	int result;
 
+	/*
+	 * Existing Atlas NDP TC programs.
+	 */
 	result = register_btf_kfunc_id_set(
 		BPF_PROG_TYPE_SCHED_CLS,
 		&atlas_neigh_v3_kfunc_set);
 
 	if (result) {
 		pr_err(
-			"atlas_neigh_v3: kfunc registration failed: %d\n",
+			"atlas_v3: SCHED_CLS kfunc registration failed: %d\n",
 			result);
+
 		return result;
 	}
 
-	pr_info("atlas_neigh_v3: kfunc registered\n");
+	/*
+	 * Atlas NUD tracepoint program.
+	 */
+	result = register_btf_kfunc_id_set(
+		BPF_PROG_TYPE_TRACEPOINT,
+		&atlas_neigh_v3_kfunc_set);
+
+	if (result) {
+		pr_err(
+			"atlas_v3: TRACEPOINT kfunc registration failed: %d\n",
+			result);
+
+		return result;
+	}
+
+	pr_info(
+		"atlas_v3: register and delete kfuncs registered "
+		"for SCHED_CLS and TRACEPOINT\n");
 
 	return 0;
 }
 
 static void __exit atlas_neigh_v3_exit(void)
 {
-	pr_info("atlas_neigh_v3: unloaded\n");
+	pr_info("atlas_v3: unloaded\n");
 }
 
 module_init(atlas_neigh_v3_init);
@@ -189,4 +323,4 @@ module_exit(atlas_neigh_v3_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Atlas");
 MODULE_DESCRIPTION(
-	"Atlas WG Mesh neighbour registration kfunc v3");
+	"Atlas WG Mesh neighbour registration and deletion kfuncs v3");
