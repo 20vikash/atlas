@@ -77,6 +77,7 @@ Neighbour advertisements are not authenticated, so a host with access to the sha
 | Shared VLAN interface | `handle_ndp_unicast_egress` | Unicast mode, attached instead of `handle_ndp_packet`: add the Atlas options, wrap solicitation and advertisement packets in IPv4, and send them to peers. |
 | Shared VLAN interface | `handle_ndp_unicast_ingress` | Unicast mode, attached instead of `handle_ndp_packet`: validate the peer, learn requester, owner, and neighbour, remove the outer IPv4 header. |
 | WireGuard interface | `handle_wireguard_packet` | Remove tunnel headers for local VMs, drop tunnels for others. |
+| `neigh/neigh_update` tracepoint | `handle_atlas_nud` | Count consecutive NUD failures per remote VM, and drop the learned location and the neighbour entry after 20 failures. |
 
 The VLAN hook is attached to both TC directions: egress adds the option to this host's own answers, ingress learns from other hosts' answers.
 
@@ -84,6 +85,7 @@ The VLAN hook is attached to both TC directions: egress adds the option to this 
 | --- | --- |
 | `config` | Host configuration, including this host's WireGuard address. |
 | `local_vms`, `remote_vms` | Local ownership and learned remote locations. |
+| `nud_failures` | Consecutive NUD failures per remote VM. |
 | `peer_list` | Unicast mode: peer IPv4 addresses, kept in sync from the peer file. |
 | `vm_peer_map`, `ndp_requesters` | Unicast mode: last answering peer per VM, and peers waiting for an answer. |
 | `privileged_tenant_allowed_addresses` | Privileged-tenant VM addresses permitted to communicate across tenants. |
@@ -235,6 +237,16 @@ A one-shot owner entry makes the fan-out self healing. When the owner never answ
 
 The `unicast start` daemon owns the peer file. It rewrites the `peer_list` map when the file changes. It processes no packets. A start or stop passes through a short window where both hook sets are attached; that window is safe, because the unicast hooks skip work that the multicast hook already did and every learning step is an idempotent replacement.
 
+## NUD failure tracking
+
+Linux NUD owns liveness, and a dead host stops answering probes. A managed neighbour then fails repeatedly, and the failure must remove the learned location, or senders keep routing to a host that no longer holds the VM.
+
+`handle_atlas_nud` watches the `neigh/neigh_update` tracepoint. A `NUD_REACHABLE` event resets the failure count for the VM, and a `NUD_FAILED` event increments it. After 20 consecutive failures, the hook removes the `remote_vms` entry, clears the Linux neighbour entry for garbage collection through the Atlas delete kfunc, and removes the counter. The next solicitation then fans out and relearns the VM location.
+
+The hook reads the trace event flags as one byte, so the managed bit at bit 8 is lost. The externally-learned bit at bit 4 survives, and only Atlas registrations set it, so the hook filters on that bit together with the `remote_vms` membership.
+
+The hook is not a tc hook, so it owns no tc filter. `configure` attaches it to the tracepoint and pins the link in the pin directory, and a pinned link keeps the hook attached after the CLI exits. `upgrade` replaces the link, because a perf event link cannot update its program. `reset` removes the pin directory, which releases the link and detaches the hook.
+
 ## Code map
 
 | File | Main responsibility |
@@ -243,9 +255,10 @@ The `unicast start` daemon owns the peer file. It rewrites the `peer_list` map w
 | `bpf/vm_hook.h` | Process packets from VM interfaces. |
 | `bpf/ndp_hook.h` | Process NDP packets on the shared VLAN interface. |
 | `bpf/ndp_unicast_hook.h` | Transport NDP packets over a routed IPv4 underlay. |
+| `bpf/nud_hook.h` | Drop unresponsive remote VMs after repeated NUD failures. |
 | `bpf/wireguard_hook.h` | Process Atlas WG Mesh tunnels. |
 | `bpf/state.h` | Define host and VM BPF state. |
 | `bpf/debug.h` | Define debug maps and event helpers. |
 | `bpf/protocol.h` | Define on-wire values and structures, including the Atlas NDP option. |
 | `bpf/address.h` | Define VM address helpers. |
-| `kernel/atlas_neigh.c` | Provide the neighbour registration kfunc. |
+| `kernel/atlas_neigh.c` | Provide the neighbour registration and deletion kfuncs. |

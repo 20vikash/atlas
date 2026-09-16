@@ -28,7 +28,7 @@ The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds 
 
 Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
 
-Build and load the Atlas neighbour kernel module on every host before you configure Atlas WG Mesh. The NDP hook calls its kfunc, so the BPF object cannot load without it:
+Build and load the Atlas neighbour kernel module on every host before you configure Atlas WG Mesh. The NDP and NUD hooks call its kfuncs, so the BPF object cannot load without it:
 
 ```sh
 atlas-wg-mesh module install
