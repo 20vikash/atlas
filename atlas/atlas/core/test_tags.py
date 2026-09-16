@@ -3,25 +3,22 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from atlas.api.core.base import parse_tag_filter
 from atlas.api.core.errors import InvalidRequest
+from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request
 from atlas.atlas.core.tags import find_names_with_tags, read_tags_for
 
 
-def insert_image(title: str, tags: list[dict[str, str]]) -> str:
+def insert_image(title: str, tags: list[dict[str, str]], **overrides) -> str:
 	"""Insert one tagged System image and return its name."""
-	return (
-		frappe.get_doc(
-			{
-				"doctype": "Virtual Machine Image",
-				"title": title,
-				"image_type": "system",
-				"architecture": "amd64",
-				"status": "Pending",
-				"tags": tags,
-			}
-		)
-		.insert()
-		.name
-	)
+	values = {
+		"doctype": "Virtual Machine Image",
+		"title": title,
+		"image_type": "system",
+		"architecture": "amd64",
+		"status": "Pending",
+		"tags": tags,
+	}
+	values.update(overrides)
+	return frappe.get_doc(values).insert().name
 
 
 class TestTagValidation(IntegrationTestCase):
@@ -73,6 +70,31 @@ class TestTagSearch(IntegrationTestCase):
 		self.build_pair("doctype")
 
 		self.assertEqual(find_names_with_tags("Virtual Machine", {"suite": "doctype"}), [])
+
+
+class TestTagSearchScope(IntegrationTestCase):
+	"""A search never collects a name that the tenant of the request cannot read."""
+
+	def setUp(self) -> None:
+		self.suite = [{"key": "suite", "value": "scope"}]
+		self.own = insert_image("own-image", self.suite, image_type="machine", tenant_id=TENANT_ID)
+		self.other = insert_image("other-image", self.suite, image_type="machine", tenant_id=OTHER_TENANT_ID)
+		self.shared = insert_image("shared-image", self.suite, tenant_id=OTHER_TENANT_ID)
+
+	def search(self, tenant_id: int) -> set[str]:
+		"""Search the suite tag as one tenant."""
+		with api_request("GET", "/api/atlas/images", tenant_id=tenant_id):
+			return set(find_names_with_tags("Virtual Machine Image", {"suite": "scope"}))
+
+	def test_a_tenant_does_not_collect_the_machine_image_of_another(self) -> None:
+		names = self.search(TENANT_ID)
+
+		self.assertIn(self.own, names)
+		self.assertNotIn(self.other, names)
+
+	def test_a_shared_system_image_stays_visible_to_every_tenant(self) -> None:
+		self.assertIn(self.shared, self.search(TENANT_ID))
+		self.assertIn(self.shared, self.search(OTHER_TENANT_ID))
 
 
 class TestTagFilterParsing(UnitTestCase):
