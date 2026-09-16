@@ -323,6 +323,7 @@ class SnapshotPayload(StrictModel):
 	image_type: Literal["machine", "system"] = "machine"
 	cache_image: bool = False
 	memory_snapshot: bool = False
+	tags: dict[str, str] = Field(default_factory=dict)
 
 
 class ConsoleTokenPayload(StrictModel):

@@ -249,6 +249,7 @@ class VirtualMachine(Document):
 		image_type: str = "machine",
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
+		tags: dict[str, str] | None = None,
 	) -> str:
 		"""Queue an image transfer from this VM. A System image needs tenant 0."""
 		self.check_permission("write")
@@ -284,6 +285,7 @@ class VirtualMachine(Document):
 			image_type=image_type,
 			cache_image=cache_image,
 			memory_snapshot=memory_snapshot,
+			tags=tags,
 		)
 
 	@frappe.whitelist(methods=["POST"])

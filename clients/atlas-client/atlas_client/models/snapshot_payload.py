@@ -10,7 +10,10 @@ from ..types import UNSET, Unset
 
 from ..models.snapshot_payload_image_type import SnapshotPayloadImageType
 from ..types import UNSET, Unset
+from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.snapshot_payload_tags import SnapshotPayloadTags
 
 
 
@@ -29,18 +32,21 @@ class SnapshotPayload:
             cache_image (bool | Unset):  Default: False.
             image_type (SnapshotPayloadImageType | Unset):  Default: SnapshotPayloadImageType.MACHINE.
             memory_snapshot (bool | Unset):  Default: False.
+            tags (SnapshotPayloadTags | Unset):
      """
 
     title: str
     cache_image: bool | Unset = False
     image_type: SnapshotPayloadImageType | Unset = SnapshotPayloadImageType.MACHINE
     memory_snapshot: bool | Unset = False
+    tags: SnapshotPayloadTags | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.snapshot_payload_tags import SnapshotPayloadTags # noqa: PLC0415
         title = self.title
 
         cache_image = self.cache_image
@@ -51,6 +57,10 @@ class SnapshotPayload:
 
 
         memory_snapshot = self.memory_snapshot
+
+        tags: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.tags, Unset):
+            tags = self.tags.to_dict()
 
 
         field_dict: dict[str, Any] = {}
@@ -64,6 +74,8 @@ class SnapshotPayload:
             field_dict["image_type"] = image_type
         if memory_snapshot is not UNSET:
             field_dict["memory_snapshot"] = memory_snapshot
+        if tags is not UNSET:
+            field_dict["tags"] = tags
 
         return field_dict
 
@@ -71,6 +83,7 @@ class SnapshotPayload:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.snapshot_payload_tags import SnapshotPayloadTags # noqa: PLC0415
         d = dict(src_dict)
         title = d.pop("title")
 
@@ -88,11 +101,22 @@ class SnapshotPayload:
 
         memory_snapshot = d.pop("memory_snapshot", UNSET)
 
+        _tags = d.pop("tags", UNSET)
+        tags: SnapshotPayloadTags | Unset
+        if isinstance(_tags,  Unset):
+            tags = UNSET
+        else:
+            tags = SnapshotPayloadTags.from_dict(_tags)
+
+
+
+
         snapshot_payload = cls(
             title=title,
             cache_image=cache_image,
             image_type=image_type,
             memory_snapshot=memory_snapshot,
+            tags=tags,
         )
 
         return snapshot_payload

@@ -35,6 +35,7 @@ class VirtualMachineImageTransferService:
 		image_type: str = "machine",
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
+		tags: dict[str, str] | None = None,
 	) -> str:
 		"""Create a snapshot record and enqueue its transfer."""
 		memory_snapshot_configuration = (
@@ -59,6 +60,7 @@ class VirtualMachineImageTransferService:
 				"status": "Pending",
 				"enabled": 1,
 				"architecture": virtual_machine.architecture,
+				"tags": [{"key": key, "value": value} for key, value in (tags or {}).items()],
 				"cache_image": int(cache_image),
 				"memory_snapshot": int(memory_snapshot),
 				"memory_snapshot_virtual_cpu_count": memory_snapshot_configuration[0],
