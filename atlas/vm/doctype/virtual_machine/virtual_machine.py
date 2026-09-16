@@ -41,6 +41,7 @@ class VirtualMachine(Document):
 		architecture: DF.Literal["amd64", "arm64"]
 		cpu_millicores: DF.Int
 		disk_mib: DF.Int
+		firewall_summary: DF.Code | None
 		is_draft: DF.Check
 		is_privileged: DF.Check
 		is_terminating: DF.Check

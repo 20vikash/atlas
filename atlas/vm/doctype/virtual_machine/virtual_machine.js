@@ -7,6 +7,7 @@ frappe.ui.form.on("Virtual Machine", {
 
 		// All fields mirror Metal and are edited through actions, never a direct save.
 		frm.disable_save();
+		loadFirewallConfiguration(frm);
 
 		const current_state = frm.doc.current_state;
 		const is_running = current_state === "running";
@@ -563,26 +564,41 @@ function firewallValue(enabled, rows) {
 }
 
 function showEditFirewallDialog(frm) {
-	frm.call({
-		method: "read_firewall",
-		doc: frm.doc,
-		type: "GET",
-		freeze: true,
-		freeze_message: __("Reading firewall..."),
-	}).then(({ message }) => openEditFirewallDialog(frm, message));
+	if (frm.firewall_configuration) {
+		openEditFirewallDialog(frm, frm.firewall_configuration);
+		return;
+	}
+
+	loadFirewallConfiguration(frm, true).then((firewall) => openEditFirewallDialog(frm, firewall));
+}
+
+function loadFirewallConfiguration(frm, freeze = false) {
+	return frm
+		.call({
+			method: "read_firewall",
+			doc: frm.doc,
+			type: "GET",
+			freeze,
+			freeze_message: __("Reading firewall..."),
+		})
+		.then(({ message }) => {
+			frm.firewall_configuration = message;
+			frm.doc.firewall_summary = JSON.stringify(message, null, 2);
+			frm.refresh_field("firewall_summary");
+			return message;
+		});
 }
 
 function openEditFirewallDialog(frm, current) {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Edit Firewall"),
-		size: "extra-large",
+		size: "large",
 		fields: [
 			{
 				fieldname: "enabled",
 				fieldtype: "Check",
 				label: __("Enabled"),
 				default: current.enabled,
-				description: __("When enabled, unmatched new traffic is blocked."),
 			},
 			{
 				fieldname: "rules",
