@@ -55,7 +55,7 @@ Secure Shell key and metadata updates use an immediate operation with a 2-second
 ```json
 {
   "compute": {
-    "virtual_cpu_count": 2,
+    "cpu_millicores": 1500,
     "memory_mib": 2048,
     "sleep_after_idle_seconds": 1800
   },
@@ -108,7 +108,7 @@ Create, read, and mutation routes return the same nested resource shape.
     "restart_generation": 1,
     "state": "running",
     "compute": {
-      "virtual_cpu_count": 2,
+      "cpu_millicores": 1500,
       "memory_mib": 2048,
       "sleep_after_idle_seconds": 1800
     },
@@ -169,10 +169,10 @@ Valid states are `running`, `stopped`, and `paused`. Delete records the desired 
 
 Restart has no request body. Each accepted request increases `restart_generation`.
 
-Compute replaces the CPU shape, memory shape, and idle shutdown timeout. A shape change needs a stopped VM. A timeout change does not. `sleep_after_idle_seconds` `0` disables automatic idle shutdown.
+Compute replaces the CPU entitlement, memory shape, and idle shutdown timeout. `cpu_millicores` accepts values from 100 through 32000. `1000` millicores equals one CPU core. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. Metal rounds the value up to select the guest-vCPU count and applies the exact value as the systemd CPU quota. A CPU or memory change needs a stopped VM. A timeout change does not. `sleep_after_idle_seconds` `0` disables automatic idle shutdown.
 
 ```json
-{"virtual_cpu_count": 4, "memory_mib": 4096, "sleep_after_idle_seconds": 1800}
+{"cpu_millicores": 4000, "memory_mib": 4096, "sleep_after_idle_seconds": 1800}
 ```
 
 Disk replaces the complete mutable disk object. Metal rejects disk shrink requests.
@@ -223,7 +223,7 @@ The snapshot status reports `pending`, `uploading`, `completing`, `completed`, o
 
 `POST /v1/sync` replaces the complete WireGuard peer, cached image, and privileged address sets. Empty arrays remove all managed values.
 
-The response contains current host capacity. CPU, memory, storage, and virtual machine counts use complete field names and binary units.
+The response contains current host capacity. CPU capacity uses `total_cpu_millicores` and `available_cpu_millicores`. Memory and storage use binary units. The virtual machine count uses a complete field name. CPU capacity is for ranking and visibility. It does not limit admission.
 
 The response also contains `virtual_machines`. It maps each VM identifier on the host to an object with its last observed `status`. Metal reads the stored observed record of each VM, so the status is as fresh as the last reconcile pass.
 

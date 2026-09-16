@@ -87,13 +87,13 @@ type MigrationSettings struct {
 // TargetReservation is capacity held by one migration target.
 type TargetReservation struct {
 	VirtualMachineID string
-	VirtualCPUCount  int
+	CPUMillicores    int
 	MemoryMiB        int
 	DiskMiB          int
 }
 
 // AvailableCapacity is free host capacity checked by a target reservation.
-// Virtual CPUs are oversubscribed, so they are not part of the check.
+// CPU entitlement is oversubscribed, so it is not part of the check.
 type AvailableCapacity struct {
 	MemoryMiB  int
 	StorageMiB int
@@ -294,7 +294,7 @@ func (m *VMMigration) TargetReservations(_ context.Context) ([]TargetReservation
 		specification := record.Config.Specification
 		reservations = append(reservations, TargetReservation{
 			VirtualMachineID: virtualMachineID,
-			VirtualCPUCount:  specification.VirtualCPUCount,
+			CPUMillicores:    specification.CPUMillicores,
 			MemoryMiB:        specification.MemoryMiB,
 			DiskMiB:          specification.DiskMiB,
 		})

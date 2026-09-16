@@ -29,3 +29,11 @@ func TestIsUnitNotLoaded(t *testing.T) {
 		})
 	}
 }
+
+func TestCPUQuotaMicrosecondsPerSecond(t *testing.T) {
+	for cpuMillicores, want := range map[int]uint64{500: 500_000, 1500: 1_500_000} {
+		if got := cpuQuotaMicrosecondsPerSecond(cpuMillicores); got != want {
+			t.Errorf("CPU quota for %d millicores = %d, want %d", cpuMillicores, got, want)
+		}
+	}
+}

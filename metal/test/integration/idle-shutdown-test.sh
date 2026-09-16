@@ -74,7 +74,7 @@ request_body=$(jq -n \
 	--arg hostname "$virtual_machine_id" --argjson idle_seconds "$idle_seconds" \
 	'{
 		compute: {
-			virtual_cpu_count: 1,
+			cpu_millicores: 1000,
 			memory_mib: 256,
 			sleep_after_idle_seconds: $idle_seconds
 		},

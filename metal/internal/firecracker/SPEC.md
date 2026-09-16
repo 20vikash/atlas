@@ -54,6 +54,8 @@ wait for the API socket       the process belongs to systemd, so this is the onl
 
 A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
 
+The VM specification stores CPU entitlement in millicores. Firecracker receives the entitlement rounded up to a whole guest-vCPU count. For example, 1500 millicores creates 2 guest vCPUs. The API maximum is 32000 millicores because Firecracker supports at most 32 guest vCPUs. systemd applies the exact entitlement as a CPU quota, so rounding the guest topology does not increase available CPU time.
+
 The runtime has explicit start operations:
 
 ```text
@@ -63,7 +65,7 @@ Restore       -> VM saved state -> resume
 RestorePaused -> VM saved state -> stay paused
 ```
 
-`Start` uses a warm image only when the image and VM shape match. It cold boots if warm launch fails. `ColdStart` always cold boots, so a migrated disk never inherits the source guest memory. `Restore` returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
+`Start` uses a warm image only when the image and derived guest-vCPU count, memory, and disk match. It cold boots if warm launch fails. `ColdStart` always cold boots, so a migrated disk never inherits the source guest memory. `Restore` returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
 
 `RefreshDisk` applies the configured disk limits to a live guest. `LimitDiskThroughput` applies a temporary combined read and write bandwidth limit to a live drive during a migration, and `RefreshDisk` restores the configured limit. A value of zero or less does nothing, so a caller never clears the limit by accident. Both do nothing when the VM is not running or paused.
 

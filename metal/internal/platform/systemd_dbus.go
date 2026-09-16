@@ -19,9 +19,9 @@ const (
 	// errorNoSuchUnit is the D-Bus error name systemd returns for an absent unit.
 	errorNoSuchUnit = "org.freedesktop.systemd1.NoSuchUnit"
 
-	// microsecondsPerCPUPercent converts a CPU percentage to the microseconds of
-	// CPU time per second that systemd expects in CPUQuotaPerSecUSec.
-	microsecondsPerCPUPercent = 10000
+	// microsecondsPerCPUMillicore converts a millicore to the microseconds of CPU
+	// time per second that systemd expects in CPUQuotaPerSecUSec.
+	microsecondsPerCPUMillicore = 1000
 
 	// waitPollInterval is how often Wait re-reads the unit state.
 	waitPollInterval = 500 * time.Millisecond
@@ -156,8 +156,8 @@ func (d *DBus) SetLimits(ctx context.Context, id string, limits Limits) error {
 		value := dbus.MakeVariant(uint64(limits.MemoryMaxBytes))
 		properties = append(properties, systemd.Property{Name: "MemoryMax", Value: value})
 	}
-	if limits.CPUQuotaPercent > 0 {
-		quota := uint64(limits.CPUQuotaPercent) * microsecondsPerCPUPercent
+	if limits.CPUMillicores > 0 {
+		quota := cpuQuotaMicrosecondsPerSecond(limits.CPUMillicores)
 		value := dbus.MakeVariant(quota)
 		properties = append(properties, systemd.Property{Name: "CPUQuotaPerSecUSec", Value: value})
 	}
@@ -166,6 +166,10 @@ func (d *DBus) SetLimits(ctx context.Context, id string, limits Limits) error {
 	}
 
 	return d.connection.SetUnitPropertiesContext(ctx, unitName(id), true, properties...)
+}
+
+func cpuQuotaMicrosecondsPerSecond(cpuMillicores int) uint64 {
+	return uint64(cpuMillicores) * microsecondsPerCPUMillicore
 }
 
 // runSystemdJob submits a job and waits for its result.

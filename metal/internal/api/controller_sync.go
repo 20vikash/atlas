@@ -44,13 +44,13 @@ type virtualMachineStateResponse struct {
 
 // capacityResponse is what the controller needs to place the next VM.
 type capacityResponse struct {
-	TotalCPUCount       int `json:"total_cpu_count"`
-	AvailableCPUCount   int `json:"available_cpu_count"`
-	VirtualMachineCount int `json:"virtual_machine_count"`
-	TotalMemoryMiB      int `json:"total_memory_mib"`
-	AvailableMemoryMiB  int `json:"available_memory_mib"`
-	TotalStorageMiB     int `json:"total_storage_mib"`
-	AvailableStorageMiB int `json:"available_storage_mib"`
+	TotalCPUMillicores     int `json:"total_cpu_millicores"`
+	AvailableCPUMillicores int `json:"available_cpu_millicores"`
+	VirtualMachineCount    int `json:"virtual_machine_count"`
+	TotalMemoryMiB         int `json:"total_memory_mib"`
+	AvailableMemoryMiB     int `json:"available_memory_mib"`
+	TotalStorageMiB        int `json:"total_storage_mib"`
+	AvailableStorageMiB    int `json:"available_storage_mib"`
 }
 
 // @Summary	Exchange controller and host state
@@ -141,13 +141,13 @@ func (request syncRequest) wireGuardPeers() []network.WireGuardPeer {
 // capacityResponseFromHost converts host capacity into the response form.
 func capacityResponseFromHost(capacity host.Capacity) capacityResponse {
 	return capacityResponse{
-		TotalCPUCount:       capacity.TotalCPUCount,
-		AvailableCPUCount:   capacity.AvailableCPUCount,
-		VirtualMachineCount: capacity.VirtualMachineCount,
-		TotalMemoryMiB:      capacity.TotalMemoryMiB,
-		AvailableMemoryMiB:  capacity.AvailableMemoryMiB,
-		TotalStorageMiB:     capacity.TotalStorageMiB,
-		AvailableStorageMiB: capacity.AvailableStorageMiB,
+		TotalCPUMillicores:     capacity.TotalCPUMillicores,
+		AvailableCPUMillicores: capacity.AvailableCPUMillicores,
+		VirtualMachineCount:    capacity.VirtualMachineCount,
+		TotalMemoryMiB:         capacity.TotalMemoryMiB,
+		AvailableMemoryMiB:     capacity.AvailableMemoryMiB,
+		TotalStorageMiB:        capacity.TotalStorageMiB,
+		AvailableStorageMiB:    capacity.AvailableStorageMiB,
 	}
 }
 

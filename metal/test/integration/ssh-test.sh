@@ -37,7 +37,7 @@ request_body=$(jq -n \
 	--arg hostname "$requested_virtual_machine_id" \
 	'{
 		compute: {
-			virtual_cpu_count: 1,
+			cpu_millicores: 1000,
 			memory_mib: 256
 		},
 		disk: {
