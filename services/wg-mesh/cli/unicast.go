@@ -282,7 +282,8 @@ func runUnicastDaemon(path string, verbose bool) error {
 	if err != nil {
 		return err
 	}
-	if len(unicastTransportPeers(entries, config.UplinkIPv4)) == 0 {
+	peers := unicastTransportPeers(entries, config.UplinkIPv4)
+	if len(peers) == 0 {
 		return fmt.Errorf("%s contains no remote peers", path)
 	}
 	information, err := os.Stat(path)
@@ -299,7 +300,11 @@ func runUnicastDaemon(path string, verbose bool) error {
 	if err := syncUnicastPeerMap(entries, config.UplinkIPv4); err != nil {
 		return err
 	}
-	logUnicastSync(verbose, unicastTransportPeers(entries, config.UplinkIPv4))
+	logUnicastSync(verbose, peers)
+
+	if err := installTransportNeighbours(peers, uplinkName); err != nil {
+		return err
+	}
 
 	if err := attachUnicastHook(uplinkName, ndpUnicastIngressProgram, "ingress", unicastIngressFilterPriority); err != nil {
 		return err
@@ -332,6 +337,32 @@ func runUnicastDaemon(path string, verbose bool) error {
 	// same reason as above.
 	if err := attachMulticastNeighbourHook(uplinkName); err != nil {
 		fmt.Fprintf(os.Stderr, "atlas-wg-mesh: warning: restore multicast NDP: %v\n", err)
+	}
+	return nil
+}
+
+// installTransportNeighbours adds one neighbour entry on the discovery
+// interface for every peer. Each entry is permanent, externally learned, and
+// managed, and holds no MAC address. The kernel resolves and maintains the
+// MAC address, which the BPF FIB lookup needs to send wrapped packets to a
+// peer.
+func installTransportNeighbours(peers []netip.Addr, uplinkName string) error {
+	for _, peer := range peers {
+		err := runCommand(
+			"ip",
+			"neigh",
+			"replace",
+			peer.String(),
+			"dev",
+			uplinkName,
+			"nud",
+			"permanent",
+			"extern_learn",
+			"managed",
+		)
+		if err != nil {
+			return fmt.Errorf("install neighbour entry for %s: %w", peer, err)
+		}
 	}
 	return nil
 }

@@ -44,6 +44,8 @@ atlas-wg-mesh unicast start PEERS_FILE
 
 The unicast hooks and the multicast NDP hook never run together. On start, the daemon attaches the two unicast TC hooks to the uplink and removes the multicast NDP filters. On a clean stop, it restores the multicast filters and removes the unicast hooks, and the host returns to multicast behavior. `SIGTERM` and `SIGINT` use the clean shutdown path. A second daemon exits rather than competing with the active one.
 
+On start, the daemon also adds one neighbour entry on the discovery interface for every peer, with `nud permanent extern_learn managed` and no MAC address. The kernel then resolves and maintains the MAC address on its own, which the BPF FIB lookup needs to send wrapped packets to a peer.
+
 A start or stop passes through a short window where both hook sets are attached. That window is safe: the unicast hooks skip the work that the multicast hook already did, and every learning step is an idempotent replacement.
 
 The daemon checks the peer file modification time once per second. When the file changes, it parses the file and rewrites the pinned `peer_list` BPF map. The map holds the peers densely from index zero. If a changed file is invalid, the daemon logs a warning and keeps the previous list.
