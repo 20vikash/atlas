@@ -220,13 +220,12 @@ def build_responses(
 
 	model = get_response_model(function)
 	if model:
-		status = next(
-			(status for status in (docs.responses if docs else {}) if 200 <= status < 300),
-			200,
-		)
-		responses.setdefault(status, {"description": "OK"}).setdefault(
-			"content", {"application/json": {"schema": {"$ref": register_model(model, schemas)}}}
-		)
+		reference = register_model(model, schemas)
+		declared_success = [status for status in (docs.responses if docs else {}) if 200 <= status < 300]
+		for status in declared_success or [200]:
+			responses.setdefault(status, {"description": "OK"}).setdefault(
+				"content", {"application/json": {"schema": {"$ref": reference}}}
+			)
 	return {str(status): response for status, response in sorted(responses.items())}
 
 

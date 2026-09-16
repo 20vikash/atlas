@@ -1714,6 +1714,13 @@
             "description": "The held address stays with the tenant."
           },
           "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IPAddressResponse"
+                }
+              }
+            },
             "description": "The address is reserved for the tenant."
           },
           "409": {

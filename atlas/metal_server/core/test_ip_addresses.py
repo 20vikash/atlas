@@ -112,7 +112,7 @@ class TestIPAddressReservation(UnitTestCase):
 class TestHeldIPAddressReservation(UnitTestCase):
 	def test_an_attached_address_can_be_reserved(self) -> None:
 		"""An attached borrowed address can be kept."""
-		ip_address = SimpleNamespace(name="203.0.113.10", reserved=0)
+		ip_address = SimpleNamespace(name="203.0.113.10", tenant_id=TENANT_ID, reserved=0)
 		locked_address = SimpleNamespace(tenant_id=TENANT_ID, status="Attached", db_set=Mock())
 
 		with patch(
@@ -124,9 +124,22 @@ class TestHeldIPAddressReservation(UnitTestCase):
 		locked_address.db_set.assert_called_once_with("reserved", 1)
 		self.assertEqual(ip_address.reserved, 1)
 
+	def test_an_address_that_changed_tenant_cannot_be_reserved(self) -> None:
+		"""Ownership was read without a lock, so the row can reach another tenant first."""
+		ip_address = SimpleNamespace(name="203.0.113.10", tenant_id=TENANT_ID, reserved=0)
+		locked_address = SimpleNamespace(tenant_id=TENANT_ID + 1, status="Attached", db_set=Mock())
+
+		with (
+			patch("atlas.metal_server.core.ip_address_service.frappe.get_doc", return_value=locked_address),
+			self.assertRaises(frappe.ValidationError),
+		):
+			IPAddressService().reserve_held(ip_address)
+
+		locked_address.db_set.assert_not_called()
+
 	def test_a_detaching_address_cannot_be_reserved(self) -> None:
 		"""A detaching address cannot be kept."""
-		ip_address = SimpleNamespace(name="203.0.113.10", reserved=0)
+		ip_address = SimpleNamespace(name="203.0.113.10", tenant_id=TENANT_ID, reserved=0)
 		locked_address = SimpleNamespace(tenant_id=TENANT_ID, status="Detaching", db_set=Mock())
 
 		with (
@@ -138,7 +151,7 @@ class TestHeldIPAddressReservation(UnitTestCase):
 		locked_address.db_set.assert_not_called()
 
 	def test_a_pool_address_has_no_tenant_to_reserve_it_for(self) -> None:
-		ip_address = SimpleNamespace(name="203.0.113.10", reserved=0)
+		ip_address = SimpleNamespace(name="203.0.113.10", tenant_id=TENANT_ID, reserved=0)
 		locked_address = SimpleNamespace(tenant_id=UNOWNED_TENANT_ID, status="Allocated", db_set=Mock())
 
 		with (

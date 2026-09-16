@@ -91,6 +91,9 @@ class IPAddressService:
 		locked_address = frappe.get_doc("Metal Server IP Address", ip_address.name, for_update=True)
 		if locked_address.tenant_id == UNOWNED_TENANT_ID:
 			frappe.throw(_("An IP address in the shared pool has no tenant."), exc=IPAddressInUse)
+		# The caller authorized an unlocked read. The address can reach another tenant before this lock.
+		if locked_address.tenant_id != ip_address.tenant_id:
+			frappe.throw(_("Another tenant now holds this IP address."), exc=IPAddressInUse)
 		if locked_address.status == "Detaching":
 			frappe.throw(_("This IP address is on its way back to the shared pool."), exc=IPAddressInUse)
 
