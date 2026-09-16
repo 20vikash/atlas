@@ -101,6 +101,13 @@ func installHost(uplinkName, wireGuardName string) error {
 		return rollbackInstall(err, uplinkName)
 	}
 
+	// The NUD hook is a tracepoint link, so its attach owns no tc filter.
+	if err := attachNUDHook(
+		filepath.Join(pinDirectory, nudProgram),
+	); err != nil {
+		return rollbackInstall(err, uplinkName)
+	}
+
 	fmt.Printf("Atlas WG Mesh is installed on %s and %s\n", uplinkName, wireGuardName)
 	return nil
 }
