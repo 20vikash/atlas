@@ -15,6 +15,7 @@
   "column_break_status",
   "server",
   "virtual_machine_image",
+  "architecture",
   "hostname",
   "error",
   "section_break_compute_and_storage",
@@ -35,7 +36,9 @@
   "public_network_throughput_mibps",
   "other_data_section",
   "ssh_keys",
-  "metadata"
+  "metadata",
+  "section_break_tags",
+  "tags"
  ],
  "fields": [
   {
@@ -89,11 +92,10 @@
   },
   {
    "fieldname": "virtual_machine_image",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Virtual Machine Image",
-   "options": "Virtual Machine Image",
    "read_only": 1,
    "reqd": 1,
    "set_only_once": 1
@@ -264,6 +266,29 @@
   {
    "fieldname": "other_data_section",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "architecture",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Architecture",
+   "options": "amd64\narm64",
+   "read_only": 1,
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "section_break_tags",
+   "fieldtype": "Section Break",
+   "label": "Tags"
+  },
+  {
+   "description": "Arbitrary key and value labels used to select a virtual machine.",
+   "fieldname": "tags",
+   "fieldtype": "Table",
+   "label": "Tags",
+   "options": "Atlas Tag",
+   "show_description_on_click": 1
   }
  ],
  "in_create": 1,

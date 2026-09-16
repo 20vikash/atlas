@@ -42,10 +42,6 @@ class VirtualMachineImageTransferService:
 			if memory_snapshot
 			else (0, 0, 0)
 		)
-		original_image = cast(
-			"VirtualMachineImage",
-			frappe.get_doc("Virtual Machine Image", virtual_machine.virtual_machine_image),
-		)
 		server = cast("MetalServer", frappe.get_doc("Metal Server", virtual_machine.server))
 		metal_client = MetalClient(server)
 		try:
@@ -62,9 +58,7 @@ class VirtualMachineImageTransferService:
 				"tenant_id": virtual_machine.tenant_id,
 				"status": "Pending",
 				"enabled": 1,
-				"platform": original_image.platform,
-				"operating_system": original_image.operating_system,
-				"operating_system_version": original_image.operating_system_version,
+				"architecture": virtual_machine.architecture,
 				"cache_image": int(cache_image),
 				"memory_snapshot": int(memory_snapshot),
 				"memory_snapshot_virtual_cpu_count": memory_snapshot_configuration[0],

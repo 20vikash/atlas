@@ -26,7 +26,7 @@ class TestVirtualMachineCreation(UnitTestCase):
 		operations: list[str] = []
 		image = SimpleNamespace(
 			name="image-1",
-			platform="amd64",
+			architecture="amd64",
 			enabled=1,
 			title="Ubuntu",
 			validate_compatibility=Mock(),
@@ -78,7 +78,7 @@ class TestVirtualMachineCreation(UnitTestCase):
 	def test_uncertain_create_keeps_the_committed_draft(self) -> None:
 		image = SimpleNamespace(
 			name="image-1",
-			platform="amd64",
+			architecture="amd64",
 			enabled=1,
 			title="Ubuntu",
 			validate_compatibility=Mock(),
@@ -110,7 +110,7 @@ class TestVirtualMachineCreation(UnitTestCase):
 	def test_confirmed_create_failure_identifies_the_committed_draft(self) -> None:
 		image = SimpleNamespace(
 			name="image-1",
-			platform="amd64",
+			architecture="amd64",
 			enabled=1,
 			title="Ubuntu",
 			validate_compatibility=Mock(),

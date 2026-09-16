@@ -11,6 +11,7 @@ from frappe.utils import add_to_date, cint, now_datetime
 from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.parsing import strict_bool
+from atlas.atlas.core.tags import validate_tags
 from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
@@ -34,7 +35,10 @@ class VirtualMachine(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from atlas.atlas.doctype.atlas_tag.atlas_tag import AtlasTag
+
 		active_migration: DF.Link | None
+		architecture: DF.Literal["amd64", "arm64"]
 		disk_mib: DF.Int
 		is_draft: DF.Check
 		is_privileged: DF.Check
@@ -43,9 +47,10 @@ class VirtualMachine(Document):
 		metadata: DF.Code | None
 		server: DF.Link
 		sleep_after_idle_seconds: DF.Int
+		tags: DF.Table[AtlasTag]
 		tenant_id: DF.Int
 		vcpus: DF.Int
-		virtual_machine_image: DF.Link
+		virtual_machine_image: DF.Data
 	# end: auto-generated types
 
 	@request_cache
@@ -70,6 +75,8 @@ class VirtualMachine(Document):
 		This runs on every save, because the flag is removable. Removing it drops
 		the address from the next whitelist and ends cross-tenant traffic.
 		"""
+		validate_tags(self)
+
 		if self.is_privileged and self.tenant_id != PRIVILEGED_TENANT_ID:
 			frappe.throw(_("A privileged Virtual Machine must use tenant {0}.").format(PRIVILEGED_TENANT_ID))
 

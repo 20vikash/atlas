@@ -35,7 +35,7 @@ class TestVirtualMachineImage(UnitTestCase):
 			"kernel_file": None,
 			"image_size_mib": 10,
 			"kernel_size_mib": 5,
-			"platform": "amd64",
+			"architecture": "amd64",
 			"status": "Available",
 			"title": "Machine image",
 			"cache_image": 0,
@@ -226,13 +226,12 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			name="VM-00001",
 			server="server-1",
 			virtual_machine_image="system-image",
+			architecture="amd64",
 			disk_mib=1024,
 			tenant_id=7,
 		)
 		original_image = SimpleNamespace(
-			platform="amd64",
-			operating_system="Ubuntu",
-			operating_system_version="24.04",
+			architecture="amd64",
 		)
 		server = SimpleNamespace(name="server-1")
 		image = Mock()

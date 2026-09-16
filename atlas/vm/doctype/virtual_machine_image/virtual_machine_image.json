@@ -8,12 +8,10 @@
   "enabled",
   "status",
   "title",
-  "image_type",
   "tenant_id",
   "column_break_identity",
-  "operating_system",
-  "operating_system_version",
-  "platform",
+  "image_type",
+  "architecture",
   "transfer_progress",
   "cache_image",
   "memory_snapshot",
@@ -44,6 +42,8 @@
   "rootfs_multipart_upload_id",
   "kernel_multipart_upload_id",
   "transfer_error",
+  "section_break_tags",
+  "tags",
   "version"
  ],
  "fields": [
@@ -82,25 +82,11 @@
    "reqd": 1
   },
   {
-   "fieldname": "platform",
+   "fieldname": "architecture",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Platform",
+   "label": "Architecture",
    "options": "amd64\narm64",
-   "reqd": 1,
-   "set_only_once": 1
-  },
-  {
-   "fieldname": "operating_system",
-   "fieldtype": "Data",
-   "label": "Operating System",
-   "reqd": 1,
-   "set_only_once": 1
-  },
-  {
-   "fieldname": "operating_system_version",
-   "fieldtype": "Data",
-   "label": "Operating System Version",
    "reqd": 1,
    "set_only_once": 1
   },
@@ -318,11 +304,24 @@
    "read_only": 1,
    "search_index": 1,
    "set_only_once": 1
+  },
+  {
+   "fieldname": "section_break_tags",
+   "fieldtype": "Section Break",
+   "label": "Tags"
+  },
+  {
+   "description": "Arbitrary key and value labels used to select an image.",
+   "fieldname": "tags",
+   "fieldtype": "Table",
+   "label": "Tags",
+   "options": "Atlas Tag",
+   "show_description_on_click": 1
   }
  ],
  "links": [],
- "modified": "2026-09-09 10:17:25.885323",
- "modified_by": "test@gmail.com",
+ "modified": "2026-09-16 12:47:26.760562",
+ "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine Image",
  "naming_rule": "Random",

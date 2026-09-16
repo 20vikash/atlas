@@ -12,7 +12,9 @@
   "intent_version",
   "column_break_uoyq",
   "server",
-  "virtual_machine"
+  "virtual_machine",
+  "section_break_tags",
+  "tags"
  ],
  "fields": [
   {
@@ -75,6 +77,19 @@
    "label": "Tenant ID",
    "read_only": 1,
    "search_index": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "section_break_tags",
+   "fieldtype": "Section Break",
+   "label": "Tags"
+  },
+  {
+   "description": "Arbitrary key and value labels used to select an IP address.",
+   "fieldname": "tags",
+   "fieldtype": "Table",
+   "label": "Tags",
+   "options": "Atlas Tag",
    "show_description_on_click": 1
   }
  ],

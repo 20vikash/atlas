@@ -11,6 +11,7 @@ from frappe.utils import add_to_date, now_datetime
 
 from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.atlas.core.tags import validate_tags
 
 SIGNED_URL_EXPIRY_SECONDS = 86400
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -44,6 +45,9 @@ class VirtualMachineImage(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from atlas.atlas.doctype.atlas_tag.atlas_tag import AtlasTag
+
+		architecture: DF.Literal["amd64", "arm64"]
 		artifact_storage: DF.Literal["Object Storage", "Site File"]
 		cache_image: DF.Check
 		enabled: DF.Check
@@ -61,9 +65,6 @@ class VirtualMachineImage(Document):
 		memory_snapshot_disk_mib: DF.Int
 		memory_snapshot_memory_mib: DF.Int
 		memory_snapshot_virtual_cpu_count: DF.Int
-		operating_system: DF.Data
-		operating_system_version: DF.Data
-		platform: DF.Literal["amd64", "arm64"]
 		rootfs_multipart_upload_id: DF.Data | None
 		source_local_snapshot_id: DF.Data | None
 		source_server: DF.Data | None
@@ -79,6 +80,7 @@ class VirtualMachineImage(Document):
 			"Deleting",
 			"Archived",
 		]
+		tags: DF.Table[AtlasTag]
 		tenant_id: DF.Int
 		title: DF.Data
 		transfer_error: DF.SmallText | None
@@ -87,7 +89,8 @@ class VirtualMachineImage(Document):
 	# end: auto-generated types
 
 	def validate(self) -> None:
-		"""Reject an image whose artifacts or snapshot shape are inconsistent."""
+		"""Reject an image whose artifacts, tags, or snapshot shape are inconsistent."""
+		validate_tags(self)
 		self.validate_memory_snapshot_configuration()
 		if self.status == "Available":
 			self.validate_artifacts()
@@ -121,7 +124,7 @@ class VirtualMachineImage(Document):
 		"""Return the image object with freshly signed artifact URLs."""
 		return {
 			"ref": self.immutable_reference,
-			"architecture": self.platform,
+			"architecture": self.architecture,
 			"rootfs": {"url": self.get_artifact_url("rootfs", expiry_seconds), "sha256": self.image_sha256},
 			"kernel": {"url": self.get_artifact_url("kernel", expiry_seconds), "sha256": self.kernel_sha256},
 		}
@@ -138,7 +141,7 @@ class VirtualMachineImage(Document):
 	@property
 	def immutable_reference(self) -> str:
 		"""Return the name that identifies this exact content on a host."""
-		identity = f"{self.platform}\0{self.image_sha256}\0{self.kernel_sha256}"
+		identity = f"{self.architecture}\0{self.image_sha256}\0{self.kernel_sha256}"
 		return f"sha256:{hashlib.sha256(identity.encode()).hexdigest()}"
 
 	@property
