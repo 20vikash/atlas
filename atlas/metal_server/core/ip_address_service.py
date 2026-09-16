@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 POOL_SEARCH_LIMIT = 20
 UNOWNED_TENANT_ID = -1
-RESERVATION_SOURCES = ("pool", "provider")
 
 
 class IPAddressPoolEmpty(AtlasUserError):
@@ -24,7 +23,7 @@ class IPAddressPoolEmpty(AtlasUserError):
 
 
 class IPAddressInUse(AtlasUserError):
-	"""Report that an address cannot return to the shared pool."""
+	"""Report that an address cannot change its reservation."""
 
 	http_status_code = 409
 
@@ -32,20 +31,14 @@ class IPAddressInUse(AtlasUserError):
 class IPAddressService:
 	"""Own tenant reservations for public IPv4 addresses."""
 
-	def reserve(self, tenant_id: int, source: str) -> str:
-		"""Reserve one address for a tenant from the pool or from the provider."""
-		if source not in RESERVATION_SOURCES:
-			frappe.throw(_("Reservation source must be pool or provider."))
-		if source == "provider":
-			return self.reserve_from_provider(tenant_id)
-
-		address_name = self.claim_from_pool(tenant_id)
-		if not address_name:
-			frappe.throw(_("The shared IP address pool is empty."), exc=IPAddressPoolEmpty)
+	def reserve(self, tenant_id: int) -> str:
+		"""Reserve one shared pool address for a tenant."""
+		address_name = self.borrow_from_pool()
+		frappe.db.set_value("Metal Server IP Address", address_name, {"tenant_id": tenant_id, "reserved": 1})
 		return address_name
 
-	def claim_from_pool(self, tenant_id: int) -> str | None:
-		"""Claim one unowned address. A concurrent claim takes the next candidate."""
+	def borrow_from_pool(self) -> str:
+		"""Lock one unused shared pool address. The caller decides whether it becomes a reservation."""
 		for name in self.get_pool_candidates():
 			locked = frappe.db.get_value(
 				"Metal Server IP Address",
@@ -54,10 +47,9 @@ class IPAddressService:
 				for_update=True,
 			)
 			if locked:
-				frappe.db.set_value("Metal Server IP Address", name, "tenant_id", tenant_id)
 				return name
 
-		return None
+		frappe.throw(_("The shared IP address pool is empty."), exc=IPAddressPoolEmpty)
 
 	def get_pool_candidates(self) -> list[str]:
 		"""Return addresses that no tenant reserved and no virtual machine uses."""
@@ -73,8 +65,8 @@ class IPAddressService:
 			order_by="creation asc",
 		)
 
-	def reserve_from_provider(self, tenant_id: int) -> str:
-		"""Create one provider reservation and assign its tenant."""
+	def reserve_from_provider(self) -> str:
+		"""Add one provider reservation to the shared pool."""
 		provider = frappe.get_single("Atlas Settings").server_provider_controller
 		reserved = provider.reserve_public_ipv4_address()
 		try:
@@ -83,7 +75,7 @@ class IPAddressService:
 					"doctype": "Metal Server IP Address",
 					"address": reserved.address,
 					"provider_resource_id": reserved.provider_resource_id,
-					"tenant_id": tenant_id,
+					"tenant_id": UNOWNED_TENANT_ID,
 				}
 			).insert()
 			return ip_address.name
@@ -94,10 +86,25 @@ class IPAddressService:
 				frappe.log_error(title="Could not delete reserved Metal Server IP Address")
 			raise
 
+	def reserve_held(self, ip_address: MetalServerIPAddress) -> None:
+		"""Keep a held address with its tenant after detach."""
+		locked_address = frappe.get_doc("Metal Server IP Address", ip_address.name, for_update=True)
+		if locked_address.tenant_id == UNOWNED_TENANT_ID:
+			frappe.throw(_("An IP address in the shared pool has no tenant."), exc=IPAddressInUse)
+		# The caller authorized an unlocked read. The address can reach another tenant before this lock.
+		if locked_address.tenant_id != ip_address.tenant_id:
+			frappe.throw(_("Another tenant now holds this IP address."), exc=IPAddressInUse)
+		if locked_address.status == "Detaching":
+			frappe.throw(_("This IP address is on its way back to the shared pool."), exc=IPAddressInUse)
+
+		locked_address.db_set("reserved", 1)
+		ip_address.reserved = 1
+
 	def release(self, ip_address: MetalServerIPAddress) -> None:
-		"""Return one unattached address to the shared pool and keep its reservation."""
+		"""Release an address to the shared pool."""
 		locked_address = frappe.get_doc("Metal Server IP Address", ip_address.name, for_update=True)
 		if locked_address.status != "Allocated" or locked_address.virtual_machine:
 			frappe.throw(_("Detach this IP address before you release it."), exc=IPAddressInUse)
-		locked_address.db_set("tenant_id", UNOWNED_TENANT_ID)
+		locked_address.db_set({"tenant_id": UNOWNED_TENANT_ID, "reserved": 0})
 		ip_address.tenant_id = UNOWNED_TENANT_ID
+		ip_address.reserved = 0

@@ -20,6 +20,7 @@ class IPAddressIntent:
 	status: str
 	provider_resource_id: str
 	server: str | None
+	reserved: bool
 
 
 class MetalServerIPAddress(Document):
@@ -38,6 +39,7 @@ class MetalServerIPAddress(Document):
 		address: DF.Data
 		intent_version: DF.Int
 		provider_resource_id: DF.Data
+		reserved: DF.Check
 		server: DF.Link | None
 		status: DF.Literal["Allocated", "Attaching", "Attached", "Detaching"]
 		tags: DF.Table[AtlasTag]
@@ -46,7 +48,7 @@ class MetalServerIPAddress(Document):
 	# end: auto-generated types
 
 	def validate(self) -> None:
-		"""Reject an address or tag set that is not consistent with its server."""
+		"""Validate the address and default it to the shared pool."""
 		validate_tags(self)
 
 		try:
@@ -58,6 +60,13 @@ class MetalServerIPAddress(Document):
 		if not isinstance(address, ipaddress.IPv4Interface) or address.network.prefixlen != 32:
 			frappe.throw(_("IPv4 Address must be a valid /32 address."))
 		self.address = str(address.ip)
+
+		# An unset Int becomes tenant 0, so set the shared-pool sentinel explicitly.
+		if self.get("tenant_id") is None:
+			self.tenant_id = UNOWNED_TENANT_ID
+
+		if self.get("reserved") and self.tenant_id == UNOWNED_TENANT_ID:
+			frappe.throw(_("A reserved IP address needs a tenant."))
 
 	def on_trash(self) -> None:
 		"""Release the provider reservation before the record is removed."""
@@ -80,7 +89,7 @@ class MetalServerIPAddress(Document):
 		self.queue_reconcile()
 
 	def release(self) -> None:
-		"""Set a detach intent for this address."""
+		"""Set a detach intent and return unreserved addresses to the pool."""
 		self.virtual_machine = None
 		self.intent_version = (self.intent_version or 0) + 1
 
@@ -88,8 +97,16 @@ class MetalServerIPAddress(Document):
 			self.status = "Detaching"
 		else:
 			self.status = "Allocated"
+			if not self.reserved:
+				self.tenant_id = UNOWNED_TENANT_ID
 		self.save()
 		self.queue_reconcile()
+
+	@frappe.whitelist(methods=["POST"])
+	def reserve(self) -> None:
+		"""Keep this address with its tenant after detach."""
+		self.check_permission("write")
+		IPAddressService().reserve_held(self)
 
 	def release_to_pool(self) -> None:
 		"""Release this unused address to the shared pool."""
@@ -147,6 +164,7 @@ class MetalServerIPAddress(Document):
 			status=self.status,
 			provider_resource_id=self.provider_resource_id,
 			server=self.server,
+			reserved=bool(self.reserved),
 		)
 
 	def apply_intent(self, intent: IPAddressIntent) -> None:
@@ -164,16 +182,18 @@ class MetalServerIPAddress(Document):
 	def complete_intent(self, intent: IPAddressIntent) -> None:
 		"""Complete an intent only when no newer intent exists."""
 		table = frappe.qb.DocType("Metal Server IP Address")
-		status = "Attached" if intent.status == "Attaching" else "Allocated"
-		server = intent.server if intent.status == "Attaching" else None
+		is_attaching = intent.status == "Attaching"
 
-		(
+		query = (
 			frappe.qb.update(table)
-			.set(table.status, status)
-			.set(table.server, server)
+			.set(table.status, "Attached" if is_attaching else "Allocated")
+			.set(table.server, intent.server if is_attaching else None)
 			.where(table.name == self.name)
 			.where(table.intent_version == intent.version)
-		).run()
+		)
+		if not is_attaching and not intent.reserved:
+			query = query.set(table.tenant_id, UNOWNED_TENANT_ID)
+		query.run()
 
 
 def enqueue_pending_ip_address_reconcilation() -> None:
@@ -187,14 +207,14 @@ def enqueue_pending_ip_address_reconcilation() -> None:
 
 
 @frappe.whitelist(methods=["POST"])
-def reserve() -> str:
-	"""Reserve one public IPv4 address from the provider for the shared pool."""
+def reserve_for_pool() -> str:
+	"""Add one provider reservation to the shared pool."""
 	frappe.only_for("System Manager")
-	return IPAddressService().reserve_from_provider(UNOWNED_TENANT_ID)
+	return IPAddressService().reserve_from_provider()
 
 
-def reserve_for_tenant(tenant_id: int, source: str) -> str:
-	"""Reserve one public IPv4 address for a tenant."""
+def reserve_for_tenant(tenant_id: int) -> str:
+	"""Reserve one shared pool address for a tenant."""
 	if not frappe.has_permission("Metal Server IP Address", ptype="create"):
 		raise frappe.PermissionError
-	return IPAddressService().reserve(tenant_id, source)
+	return IPAddressService().reserve(tenant_id)

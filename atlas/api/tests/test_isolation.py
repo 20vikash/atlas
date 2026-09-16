@@ -19,6 +19,7 @@ def insert_ip_address(tenant_id: int) -> str:
 				"address": address,
 				"provider_resource_id": f"provider-{address}",
 				"tenant_id": tenant_id,
+				"reserved": 1,
 				"status": "Allocated",
 			}
 		)

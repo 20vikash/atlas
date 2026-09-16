@@ -32,18 +32,24 @@ def get_owned_ip_address(ip_address_id: str) -> MetalServerIPAddress:
 
 @ip_addresses.post("")
 @api_docs(
-	request_example={"source": "pool"},
+	request_example={"ip_address_id": "203.0.113.10"},
 	responses={
+		200: {"description": "The held address stays with the tenant."},
 		201: {"description": "The address is reserved for the tenant."},
-		409: {"description": "The shared pool holds no free address."},
+		409: {"description": "The pool is empty or the address is detaching."},
 	},
 )
 def reserve_ip_address(payload: ReserveIPAddressPayload) -> ApiResult[IPAddressResponse]:
 	"""Reserve IP address.
 
-	Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the provider source creates a provider reservation.
+	Reserves a shared-pool address, or keeps an address the tenant already holds by naming its ip_address_id.
 	"""
-	ip_address_name = reserve_for_tenant(get_current_tenant_id(), payload.source)
+	if payload.ip_address_id:
+		held_address = get_owned_ip_address(payload.ip_address_id)
+		held_address.reserve()
+		return ApiResult(IPAddressResponse.from_document(held_address))
+
+	ip_address_name = reserve_for_tenant(get_current_tenant_id())
 	ip_address: MetalServerIPAddress = frappe.get_doc("Metal Server IP Address", ip_address_name)
 
 	return ApiResult(
@@ -67,7 +73,7 @@ def list_ip_addresses(query: ListQuery) -> Page[IPAddressResponse]:
 	rows: list[MetalServerIPAddress] = frappe.get_list(
 		"Metal Server IP Address",
 		filters=filters,
-		fields=["name", "tenant_id", "address", "status", "virtual_machine", "creation"],
+		fields=["name", "tenant_id", "address", "status", "reserved", "virtual_machine", "creation"],
 		order_by="creation desc",
 		offset=query.offset,
 		limit=query.fetch_limit,

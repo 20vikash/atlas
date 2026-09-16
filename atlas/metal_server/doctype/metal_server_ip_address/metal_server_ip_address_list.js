@@ -5,14 +5,14 @@ function showReserveServerIPAddressDialog() {
 			{
 				fieldtype: "HTML",
 				options: `<p>${__(
-					"This reserves one public IPv4 address from the provider. Attach it to a Virtual Machine later."
+					"This adds one provider address to the shared pool for tenant claims."
 				)}</p>`,
 			},
 		],
 		primary_action_label: __("Reserve"),
 		primary_action() {
 			frappe.call({
-				method: "atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.reserve",
+				method: "atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.reserve_for_pool",
 				freeze: true,
 				freeze_message: __("Reserving Public IPv4"),
 				callback(response) {
