@@ -204,7 +204,7 @@ class TestProxyServerCreate(UnitTestCase):
 			name = proxy_server_module.create(
 				{
 					"virtual_machine_image": "image-1",
-					"vcpus": 2,
+					"cpu_millicores": 2000,
 					"memory_mib": 4096,
 					"disk_mib": 16384,
 					"server_ip_address": "203.0.113.9",
@@ -217,6 +217,9 @@ class TestProxyServerCreate(UnitTestCase):
 		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_privileged"])
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["hostname"], "proxy-001")
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["server_ip_address"], "203.0.113.9")
+		self.assertEqual(virtual_machine_service.create.call_args.args[0]["cpu_millicores"], 2000)
+		self.assertEqual(virtual_machine_service.create.call_args.args[0]["memory_mib"], 4096)
+		self.assertEqual(virtual_machine_service.create.call_args.args[0]["disk_mib"], 16384)
 		proxy_server.enqueue_provisioning.assert_called_once()
 
 	def test_creation_needs_an_allocated_public_ipv4_address(self) -> None:
@@ -227,7 +230,7 @@ class TestProxyServerCreate(UnitTestCase):
 			proxy_server_module.create(
 				{
 					"virtual_machine_image": "image-1",
-					"vcpus": 2,
+					"cpu_millicores": 2000,
 					"memory_mib": 4096,
 					"disk_mib": 16384,
 				}

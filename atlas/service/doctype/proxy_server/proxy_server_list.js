@@ -10,7 +10,14 @@ function showCreateProxyServerDialog() {
 				reqd: 1,
 				filters: { enabled: 1, status: "Available" },
 			},
-			{ fieldname: "vcpus", fieldtype: "Int", label: __("vCPUs"), reqd: 1, default: 2 },
+			{
+				fieldname: "cpu_millicores",
+				fieldtype: "Int",
+				label: __("CPU (millicores)"),
+				description: __("1000 millicores equals one CPU core."),
+				reqd: 1,
+				default: 2000,
+			},
 			{
 				fieldname: "memory_mib",
 				fieldtype: "Int",

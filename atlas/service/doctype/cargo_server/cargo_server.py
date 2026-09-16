@@ -211,7 +211,7 @@ class CargoServer(Document):
 
 		request = {
 			"virtual_machine_image": values.get("virtual_machine_image"),
-			"vcpus": values.get("vcpus"),
+			"cpu_millicores": values.get("cpu_millicores"),
 			"memory_mib": values.get("memory_mib"),
 			"disk_mib": values.get("disk_mib"),
 			"tenant_id": 0,

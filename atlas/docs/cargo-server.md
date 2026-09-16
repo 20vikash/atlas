@@ -14,7 +14,7 @@ cargo-pilot.<wildcard-domain> -> Proxy -> Cargo mesh IPv6
 
 Before you provision Cargo Server, make sure that at least one Proxy Server is Active. Reserve one tenant `0` public IPv4 address and make sure that the required System image is Available.
 
-Open Cargo Server and select Provision. Select the image and public IPv4 address. The form defaults to 2 vCPUs, 4096 MiB of memory, and 16384 MiB of disk.
+Open Cargo Server and select Provision. Select the image and public IPv4 address. The form defaults to 2000 CPU millicores, 4096 MiB of memory, and 16384 MiB of disk. 1000 millicores equals one CPU core.
 
 The Storage Cluster section of the same dialog sets the object storage cluster that Cargo builds for itself. The form defaults to 3 storage nodes, a replication factor of 3, a gateway of 2 vCPUs, 4 GB of memory and 20 GB of disk, and storage nodes of 4 vCPUs, 8 GB of memory and 500 GB of disk. Storage nodes must not be fewer than the replication factor. Every value must be at least 1. Garage weights each storage node by its disk size, and every S3 request goes through the one gateway.
 
