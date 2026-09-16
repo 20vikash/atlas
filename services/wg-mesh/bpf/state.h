@@ -34,6 +34,21 @@ struct
 	__uint(max_entries, 262144);
 } remote_vms SEC(".maps");
 
+/* Consecutive NUD failures for remote VMs.
+ *
+ * The NUD hook increments this counter on each NUD_FAILED event.
+ * A NUD_REACHABLE event resets it to zero.
+ * The NUD hook removes the entry once the failure count reaches
+ * ATLAS_NUD_FAILURE_LIMIT.
+ */
+struct
+{
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, struct in6_addr);
+	__type(value, __u32);
+	__uint(max_entries, 262144);
+} nud_failures SEC(".maps");
+
 /* Peer capacity of the peer_list map. The unicast hooks use the same limit to
  * bound their loops. */
 #define ATLAS_UNICAST_PEER_LIMIT 256
@@ -132,11 +147,15 @@ static __always_inline int tenants_can_communicate(
 		return 1;
 
 	if (get_tenant(source) == 0 &&
-		bpf_map_lookup_elem(&privileged_tenant_allowed_addresses, source) != NULL)
+		bpf_map_lookup_elem(
+			&privileged_tenant_allowed_addresses,
+			source) != NULL)
 		return 1;
 
 	return get_tenant(destination) == 0 &&
-		   bpf_map_lookup_elem(&privileged_tenant_allowed_addresses, destination) != NULL;
+		   bpf_map_lookup_elem(
+			   &privileged_tenant_allowed_addresses,
+			   destination) != NULL;
 }
 
 /* Get the remote location (WireGuard address of the bare metal host) of the given VM. */
