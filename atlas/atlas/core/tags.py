@@ -32,11 +32,7 @@ def validate_tags(document: Document) -> None:
 
 
 def find_names_with_tags(doctype: str, tags: dict[str, str]) -> list[str]:
-	"""Return the names of doctype documents that carry every key and value in tags.
-
-	The search joins the parent and applies the same permission condition that a
-	list query uses, so it never collects a name the request cannot read.
-	"""
+	"""Return names of documents with every requested tag that the request can read."""
 	if not tags:
 		return []
 

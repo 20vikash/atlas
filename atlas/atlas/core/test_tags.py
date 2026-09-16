@@ -73,7 +73,7 @@ class TestTagSearch(IntegrationTestCase):
 
 
 class TestTagSearchScope(IntegrationTestCase):
-	"""A search never collects a name that the tenant of the request cannot read."""
+	"""A tag search respects each tenant's read permissions."""
 
 	def setUp(self) -> None:
 		self.suite = [{"key": "suite", "value": "scope"}]
