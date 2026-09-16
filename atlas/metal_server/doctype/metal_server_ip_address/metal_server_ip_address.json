@@ -85,7 +85,7 @@
    "label": "Tags"
   },
   {
-   "description": "Arbitrary key and value labels used to select an IP address.",
+   "description": "Your own key and value labels for this address, such as pool and edge. Use them to find it again.",
    "fieldname": "tags",
    "fieldtype": "Table",
    "label": "Tags",

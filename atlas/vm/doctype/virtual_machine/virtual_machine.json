@@ -283,7 +283,7 @@
    "label": "Tags"
   },
   {
-   "description": "Arbitrary key and value labels used to select a virtual machine.",
+   "description": "Your own key and value labels for this virtual machine, such as env and prod. Use them to find it again.",
    "fieldname": "tags",
    "fieldtype": "Table",
    "label": "Tags",
