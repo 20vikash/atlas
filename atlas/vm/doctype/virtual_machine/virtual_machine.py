@@ -41,7 +41,6 @@ class VirtualMachine(Document):
 		architecture: DF.Literal["amd64", "arm64"]
 		cpu_millicores: DF.Int
 		disk_mib: DF.Int
-		firewall_rules: DF.Code | None
 		is_draft: DF.Check
 		is_privileged: DF.Check
 		is_terminating: DF.Check
@@ -176,25 +175,6 @@ class VirtualMachine(Document):
 		"""Return the public network limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.public_network_throughput_mibps if information else 0
-
-	@property
-	def firewall_enabled(self) -> bool:
-		"""Return whether Metal applies the firewall rules."""
-		information = self.get_metal_vm_info()
-		return information.desired.network.firewall.enabled if information else False
-
-	@property
-	def firewall_rules(self) -> str:
-		"""Return the desired firewall rule lists as JSON."""
-		information = self.get_metal_vm_info()
-		firewall = information.desired.network.firewall if information else None
-		return json.dumps(
-			{
-				"inbound": [rule.as_dict() for rule in firewall.inbound] if firewall else [],
-				"outbound": [rule.as_dict() for rule in firewall.outbound] if firewall else [],
-			},
-			indent=2,
-		)
 
 	@property
 	def ssh_keys(self) -> str:
@@ -374,11 +354,19 @@ class VirtualMachine(Document):
 			}
 		)
 
+	@frappe.whitelist(methods=["GET"])
+	def read_firewall(self) -> dict[str, Any]:
+		"""Return the complete desired firewall when the user opens the editor."""
+		self.check_permission("read")
+		information = self.get_metal_vm_info()
+		if not information:
+			return {"enabled": False, "inbound": [], "outbound": []}
+		return information.desired.network.firewall.as_dict()
+
 	@frappe.whitelist(methods=["POST"])
-	def update_firewall(self, firewall: str | dict[str, Any]) -> dict[str, Any]:
+	def update_firewall(self, firewall: dict[str, Any]) -> dict[str, Any]:
 		"""Change the firewall without a VM restart."""
-		value = frappe.parse_json(firewall) if isinstance(firewall, str) else firewall
-		return self.update_network({"firewall": value})
+		return self.update_network({"firewall": firewall})
 
 	@frappe.whitelist(methods=["POST"])
 	def update_disk_limits(self, disk_throughput_mibps: int, disk_iops: int) -> dict[str, Any]:

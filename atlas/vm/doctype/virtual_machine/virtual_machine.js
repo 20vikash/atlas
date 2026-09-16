@@ -563,7 +563,16 @@ function firewallValue(enabled, rows) {
 }
 
 function showEditFirewallDialog(frm) {
-	const current = JSON.parse(frm.doc.firewall_rules || '{"inbound":[],"outbound":[]}');
+	frm.call({
+		method: "read_firewall",
+		doc: frm.doc,
+		type: "GET",
+		freeze: true,
+		freeze_message: __("Reading firewall..."),
+	}).then(({ message }) => openEditFirewallDialog(frm, message));
+}
+
+function openEditFirewallDialog(frm, current) {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Edit Firewall"),
 		size: "extra-large",
@@ -572,7 +581,7 @@ function showEditFirewallDialog(frm) {
 				fieldname: "enabled",
 				fieldtype: "Check",
 				label: __("Enabled"),
-				default: frm.doc.firewall_enabled,
+				default: current.enabled,
 				description: __("When enabled, unmatched new traffic is blocked."),
 			},
 			{

@@ -677,6 +677,17 @@ class TestMetalVirtualMachineModel(UnitTestCase):
 		self.assertEqual(virtual_machine.ssh_keys, "ssh-ed25519 AAAA")
 		self.assertEqual(virtual_machine.metadata, '{\n  "env": "prod"\n}')
 
+	def test_read_firewall_returns_the_nested_model(self) -> None:
+		virtual_machine = VirtualMachine.__new__(VirtualMachine)
+		information = MetalVirtualMachine.from_dict(METAL_VIRTUAL_MACHINE_RESPONSE)
+		virtual_machine.check_permission = Mock()
+		virtual_machine.get_metal_vm_info = Mock(return_value=information)
+
+		firewall = virtual_machine.read_firewall()
+
+		virtual_machine.check_permission.assert_called_once_with("read")
+		self.assertEqual(firewall, {"enabled": False, "inbound": [], "outbound": []})
+
 
 class TestVirtualMachineNetwork(UnitTestCase):
 	"""Cover the live network updates that do not restart the VM."""
@@ -719,6 +730,15 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				),
 			),
 		)
+
+	def test_update_firewall_passes_one_dictionary_shape(self) -> None:
+		virtual_machine = VirtualMachine.__new__(VirtualMachine)
+		virtual_machine.update_network = Mock(return_value={})
+		firewall = {"enabled": True, "inbound": [], "outbound": []}
+
+		virtual_machine.update_firewall(firewall)
+
+		virtual_machine.update_network.assert_called_once_with({"firewall": firewall})
 
 	def test_update_network_keeps_the_unchanged_metal_values(self) -> None:
 		virtual_machine, client = self.build_virtual_machine(
