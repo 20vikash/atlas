@@ -10,6 +10,8 @@ from ..types import UNSET, Unset
 
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.firewall_response import FirewallResponse
 
 
 
@@ -25,6 +27,7 @@ class VirtualMachineNetwork:
 
         Attributes:
             egress (None | str):
+            firewall (FirewallResponse): The complete desired firewall configuration.
             mac (None | str):
             mesh_ipv6 (None | str):
             private_network_throughput_mibps (int):
@@ -33,6 +36,7 @@ class VirtualMachineNetwork:
      """
 
     egress: None | str
+    firewall: FirewallResponse
     mac: None | str
     mesh_ipv6: None | str
     private_network_throughput_mibps: int
@@ -45,8 +49,11 @@ class VirtualMachineNetwork:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.firewall_response import FirewallResponse # noqa: PLC0415
         egress: None | str
         egress = self.egress
+
+        firewall = self.firewall.to_dict()
 
         mac: None | str
         mac = self.mac
@@ -66,6 +73,7 @@ class VirtualMachineNetwork:
         field_dict.update(self.additional_properties)
         field_dict.update({
             "egress": egress,
+            "firewall": firewall,
             "mac": mac,
             "mesh_ipv6": mesh_ipv6,
             "private_network_throughput_mibps": private_network_throughput_mibps,
@@ -79,6 +87,7 @@ class VirtualMachineNetwork:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.firewall_response import FirewallResponse # noqa: PLC0415
         d = dict(src_dict)
         def _parse_egress(data: object) -> None | str:
             if data is None:
@@ -86,6 +95,11 @@ class VirtualMachineNetwork:
             return cast(None | str, data)
 
         egress = _parse_egress(d.pop("egress"))
+
+
+        firewall = FirewallResponse.from_dict(d.pop("firewall"))
+
+
 
 
         def _parse_mac(data: object) -> None | str:
@@ -118,6 +132,7 @@ class VirtualMachineNetwork:
 
         virtual_machine_network = cls(
             egress=egress,
+            firewall=firewall,
             mac=mac,
             mesh_ipv6=mesh_ipv6,
             private_network_throughput_mibps=private_network_throughput_mibps,

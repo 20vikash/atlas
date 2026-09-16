@@ -14,6 +14,7 @@ from typing import cast
 
 if TYPE_CHECKING:
   from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata
+  from ..models.firewall_payload import FirewallPayload
 
 
 
@@ -35,6 +36,7 @@ class CreateVirtualMachinePayload:
             disk_iops (int | Unset):  Default: 0.
             disk_throughput_mibps (int | Unset):  Default: 0.
             egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
+            firewall (FirewallPayload | Unset): The complete desired firewall configuration.
             hostname (str | Unset):  Default: ''.
             ip_address_id (None | str | Unset):
             is_privileged (bool | Unset):  Default: False.
@@ -53,6 +55,7 @@ class CreateVirtualMachinePayload:
     disk_iops: int | Unset = 0
     disk_throughput_mibps: int | Unset = 0
     egress: CreateVirtualMachinePayloadEgress | Unset = CreateVirtualMachinePayloadEgress.UPLINK
+    firewall: FirewallPayload | Unset = UNSET
     hostname: str | Unset = ''
     ip_address_id: None | str | Unset = UNSET
     is_privileged: bool | Unset = False
@@ -69,6 +72,7 @@ class CreateVirtualMachinePayload:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata # noqa: PLC0415
+        from ..models.firewall_payload import FirewallPayload # noqa: PLC0415
         cpu_millicores = self.cpu_millicores
 
         disk_mib = self.disk_mib
@@ -85,6 +89,10 @@ class CreateVirtualMachinePayload:
         if not isinstance(self.egress, Unset):
             egress = self.egress.value
 
+
+        firewall: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.firewall, Unset):
+            firewall = self.firewall.to_dict()
 
         hostname = self.hostname
 
@@ -129,6 +137,8 @@ class CreateVirtualMachinePayload:
             field_dict["disk_throughput_mibps"] = disk_throughput_mibps
         if egress is not UNSET:
             field_dict["egress"] = egress
+        if firewall is not UNSET:
+            field_dict["firewall"] = firewall
         if hostname is not UNSET:
             field_dict["hostname"] = hostname
         if ip_address_id is not UNSET:
@@ -155,6 +165,7 @@ class CreateVirtualMachinePayload:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata # noqa: PLC0415
+        from ..models.firewall_payload import FirewallPayload # noqa: PLC0415
         d = dict(src_dict)
         cpu_millicores = d.pop("cpu_millicores")
 
@@ -174,6 +185,16 @@ class CreateVirtualMachinePayload:
             egress = UNSET
         else:
             egress = CreateVirtualMachinePayloadEgress(_egress)
+
+
+
+
+        _firewall = d.pop("firewall", UNSET)
+        firewall: FirewallPayload | Unset
+        if isinstance(_firewall,  Unset):
+            firewall = UNSET
+        else:
+            firewall = FirewallPayload.from_dict(_firewall)
 
 
 
@@ -221,6 +242,7 @@ class CreateVirtualMachinePayload:
             disk_iops=disk_iops,
             disk_throughput_mibps=disk_throughput_mibps,
             egress=egress,
+            firewall=firewall,
             hostname=hostname,
             ip_address_id=ip_address_id,
             is_privileged=is_privileged,

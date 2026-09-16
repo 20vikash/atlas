@@ -10,6 +10,13 @@ from .create_virtual_machine_payload_egress import CreateVirtualMachinePayloadEg
 from .create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata
 from .disk_update_payload import DiskUpdatePayload
 from .download_image_artifact import DownloadImageArtifact
+from .firewall_payload import FirewallPayload
+from .firewall_response import FirewallResponse
+from .firewall_rule_payload import FirewallRulePayload
+from .firewall_rule_payload_protocol import FirewallRulePayloadProtocol
+from .firewall_rule_response import FirewallRuleResponse
+from .firewall_rule_response_protocol import FirewallRuleResponseProtocol
+from .firewall_update_payload import FirewallUpdatePayload
 from .image_download_response import ImageDownloadResponse
 from .image_download_response_artifact import ImageDownloadResponseArtifact
 from .image_response import ImageResponse
@@ -55,6 +62,13 @@ __all__ = (
     "CreateVirtualMachinePayloadMetadata",
     "DiskUpdatePayload",
     "DownloadImageArtifact",
+    "FirewallPayload",
+    "FirewallResponse",
+    "FirewallRulePayload",
+    "FirewallRulePayloadProtocol",
+    "FirewallRuleResponse",
+    "FirewallRuleResponseProtocol",
+    "FirewallUpdatePayload",
     "ImageDownloadResponse",
     "ImageDownloadResponseArtifact",
     "ImageResponse",
