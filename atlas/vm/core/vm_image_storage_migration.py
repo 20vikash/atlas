@@ -73,23 +73,23 @@ class VirtualMachineImageStorageMigration:
 	def delete_site_files(self, image_name: str) -> None:
 		"""Remove the site files that object storage replaced.
 
-		The record drops both references before the files go, so a failed delete
-		leaves an unused file and never an image that points at a missing one.
+		The files go before the record drops the retention time, so a failed delete
+		leaves the image for the next sweep instead of an unreachable file. The
+		artifacts already serve from object storage, so a stale reference reaches
+		nothing, and deleting a file that is gone does nothing.
 		"""
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
 		if image.is_stored_in_site_file:
 			return
 
-		replaced_files = (image.image_file, image.kernel_file)
+		for file_name in (image.image_file, image.kernel_file):
+			if file_name:
+				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
+
 		image.image_file = None
 		image.kernel_file = None
 		image.site_file_retention_until = None
 		image.save()
-		frappe.db.commit()  # nosemgrep
-
-		for file_name in replaced_files:
-			if file_name:
-				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
 
 	def upload(self, client: ObjectStorageClient, image: VirtualMachineImage, artifact: Artifact) -> str:
 		"""Upload one artifact under its content addressed key and verify its size."""

@@ -1,19 +1,26 @@
-from datetime import timedelta
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
 from frappe.tests import UnitTestCase
-from frappe.utils import now_datetime
 
 from atlas.atlas.object_storage import ObjectStorageError
+from atlas.vm.core import vm_image_storage_migration
 from atlas.vm.core.vm_image_storage_migration import (
 	SITE_FILE_RETENTION,
 	VirtualMachineImageStorageMigration,
 	delete_expired_site_files,
 	enqueue_site_file_image_migrations,
 )
+
+NOW = datetime(2026, 9, 16, 10, 0)
+
+
+def fixed_clock():
+	"""Pin the module clock, so a retention time is exact and reads no site setting."""
+	return patch.object(vm_image_storage_migration, "now_datetime", return_value=NOW)
 
 
 def build_image(**overrides) -> SimpleNamespace:
@@ -79,6 +86,7 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 			patch.object(VirtualMachineImageStorageMigration, "validate_stored_size") as validate_stored_size,
 			patch("atlas.vm.core.vm_image_storage_migration.frappe.db", Mock()),
 			patch("atlas.vm.core.vm_image_storage_migration.frappe.delete_doc") as delete_doc,
+			fixed_clock(),
 		):
 			VirtualMachineImageStorageMigration().migrate("image-1")
 
@@ -87,11 +95,7 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 		self.assertEqual(image.artifact_storage, "Object Storage")
 		self.assertEqual(image.image_file, "file-rootfs")
 		self.assertEqual(image.kernel_file, "file-kernel")
-		self.assertAlmostEqual(
-			image.site_file_retention_until,
-			now_datetime() + SITE_FILE_RETENTION,
-			delta=timedelta(minutes=1),
-		)
+		self.assertEqual(image.site_file_retention_until, NOW + SITE_FILE_RETENTION)
 		image.save.assert_called_once()
 		self.assertEqual(validate_stored_size.call_count, 2)
 		delete_doc.assert_not_called()
@@ -165,7 +169,7 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 
 		return delete_doc
 
-	def test_the_record_drops_both_references_before_the_files_go(self) -> None:
+	def test_the_files_go_before_the_record_drops_its_retention_time(self) -> None:
 		image = build_image(
 			artifact_storage="Object Storage",
 			is_stored_in_site_file=False,
@@ -179,6 +183,28 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 		self.assertIsNone(image.site_file_retention_until)
 		image.save.assert_called_once()
 		self.assertEqual([call.args[1] for call in delete_doc.call_args_list], ["file-rootfs", "file-kernel"])
+
+	def test_a_failed_delete_leaves_the_image_for_the_next_sweep(self) -> None:
+		image = build_image(
+			artifact_storage="Object Storage",
+			is_stored_in_site_file=False,
+			site_file_retention_until="2026-09-16 10:00:00",
+		)
+
+		with (
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_storage_migration.frappe.db", Mock()),
+			patch(
+				"atlas.vm.core.vm_image_storage_migration.frappe.delete_doc",
+				side_effect=OSError("storage is down"),
+			),
+			self.assertRaises(OSError),
+		):
+			VirtualMachineImageStorageMigration().delete_site_files("image-1")
+
+		self.assertEqual(image.image_file, "file-rootfs")
+		self.assertEqual(image.site_file_retention_until, "2026-09-16 10:00:00")
+		image.save.assert_not_called()
 
 	def test_a_site_file_image_keeps_its_files(self) -> None:
 		image = build_image()
@@ -195,6 +221,7 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 				"atlas.vm.core.vm_image_storage_migration.frappe.get_all", return_value=["image-1"]
 			) as get_all,
 			patch.object(VirtualMachineImageStorageMigration, "delete_site_files") as delete_site_files,
+			fixed_clock(),
 		):
 			delete_expired_site_files()
 
