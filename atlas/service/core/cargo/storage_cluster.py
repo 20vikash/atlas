@@ -10,9 +10,11 @@ from typing import Any
 import frappe
 from frappe import _
 
+from atlas.vm.core.models import MAXIMUM_CPU_MILLICORES, MINIMUM_CPU_MILLICORES
+
 CONFIG_FILE_PATH = ("private", "files", "cargo-storage-cluster.json")
 NODE_ROLES = ("gateway", "storage")
-NODE_FIELDS = ("cpu", "ram_gb", "disk_gb")
+NODE_FIELDS = ("cpu_millicores", "ram_gb", "disk_gb")
 
 
 def config_file() -> Path:
@@ -63,9 +65,17 @@ def _validated_config(values: Any) -> dict[str, Any]:
 
 def _node_size(values: Any, role: str) -> dict[str, int]:
 	if not isinstance(values, dict) or any(field not in values for field in NODE_FIELDS):
-		frappe.throw(_("{0} must hold cpu, ram_gb and disk_gb.").format(role))
+		frappe.throw(_("{0} must hold cpu_millicores, ram_gb and disk_gb.").format(role))
 
-	return {field: _whole_number(values[field], f"{role} {field}") for field in NODE_FIELDS}
+	size = {field: _whole_number(values[field], f"{role} {field}") for field in NODE_FIELDS}
+	if not MINIMUM_CPU_MILLICORES <= size["cpu_millicores"] <= MAXIMUM_CPU_MILLICORES:
+		frappe.throw(
+			_("{0} cpu_millicores must be between {1} and {2}.").format(
+				role, MINIMUM_CPU_MILLICORES, MAXIMUM_CPU_MILLICORES
+			)
+		)
+
+	return size
 
 
 def _whole_number(value: Any, name: str) -> int:

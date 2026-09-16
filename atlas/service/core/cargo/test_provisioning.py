@@ -28,7 +28,8 @@ def script_enrolment_variables() -> list[str]:
 
 STORAGE_CLUSTER_JSON = (
 	'{"storage_node_count":3,"replication_factor":3,'
-	'"gateway":{"cpu":2,"ram_gb":4,"disk_gb":20},"storage":{"cpu":4,"ram_gb":8,"disk_gb":500}}'
+	'"gateway":{"cpu_millicores":2000,"ram_gb":4,"disk_gb":20},'
+	'"storage":{"cpu_millicores":4000,"ram_gb":8,"disk_gb":500}}'
 )
 
 
