@@ -288,6 +288,9 @@
             "created_at": 1788834165,
             "id": "203.0.113.10",
             "state": "reserved",
+            "tags": {
+              "pool": "edge"
+            },
             "tenant_id": 7,
             "virtual_machine_id": null
           }
@@ -308,6 +311,13 @@
           "state": {
             "title": "State",
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
           },
           "tenant_id": {
             "title": "Tenant Id",
@@ -331,6 +341,7 @@
           "address",
           "state",
           "virtual_machine_id",
+          "tags",
           "created_at"
         ],
         "title": "IPAddressResponse",
@@ -393,6 +404,7 @@
         "description": "A tenant virtual machine image.",
         "examples": [
           {
+            "architecture": "amd64",
             "cache_image": false,
             "created_at": 1788834165,
             "enabled": true,
@@ -400,11 +412,12 @@
             "image_type": "machine",
             "kernel_size_mib": 8,
             "memory_snapshot": false,
-            "operating_system": "Ubuntu",
-            "operating_system_version": "24.04",
-            "platform": "amd64",
             "rootfs_size_mib": 20480,
             "status": "available",
+            "tags": {
+              "os": "Ubuntu",
+              "os_version": "24.04"
+            },
             "tenant_id": 7,
             "title": "Worker snapshot",
             "transfer_error": null,
@@ -412,6 +425,10 @@
           }
         ],
         "properties": {
+          "architecture": {
+            "title": "Architecture",
+            "type": "string"
+          },
           "cache_image": {
             "title": "Cache Image",
             "type": "boolean"
@@ -440,18 +457,6 @@
             "title": "Memory Snapshot",
             "type": "boolean"
           },
-          "operating_system": {
-            "title": "Operating System",
-            "type": "string"
-          },
-          "operating_system_version": {
-            "title": "Operating System Version",
-            "type": "string"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          },
           "rootfs_size_mib": {
             "title": "Rootfs Size Mib",
             "type": "integer"
@@ -459,6 +464,13 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
           },
           "tenant_id": {
             "title": "Tenant Id",
@@ -489,9 +501,7 @@
           "tenant_id",
           "title",
           "image_type",
-          "platform",
-          "operating_system",
-          "operating_system_version",
+          "architecture",
           "status",
           "enabled",
           "cache_image",
@@ -500,6 +510,7 @@
           "kernel_size_mib",
           "transfer_progress",
           "transfer_error",
+          "tags",
           "created_at"
         ],
         "title": "ImageResponse",
@@ -817,6 +828,13 @@
             "title": "Memory Snapshot",
             "type": "boolean"
           },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
           "title": {
             "minLength": 1,
             "title": "Title",
@@ -896,6 +914,10 @@
           }
         ],
         "properties": {
+          "architecture": {
+            "title": "Architecture",
+            "type": "string"
+          },
           "compute": {
             "$ref": "#/components/schemas/VirtualMachineCompute"
           },
@@ -950,6 +972,13 @@
           "network": {
             "$ref": "#/components/schemas/VirtualMachineNetwork"
           },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
           "tenant_id": {
             "title": "Tenant Id",
             "type": "integer"
@@ -959,6 +988,8 @@
           "id",
           "tenant_id",
           "image_id",
+          "architecture",
+          "tags",
           "created_at",
           "is_privileged",
           "desired_state",
@@ -1049,6 +1080,7 @@
         "description": "A stored virtual machine with its last known host state.",
         "examples": [
           {
+            "architecture": "amd64",
             "created_at": 1788834165,
             "disk_mib": 20480,
             "id": "vm-00001",
@@ -1057,11 +1089,18 @@
             "memory_mib": 2048,
             "sleep_after_idle_seconds": 0,
             "state_synced_at": 1788834165,
+            "tags": {
+              "env": "prod"
+            },
             "tenant_id": 7,
             "vcpus": 2
           }
         ],
         "properties": {
+          "architecture": {
+            "title": "Architecture",
+            "type": "string"
+          },
           "created_at": {
             "title": "Created At",
             "type": "integer"
@@ -1101,6 +1140,13 @@
             ],
             "title": "State Synced At"
           },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
           "tenant_id": {
             "title": "Tenant Id",
             "type": "integer"
@@ -1114,10 +1160,12 @@
           "id",
           "tenant_id",
           "image_id",
+          "architecture",
           "vcpus",
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
+          "tags",
           "created_at",
           "last_known_state",
           "state_synced_at"
@@ -1196,17 +1244,25 @@
         "description": "A stored tenant virtual machine.",
         "examples": [
           {
+            "architecture": "amd64",
             "created_at": 1788834165,
             "disk_mib": 20480,
             "id": "vm-00001",
             "image_id": "8f1c2d3e4b5a6978",
             "memory_mib": 2048,
             "sleep_after_idle_seconds": 0,
+            "tags": {
+              "env": "prod"
+            },
             "tenant_id": 7,
             "vcpus": 2
           }
         ],
         "properties": {
+          "architecture": {
+            "title": "Architecture",
+            "type": "string"
+          },
           "created_at": {
             "title": "Created At",
             "type": "integer"
@@ -1231,6 +1287,13 @@
             "title": "Sleep After Idle Seconds",
             "type": "integer"
           },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
           "tenant_id": {
             "title": "Tenant Id",
             "type": "integer"
@@ -1244,10 +1307,12 @@
           "id",
           "tenant_id",
           "image_id",
+          "architecture",
           "vcpus",
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
+          "tags",
           "created_at"
         ],
         "title": "VirtualMachineResponse",
@@ -1318,6 +1383,24 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
+              "title": "Tag"
             }
           },
           {
@@ -1541,6 +1624,24 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
+              "title": "Tag"
+            }
           }
         ],
         "responses": {
@@ -1749,6 +1850,24 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
+              "title": "Tag"
             }
           }
         ],
@@ -2094,7 +2213,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/actions/snapshot": {
       "post": {
-        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.",
+        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nUse tags to label the image and filter it later, for example, `{\"purpose\": \"pilot\"}` and `?tag=purpose:pilot`.",
         "operationId": "create_virtual_machine_snapshot",
         "parameters": [
           {
@@ -2124,6 +2243,9 @@
                 "cache_image": false,
                 "image_type": "machine",
                 "memory_snapshot": false,
+                "tags": {
+                  "purpose": "pilot"
+                },
                 "title": "worker-1 golden"
               },
               "schema": {

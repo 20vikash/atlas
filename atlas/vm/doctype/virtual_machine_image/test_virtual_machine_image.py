@@ -35,7 +35,7 @@ class TestVirtualMachineImage(UnitTestCase):
 			"kernel_file": None,
 			"image_size_mib": 10,
 			"kernel_size_mib": 5,
-			"platform": "amd64",
+			"architecture": "amd64",
 			"status": "Available",
 			"title": "Machine image",
 			"cache_image": 0,
@@ -226,13 +226,12 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			name="VM-00001",
 			server="server-1",
 			virtual_machine_image="system-image",
+			architecture="amd64",
 			disk_mib=1024,
 			tenant_id=7,
 		)
 		original_image = SimpleNamespace(
-			platform="amd64",
-			operating_system="Ubuntu",
-			operating_system_version="24.04",
+			architecture="amd64",
 		)
 		server = SimpleNamespace(name="server-1")
 		image = Mock()
@@ -263,6 +262,79 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			set_name="01900000-0000-7000-8000-000000000001",
 		)
 		enqueue_transfer.assert_called_once_with("01900000-0000-7000-8000-000000000001")
+
+	def test_requested_tags_reach_the_new_image(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			server="server-1",
+			virtual_machine_image="system-image",
+			architecture="amd64",
+			disk_mib=1024,
+			tenant_id=0,
+		)
+		values = {}
+		metal_client = Mock()
+		metal_client.create_snapshot.return_value = {
+			"id": "01900000-0000-7000-8000-000000000002",
+			"rootfs": {"size_bytes": 1024 * 1024},
+			"kernel": {"size_bytes": 1024 * 1024},
+		}
+		service = VirtualMachineImageTransferService()
+
+		def get_doc(doctype, name=None):
+			if isinstance(doctype, dict):
+				values.update(doctype)
+				return Mock()
+			return SimpleNamespace(name="server-1")
+
+		with (
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", side_effect=get_doc),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
+			patch.object(service, "enqueue"),
+		):
+			service.create_from_virtual_machine(
+				virtual_machine,
+				"Pilot image",
+				tags={"purpose": "pilot", "pilot_version": "1.2.3"},
+			)
+
+		self.assertEqual(
+			values["tags"],
+			[{"key": "purpose", "value": "pilot"}, {"key": "pilot_version", "value": "1.2.3"}],
+		)
+
+	def test_an_image_without_tags_carries_none(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			server="server-1",
+			virtual_machine_image="system-image",
+			architecture="amd64",
+			disk_mib=1024,
+			tenant_id=7,
+		)
+		values = {}
+		metal_client = Mock()
+		metal_client.create_snapshot.return_value = {
+			"id": "01900000-0000-7000-8000-000000000003",
+			"rootfs": {"size_bytes": 1024 * 1024},
+			"kernel": {"size_bytes": 1024 * 1024},
+		}
+		service = VirtualMachineImageTransferService()
+
+		def get_doc(doctype, name=None):
+			if isinstance(doctype, dict):
+				values.update(doctype)
+				return Mock()
+			return SimpleNamespace(name="server-1")
+
+		with (
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", side_effect=get_doc),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
+			patch.object(service, "enqueue"),
+		):
+			service.create_from_virtual_machine(virtual_machine, "Machine image")
+
+		self.assertEqual(values["tags"], [])
 
 	def test_part_count_has_no_empty_boundary_part(self) -> None:
 		self.assertEqual(get_multipart_part_count(MULTIPART_PART_SIZE_MIB), 1)

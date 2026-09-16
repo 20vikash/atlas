@@ -72,6 +72,8 @@ An error response has `error.code`, `error.message`, and `error.fields`. Validat
 
 A list response carries `items`, `offset`, `limit`, and `has_more`. The default limit is 20 and the maximum limit is 100.
 
+Every list route accepts `tag`, a comma separated list of `key:value` pairs. A resource must carry every pair, such as `?tag=os:Ubuntu,channel:lts`. A pair without `:` and a repeated key return `400`. Images, virtual machines, and IP addresses each carry a `tags` map in their response.
+
 A `PATCH` request needs at least one supported field. A field that is not in the request does not change. A `PUT` request replaces the complete stored value.
 
 A route that asks the host for work returns `202`. Poll the resource route for completion.

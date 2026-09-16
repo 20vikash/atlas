@@ -10,8 +10,7 @@ import frappe
 import orjson
 from frappe.utils import orjson_dumps
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import ConfigDict, Field, TypeAdapter, model_validator
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import ConfigDict, Field, model_validator
 from werkzeug.exceptions import HTTPException
 from werkzeug.routing import Rule
 from werkzeug.wrappers import Request, Response
@@ -19,11 +18,11 @@ from werkzeug.wrappers import Request, Response
 from atlas.api.core.binding import CallShape, ParameterBinding, read_json_body, resolve_binding
 from atlas.api.core.docs import DocsConfig, RouteDocs, generate_specification, render_api_reference
 from atlas.api.core.errors import (
-	ApiError,
 	InvalidRequest,
 	ResourceNotFound,
 	describe_exception,
 )
+from atlas.atlas.core.tags import find_names_with_tags
 from atlas.auth.identity import MAXIMUM_TENANT_ID, TENANT_HEADER, get_current_tenant_id
 from atlas.auth.overrides import is_document_visible
 
@@ -66,11 +65,42 @@ class ListQuery(StrictModel):
 
 	offset: int = Field(default=0, ge=0)
 	limit: int = Field(default=DEFAULT_LIST_LIMIT, ge=1, le=MAXIMUM_LIST_LIMIT)
+	tag: str | None = Field(
+		default=None,
+		description=(
+			"Comma separated key:value tags. A resource must carry every pair, such as"
+			" tag=os:Ubuntu,channel:lts."
+		),
+	)
 
 	@property
 	def fetch_limit(self) -> int:
 		"""Return the row count that shows whether another page exists."""
 		return self.limit + 1
+
+	@property
+	def tags(self) -> dict[str, str]:
+		"""Return the requested tags as a key to value map."""
+		return parse_tag_filter(self.tag)
+
+
+def parse_tag_filter(value: str | None) -> dict[str, str]:
+	"""Read one comma separated key:value list, or report why it is not usable."""
+	if not value:
+		return {}
+
+	tags: dict[str, str] = {}
+	for pair in value.split(","):
+		key, separator, tag_value = pair.partition(":")
+		key, tag_value = key.strip(), tag_value.strip()
+		if not separator or not key:
+			raise InvalidRequest(f"Tag filter {pair.strip()!r} needs the form key:value.")
+		if key in tags:
+			raise InvalidRequest(f"Tag key {key!r} is repeated.")
+
+		tags[key] = tag_value
+
+	return tags
 
 
 class Page[PageItem](PydanticBaseModel):
@@ -103,6 +133,24 @@ def get_owned_document(doctype: str, name: str, label: str | None = None):
 		raise absent
 
 	return document
+
+
+def add_tag_filter(doctype: str, query: ListQuery, filters: dict[str, Any]) -> bool:
+	"""Narrow filters to the documents that carry every tag in query.
+
+	Returns False when no document can match, so the route answers an empty page
+	instead of an unfiltered one.
+	"""
+	tags = query.tags
+	if not tags:
+		return True
+
+	names = find_names_with_tags(doctype, tags)
+	if not names:
+		return False
+
+	filters["name"] = ("in", names)
+	return True
 
 
 def build_page[PageItem](rows: list[PageItem], query: ListQuery) -> Page[PageItem]:

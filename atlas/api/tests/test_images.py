@@ -26,9 +26,7 @@ def insert_image(tenant_id: int, image_type: str = "machine", **overrides) -> st
 		"title": f"test-image-{tenant_id}-{image_type}",
 		"image_type": image_type,
 		"tenant_id": tenant_id,
-		"platform": "amd64",
-		"operating_system": "Ubuntu",
-		"operating_system_version": "24.04",
+		"architecture": "amd64",
 		"status": "Available",
 		"enabled": 1,
 		"image_object_key": "images/test/rootfs.img",
@@ -50,9 +48,7 @@ class TestImageView(UnitTestCase):
 				tenant_id=TENANT_ID,
 				title="Ubuntu 24.04",
 				image_type="machine",
-				platform="amd64",
-				operating_system="Ubuntu",
-				operating_system_version="24.04",
+				architecture="amd64",
 				status="Available",
 				enabled=1,
 				cache_image=0,
@@ -61,11 +57,13 @@ class TestImageView(UnitTestCase):
 				kernel_size_mib=8,
 				transfer_progress=100,
 				transfer_error=None,
+				tags=[SimpleNamespace(key="os", value="Ubuntu")],
 				creation="2026-09-08 10:00:00",
 			)
 		)
 
 		self.assertEqual(view.status, "available")
+		self.assertEqual(view.tags, {"os": "Ubuntu"})
 		self.assertEqual(view.image_type, "machine")
 		self.assertEqual(view.rootfs_size_mib, 1024)
 		self.assertIsInstance(view.created_at, int)
@@ -80,11 +78,13 @@ class TestImageAccess(IntegrationTestCase):
 		self.own_image = insert_image(TENANT_ID)
 		self.other_image = insert_image(OTHER_TENANT_ID)
 
-	def list_names(self, tenant_id: int, image_type: str | None = None) -> set[str]:
+	def list_names(self, tenant_id: int, image_type: str | None = None, tag: str | None = None) -> set[str]:
 		"""Return the image identifiers that one tenant can list."""
 		query = {"limit": "100"}
 		if image_type:
 			query["image_type"] = image_type
+		if tag:
+			query["tag"] = tag
 		with api_request("GET", "/api/atlas/images", tenant_id=tenant_id, query_string=query):
 			status, body = call_route(list_images)
 
@@ -235,3 +235,49 @@ class TestImageDeletion(IntegrationTestCase):
 		self.assertEqual(status, 404)
 		self.assertEqual(body["error"]["code"], "not_found")
 		request_deletion.assert_not_called()
+
+
+class TestImageTagFilter(IntegrationTestCase):
+	def setUp(self) -> None:
+		self.tagged = insert_image(
+			TENANT_ID,
+			tags=[{"key": "role", "value": "worker"}, {"key": "channel", "value": "lts"}],
+		)
+		self.other_tag = insert_image(
+			TENANT_ID, title="other-tagged", tags=[{"key": "role", "value": "proxy"}]
+		)
+
+	def list_with_tag(self, tag: str) -> tuple[int, dict]:
+		"""Call the list route with one tag filter."""
+		with api_request(
+			"GET", "/api/atlas/images", tenant_id=TENANT_ID, query_string={"limit": "100", "tag": tag}
+		):
+			return call_route(list_images)
+
+	def test_a_tag_narrows_the_page(self) -> None:
+		status, body = self.list_with_tag("role:worker")
+
+		self.assertEqual(status, 200)
+		names = {item["id"] for item in body["items"]}
+		self.assertIn(self.tagged, names)
+		self.assertNotIn(self.other_tag, names)
+
+	def test_every_tag_must_match(self) -> None:
+		_status, body = self.list_with_tag("role:worker,channel:lts")
+		names = {item["id"] for item in body["items"]}
+		self.assertIn(self.tagged, names)
+		self.assertNotIn(self.other_tag, names)
+
+		_status, body = self.list_with_tag("role:worker,channel:edge")
+		self.assertEqual(body["items"], [])
+
+	def test_the_response_carries_the_tags(self) -> None:
+		_status, body = self.list_with_tag("role:worker")
+
+		self.assertEqual(body["items"][0]["tags"], {"role": "worker", "channel": "lts"})
+
+	def test_a_malformed_tag_is_rejected(self) -> None:
+		status, body = self.list_with_tag("role")
+
+		self.assertEqual(status, 400)
+		self.assertEqual(body["error"]["code"], "invalid_request")

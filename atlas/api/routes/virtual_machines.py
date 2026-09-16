@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import frappe
 
@@ -8,6 +8,7 @@ from atlas.api.core.base import (
 	ApiResult,
 	ListQuery,
 	Page,
+	add_tag_filter,
 	build_page,
 	get_owned_document,
 )
@@ -39,6 +40,7 @@ from atlas.api.router import (
 )
 from atlas.api.routes.images import get_owned_image
 from atlas.api.routes.ip_addresses import get_owned_ip_address
+from atlas.atlas.core.tags import read_tags_for
 from atlas.auth.identity import get_current_tenant_id
 from atlas.vm.core.console_token import CONSOLE_TOKEN_TTL_SECONDS
 from atlas.vm.core.vm_state import get_reported_state_rows
@@ -121,13 +123,18 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 
 	Returns one page of tenant VM records in newest-first order, with the state each host last reported. This request does not contact the host.
 	"""
+	filters: dict[str, Any] = {"tenant_id": get_current_tenant_id()}
+	if not add_tag_filter("Virtual Machine", query, filters):
+		return build_page([], query)
+
 	rows: list[VirtualMachine] = frappe.get_list(
 		"Virtual Machine",
-		filters={"tenant_id": get_current_tenant_id()},
+		filters=filters,
 		fields=[
 			"name",
 			"tenant_id",
 			"virtual_machine_image",
+			"architecture",
 			"vcpus",
 			"memory_mib",
 			"disk_mib",
@@ -140,9 +147,14 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 		offset=query.offset,
 		limit=query.fetch_limit,
 	)
-	states = get_reported_state_rows([row.name for row in rows])
+	names = [row.name for row in rows]
+	states = get_reported_state_rows(names)
+	tags = read_tags_for("Virtual Machine", names)
 	return build_page(
-		[VirtualMachineListResponse.from_document_and_state(row, states.get(row.name)) for row in rows],
+		[
+			VirtualMachineListResponse.from_document_and_state(row, states.get(row.name), tags[row.name])
+			for row in rows
+		],
 		query,
 	)
 
@@ -242,6 +254,7 @@ def restart_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachine
 		"image_type": "machine",
 		"cache_image": False,
 		"memory_snapshot": False,
+		"tags": {"purpose": "pilot"},
 	},
 	responses={201: {"description": "The Machine image record is created."}},
 )
@@ -253,6 +266,8 @@ def create_virtual_machine_snapshot(
 	Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.
 
 	If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
+
+	Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and `?tag=purpose:pilot`.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	image_name = virtual_machine.create_machine_image(
@@ -260,6 +275,7 @@ def create_virtual_machine_snapshot(
 		image_type=payload.image_type,
 		cache_image=payload.cache_image,
 		memory_snapshot=payload.memory_snapshot,
+		tags=payload.tags,
 	)
 	image: VirtualMachineImage = frappe.get_doc("Virtual Machine Image", image_name)
 

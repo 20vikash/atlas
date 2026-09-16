@@ -72,8 +72,14 @@ class TestUbuntuImageBuilder(UnitTestCase):
 			)
 
 		get_single.assert_not_called()
+		self.assertEqual(created["status"], "Available")
+		self.assertEqual(created["transfer_progress"], 100)
 		self.assertEqual(created["artifact_storage"], "Site File")
 		self.assertEqual(created["image_file"], "file-rootfs")
 		self.assertEqual(created["kernel_file"], "file-kernel")
 		self.assertIsNone(created["image_object_key"])
 		self.assertIsNone(created["kernel_object_key"])
+		self.assertEqual(
+			{tag["key"]: tag["value"] for tag in created["tags"]},
+			{"purpose": "base", "os": "Ubuntu", "os_version": "24.04"},
+		)

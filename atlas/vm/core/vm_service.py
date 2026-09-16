@@ -64,8 +64,8 @@ class VirtualMachineService:
 
 		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
-		server = PlacementService().select_server(request, image.platform)
-		virtual_machine = cls.insert_draft(request, cast(str, image.name), cast(str, server.name))
+		server = PlacementService().select_server(request, image.architecture)
+		virtual_machine = cls.insert_draft(request, image, cast(str, server.name))
 		service = cls(virtual_machine)
 		server_ip_address = (
 			service.assign_ip_address(request.server_ip_address) if request.server_ip_address else None
@@ -101,15 +101,20 @@ class VirtualMachineService:
 
 	@staticmethod
 	def insert_draft(
-		request: VirtualMachineCreateRequest, image_name: str, server_name: str
+		request: VirtualMachineCreateRequest, image: VirtualMachineImage, server_name: str
 	) -> VirtualMachine:
-		"""Insert one draft that reserves capacity before a Metal request."""
+		"""Insert one draft that reserves capacity before a Metal request.
+
+		The draft copies the image architecture, so later placement never reads the
+		image again and the image stays deletable.
+		"""
 		virtual_machine = frappe.get_doc(
 			{
 				"doctype": "Virtual Machine",
 				"is_draft": 1,
 				"server": server_name,
-				"virtual_machine_image": image_name,
+				"virtual_machine_image": image.name,
+				"architecture": image.architecture,
 				"vcpus": request.virtual_cpu_count,
 				"memory_mib": request.memory_mib,
 				"disk_mib": request.disk_mib,

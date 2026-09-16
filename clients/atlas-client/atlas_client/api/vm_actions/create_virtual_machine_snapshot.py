@@ -84,6 +84,9 @@ def sync_detailed(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
+
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
@@ -127,6 +130,9 @@ def sync(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
+
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
@@ -164,6 +170,9 @@ async def asyncio_detailed(
     If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
+
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
 
     Args:
         virtual_machine_id (str):
@@ -207,6 +216,9 @@ async def asyncio(
     If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
+
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
 
     Args:
         virtual_machine_id (str):

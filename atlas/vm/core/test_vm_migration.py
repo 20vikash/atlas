@@ -70,6 +70,7 @@ class TestMigrationCreation(UnitTestCase):
 			disk_mib=10240,
 			tenant_id=7,
 			virtual_machine_image="Ubuntu",
+			architecture="amd64",
 			db_set=Mock(),
 		)
 		inserted = Mock()
@@ -108,6 +109,7 @@ class TestMigrationCreation(UnitTestCase):
 			disk_mib=10240,
 			tenant_id=7,
 			virtual_machine_image="Ubuntu",
+			architecture="amd64",
 			db_set=Mock(),
 		)
 		inserted = Mock()
@@ -145,6 +147,7 @@ class TestMigrationCreation(UnitTestCase):
 			disk_mib=10240,
 			tenant_id=7,
 			virtual_machine_image="Ubuntu",
+			architecture="amd64",
 			db_set=Mock(),
 		)
 		with (

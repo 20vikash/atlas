@@ -8,7 +8,10 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.virtual_machine_response_tags import VirtualMachineResponseTags
 
 
 
@@ -23,22 +26,26 @@ class VirtualMachineResponse:
     """ A stored tenant virtual machine.
 
         Attributes:
+            architecture (str):
             created_at (int):
             disk_mib (int):
             id (str):
             image_id (str):
             memory_mib (int):
             sleep_after_idle_seconds (int):
+            tags (VirtualMachineResponseTags):
             tenant_id (int):
             vcpus (int):
      """
 
+    architecture: str
     created_at: int
     disk_mib: int
     id: str
     image_id: str
     memory_mib: int
     sleep_after_idle_seconds: int
+    tags: VirtualMachineResponseTags
     tenant_id: int
     vcpus: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -48,6 +55,9 @@ class VirtualMachineResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.virtual_machine_response_tags import VirtualMachineResponseTags # noqa: PLC0415
+        architecture = self.architecture
+
         created_at = self.created_at
 
         disk_mib = self.disk_mib
@@ -60,6 +70,8 @@ class VirtualMachineResponse:
 
         sleep_after_idle_seconds = self.sleep_after_idle_seconds
 
+        tags = self.tags.to_dict()
+
         tenant_id = self.tenant_id
 
         vcpus = self.vcpus
@@ -68,12 +80,14 @@ class VirtualMachineResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "architecture": architecture,
             "created_at": created_at,
             "disk_mib": disk_mib,
             "id": id,
             "image_id": image_id,
             "memory_mib": memory_mib,
             "sleep_after_idle_seconds": sleep_after_idle_seconds,
+            "tags": tags,
             "tenant_id": tenant_id,
             "vcpus": vcpus,
         })
@@ -84,7 +98,10 @@ class VirtualMachineResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.virtual_machine_response_tags import VirtualMachineResponseTags # noqa: PLC0415
         d = dict(src_dict)
+        architecture = d.pop("architecture")
+
         created_at = d.pop("created_at")
 
         disk_mib = d.pop("disk_mib")
@@ -97,17 +114,24 @@ class VirtualMachineResponse:
 
         sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
 
+        tags = VirtualMachineResponseTags.from_dict(d.pop("tags"))
+
+
+
+
         tenant_id = d.pop("tenant_id")
 
         vcpus = d.pop("vcpus")
 
         virtual_machine_response = cls(
+            architecture=architecture,
             created_at=created_at,
             disk_mib=disk_mib,
             id=id,
             image_id=image_id,
             memory_mib=memory_mib,
             sleep_after_idle_seconds=sleep_after_idle_seconds,
+            tags=tags,
             tenant_id=tenant_id,
             vcpus=vcpus,
         )

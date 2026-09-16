@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import frappe
 from frappe import _
+from frappe.utils import now_datetime
 
 from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
 	)
 
 MIGRATION_TIMEOUT_SECONDS = 3600
+SITE_FILE_RETENTION = timedelta(hours=6)
 
 
 class VirtualMachineImageStorageMigration:
@@ -46,18 +49,20 @@ class VirtualMachineImageStorageMigration:
 		)
 
 	def migrate(self, image_name: str) -> None:
-		"""Upload both artifacts, update the record, and remove the site files."""
+		"""Upload both artifacts and move the record to object storage.
+
+		The site files stay for SITE_FILE_RETENTION, so a host that is still
+		downloading one keeps a working URL. delete_expired_site_files removes them.
+		"""
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
 		if not image.is_stored_in_site_file:
 			return
 
 		client = cast("AtlasSettings", frappe.get_single("Atlas Settings")).get_object_storage_client()
-		replaced_files = (image.image_file, image.kernel_file)
 		image.image_object_key = self.upload(client, image, "rootfs")
 		image.kernel_object_key = self.upload(client, image, "kernel")
-		image.image_file = None
-		image.kernel_file = None
 		image.artifact_storage = "Object Storage"
+		image.site_file_retention_until = now_datetime() + SITE_FILE_RETENTION
 		image.save()
 		frappe.db.commit()  # nosemgrep
 
@@ -65,9 +70,26 @@ class VirtualMachineImageStorageMigration:
 
 		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
 
-		for file_name in replaced_files:
+	def delete_site_files(self, image_name: str) -> None:
+		"""Remove the site files that object storage replaced.
+
+		The files go before the record drops the retention time, so a failed delete
+		leaves the image for the next sweep instead of an unreachable file. The
+		artifacts already serve from object storage, so a stale reference reaches
+		nothing, and deleting a file that is gone does nothing.
+		"""
+		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
+		if image.is_stored_in_site_file:
+			return
+
+		for file_name in (image.image_file, image.kernel_file):
 			if file_name:
 				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
+
+		image.image_file = None
+		image.kernel_file = None
+		image.site_file_retention_until = None
+		image.save()
 
 	def upload(self, client: ObjectStorageClient, image: VirtualMachineImage, artifact: Artifact) -> str:
 		"""Upload one artifact under its content addressed key and verify its size."""
@@ -106,6 +128,21 @@ def enqueue_site_file_image_migrations() -> None:
 		pluck="name",
 	):
 		migration.enqueue(name)
+
+
+@run_as_admin
+def delete_expired_site_files() -> None:
+	"""Remove the site files of every image that finished its retention time."""
+	migration = VirtualMachineImageStorageMigration()
+	for name in frappe.get_all(
+		"Virtual Machine Image",
+		filters={
+			"artifact_storage": "Object Storage",
+			"site_file_retention_until": ("<=", now_datetime()),
+		},
+		pluck="name",
+	):
+		migration.delete_site_files(name)
 
 
 @run_as_admin

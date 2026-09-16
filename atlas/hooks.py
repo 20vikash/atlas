@@ -220,6 +220,8 @@ scheduler_events = {
 			"atlas.atlas.core.artifacts.delete_unlinked_files",
 			# Migrate bootstrap images after object storage is configured.
 			"atlas.vm.core.vm_image_storage_migration.enqueue_site_file_image_migrations",
+			# Drop the site files that object storage replaced, after their retention time.
+			"atlas.vm.core.vm_image_storage_migration.delete_expired_site_files",
 		],
 		"0 */12 * * *": [
 			"atlas.atlas.doctype.atlas_settings.atlas_settings.rotate_proxy_cluster_password",

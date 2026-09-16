@@ -12,6 +12,7 @@ from typing import cast
 
 if TYPE_CHECKING:
   from ..models.virtual_machine_compute import VirtualMachineCompute
+  from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags
   from ..models.virtual_machine_disk import VirtualMachineDisk
   from ..models.virtual_machine_guest import VirtualMachineGuest
   from ..models.virtual_machine_network import VirtualMachineNetwork
@@ -29,6 +30,7 @@ class VirtualMachineDetailResponse:
     """ One virtual machine with its state, addresses, and guest configuration.
 
         Attributes:
+            architecture (str):
             compute (VirtualMachineCompute): The compute shape of one virtual machine.
             created_at (int):
             current_state (str):
@@ -40,9 +42,11 @@ class VirtualMachineDetailResponse:
             image_id (str):
             is_privileged (bool):
             network (VirtualMachineNetwork): The addresses and network limits of one virtual machine.
+            tags (VirtualMachineDetailResponseTags):
             tenant_id (int):
      """
 
+    architecture: str
     compute: VirtualMachineCompute
     created_at: int
     current_state: str
@@ -54,6 +58,7 @@ class VirtualMachineDetailResponse:
     image_id: str
     is_privileged: bool
     network: VirtualMachineNetwork
+    tags: VirtualMachineDetailResponseTags
     tenant_id: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -63,9 +68,12 @@ class VirtualMachineDetailResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.virtual_machine_compute import VirtualMachineCompute # noqa: PLC0415
+        from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags # noqa: PLC0415
         from ..models.virtual_machine_disk import VirtualMachineDisk # noqa: PLC0415
         from ..models.virtual_machine_guest import VirtualMachineGuest # noqa: PLC0415
         from ..models.virtual_machine_network import VirtualMachineNetwork # noqa: PLC0415
+        architecture = self.architecture
+
         compute = self.compute.to_dict()
 
         created_at = self.created_at
@@ -90,12 +98,15 @@ class VirtualMachineDetailResponse:
 
         network = self.network.to_dict()
 
+        tags = self.tags.to_dict()
+
         tenant_id = self.tenant_id
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "architecture": architecture,
             "compute": compute,
             "created_at": created_at,
             "current_state": current_state,
@@ -107,6 +118,7 @@ class VirtualMachineDetailResponse:
             "image_id": image_id,
             "is_privileged": is_privileged,
             "network": network,
+            "tags": tags,
             "tenant_id": tenant_id,
         })
 
@@ -117,10 +129,13 @@ class VirtualMachineDetailResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.virtual_machine_compute import VirtualMachineCompute # noqa: PLC0415
+        from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags # noqa: PLC0415
         from ..models.virtual_machine_disk import VirtualMachineDisk # noqa: PLC0415
         from ..models.virtual_machine_guest import VirtualMachineGuest # noqa: PLC0415
         from ..models.virtual_machine_network import VirtualMachineNetwork # noqa: PLC0415
         d = dict(src_dict)
+        architecture = d.pop("architecture")
+
         compute = VirtualMachineCompute.from_dict(d.pop("compute"))
 
 
@@ -167,9 +182,15 @@ class VirtualMachineDetailResponse:
 
 
 
+        tags = VirtualMachineDetailResponseTags.from_dict(d.pop("tags"))
+
+
+
+
         tenant_id = d.pop("tenant_id")
 
         virtual_machine_detail_response = cls(
+            architecture=architecture,
             compute=compute,
             created_at=created_at,
             current_state=current_state,
@@ -181,6 +202,7 @@ class VirtualMachineDetailResponse:
             image_id=image_id,
             is_privileged=is_privileged,
             network=network,
+            tags=tags,
             tenant_id=tenant_id,
         )
 

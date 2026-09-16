@@ -19,6 +19,7 @@ def _get_kwargs(
     *,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
@@ -36,6 +37,13 @@ def _get_kwargs(
     params["offset"] = offset
 
     params["limit"] = limit
+
+    json_tag: None | str | Unset
+    if isinstance(tag, Unset):
+        json_tag = UNSET
+    else:
+        json_tag = tag
+    params["tag"] = json_tag
 
     json_image_type: None | str | Unset
     if isinstance(image_type, Unset):
@@ -90,6 +98,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
@@ -103,6 +112,8 @@ def sync_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
@@ -118,6 +129,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         offset=offset,
 limit=limit,
+tag=tag,
 image_type=image_type,
 x_tenant_id=x_tenant_id,
 
@@ -134,6 +146,7 @@ def sync(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
@@ -147,6 +160,8 @@ def sync(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
@@ -163,6 +178,7 @@ def sync(
         client=client,
 offset=offset,
 limit=limit,
+tag=tag,
 image_type=image_type,
 x_tenant_id=x_tenant_id,
 
@@ -173,6 +189,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
@@ -186,6 +203,8 @@ async def asyncio_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
@@ -201,6 +220,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         offset=offset,
 limit=limit,
+tag=tag,
 image_type=image_type,
 x_tenant_id=x_tenant_id,
 
@@ -217,6 +237,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
@@ -230,6 +251,8 @@ async def asyncio(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         image_type (ListImagesImageTypeType0 | None | Unset):
         x_tenant_id (int):
 
@@ -246,6 +269,7 @@ async def asyncio(
         client=client,
 offset=offset,
 limit=limit,
+tag=tag,
 image_type=image_type,
 x_tenant_id=x_tenant_id,
 

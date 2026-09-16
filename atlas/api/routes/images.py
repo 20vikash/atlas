@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import frappe
 
 from atlas.api.core.base import (
 	ApiResult,
 	Page,
+	add_tag_filter,
 	build_page,
 	get_owned_document,
 )
 from atlas.api.core.docs import api_docs
 from atlas.api.core.errors import (
 	ResourceConflict,
-	ResourceNotFound,
 )
 from atlas.api.models import (
 	ImageDownloadQuery,
@@ -22,6 +22,7 @@ from atlas.api.models import (
 	ImageResponse,
 )
 from atlas.api.router import images
+from atlas.atlas.core.tags import read_tags_for
 from atlas.auth.identity import get_current_tenant_id
 
 if TYPE_CHECKING:
@@ -40,9 +41,11 @@ def list_images(query: ImageListQuery) -> Page[ImageResponse]:
 
 	Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A disabled image cannot boot a virtual machine, so the list leaves it out. Pass `image_type` as `system` or `machine` to return only that type. Omit it to return both.
 	"""
-	filters: dict[str, str | int] = {"enabled": 1}
+	filters: dict[str, Any] = {"enabled": 1}
 	if query.image_type:
 		filters["image_type"] = query.image_type
+	if not add_tag_filter("Virtual Machine Image", query, filters):
+		return build_page([], query)
 
 	rows: list[VirtualMachineImage] = frappe.get_list(
 		"Virtual Machine Image",
@@ -53,9 +56,7 @@ def list_images(query: ImageListQuery) -> Page[ImageResponse]:
 			"tenant_id",
 			"title",
 			"image_type",
-			"platform",
-			"operating_system",
-			"operating_system_version",
+			"architecture",
 			"status",
 			"enabled",
 			"cache_image",
@@ -70,7 +71,8 @@ def list_images(query: ImageListQuery) -> Page[ImageResponse]:
 		offset=query.offset,
 		limit=query.fetch_limit,
 	)
-	return build_page([ImageResponse.from_document(row) for row in rows], query)
+	tags = read_tags_for("Virtual Machine Image", [row.name for row in rows])
+	return build_page([ImageResponse.from_document(row, tags[row.name]) for row in rows], query)
 
 
 @images.get("<image_id>")
