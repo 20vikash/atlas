@@ -321,6 +321,19 @@ class TestSpecification(unittest.TestCase):
 		self.assertEqual(content["example"], {"name": "vm-1"})
 		self.assertIn("Machine", self.specification["components"]["schemas"])
 
+	def test_every_declared_success_status_carries_the_response_schema(self):
+		router = make_router(name="Machines", docs=DocsConfig(title="Atlas API", version="2.0.0"))
+
+		@router.post("machines")
+		@api_docs(responses={200: {"description": "Updated"}, 201: {"description": "Created"}})
+		def upsert_machine(payload: Machine) -> Machine:
+			return payload
+
+		paths = router.openapi_specification["paths"]
+		responses = next(iter(paths.values()))["post"]["responses"]
+		for status in ("200", "201"):
+			self.assertIn("content", responses[status], f"{status} has no response body")
+
 	def test_only_declared_responses_are_included(self):
 		responses = self.operation("machines", "post")["responses"]
 		self.assertEqual(responses["201"]["description"], "Created")

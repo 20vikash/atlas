@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 EgressMode = Literal["uplink", "mesh", "none"]
+AUTO_IP_ADDRESS = "auto"
 
 
 def to_unix_timestamp(value: str | datetime) -> int:
@@ -55,9 +56,9 @@ class JSONWebKeySetResponse(BaseModel):
 
 
 class ReserveIPAddressPayload(StrictModel):
-	"""Select the source of an IP address reservation."""
+	"""Optionally reserve an address the tenant already holds."""
 
-	source: Literal["pool", "provider"] = "pool"
+	ip_address_id: str | None = None
 
 
 class IPAddressResponse(BaseModel):
@@ -71,6 +72,7 @@ class IPAddressResponse(BaseModel):
 					"tenant_id": 7,
 					"address": "203.0.113.10",
 					"state": "reserved",
+					"reserved": True,
 					"virtual_machine_id": None,
 					"tags": {"pool": "edge"},
 					"created_at": 1788834165,
@@ -83,6 +85,7 @@ class IPAddressResponse(BaseModel):
 	tenant_id: int
 	address: str
 	state: str
+	reserved: bool
 	virtual_machine_id: str | None
 	tags: dict[str, str]
 	created_at: int
@@ -98,6 +101,7 @@ class IPAddressResponse(BaseModel):
 			tenant_id=ip_address.tenant_id,
 			address=ip_address.address,
 			state=state,
+			reserved=bool(ip_address.reserved),
 			virtual_machine_id=ip_address.virtual_machine or None,
 			tags=read_tags(ip_address) if tags is None else tags,
 			created_at=to_unix_timestamp(ip_address.creation),
@@ -314,7 +318,10 @@ class MetadataReplacementPayload(StrictModel):
 class IPAddressAssignmentPayload(StrictModel):
 	"""The public IPv4 address to attach."""
 
-	ip_address_id: str = Field(min_length=1)
+	ip_address_id: str = Field(
+		min_length=1,
+		description=f"A reserved address, or {AUTO_IP_ADDRESS} to borrow one from the shared pool.",
+	)
 
 
 class SnapshotPayload(StrictModel):

@@ -363,7 +363,7 @@ class VirtualMachineService:
 		return information
 
 	def assign_ip_address(self, server_ip_address: str) -> MetalServerIPAddress:
-		"""Set an attach intent for one reserved public address."""
+		"""Set an attach intent; pool addresses stay unreserved."""
 		address = cast(
 			"MetalServerIPAddress",
 			frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True),

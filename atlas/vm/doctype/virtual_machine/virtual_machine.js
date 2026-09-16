@@ -135,19 +135,26 @@ frappe.ui.form.on("Virtual Machine", {
 		}
 		frm.add_custom_button(
 			__("Terminate VM"),
-			() =>
-				frm
-					.call({
-						method: "terminate",
-						doc: frm.doc,
-						freeze: true,
-						freeze_message: __("Requesting termination..."),
-					})
-					.then(() => frm.reload_doc()),
+			() => terminateVirtualMachine(frm),
 			__("Dangerous Actions")
 		);
 	},
 });
+
+function terminateVirtualMachine(frm) {
+	frappe.confirm(
+		__("Terminate {0}? The virtual machine and its data are lost.", [frm.doc.name.bold()]),
+		() =>
+			frm
+				.call({
+					method: "terminate",
+					doc: frm.doc,
+					freeze: true,
+					freeze_message: __("Requesting termination..."),
+				})
+				.then(() => frm.reload_doc())
+	);
+}
 
 function migrateVirtualMachine(frm) {
 	const dialog = new frappe.ui.Dialog({

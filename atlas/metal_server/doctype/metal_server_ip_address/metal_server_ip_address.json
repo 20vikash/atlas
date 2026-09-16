@@ -5,18 +5,36 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "section_break_address",
   "status",
   "address",
   "provider_resource_id",
-  "tenant_id",
-  "intent_version",
   "column_break_uoyq",
+  "tenant_id",
+  "reserved",
+  "intent_version",
+  "section_break_attachment",
   "server",
+  "column_break_wlan",
   "virtual_machine",
   "section_break_tags",
   "tags"
  ],
  "fields": [
+  {
+   "fieldname": "section_break_address",
+   "fieldtype": "Section Break",
+   "label": "Address"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Allocated\nAttaching\nAttached\nDetaching",
+   "read_only": 1
+  },
   {
    "fieldname": "address",
    "fieldtype": "Data",
@@ -34,6 +52,43 @@
    "unique": 1
   },
   {
+   "fieldname": "column_break_uoyq",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "reserved",
+   "fieldtype": "Check",
+   "in_standard_filter": 1,
+   "label": "Reserved",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "default": "-1",
+   "description": "Tenant that reserved this address.\nThe value -1 means that the address is in the shared pool.",
+   "fieldname": "tenant_id",
+   "fieldtype": "Int",
+   "in_standard_filter": 1,
+   "label": "Tenant ID",
+   "read_only": 1,
+   "search_index": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "intent_version",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Intent Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_attachment",
+   "fieldtype": "Section Break",
+   "label": "Attachment"
+  },
+  {
    "fieldname": "server",
    "fieldtype": "Link",
    "label": "Attached Server",
@@ -48,38 +103,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "status",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Status",
-   "options": "Allocated\nAttaching\nAttached\nDetaching",
-   "read_only": 1
-  },
-  {
-   "default": "0",
-   "fieldname": "intent_version",
-   "fieldtype": "Int",
-   "hidden": 1,
-   "label": "Intent Version",
-   "read_only": 1
-  },
-  {
-   "fieldname": "column_break_uoyq",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "-1",
-   "description": "Tenant that reserved this address. The value -1 means that the address is in the shared pool.",
-   "fieldname": "tenant_id",
-   "fieldtype": "Int",
-   "in_standard_filter": 1,
-   "label": "Tenant ID",
-   "read_only": 1,
-   "search_index": 1,
-   "show_description_on_click": 1
-  },
-  {
    "fieldname": "section_break_tags",
    "fieldtype": "Section Break",
    "label": "Tags"
@@ -91,10 +114,14 @@
    "label": "Tags",
    "options": "Atlas Tag",
    "show_description_on_click": 1
+  },
+  {
+   "fieldname": "column_break_wlan",
+   "fieldtype": "Column Break"
   }
  ],
  "links": [],
- "modified": "2026-09-03 17:36:19.639314",
+ "modified": "2026-09-16 21:41:03.266919",
  "modified_by": "Administrator",
  "module": "Metal Server",
  "name": "Metal Server IP Address",

@@ -52,11 +52,19 @@ The same exchange carries the Atlas public keys that the host must trust. Each h
 
 An address carries a desired intent and an intent version. Reconciliation applies the intent and preserves a pending one for a retry, so a failed apply is never mistaken for a completed one.
 
-An address also carries the tenant that reserved it. An address without a tenant is in the shared pool. `IPAddressService` owns reservation and release. A reservation uses the shared pool or the provider. A pool claim locks one unowned row before it writes the tenant, so two requests never take the same address, and an empty pool is an error instead of a silent provider reservation. A release clears the tenant, keeps the provider reservation, and refuses an attached or detaching address.
+An address has a tenant and a `reserved` flag. An address without a tenant is in the shared pool. `IPAddressService` owns both fields.
 
-A virtual machine can attach an address that its own tenant holds, or an unowned address from the shared pool. Attaching an unowned address claims it for the tenant of the virtual machine. An address that another tenant holds is refused.
+A tenant reservation claims an address from the shared pool. An operator fills the pool from the provider. An empty pool is an error. A claim locks the row before it writes the tenant and flag. Release clears both fields, keeps the provider reservation, and refuses attached or detaching addresses.
 
-Reset Tenant returns one unattached address to the shared pool from the desk. It needs the System Manager role, and it refuses an address that is already unowned. The action adds a comment that records the losing tenant, because the address keeps no trace of its previous owner.
+A virtual machine can attach an address that its own tenant holds, or an unowned address from the shared pool. Attaching an unowned address claims it for the tenant of the virtual machine but does not reserve it. An address that another tenant holds is refused. The attach route accepts `auto` and borrows the oldest free pool address.
+
+An unreserved address returns to the shared pool after detach, including VM deletion. The guarded update clears the tenant only after provider detach succeeds. A reserved address keeps its tenant until release.
+
+A tenant can reserve an address it already holds to stop that return, even while it is attached. A `Detaching` address is refused because reconciliation has already decided its pool return.
+
+Reset Tenant returns one unattached address to the shared pool. It needs the System Manager role, refuses unowned addresses, and records the previous tenant in a comment.
+
+Remove deletes one unattached address and releases its provider reservation. It uses the standard delete permission and confirmation. Both actions appear only for an unused Allocated address.
 
 ## Related
 

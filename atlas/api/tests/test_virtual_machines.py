@@ -431,6 +431,28 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		return status, body, virtual_machine
 
+	def test_auto_borrows_one_pool_address(self) -> None:
+		with (
+			api_request(
+				"PUT",
+				"/api/atlas/virtual-machines/vm-00001/ip-address",
+				tenant_id=TENANT_ID,
+				json={"ip_address_id": "auto"},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+			patch("atlas.api.routes.virtual_machines.frappe.db.get_value", return_value=None),
+			patch(
+				"atlas.api.routes.virtual_machines.IPAddressService",
+				return_value=Mock(borrow_from_pool=Mock(return_value="203.0.113.10")),
+			),
+			patch("atlas.api.routes.virtual_machines.get_available_ip_address") as get_available,
+		):
+			status, _ = call_route(attach_virtual_machine_ip_address, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 202)
+		virtual_machine.attach_ip_address.assert_called_once_with("203.0.113.10")
+		get_available.assert_not_called()
+
 	def test_attaching_the_same_address_again_is_safe(self) -> None:
 		status, _, service = self.attach("203.0.113.10", "203.0.113.10")
 

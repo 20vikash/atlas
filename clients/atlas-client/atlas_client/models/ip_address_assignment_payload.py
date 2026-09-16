@@ -23,7 +23,7 @@ class IPAddressAssignmentPayload:
     """ The public IPv4 address to attach.
 
         Attributes:
-            ip_address_id (str):
+            ip_address_id (str): A reserved address, or auto to borrow one from the shared pool.
      """
 
     ip_address_id: str
