@@ -133,11 +133,11 @@ For a bug fix, use this structure:
 ## Summary
 <1 or 2 sentences that state the fix and why it matters.>
 
-## What changed
-- <Specific change>
-
 ## Why
 <The technical or business reason for this approach.>
+
+## What changed
+- <Specific change>
 
 ## Screenshots
 <Before and after evidence. Omit this section when it does not apply.>
@@ -152,11 +152,11 @@ For a feature, use this structure:
 ## Summary
 <1 or 2 sentences that state the capability and why it matters.>
 
-## What changed
-- <Specific change>
-
 ## Why
 <The technical or business reason for this approach.>
+
+## What changed
+- <Specific change>
 
 ## Screenshots
 <Before and after evidence. Omit this section when it does not apply.>
