@@ -1,7 +1,7 @@
 BPF_OBJECT := cli/atlas-wg-mesh.bpf.o
 BPF_SOURCE := bpf/bpf.c
 BPF_HEADERS := $(wildcard bpf/*.h)
-MODULE_SOURCE_FILES := kernel/atlas_neigh.c kernel/atlas_neigh_v3.c kernel/Makefile
+MODULE_SOURCE_FILES := kernel/atlas_neigh.c kernel/Makefile
 MODULE_SOURCE_DIRECTORY := cli/kernel_module
 OUTPUT_DIRECTORY := dist
 CLI_NAME := atlas-wg-mesh

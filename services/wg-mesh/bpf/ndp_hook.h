@@ -55,7 +55,7 @@
 #define NDP_OPERATION_RX_KFUNC_SUCCEEDED        33
 
 /*
- * Atlas neighbour kfunc v3, provided by the Atlas kernel module.
+ * Atlas neighbour kfunc, provided by the Atlas kernel module.
  *
  * The IPv6 address is passed entirely through scalar arguments:
  *
@@ -64,7 +64,7 @@
  *
  * The MAC is packed into the low 6 bytes of mac.
  */
-extern int atlas_register_neigh_v3(
+extern int atlas_register_neigh(
 	__u32 ifindex,
 	__u64 addr_hi,
 	__u64 addr_lo,
@@ -886,7 +886,7 @@ int handle_ndp_packet(struct __sk_buff *packet)
 
 	/*
 	 * Register the VM IPv6 address and its L2 address in the Linux
-	 * neighbour table through the v3 kfunc.
+	 * neighbour table through the kfunc.
 	 */
 	emit_protocol_debug_event(
 		DEBUG_NDP,
@@ -895,7 +895,7 @@ int handle_ndp_packet(struct __sk_buff *packet)
 		&target,
 		&host);
 
-	kfunc_result = atlas_register_neigh_v3(
+	kfunc_result = atlas_register_neigh(
 		packet->ifindex,
 		addr_hi,
 		addr_lo,

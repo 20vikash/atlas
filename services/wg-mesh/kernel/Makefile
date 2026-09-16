@@ -1,5 +1,4 @@
 obj-m += atlas_neigh.o
-obj-m += atlas_neigh_v3.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
 

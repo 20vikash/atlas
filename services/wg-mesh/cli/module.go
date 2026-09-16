@@ -23,7 +23,8 @@ var kernelModuleSources embed.FS
 const (
 	kernelModuleSourceDirectory = "/usr/src/atlas-wg-mesh-neigh"
 	kernelModuleStampFile       = "module-stamp"
-	kernelModuleFunction        = "atlas_register_neigh_v3"
+	kernelModuleName            = "atlas_neigh"
+	kernelModuleFunction        = "atlas_register_neigh"
 	kernelModuleLoadFile        = "/etc/modules-load.d/atlas-neigh.conf"
 	kernelModuleSymbolsFile     = "/proc/kallsyms"
 )
@@ -80,7 +81,7 @@ func runModuleInstall() error {
 		filepath.Join(kernelModuleSourceDirectory, kernelModuleStampFile))
 
 	moduleObject := filepath.Join(
-		kernelModuleSourceDirectory, "atlas_neigh_v3.ko")
+		kernelModuleSourceDirectory, kernelModuleName+".ko")
 	_, objectError := os.Stat(moduleObject)
 
 	needBuild := stampError != nil || string(storedStamp) != stamp || objectError != nil
@@ -115,7 +116,7 @@ func runModuleInstall() error {
 		return err
 	}
 
-	linkPath := filepath.Join(extraDirectory, "atlas_neigh_v3.ko")
+	linkPath := filepath.Join(extraDirectory, kernelModuleName+".ko")
 	if err := os.Remove(linkPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -131,12 +132,12 @@ func runModuleInstall() error {
 		// The module can stay in use after its sources changed, for example
 		// while a BPF program still runs. The old module then serves the
 		// kfunc until the next reboot.
-		if err := runCommand("rmmod", "atlas_neigh_v3"); err != nil {
+		if err := runCommand("rmmod", kernelModuleName); err != nil {
 			fmt.Printf("atlas-wg-mesh: warning: the previous module stays loaded until a reboot: %v\n", err)
 		}
 	}
 
-	if err := runCommand("modprobe", "atlas_neigh_v3"); err != nil {
+	if err := runCommand("modprobe", kernelModuleName); err != nil {
 		return err
 	}
 
@@ -144,7 +145,7 @@ func runModuleInstall() error {
 		return err
 	}
 	if err := os.WriteFile(
-		kernelModuleLoadFile, []byte("atlas_neigh_v3\n"), 0644); err != nil {
+		kernelModuleLoadFile, []byte(kernelModuleName+"\n"), 0644); err != nil {
 		return err
 	}
 
