@@ -74,6 +74,8 @@ The first packet can be lost while Firecracker starts. Clients must retry. A met
 
 `POST /v1/sync` supplies the complete managed peer set. Metal applies it to `wg0` and records what it applied, so it never disturbs peers added by other tools.
 
+Each peer endpoint is a public address, so the tunnel crosses the uplink. Atlas WG Mesh discovery uses the private network. The WireGuard MTU follows the uplink MTU for this reason.
+
 ## Design notes
 
 - A namespace for each VM lets every guest use the same private IPv4 address.
