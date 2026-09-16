@@ -6,6 +6,7 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.base import ReservedIPAddress
+from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID
 from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
 	IPAddressIntent,
 	MetalServerIPAddress,
@@ -18,6 +19,20 @@ class TestServerIPAddress(UnitTestCase):
 
 		with self.assertRaises(FrozenInstanceError):
 			reserved.address = "203.0.113.11"
+
+	def test_an_address_without_a_tenant_goes_to_the_shared_pool(self) -> None:
+		"""An unset tenant uses the shared-pool sentinel."""
+		address = frappe.get_doc(
+			{
+				"doctype": "Metal Server IP Address",
+				"address": "203.0.113.10",
+				"provider_resource_id": "provider-1",
+			}
+		)
+
+		address.validate()
+
+		self.assertEqual(address.tenant_id, UNOWNED_TENANT_ID)
 
 	def test_reset_tenant_returns_the_address_to_the_pool(self) -> None:
 		address = SimpleNamespace(
@@ -81,8 +96,61 @@ class TestServerIPAddress(UnitTestCase):
 		self.assertEqual(address.status, "Attaching")
 		address.queue_reconcile.assert_called_once()
 
+	def test_an_unreserved_address_leaves_the_tenant_on_release(self) -> None:
+		address = SimpleNamespace(
+			name="203.0.113.10",
+			status="Attached",
+			server=None,
+			virtual_machine="VM-00001",
+			tenant_id=7,
+			reserved=0,
+			intent_version=1,
+			save=Mock(),
+			queue_reconcile=Mock(),
+		)
+
+		MetalServerIPAddress.release(address)
+
+		self.assertEqual(address.status, "Allocated")
+		self.assertEqual(address.tenant_id, UNOWNED_TENANT_ID)
+
+	def test_a_reserved_address_keeps_its_tenant_on_release(self) -> None:
+		address = SimpleNamespace(
+			name="203.0.113.10",
+			status="Attached",
+			server=None,
+			virtual_machine="VM-00001",
+			tenant_id=7,
+			reserved=1,
+			intent_version=1,
+			save=Mock(),
+			queue_reconcile=Mock(),
+		)
+
+		MetalServerIPAddress.release(address)
+
+		self.assertEqual(address.status, "Allocated")
+		self.assertEqual(address.tenant_id, 7)
+
+	def test_a_detach_returns_an_unreserved_address_to_the_pool(self) -> None:
+		for reserved, expects_pool_return in ((False, True), (True, False)):
+			intent = IPAddressIntent(3, "Detaching", "provider-id", "node-1", reserved=reserved)
+			query = Mock()
+			query.set.return_value = query
+			query.where.return_value = query
+			query_builder = Mock(DocType=Mock(), update=Mock(return_value=query))
+
+			with patch(
+				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.qb",
+				new=query_builder,
+			):
+				MetalServerIPAddress.complete_intent(SimpleNamespace(name="203.0.113.10"), intent)
+
+			tenant_writes = [call for call in query.set.call_args_list if call.args[1] == UNOWNED_TENANT_ID]
+			self.assertEqual(bool(tenant_writes), expects_pool_return)
+
 	def test_reconcile_applies_one_intent_per_job(self) -> None:
-		intent = IPAddressIntent(1, "Attaching", "provider-id", "node-1")
+		intent = IPAddressIntent(1, "Attaching", "provider-id", "node-1", reserved=True)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
 			name="203.0.113.10",
@@ -100,7 +168,7 @@ class TestServerIPAddress(UnitTestCase):
 		worker.complete_intent.assert_called_once_with(intent)
 
 	def test_reconcile_logs_the_resource_intent_and_version(self) -> None:
-		intent = IPAddressIntent(7, "Attaching", "provider-id", "node-1")
+		intent = IPAddressIntent(7, "Attaching", "provider-id", "node-1", reserved=True)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
 			name="203.0.113.10",

@@ -72,7 +72,8 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Detach IP address
 
-     Detaches the public IP address from the VM and keeps its tenant reservation.
+     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
+    pool.
 
     Args:
         virtual_machine_id (str):
@@ -108,7 +109,8 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """ Detach IP address
 
-     Detaches the public IP address from the VM and keeps its tenant reservation.
+     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
+    pool.
 
     Args:
         virtual_machine_id (str):
@@ -139,7 +141,8 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Detach IP address
 
-     Detaches the public IP address from the VM and keeps its tenant reservation.
+     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
+    pool.
 
     Args:
         virtual_machine_id (str):
@@ -175,7 +178,8 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """ Detach IP address
 
-     Detaches the public IP address from the VM and keeps its tenant reservation.
+     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
+    pool.
 
     Args:
         virtual_machine_id (str):

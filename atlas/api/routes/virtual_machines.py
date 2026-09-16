@@ -427,7 +427,7 @@ def detach_virtual_machine_ip_address(
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Detach IP address.
 
-	Detaches the public IP address from the VM and keeps its tenant reservation.
+	Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared pool.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	if frappe.db.exists("Metal Server IP Address", {"virtual_machine": virtual_machine.name}):

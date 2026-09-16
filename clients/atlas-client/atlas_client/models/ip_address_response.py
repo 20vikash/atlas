@@ -29,6 +29,7 @@ class IPAddressResponse:
             address (str):
             created_at (int):
             id (str):
+            reserved (bool):
             state (str):
             tags (IPAddressResponseTags):
             tenant_id (int):
@@ -38,6 +39,7 @@ class IPAddressResponse:
     address: str
     created_at: int
     id: str
+    reserved: bool
     state: str
     tags: IPAddressResponseTags
     tenant_id: int
@@ -56,6 +58,8 @@ class IPAddressResponse:
 
         id = self.id
 
+        reserved = self.reserved
+
         state = self.state
 
         tags = self.tags.to_dict()
@@ -72,6 +76,7 @@ class IPAddressResponse:
             "address": address,
             "created_at": created_at,
             "id": id,
+            "reserved": reserved,
             "state": state,
             "tags": tags,
             "tenant_id": tenant_id,
@@ -91,6 +96,8 @@ class IPAddressResponse:
         created_at = d.pop("created_at")
 
         id = d.pop("id")
+
+        reserved = d.pop("reserved")
 
         state = d.pop("state")
 
@@ -113,6 +120,7 @@ class IPAddressResponse:
             address=address,
             created_at=created_at,
             id=id,
+            reserved=reserved,
             state=state,
             tags=tags,
             tenant_id=tenant_id,
