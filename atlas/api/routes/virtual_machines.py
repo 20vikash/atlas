@@ -267,7 +267,7 @@ def create_virtual_machine_snapshot(
 
 	If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
-	Pass `tags` as a key to value map to label the new image, such as `{"purpose": "pilot"}`. A later list request can select the image with `?tag=purpose:pilot`.
+	Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and `?tag=purpose:pilot`.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	image_name = virtual_machine.create_machine_image(

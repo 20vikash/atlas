@@ -84,8 +84,8 @@ def sync_detailed(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
-    Pass `tags` as a key to value map to label the new image, such as `{"purpose": "pilot"}`. A later
-    list request can select the image with `?tag=purpose:pilot`.
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
 
     Args:
         virtual_machine_id (str):
@@ -130,8 +130,8 @@ def sync(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
-    Pass `tags` as a key to value map to label the new image, such as `{"purpose": "pilot"}`. A later
-    list request can select the image with `?tag=purpose:pilot`.
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
 
     Args:
         virtual_machine_id (str):
@@ -171,8 +171,8 @@ async def asyncio_detailed(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
-    Pass `tags` as a key to value map to label the new image, such as `{"purpose": "pilot"}`. A later
-    list request can select the image with `?tag=purpose:pilot`.
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
 
     Args:
         virtual_machine_id (str):
@@ -217,8 +217,8 @@ async def asyncio(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
-    Pass `tags` as a key to value map to label the new image, such as `{"purpose": "pilot"}`. A later
-    list request can select the image with `?tag=purpose:pilot`.
+    Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
+    `?tag=purpose:pilot`.
 
     Args:
         virtual_machine_id (str):

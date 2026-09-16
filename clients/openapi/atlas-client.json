@@ -2213,7 +2213,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/actions/snapshot": {
       "post": {
-        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nPass `tags` as a key to value map to label the new image, such as `{\"purpose\": \"pilot\"}`. A later list request can select the image with `?tag=purpose:pilot`.",
+        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nUse tags to label the image and filter it later, for example, `{\"purpose\": \"pilot\"}` and `?tag=purpose:pilot`.",
         "operationId": "create_virtual_machine_snapshot",
         "parameters": [
           {
