@@ -24,24 +24,24 @@ class PlacementCapacity:
 	server: str
 	architecture: str
 	sample_created_at: datetime
-	available_cpu_count: int
+	available_cpu_millicores: int
 	available_memory_mib: int
 	available_storage_mib: int
 
-	def reserve(self, virtual_cpu_count: int, memory_mib: int, disk_mib: int) -> PlacementCapacity:
+	def reserve(self, cpu_millicores: int, memory_mib: int, disk_mib: int) -> PlacementCapacity:
 		"""Subtract one local reservation without producing negative capacity."""
 		return replace(
 			self,
-			available_cpu_count=max(self.available_cpu_count - virtual_cpu_count, 0),
+			available_cpu_millicores=max(self.available_cpu_millicores - cpu_millicores, 0),
 			available_memory_mib=max(self.available_memory_mib - memory_mib, 0),
 			available_storage_mib=max(self.available_storage_mib - disk_mib, 0),
 		)
 
 	def can_host(self, request: VirtualMachineCreateRequest, architecture: str) -> bool:
-		"""Return whether this capacity can hold the request."""
+		"""Return whether this capacity can hold the request. CPU entitlement is
+		oversubscribed, so only memory and storage limit placement."""
 		return (
 			self.architecture == architecture
-			and self.available_cpu_count >= request.virtual_cpu_count
 			and self.available_memory_mib >= request.memory_mib
 			and self.available_storage_mib >= request.disk_mib
 		)
@@ -51,7 +51,7 @@ class PlacementCapacity:
 		"""Return the stable best-capacity ordering key."""
 		return (
 			self.available_memory_mib,
-			self.available_cpu_count,
+			self.available_cpu_millicores,
 			self.available_storage_mib,
 			self.server,
 		)
@@ -155,7 +155,7 @@ class PlacementService:
 			fields=[
 				"server",
 				"creation",
-				"available_cpu_count",
+				"available_cpu_millicores",
 				"available_memory_mib",
 				"available_storage_mib",
 			],
@@ -170,7 +170,7 @@ class PlacementService:
 				server=usage_row.server,
 				architecture=architecture_by_server[usage_row.server],
 				sample_created_at=usage_row.creation,
-				available_cpu_count=usage_row.available_cpu_count,
+				available_cpu_millicores=usage_row.available_cpu_millicores,
 				available_memory_mib=usage_row.available_memory_mib,
 				available_storage_mib=usage_row.available_storage_mib,
 			)
@@ -185,17 +185,17 @@ class PlacementService:
 				"creation": [">", capacity.sample_created_at],
 				"is_draft": 1,
 			},
-			fields=["vcpus", "memory_mib", "disk_mib"],
+			fields=["cpu_millicores", "memory_mib", "disk_mib"],
 		)
 		for reservation in reservations:
 			capacity = capacity.reserve(
-				virtual_cpu_count=reservation.vcpus,
+				cpu_millicores=reservation.cpu_millicores,
 				memory_mib=reservation.memory_mib,
 				disk_mib=reservation.disk_mib,
 			)
 		for shape in self.get_target_migration_reservations(capacity.server):
 			capacity = capacity.reserve(
-				virtual_cpu_count=shape.vcpus,
+				cpu_millicores=shape.cpu_millicores,
 				memory_mib=shape.memory_mib,
 				disk_mib=shape.disk_mib,
 			)
@@ -213,7 +213,7 @@ class PlacementService:
 		return frappe.get_all(
 			"Virtual Machine",
 			filters={"name": ["in", virtual_machine_names]},
-			fields=["vcpus", "memory_mib", "disk_mib"],
+			fields=["cpu_millicores", "memory_mib", "disk_mib"],
 		)
 
 	def lock_server(self, server_name: str) -> MetalServer:

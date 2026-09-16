@@ -12,20 +12,28 @@ from atlas.vm.core.placement import PlacementCapacity, PlacementService
 
 class TestPlacementCapacity(UnitTestCase):
 	def test_reserve_subtracts_each_resource(self) -> None:
-		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 8, 16384, 102400)
+		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 8000, 16384, 102400)
 
-		remaining = capacity.reserve(2, 2048, 10240)
+		remaining = capacity.reserve(2500, 2048, 10240)
 
-		self.assertEqual(remaining.available_cpu_count, 6)
+		self.assertEqual(remaining.available_cpu_millicores, 5500)
 		self.assertEqual(remaining.available_memory_mib, 14336)
 		self.assertEqual(remaining.available_storage_mib, 92160)
 
-	def test_capacity_checks_each_resource_and_architecture(self) -> None:
-		request = VirtualMachineCreateRequest("image", 2, 2048, 10240, 7)
-		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 4, 4096, 20480)
+	def test_capacity_checks_memory_storage_and_architecture(self) -> None:
+		request = VirtualMachineCreateRequest("image", 2000, 2048, 10240, 7)
+		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 4000, 4096, 20480)
 
 		self.assertTrue(capacity.can_host(request, "amd64"))
 		self.assertFalse(capacity.can_host(request, "arm64"))
+		self.assertFalse(capacity.reserve(0, 4096, 0).can_host(request, "amd64"))
+		self.assertFalse(capacity.reserve(0, 0, 20480).can_host(request, "amd64"))
+
+	def test_capacity_oversubscribes_cpu_entitlement(self) -> None:
+		request = VirtualMachineCreateRequest("image", 32000, 2048, 10240, 7)
+		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 0, 4096, 20480)
+
+		self.assertTrue(capacity.can_host(request, "amd64"))
 
 
 class TestPlacementService(UnitTestCase):
@@ -37,21 +45,21 @@ class TestPlacementService(UnitTestCase):
 		service.get_latest_capacities = Mock(return_value={})
 
 		with self.assertRaisesRegex(frappe.ValidationError, "capacity sample"):
-			service.select_server(VirtualMachineCreateRequest("image", 2, 2048, 10240, 7), "amd64")
+			service.select_server(VirtualMachineCreateRequest("image", 2000, 2048, 10240, 7), "amd64")
 
 	def test_latest_capacities_use_only_fresh_samples(self) -> None:
 		current_time = datetime(2026, 9, 6, 8, 0)
 		latest_sample = SimpleNamespace(
 			server="server-1",
 			creation=datetime(2026, 9, 6, 7, 59),
-			available_cpu_count=4,
+			available_cpu_millicores=4000,
 			available_memory_mib=4096,
 			available_storage_mib=20480,
 		)
 		older_sample = SimpleNamespace(
 			server="server-1",
 			creation=datetime(2026, 9, 6, 7, 58, 30),
-			available_cpu_count=8,
+			available_cpu_millicores=8000,
 			available_memory_mib=8192,
 			available_storage_mib=40960,
 		)
@@ -65,7 +73,7 @@ class TestPlacementService(UnitTestCase):
 		):
 			capacities = PlacementService().get_latest_capacities({"server-1": "amd64"})
 
-		self.assertEqual(capacities["server-1"].available_cpu_count, 4)
+		self.assertEqual(capacities["server-1"].available_cpu_millicores, 4000)
 		self.assertEqual(
 			get_all.call_args.kwargs["filters"]["creation"],
 			[">=", datetime(2026, 9, 6, 7, 58)],
@@ -73,10 +81,10 @@ class TestPlacementService(UnitTestCase):
 
 	def test_local_reservations_include_uncertain_drafts(self) -> None:
 		created_at = datetime.now()
-		capacity = PlacementCapacity("server-1", "amd64", created_at, 8, 16384, 102400)
+		capacity = PlacementCapacity("server-1", "amd64", created_at, 8000, 16384, 102400)
 		reservations = [
-			SimpleNamespace(vcpus=2, memory_mib=2048, disk_mib=10240, is_draft=1),
-			SimpleNamespace(vcpus=1, memory_mib=1024, disk_mib=5120, is_draft=0),
+			SimpleNamespace(cpu_millicores=2500, memory_mib=2048, disk_mib=10240, is_draft=1),
+			SimpleNamespace(cpu_millicores=1000, memory_mib=1024, disk_mib=5120, is_draft=0),
 		]
 		service = PlacementService()
 		service.get_target_migration_reservations = Mock(return_value=[])
@@ -84,20 +92,20 @@ class TestPlacementService(UnitTestCase):
 		with patch("atlas.vm.core.placement.frappe.get_all", return_value=reservations) as get_all:
 			remaining = service.subtract_local_reservations(capacity)
 
-		self.assertEqual(remaining.available_cpu_count, 5)
+		self.assertEqual(remaining.available_cpu_millicores, 4500)
 		self.assertEqual(remaining.available_memory_mib, 13312)
 		self.assertEqual(remaining.available_storage_mib, 87040)
 		get_all.assert_called_once_with(
 			"Virtual Machine",
 			filters={"server": "server-1"},
 			or_filters={"creation": [">", created_at], "is_draft": 1},
-			fields=["vcpus", "memory_mib", "disk_mib"],
+			fields=["cpu_millicores", "memory_mib", "disk_mib"],
 		)
 
 	def test_active_migrations_reserve_target_capacity(self) -> None:
 		created_at = datetime.now()
-		capacity = PlacementCapacity("server-1", "amd64", created_at, 8, 16384, 102400)
-		incoming = SimpleNamespace(vcpus=3, memory_mib=3072, disk_mib=15360)
+		capacity = PlacementCapacity("server-1", "amd64", created_at, 8000, 16384, 102400)
+		incoming = SimpleNamespace(cpu_millicores=3000, memory_mib=3072, disk_mib=15360)
 
 		with patch(
 			"atlas.vm.core.placement.frappe.get_all",
@@ -105,7 +113,7 @@ class TestPlacementService(UnitTestCase):
 		) as get_all:
 			remaining = PlacementService().subtract_local_reservations(capacity)
 
-		self.assertEqual(remaining.available_cpu_count, 5)
+		self.assertEqual(remaining.available_cpu_millicores, 5000)
 		self.assertEqual(remaining.available_memory_mib, 13312)
 		self.assertEqual(remaining.available_storage_mib, 87040)
 		self.assertEqual(get_all.call_args_list[1].args[0], "Virtual Machine Migration")
@@ -130,7 +138,7 @@ class TestPlacementService(UnitTestCase):
 
 		with self.assertRaisesRegex(frappe.ValidationError, "ready"):
 			service.select_server(
-				VirtualMachineCreateRequest("image", 2, 2048, 10240, 7),
+				VirtualMachineCreateRequest("image", 2000, 2048, 10240, 7),
 				"amd64",
 				exclude_servers={"server-1"},
 			)

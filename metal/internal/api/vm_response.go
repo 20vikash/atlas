@@ -43,7 +43,7 @@ type observedVirtualMachineResponse struct {
 
 // computeResponse is the requested compute configuration.
 type computeResponse struct {
-	VirtualCPUCount       int `json:"virtual_cpu_count"`
+	CPUMillicores         int `json:"cpu_millicores"`
 	MemoryMiB             int `json:"memory_mib"`
 	SleepAfterIdleSeconds int `json:"sleep_after_idle_seconds"`
 }
@@ -122,7 +122,7 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			RestartGeneration: information.DesiredRestartGeneration,
 			State:             string(information.DesiredState),
 			Compute: computeResponse{
-				VirtualCPUCount:       information.VirtualCPUCount,
+				CPUMillicores:         information.CPUMillicores,
 				MemoryMiB:             information.MemoryMiB,
 				SleepAfterIdleSeconds: information.SleepAfterIdleSeconds,
 			},

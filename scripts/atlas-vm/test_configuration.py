@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import string
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -128,6 +130,59 @@ class ConfigurationTest(unittest.TestCase):
 		forwarded = json.loads(pilot.call_args_list[1].kwargs["input_text"])
 		self.assertEqual(forwarded["public_ssh_key"], "ssh-ed25519 public-key")
 		self.assertNotIn("bootstrap_password", forwarded)
+
+
+class TestNetworkRules(unittest.TestCase):
+	"""Run the generated host network script against a stubbed ip command."""
+
+	uplink_address = "203.0.113.10"
+
+	def setUp(self) -> None:
+		self.temporary_directory = tempfile.TemporaryDirectory()
+		self.addCleanup(self.temporary_directory.cleanup)
+		directory = Path(self.temporary_directory.name)
+
+		stub = directory / "ip"
+		stub.write_text(
+			"#!/usr/bin/env bash\n"
+			'if [[ $* == *"route show default"* ]]; then\n'
+			"  echo 'default via 203.0.113.1 dev eno1 proto dhcp metric 100'\n"
+			"else\n"
+			f"  echo '2: eno1    inet {self.uplink_address}/24 scope global eno1'\n"
+			"fi\n"
+		)
+		stub.chmod(0o755)
+
+		script = directory / "network"
+		script.write_text(
+			"#!/usr/bin/env bash\n"
+			"set -euo pipefail\n"
+			"tap_device=tap-atlas\n"
+			f"host_address={atlas_vm.HOST_ADDRESS}\n"
+			f"vm_address={atlas_vm.VM_ADDRESS}\n"
+			'forwards="443:443"\n'
+			+ atlas_vm.NETWORK_SCRIPT_BODY.replace('case "${1:-}" in', 'rules\nexit 0\ncase "${1:-}" in')
+		)
+		script.chmod(0o755)
+		self.rules = subprocess.run(
+			[str(script)],
+			env={"PATH": f"{directory}:{os.environ['PATH']}"},
+			capture_output=True,
+			text=True,
+			check=True,
+		).stdout.splitlines()
+
+	def test_a_forward_matches_only_the_host_address(self) -> None:
+		expected = (
+			f"-t nat -A PREROUTING -d {self.uplink_address} -p tcp --dport 443 "
+			f"-j DNAT --to-destination {atlas_vm.VM_ADDRESS}:443"
+		)
+		prerouting = [rule for rule in self.rules if "-A PREROUTING" in rule]
+		self.assertEqual(prerouting, [expected])
+
+	def test_the_host_reaches_a_forward_through_its_own_address(self) -> None:
+		destinations = [rule.split(" -d ")[1].split(" ")[0] for rule in self.rules if "-A OUTPUT" in rule]
+		self.assertEqual(destinations, [self.uplink_address, atlas_vm.HOST_ADDRESS, "127.0.0.1"])
 
 
 if __name__ == "__main__":

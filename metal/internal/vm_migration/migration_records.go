@@ -1,11 +1,13 @@
 package vmmigration
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	platform "github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -229,9 +231,7 @@ func writeMigrationRecord(path string, value any) error {
 	return nil
 }
 
-// readMigrationRecord decodes a persisted migration record. It ignores an
-// unknown field, so a record written by a different schema still loads and the
-// daemon can finish or clean up the migration instead of failing to start.
+// readMigrationRecord decodes one persisted migration record.
 func readMigrationRecord(path string, value any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -240,8 +240,13 @@ func readMigrationRecord(path string, value any) error {
 		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	if err := json.Unmarshal(data, value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("decode %s: trailing JSON data", path)
 	}
 	return nil
 }

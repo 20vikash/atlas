@@ -70,7 +70,7 @@ Atlas WG Mesh also adds a proxy NDP entry for the guest address on the shared VL
 
 Tenant 0 is the privileged tenant. A tenant-0 VM crosses tenants only when its address is in the Atlas WG Mesh whitelist, which `POST /v1/sync` carries in full.
 
-A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes.
+A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes. The service then resets the guest resolver and time sync, because both resume backed off. See [Per-VM metadata](../../atlas/vm/SPEC.md#per-vm-metadata).
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
@@ -92,7 +92,9 @@ The first packet can be lost while Firecracker starts. Clients must retry. A met
 
 `POST /v1/sync` supplies the complete managed peer set. Metal applies it to `wg0` and records what it applied, so it never disturbs peers added by other tools.
 
-Runtime `wg set` installs no system routes, so the manager also owns one `/128` route per peer into `wg0`. The encapsulated tunnel traffic from the mesh reaches `wg0` only through these routes. A peer that leaves the set loses its peer entry and its route; a missing route is reinstalled on the next apply, because routes do not survive a reboot while the managed peer state does.
+Each peer endpoint is a public address, so the tunnel crosses the uplink. Atlas WG Mesh discovery uses the private network. The WireGuard MTU follows the uplink MTU for this reason.
+
+The region prefix on `wg0` makes every peer on-link. Runtime `wg set` installs no system routes, so the manager additionally owns one `/128` route per peer into `wg0`. A peer that leaves the set loses its peer entry and its route; a missing route is reinstalled on the next apply, because routes do not survive a reboot while the managed peer state does.
 
 ## Design notes
 

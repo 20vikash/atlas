@@ -18,6 +18,7 @@ def _get_kwargs(
     *,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -34,6 +35,13 @@ def _get_kwargs(
     params["offset"] = offset
 
     params["limit"] = limit
+
+    json_tag: None | str | Unset
+    if isinstance(tag, Unset):
+        json_tag = UNSET
+    else:
+        json_tag = tag
+    params["tag"] = json_tag
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -79,6 +87,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> Response[PageVirtualMachineListResponse]:
@@ -90,6 +99,8 @@ def sync_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
 
     Raises:
@@ -104,6 +115,7 @@ def sync_detailed(
     kwargs = _get_kwargs(
         offset=offset,
 limit=limit,
+tag=tag,
 x_tenant_id=x_tenant_id,
 
     )
@@ -119,6 +131,7 @@ def sync(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> PageVirtualMachineListResponse | None:
@@ -130,6 +143,8 @@ def sync(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
 
     Raises:
@@ -145,6 +160,7 @@ def sync(
         client=client,
 offset=offset,
 limit=limit,
+tag=tag,
 x_tenant_id=x_tenant_id,
 
     ).parsed
@@ -154,6 +170,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> Response[PageVirtualMachineListResponse]:
@@ -165,6 +182,8 @@ async def asyncio_detailed(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
 
     Raises:
@@ -179,6 +198,7 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         offset=offset,
 limit=limit,
+tag=tag,
 x_tenant_id=x_tenant_id,
 
     )
@@ -194,6 +214,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     offset: int | Unset = 0,
     limit: int | Unset = 20,
+    tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> PageVirtualMachineListResponse | None:
@@ -205,6 +226,8 @@ async def asyncio(
     Args:
         offset (int | Unset):  Default: 0.
         limit (int | Unset):  Default: 20.
+        tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
+            pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
 
     Raises:
@@ -220,6 +243,7 @@ async def asyncio(
         client=client,
 offset=offset,
 limit=limit,
+tag=tag,
 x_tenant_id=x_tenant_id,
 
     )).parsed

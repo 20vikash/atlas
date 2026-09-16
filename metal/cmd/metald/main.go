@@ -354,7 +354,6 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			return vmmigration.AvailableCapacity{}, err
 		}
 		return vmmigration.AvailableCapacity{
-			CPUCount:   capacity.AvailableCPUCount,
 			MemoryMiB:  capacity.AvailableMemoryMiB,
 			StorageMiB: capacity.AvailableStorageMiB,
 		}, nil

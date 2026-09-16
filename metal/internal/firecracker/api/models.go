@@ -14,12 +14,19 @@ type BootSource struct {
 	InitrdPath      string `json:"initrd_path,omitempty"`
 }
 
+// CacheTypeWriteback makes Firecracker fsync the backing file when the guest
+// flushes. Firecracker defaults to "Unsafe", which acknowledges a flush without
+// writing anything, so a guest that syncs before the host photographs its disk
+// can still lose its last writes.
+const CacheTypeWriteback = "Writeback"
+
 // Drive contains one Firecracker drive.
 type Drive struct {
 	DriveID      string       `json:"drive_id"`
 	PathOnHost   string       `json:"path_on_host"`
 	IsRootDevice bool         `json:"is_root_device"`
 	IsReadOnly   bool         `json:"is_read_only"`
+	CacheType    string       `json:"cache_type,omitempty"`
 	RateLimiter  *RateLimiter `json:"rate_limiter,omitempty"`
 }
 

@@ -25,7 +25,7 @@ Archive removes both Proxy routes before it requests virtual machine termination
 
 ## Virtual machine
 
-Provision requires an Active Proxy Server, an enabled Available System image, and an unattached Allocated Metal Server IP Address. Atlas creates the virtual machine for tenant `0` with privileged mesh access, `uplink` egress, hostname `cargo`, and the Atlas public SSH key.
+Provision requires an Active Proxy Server, an enabled Available System image, and an unattached Allocated Metal Server IP Address from the shared pool (`tenant_id` -1) or from tenant `0`. Atlas claims a shared pool address for tenant `0` when it attaches it. Atlas creates the virtual machine for tenant `0` with privileged mesh access, `uplink` egress, hostname `cargo`, and the Atlas public SSH key.
 
 The public IPv4 address is for SSH and operations. The Cargo and Pilot HTTP routes always use the virtual machine WireGuard mesh IPv6 address.
 
@@ -33,7 +33,9 @@ The public IPv4 address is for SSH and operations. The Cargo and Pilot HTTP rout
 
 Atlas waits for root SSH on the public IPv4 address and runs `atlas/scripts/install-cargo.sh` with a synchronous SSH Task. Cargo Server links to this task so that an operator can read its status and output while the virtual machine exists.
 
-Atlas creates the Atlas token, Proxy token, Cargo site password, and Pilot admin password immediately before installation. Atlas sets the Pilot administration domain to `cargo-pilot.<wildcard-domain>`. The installation environment supplies every variable in the `ENROLMENT_VARS` list of the script. A test compares the two lists. The SSH Task stores the installer environment and output for operator visibility.
+The provision request also carries the default storage cluster: `storage_node_count`, `replication_factor`, and a `gateway` and `storage` block of `cpu`, `ram_gb`, and `disk_gb`. Atlas rejects a value below 1 and a `storage_node_count` below the `replication_factor`. Atlas writes the accepted request to `private/files/cargo-storage-cluster.json` and reads it again at installation, because the installation job runs after the dialog closes. Archive removes the file.
+
+Atlas creates the Atlas token, Proxy token, Cargo site password, and Pilot admin password immediately before installation. Atlas sets the Pilot administration domain to `cargo-pilot.<wildcard-domain>`. The installation environment supplies every variable in the `ENROLMENT_VARS` list of the script, and `DEFAULT_STORAGE_CLUSTER_CONFIG` with the stored cluster as compact JSON. A test compares the two lists. The script writes the cluster to the site configuration key `default_storage_cluster_config` with `set-config -p`, so Cargo reads it as JSON and builds the cluster on first boot. The SSH Task stores the installer environment and output for operator visibility.
 
 The Atlas token has audience `atlas-admin:<region-id>`, subject `cargo`, scope `*`, tenant `0`, and a 365-day lifetime. The Proxy token has audience `atlas-proxy:<region-id>`, subject `cargo`, scope `site:*`, a site suffix constraint of `-svc`, no tenant claim, and a 365-day lifetime.
 
@@ -53,8 +55,12 @@ Cargo returns the secret key one time and keeps no copy. Atlas writes the bucket
 
 Atlas never replaces object storage that is already configured. A second attempt writes an Error Log entry instead, because a replaced key makes the objects under the current bucket unreachable. Clear the Atlas Settings object storage fields to provision another bucket.
 
+After the bucket exists and each available bootstrap image has moved from Site File storage to Object Storage, Atlas enables the Cargo Pilot release tracker. Cargo then builds images for new Pilot prereleases. Cargo Server records this state in Auto Build Pilot Images. System Managers can enable or disable the tracker from Actions after Cargo Server becomes Active.
+
 ## Access and failures
 
-Only System Managers with System User accounts can operate Cargo Server. Atlas stores the failed phase and the failure message. The phase is one of `secure-shell`, `installation`, `proxy-routes`, `readiness`, `virtual-machine`, or `archive`. System Managers can read the installation secrets and output in the linked SSH Task.
+Only System Managers with System User accounts can operate Cargo Server. An Active Cargo Server has a Reset Pilot Admin Password action. Atlas generates a password, runs `pilot set-admin-password` through SSH as the Cargo bench user, and shows the password once after a successful command. Atlas does not store the reset password or command output.
+
+Atlas stores the failed phase and the failure message. The phase is one of `secure-shell`, `installation`, `proxy-routes`, `readiness`, `virtual-machine`, or `archive`. System Managers can read the installation secrets and output in the linked SSH Task.
 
 Use [Cargo Server operations](../../../docs/cargo-server.md) for the operator workflow. Use [Proxy control daemon](../../../../services/http-proxy/docs/control-daemon.md) for the site map interface.

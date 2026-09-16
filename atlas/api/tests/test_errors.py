@@ -24,7 +24,7 @@ class HostFailure(frappe.ValidationError):
 class TestErrorBody(UnitTestCase):
 	def test_api_error_keeps_its_code_and_fields(self) -> None:
 		status, body = describe_exception(
-			InvalidRequest("bad", fields=[{"name": "vcpus", "message": "too small"}])
+			InvalidRequest("bad", fields=[{"name": "cpu_millicores", "message": "too small"}])
 		)
 
 		self.assertEqual(status, 400)
@@ -34,7 +34,7 @@ class TestErrorBody(UnitTestCase):
 				"error": {
 					"code": "invalid_request",
 					"message": "bad",
-					"fields": [{"name": "vcpus", "message": "too small"}],
+					"fields": [{"name": "cpu_millicores", "message": "too small"}],
 				}
 			},
 		)

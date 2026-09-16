@@ -25,6 +25,11 @@ def build_image(**overrides) -> SimpleNamespace:
 	return SimpleNamespace(**values)
 
 
+def live_virtual_machine(is_live: bool):
+	"""Patch the live virtual machine lookup that guards a deletion."""
+	return patch("atlas.vm.core.vm_image_deletion.has_live_virtual_machine_for_image", return_value=is_live)
+
+
 class TestMachineImageDeletionRequest(UnitTestCase):
 	def test_a_system_image_is_archived_and_keeps_its_artifacts(self) -> None:
 		service = VirtualMachineImageDeletionService()
@@ -38,12 +43,12 @@ class TestMachineImageDeletionRequest(UnitTestCase):
 		self.assertEqual(image.image_object_key, "images/image-1/rootfs.img")
 		enqueue.assert_not_called()
 
-	def test_an_image_in_use_is_archived_instead_of_deleted(self) -> None:
+	def test_an_image_a_live_virtual_machine_uses_is_archived_instead_of_deleted(self) -> None:
 		service = VirtualMachineImageDeletionService()
 		image = build_image()
 
 		with (
-			patch("atlas.vm.core.vm_image_deletion.frappe.db", Mock(exists=Mock(return_value=True))),
+			live_virtual_machine(True),
 			patch.object(service, "enqueue") as enqueue,
 		):
 			self.assertEqual(service.request(image), "Archived")
@@ -62,20 +67,14 @@ class TestMachineImageDeletionRequest(UnitTestCase):
 		service = VirtualMachineImageDeletionService()
 		image = build_image(status="Failed")
 
-		with (
-			patch("atlas.vm.core.vm_image_deletion.frappe.db", Mock(exists=Mock(return_value=False))),
-			patch.object(service, "enqueue"),
-		):
+		with live_virtual_machine(False), patch.object(service, "enqueue"):
 			self.assertEqual(service.request(image), "Deleting")
 
 	def test_a_request_marks_the_image_and_queues_the_cleanup(self) -> None:
 		service = VirtualMachineImageDeletionService()
 		image = build_image()
 
-		with (
-			patch("atlas.vm.core.vm_image_deletion.frappe.db", Mock(exists=Mock(return_value=False))),
-			patch.object(service, "enqueue") as enqueue,
-		):
+		with live_virtual_machine(False), patch.object(service, "enqueue") as enqueue:
 			self.assertEqual(service.request(image), "Deleting")
 
 		self.assertEqual(image.status, "Deleting")
@@ -85,11 +84,12 @@ class TestMachineImageDeletionRequest(UnitTestCase):
 
 
 class TestArchivedImageReclamation(UnitTestCase):
-	def reclaim(self, is_referenced: bool):
+	def reclaim(self, has_live_virtual_machine: bool):
 		service = VirtualMachineImageDeletionService()
-		database = Mock(exists=Mock(return_value=is_referenced), set_value=Mock())
+		database = Mock(set_value=Mock())
 
 		with (
+			live_virtual_machine(has_live_virtual_machine),
 			patch("atlas.vm.core.vm_image_deletion.frappe.db", database),
 			patch("atlas.vm.core.vm_image_deletion.frappe.get_all", return_value=["image-1"]) as get_all,
 			patch.object(service, "enqueue") as enqueue,
@@ -99,19 +99,19 @@ class TestArchivedImageReclamation(UnitTestCase):
 		return database, get_all, enqueue
 
 	def test_an_unused_archived_image_moves_to_deleting_and_queues_cleanup(self) -> None:
-		database, _get_all, enqueue = self.reclaim(is_referenced=False)
+		database, _get_all, enqueue = self.reclaim(has_live_virtual_machine=False)
 
 		database.set_value.assert_called_once_with("Virtual Machine Image", "image-1", "status", "Deleting")
 		enqueue.assert_called_once_with("image-1")
 
-	def test_an_archived_image_a_virtual_machine_still_uses_is_left_alone(self) -> None:
-		database, _get_all, enqueue = self.reclaim(is_referenced=True)
+	def test_an_archived_image_a_live_virtual_machine_uses_is_left_alone(self) -> None:
+		database, _get_all, enqueue = self.reclaim(has_live_virtual_machine=True)
 
 		database.set_value.assert_not_called()
 		enqueue.assert_not_called()
 
 	def test_only_archived_machine_images_are_considered(self) -> None:
-		_database, get_all, _enqueue = self.reclaim(is_referenced=False)
+		_database, get_all, _enqueue = self.reclaim(has_live_virtual_machine=False)
 
 		self.assertEqual(get_all.call_args.kwargs["filters"], {"image_type": "machine", "status": "Archived"})
 

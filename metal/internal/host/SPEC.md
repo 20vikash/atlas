@@ -42,7 +42,7 @@ A nil unicast peer set means multicast mode and disables the transport. A reques
 
 ## Capacity
 
-CPU is reported against reservations, not against host load: available CPU is the host count minus the virtual CPUs that existing VMs reserve, and it never goes below zero. The host may therefore be busy while CPU still reads as available.
+CPU is reported in millicores against entitlements, not against host load. Total CPU is the host CPU count multiplied by 1000. Available CPU is the total minus the `cpu_millicores` values that existing VMs reserve, and it never goes below zero. The host may therefore be busy while CPU still reads as available. The report is for visibility only. CPU is oversubscribed, so no admission check uses it and available CPU can read as zero while the host accepts more VMs.
 
 Memory and storage are read from the host instead. Available memory comes from `MemAvailable` in `/proc/meminfo`, which counts cache the kernel can reclaim. Free memory alone would understate what a new guest can use.
 

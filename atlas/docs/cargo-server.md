@@ -14,11 +14,17 @@ cargo-pilot.<wildcard-domain> -> Proxy -> Cargo mesh IPv6
 
 Before you provision Cargo Server, make sure that at least one Proxy Server is Active. Reserve one tenant `0` public IPv4 address and make sure that the required System image is Available.
 
-Open Cargo Server and select Provision. Select the image and public IPv4 address. The form defaults to 2 vCPUs, 4096 MiB of memory, and 16384 MiB of disk.
+Open Cargo Server and select Provision. Select the image and public IPv4 address. The form defaults to 2000 CPU millicores, 4096 MiB of memory, and 16384 MiB of disk. 1000 millicores equals one CPU core.
+
+The Storage Cluster section of the same dialog sets the object storage cluster that Cargo builds for itself. The form defaults to 3 storage nodes, a replication factor of 3, a gateway of 2000 CPU millicores, 4 GB of memory and 20 GB of disk, and storage nodes of 4000 CPU millicores, 8 GB of memory and 500 GB of disk. Storage nodes must not be fewer than the replication factor. Every value must be at least 1. Garage weights each storage node by its disk size, and every S3 request goes through the one gateway.
 
 Atlas creates the virtual machine and sets Pending. A Pending service can stay in this status while Atlas reconciles an uncertain virtual machine create request. Do not start another provision request. The scheduled job continues with the same virtual machine.
 
 Atlas changes the status to Provisioning when the virtual machine is ready. It waits for SSH on the public IPv4 address, installs Cargo with `cargo-pilot.<wildcard-domain>` as the Pilot administration domain, maps both public domains to the mesh IPv6 address, and checks the Cargo ping route. A successful check sets Active.
+
+## Reset the Pilot administration password
+
+When Cargo Server is Active, select Reset Pilot Admin Password. Atlas generates a password, runs the reset command on the Cargo host, and then shows the new password once. Store the password before you close the dialog. Atlas does not retain this password.
 
 ## Object storage
 
@@ -27,6 +33,8 @@ Cargo brings up its Garage object storage cluster after it activates. Atlas wait
 The job runs every minute until it succeeds, so no operator action is needed. Atlas writes the bucket and its credentials to Atlas Settings. Look at the Object Storage section of Atlas Settings to confirm the result. A configured Atlas starts the bootstrap image migrations by itself.
 
 Atlas does not replace object storage that is already set. To provision another bucket, clear the Object Storage fields in Atlas Settings first. The objects under the old bucket become unreachable when its key is replaced.
+
+After Atlas moves each available bootstrap image to object storage, it enables Cargo to build images for new Pilot prereleases. Cargo Server shows this state as Auto Build Pilot Images. Use Actions to enable or disable it later.
 
 ## Investigate a failure
 

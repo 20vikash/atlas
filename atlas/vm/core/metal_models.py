@@ -8,7 +8,7 @@ from typing import Any
 class MetalCompute:
 	"""Store the desired compute configuration."""
 
-	virtual_cpu_count: int
+	cpu_millicores: int
 	memory_mib: int
 	sleep_after_idle_seconds: int
 
@@ -151,7 +151,7 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 		restart_generation=integer_field(value, "restart_generation"),
 		state=string_field(value, "state"),
 		compute=MetalCompute(
-			virtual_cpu_count=integer_field(compute, "virtual_cpu_count"),
+			cpu_millicores=integer_field(compute, "cpu_millicores"),
 			memory_mib=integer_field(compute, "memory_mib"),
 			sleep_after_idle_seconds=integer_field(compute, "sleep_after_idle_seconds"),
 		),

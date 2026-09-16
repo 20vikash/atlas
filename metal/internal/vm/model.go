@@ -9,7 +9,7 @@ import (
 
 // Specification contains the persistent configuration for one VM.
 type Specification struct {
-	VirtualCPUCount       int                  `json:"virtual_cpu_count"`
+	CPUMillicores         int                  `json:"cpu_millicores"`
 	MemoryMiB             int                  `json:"memory_mib"`
 	SleepAfterIdleSeconds int                  `json:"sleep_after_idle_seconds,omitempty"`
 	DiskMiB               int                  `json:"disk_mib"`
@@ -24,7 +24,7 @@ type Specification struct {
 
 // Compute is the requested compute configuration of one VM.
 type Compute struct {
-	VirtualCPUCount       int
+	CPUMillicores         int
 	MemoryMiB             int
 	SleepAfterIdleSeconds int
 }
@@ -67,7 +67,7 @@ type NetworkConfiguration struct {
 // SameReservation reports whether two specifications reserve the same VM. It
 // ignores signed image URLs, which can rotate without changing the reservation.
 func (specification Specification) SameReservation(other Specification) bool {
-	return specification.VirtualCPUCount == other.VirtualCPUCount &&
+	return specification.CPUMillicores == other.CPUMillicores &&
 		specification.MemoryMiB == other.MemoryMiB &&
 		specification.SleepAfterIdleSeconds == other.SleepAfterIdleSeconds &&
 		specification.DiskMiB == other.DiskMiB &&
@@ -81,6 +81,15 @@ func (specification Specification) SameReservation(other Specification) bool {
 		specification.Hostname == other.Hostname &&
 		specification.UserData == other.UserData &&
 		maps.Equal(specification.Metadata, other.Metadata)
+}
+
+// VirtualCPUCount returns the integer CPU count that Firecracker exposes to the guest.
+func (specification Specification) VirtualCPUCount() int {
+	count := specification.CPUMillicores / 1000
+	if specification.CPUMillicores%1000 != 0 {
+		count++
+	}
+	return count
 }
 
 // RefreshImageSource replaces image URLs and caching intent so a retry can use
@@ -172,7 +181,7 @@ type Information struct {
 	State                         State
 	DesiredState                  State
 	Error                         *PublicOperationError
-	VirtualCPUCount               int
+	CPUMillicores                 int
 	MemoryMiB                     int
 	DiskMiB                       int
 	DiskUsedMiB                   int

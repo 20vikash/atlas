@@ -13,6 +13,7 @@ from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement import PlacementService
+from atlas.vm.core.vm_state import LIVE_STATES
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -21,7 +22,6 @@ if TYPE_CHECKING:
 		VirtualMachineMigration,
 	)
 
-MIGRATABLE_STATES = frozenset({"running", "stopped", "paused"})
 COPY_POLL_SECONDS = 5
 TRANSITION_POLL_SECONDS = 2
 TRANSITION_PHASES = frozenset({"stopping", "starting"})
@@ -50,7 +50,7 @@ class MigrationService:
 		cls.validate_source(locked)
 
 		shape = cls.get_shape(locked)
-		architecture = cls.get_architecture(locked)
+		architecture = cast(str, locked.architecture)
 		placement = PlacementService()
 		if target_server:
 			if target_server == locked.server:
@@ -91,7 +91,7 @@ class MigrationService:
 				_("Virtual Machine {0} is not ready to migrate.").format(virtual_machine.name),
 				exc=AtlasUserError,
 			)
-		if virtual_machine.current_state not in MIGRATABLE_STATES:
+		if virtual_machine.current_state not in LIVE_STATES:
 			frappe.throw(
 				_("Virtual Machine {0} must be running, stopped, or paused to migrate.").format(
 					virtual_machine.name
@@ -104,18 +104,10 @@ class MigrationService:
 		"""Return the placement shape for the migrating VM."""
 		return VirtualMachineCreateRequest(
 			virtual_machine_image=virtual_machine.virtual_machine_image,
-			virtual_cpu_count=virtual_machine.vcpus,
+			cpu_millicores=virtual_machine.cpu_millicores,
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			tenant_id=virtual_machine.tenant_id,
-		)
-
-	@staticmethod
-	def get_architecture(virtual_machine: VirtualMachine) -> str:
-		"""Return the image architecture for placement."""
-		return cast(
-			str,
-			frappe.db.get_value("Virtual Machine Image", virtual_machine.virtual_machine_image, "platform"),
 		)
 
 	def run(self) -> None:

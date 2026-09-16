@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import frappe
 
@@ -8,12 +8,14 @@ from atlas.api.core.base import (
 	ApiResult,
 	ListQuery,
 	Page,
+	add_tag_filter,
 	build_page,
 	get_owned_document,
 )
 from atlas.api.core.docs import api_docs
 from atlas.api.models import IPAddressResponse, ReserveIPAddressPayload
 from atlas.api.router import get_resource_location, ip_addresses
+from atlas.atlas.core.tags import read_tags_for
 from atlas.auth.identity import get_current_tenant_id
 from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import reserve_for_tenant
 
@@ -58,15 +60,20 @@ def list_ip_addresses(query: ListQuery) -> Page[IPAddressResponse]:
 
 	Returns one page of IP addresses reserved by the tenant in newest-first order.
 	"""
+	filters: dict[str, Any] = {"tenant_id": get_current_tenant_id()}
+	if not add_tag_filter("Metal Server IP Address", query, filters):
+		return build_page([], query)
+
 	rows: list[MetalServerIPAddress] = frappe.get_list(
 		"Metal Server IP Address",
-		filters={"tenant_id": get_current_tenant_id()},
+		filters=filters,
 		fields=["name", "tenant_id", "address", "status", "virtual_machine", "creation"],
 		order_by="creation desc",
 		offset=query.offset,
 		limit=query.fetch_limit,
 	)
-	return build_page([IPAddressResponse.from_document(row) for row in rows], query)
+	tags = read_tags_for("Metal Server IP Address", [row.name for row in rows])
+	return build_page([IPAddressResponse.from_document(row, tags[row.name]) for row in rows], query)
 
 
 @ip_addresses.get("<ip_address_id>")

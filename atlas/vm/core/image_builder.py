@@ -20,12 +20,12 @@ ArtifactStorage = Literal["Object Storage", "Site File"]
 
 
 def build_ubuntu_image(
-	version: str, platform: str, minimal: bool, output_directory: Path
+	version: str, architecture: str, minimal: bool, output_directory: Path
 ) -> tuple[Path, Path]:
 	"""Build one Ubuntu root file system and kernel."""
 	output_directory.mkdir(parents=True, exist_ok=True)
 	image_type = "minimal-" if minimal else ""
-	image_path = output_directory / f"ubuntu-{version}-{image_type}{platform}.ext4"
+	image_path = output_directory / f"ubuntu-{version}-{image_type}{architecture}.ext4"
 	kernel_path = output_directory / f"vmlinux-ubuntu-{version}-{image_type}server"
 	builder_path = Path(__file__).parents[1] / "scripts" / "build_ubuntu_server_image.sh"
 	command = [builder_path]
@@ -37,8 +37,8 @@ def build_ubuntu_image(
 			image_path,
 			"--kernel-output",
 			kernel_path,
-			"--platform",
-			platform,
+			"--architecture",
+			architecture,
 			"--version",
 			version,
 			"--minimal" if minimal else "",
@@ -51,7 +51,7 @@ def build_ubuntu_image(
 def publish_ubuntu_image(
 	title: str,
 	version: str,
-	platform: str,
+	architecture: str,
 	image_path: Path,
 	kernel_path: Path,
 	storage: ArtifactStorage = "Object Storage",
@@ -72,6 +72,7 @@ def publish_ubuntu_image(
 
 	file_values = {
 		"status": "Available",
+		"transfer_progress": 100,
 		"artifact_storage": storage,
 		"image_object_key": None,
 		"kernel_object_key": None,
@@ -100,9 +101,12 @@ def publish_ubuntu_image(
 			"title": title,
 			"version": 1,
 			"image_type": "system",
-			"platform": platform,
-			"operating_system": "Ubuntu",
-			"operating_system_version": version,
+			"architecture": architecture,
+			"tags": [
+				{"key": "purpose", "value": "base"},
+				{"key": "os", "value": "Ubuntu"},
+				{"key": "os_version", "value": version},
+			],
 			**file_values,
 		}
 	).insert()

@@ -14,7 +14,7 @@ Each VM response nests `desired` and `observed`, so one read shows both what was
 
 `PUT /v1/vms/{id}/power` sets the power state with `{"state": "running"|"stopped"|"paused"}`. A `stopped` request is always a hard stop and removes saved VM state.
 
-`PUT /v1/vms/{id}/compute` sets `virtual_cpu_count`, `memory_mib`, and `sleep_after_idle_seconds`. A shape change needs a stopped VM. An idle timeout change is accepted in any state. `0` disables automatic idle shutdown. The response reports the value in `desired.compute`.
+`PUT /v1/vms/{id}/compute` sets `cpu_millicores`, `memory_mib`, and `sleep_after_idle_seconds`. `1000` millicores equals one CPU core. The valid CPU range is 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. A CPU or memory change needs a stopped VM. An idle timeout change is accepted in any state. `0` disables automatic idle shutdown. The response reports the value in `desired.compute`.
 
 Every `/v1` controller route needs the static Metal bearer token. The source-side migration routes that one Metal host calls on another carry no credential and trust the WireGuard mesh. Only liveness and the documentation are public.
 

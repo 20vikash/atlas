@@ -47,6 +47,6 @@ type Result struct {
 
 // Limits contains systemd resource limits.
 type Limits struct {
-	MemoryMaxBytes  int64
-	CPUQuotaPercent int
+	MemoryMaxBytes int64
+	CPUMillicores  int
 }

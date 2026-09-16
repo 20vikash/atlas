@@ -15,13 +15,15 @@ The Atlas document name is the Metal virtual machine ID. The committed draft mak
 
 ## Placement
 
-Placement uses a capacity sample that is less than 2 minutes old. It matches the image architecture and subtracts requests that the sample cannot include. Every uncertain draft remains a reservation.
+Placement uses a capacity sample that is less than 2 minutes old. It matches the image architecture and subtracts requests that the sample cannot include. Every uncertain draft remains a reservation. Memory and storage must be free for the request. CPU entitlement is oversubscribed and does not limit placement. Atlas ranks hosts by the available `cpu_millicores` value after local reservations.
 
 Atlas locks the candidate Metal Server row and checks capacity again. It commits the selected draft before it sends the Metal request.
 
 ## Desired and observed state
 
 Atlas sends complete desired values for compute, disk, network, guest metadata, and Secure Shell keys. Metal stores these values before it returns HTTP `202`.
+
+Atlas sends CPU entitlement as `cpu_millicores`. `1000` millicores equals one CPU core. The accepted range is 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. Metal rounds the entitlement up for guest topology and applies the exact value as the host CPU quota.
 
 Metal reports desired and observed generations. Equal generations mean that Metal applied the current request. A different generation means that reconciliation still has work or stopped after an error.
 

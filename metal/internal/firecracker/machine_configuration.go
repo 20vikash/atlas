@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
@@ -44,7 +43,7 @@ func configure(
 	networkInterface network.Interface,
 ) error {
 	machineConfiguration := api.MachineConfig{
-		VCPUCount:  specification.VirtualCPUCount,
+		VCPUCount:  specification.VirtualCPUCount(),
 		MemSizeMiB: specification.MemoryMiB,
 	}
 	if err := client.PutMachineConfig(operationContext, machineConfiguration); err != nil {
@@ -60,13 +59,7 @@ func configure(
 	}
 
 	for driveIndex, drive := range bootConfiguration.Drives {
-		request := api.Drive{
-			DriveID:      "drive" + strconv.Itoa(driveIndex),
-			PathOnHost:   drive.Path,
-			IsRootDevice: drive.Root,
-			IsReadOnly:   drive.ReadOnly,
-			RateLimiter:  driveRateLimiter(specification.Disk),
-		}
+		request := driveRequest(driveIndex, drive, specification.Disk)
 		if err := client.PutDrive(operationContext, request); err != nil {
 			return err
 		}
@@ -114,8 +107,8 @@ func bootArguments(bootConfiguration storage.BootConfiguration, networkInterface
 // because a memory snapshot holds guest memory and its memory file at once.
 func resourceLimits(specification vm.Specification) platform.Limits {
 	return platform.Limits{
-		MemoryMaxBytes:  (2*int64(specification.MemoryMiB) + memorySnapshotOverheadMiB) << 20,
-		CPUQuotaPercent: specification.VirtualCPUCount * 100,
+		MemoryMaxBytes: (2*int64(specification.MemoryMiB) + memorySnapshotOverheadMiB) << 20,
+		CPUMillicores:  specification.CPUMillicores,
 	}
 }
 

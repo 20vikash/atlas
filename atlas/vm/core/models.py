@@ -8,6 +8,8 @@ import frappe
 from atlas.atlas.core.parsing import strict_bool
 
 EGRESS_MODES = ("uplink", "mesh", "none")
+MINIMUM_CPU_MILLICORES = 100
+MAXIMUM_CPU_MILLICORES = 32_000
 MAXIMUM_SLEEP_AFTER_IDLE_SECONDS = 9_223_372_036
 
 
@@ -16,7 +18,7 @@ class VirtualMachineCreateRequest:
 	"""Store the validated values for one virtual machine request."""
 
 	virtual_machine_image: str
-	virtual_cpu_count: int
+	cpu_millicores: int
 	memory_mib: int
 	disk_mib: int
 	tenant_id: int
@@ -44,7 +46,11 @@ class VirtualMachineCreateRequest:
 		if not isinstance(image, str) or not image:
 			raise ValueError("Virtual Machine Image is required.")
 
-		virtual_cpu_count = cls.positive_integer(payload, "vcpus", "vCPUs")
+		cpu_millicores = cls.positive_integer(payload, "cpu_millicores", "CPU millicores")
+		if cpu_millicores < MINIMUM_CPU_MILLICORES:
+			raise ValueError(f"CPU millicores must be at least {MINIMUM_CPU_MILLICORES}.")
+		if cpu_millicores > MAXIMUM_CPU_MILLICORES:
+			raise ValueError(f"CPU millicores must not exceed {MAXIMUM_CPU_MILLICORES}.")
 		memory_mib = cls.positive_integer(payload, "memory_mib", "Memory")
 		disk_mib = cls.positive_integer(payload, "disk_mib", "Disk")
 		tenant_id = payload.get("tenant_id")
@@ -66,7 +72,7 @@ class VirtualMachineCreateRequest:
 
 		return cls(
 			virtual_machine_image=image,
-			virtual_cpu_count=virtual_cpu_count,
+			cpu_millicores=cpu_millicores,
 			memory_mib=memory_mib,
 			disk_mib=disk_mib,
 			tenant_id=tenant_id,

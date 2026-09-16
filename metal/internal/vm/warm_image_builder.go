@@ -129,11 +129,11 @@ func warmupSpecification(image Image, configuration MemorySnapshotConfiguration)
 	image.MemorySnapshot = false
 	image.MemorySnapshotConfiguration = nil
 	return Specification{
-		VirtualCPUCount: configuration.VirtualCPUCount,
-		MemoryMiB:       configuration.MemoryMiB,
-		DiskMiB:         configuration.DiskMiB,
-		Image:           image,
-		Network:         NetworkConfiguration{Egress: EgressNone},
+		CPUMillicores: configuration.VirtualCPUCount * 1000,
+		MemoryMiB:     configuration.MemoryMiB,
+		DiskMiB:       configuration.DiskMiB,
+		Image:         image,
+		Network:       NetworkConfiguration{Egress: EgressNone},
 	}
 }
 

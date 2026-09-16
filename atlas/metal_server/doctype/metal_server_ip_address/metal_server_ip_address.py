@@ -8,6 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 
 from atlas.atlas.core.background_jobs import run_as_admin
+from atlas.atlas.core.tags import validate_tags
 from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID, IPAddressService
 
 
@@ -32,17 +33,22 @@ class MetalServerIPAddress(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from atlas.atlas.doctype.atlas_tag.atlas_tag import AtlasTag
+
 		address: DF.Data
 		intent_version: DF.Int
 		provider_resource_id: DF.Data
 		server: DF.Link | None
 		status: DF.Literal["Allocated", "Attaching", "Attached", "Detaching"]
+		tags: DF.Table[AtlasTag]
 		tenant_id: DF.Int
 		virtual_machine: DF.Link | None
 	# end: auto-generated types
 
 	def validate(self) -> None:
-		"""Reject an address that is not consistent with its server."""
+		"""Reject an address or tag set that is not consistent with its server."""
+		validate_tags(self)
+
 		try:
 			address = ipaddress.ip_interface(self.address)
 		except ValueError:

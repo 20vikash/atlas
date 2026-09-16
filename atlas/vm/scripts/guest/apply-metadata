@@ -97,6 +97,21 @@ def apply_mesh_network(address):
     DROP_IN_PATH.parent.mkdir(parents=True, exist_ok=True)
     DROP_IN_PATH.write_text(drop_in)
     subprocess.run(["networkctl", "reload"], check=True)
+    reset_network_services()
+
+
+def reset_network_services():
+    """Clear the resolver and time sync state that a memory snapshot resumes with.
+
+    A warm snapshot is captured without egress, so the resolver has backed off and
+    time sync has stopped trying. Without a reset, both stay stalled for about 40
+    seconds after resume.
+    """
+    subprocess.run(["resolvectl", "reset-server-features"], check=False)
+    subprocess.run(["resolvectl", "flush-caches"], check=False)
+
+    # Queued, not awaited: time sync takes seconds to stop, and the agent must keep polling.
+    subprocess.run(["systemctl", "restart", "--no-block", "systemd-timesyncd"], check=False)
 
 
 def main():

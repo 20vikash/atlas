@@ -9,8 +9,8 @@
   "column_break_nzkt",
   "virtual_machine_count",
   "section_break_umfi",
-  "total_cpu_count",
-  "available_cpu_count",
+  "total_cpu_millicores",
+  "available_cpu_millicores",
   "column_break_dmzd",
   "total_memory_mib",
   "available_memory_mib",
@@ -30,16 +30,16 @@
    "reqd": 1
   },
   {
-   "fieldname": "total_cpu_count",
+   "fieldname": "total_cpu_millicores",
    "fieldtype": "Int",
-   "label": "Total CPUs",
+   "label": "Total CPU (millicores)",
    "read_only": 1,
    "reqd": 1
   },
   {
-   "fieldname": "available_cpu_count",
+   "fieldname": "available_cpu_millicores",
    "fieldtype": "Int",
-   "label": "Available CPUs",
+   "label": "Available CPU (millicores)",
    "read_only": 1,
    "reqd": 1
   },

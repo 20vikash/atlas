@@ -24,6 +24,25 @@ PILOT_INSTALL_URL = "https://raw.githubusercontent.com/frappe/pilot/develop/inst
 PYTHON_VERSION = "3.14"
 SETUP_GRANT = "/etc/sudoers.d/{user}-atlas-setup"
 IMAGE_BUILDER_GRANT = "/etc/sudoers.d/{user}-atlas-image-builder"
+# Pilot is a stdlib-only source tree, so its own config API can edit bench.toml.
+BENCH_CONFIGURATION_SCRIPT = """\
+import sys
+
+sys.path.insert(0, "{pilot_home}")
+
+from pathlib import Path
+
+from pilot.config import BenchConfig, WorkerGroup
+
+with BenchConfig.open(Path("{bench_path}")) as config:
+	config.get_app_by_name("frappe").branch = "develop"
+	config.socketio_backend = "python"
+	config.lite_mode.enabled = False
+	config.workers.groups = [
+		WorkerGroup(queues=["default", "short"], count=3),
+		WorkerGroup(queues=["default", "short", "long"], count=2),
+	]
+"""
 
 
 class SetupError(Exception):
@@ -237,8 +256,26 @@ class Setup:
 				f"pilot new {configuration.bench_name} --admin-password {password}"
 				f" --admin-domain {configuration.admin_domain} --database mariadb"
 			)
+		# The branch has to be set before init clones the framework.
+		self.configure_bench()
 		if not os.access(configuration.bench_path / "env/bin/python", os.X_OK):
-			self.pilot("init")
+			self.pilot("init --no-dev")
+		self.configure_common_site_config()
+
+	def configure_bench(self) -> None:
+		"""The framework branch, and full processes with dedicated worker groups."""
+		configuration = self.configuration
+		self.as_bench(
+			"python3 -",
+			input_text=BENCH_CONFIGURATION_SCRIPT.format(
+				pilot_home=configuration.pilot_home, bench_path=configuration.bench_path
+			),
+		)
+
+	def configure_common_site_config(self) -> None:
+		"""Bench wide values the scheduler and the web server need."""
+		self.pilot("frappe set-config -g -p scheduler_tick_interval 5")
+		self.pilot("frappe set-config -g webserver_host 127.0.0.1")
 
 	def create_site(self) -> None:
 		configuration = self.configuration
@@ -249,6 +286,9 @@ class Setup:
 				f"new-site {configuration.site}"
 				f" --admin-password {shlex.quote(configuration.bootstrap_password)}"
 			)
+
+		# A new site pauses the scheduler, and Atlas needs its scheduled jobs.
+		self.pilot(f"frappe --site {configuration.site} enable-scheduler")
 
 	def get_atlas(self) -> None:
 		# Pilot skips an app that is already there, so this stage is safe to repeat.

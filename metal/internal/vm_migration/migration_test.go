@@ -165,9 +165,9 @@ func (f *fakeMachines) LimitSourceDisk(_ context.Context, _ string, throughputMi
 
 func testSpecification() vm.Specification {
 	return vm.Specification{
-		VirtualCPUCount: 2,
-		MemoryMiB:       2048,
-		DiskMiB:         4096,
+		CPUMillicores: 2000,
+		MemoryMiB:     2048,
+		DiskMiB:       4096,
 	}
 }
 
@@ -326,7 +326,7 @@ func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string)
 }
 
 func ampleCapacity(context.Context) (AvailableCapacity, error) {
-	return AvailableCapacity{CPUCount: 64, MemoryMiB: 262144, StorageMiB: 4194304}, nil
+	return AvailableCapacity{MemoryMiB: 262144, StorageMiB: 4194304}, nil
 }
 
 func newMigrationManager(t *testing.T) (*VMMigration, *fakeMachines, *fakeSourceClient) {
@@ -542,7 +542,7 @@ func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	record.Phase = PhaseCopying
-	record.Config = &PortableConfig{Specification: vm.Specification{VirtualCPUCount: 3, MemoryMiB: 3072, DiskMiB: 8192}}
+	record.Config = &PortableConfig{Specification: vm.Specification{CPUMillicores: 3000, MemoryMiB: 3072, DiskMiB: 8192}}
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +551,7 @@ func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reservations) != 1 || reservations[0].VirtualCPUCount != 3 || reservations[0].MemoryMiB != 3072 {
+	if len(reservations) != 1 || reservations[0].CPUMillicores != 3000 || reservations[0].MemoryMiB != 3072 {
 		t.Fatalf("reservations = %+v", reservations)
 	}
 }

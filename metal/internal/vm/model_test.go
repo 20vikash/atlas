@@ -39,3 +39,21 @@ func TestEgressIsValidRejectsUnknownModes(t *testing.T) {
 		}
 	}
 }
+
+func TestVirtualCPUCountRoundsMillicoresUp(t *testing.T) {
+	for _, testCase := range []struct {
+		cpuMillicores int
+		want          int
+	}{
+		{100, 1},
+		{999, 1},
+		{1000, 1},
+		{1001, 2},
+		{32000, 32},
+	} {
+		specification := Specification{CPUMillicores: testCase.cpuMillicores}
+		if got := specification.VirtualCPUCount(); got != testCase.want {
+			t.Errorf("VirtualCPUCount(%d) = %d, want %d", testCase.cpuMillicores, got, testCase.want)
+		}
+	}
+}

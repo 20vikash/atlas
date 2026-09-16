@@ -22,7 +22,7 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 		"restart_generation": 1,
 		"state": "running",
 		"compute": {
-			"virtual_cpu_count": 2,
+			"cpu_millicores": 2000,
 			"memory_mib": 2048,
 			"sleep_after_idle_seconds": 1800,
 		},
@@ -65,7 +65,7 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 
 
 COMPUTE_REQUEST = {
-	"virtual_cpu_count": 2,
+	"cpu_millicores": 2000,
 	"memory_mib": 2048,
 	"sleep_after_idle_seconds": 1800,
 }
@@ -84,7 +84,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "Ubuntu 24.04",
-				"vcpus": 2,
+				"cpu_millicores": 1500,
 				"memory_mib": 2048,
 				"disk_mib": 10240,
 				"tenant_id": 7,
@@ -93,13 +93,51 @@ class TestVirtualMachineRequest(UnitTestCase):
 		)
 
 		self.assertEqual(request.ssh_keys, ("key-one", "key-two"))
+		self.assertEqual(request.cpu_millicores, 1500)
 		self.assertEqual(request.egress, "uplink")
+
+	def test_request_accepts_the_infrastructure_tenant(self) -> None:
+		request = VirtualMachineCreateRequest.from_value(
+			{
+				"virtual_machine_image": "Ubuntu 24.04",
+				"cpu_millicores": 1000,
+				"memory_mib": 2048,
+				"disk_mib": 10240,
+				"tenant_id": 0,
+			}
+		)
+
+		self.assertEqual(request.tenant_id, 0)
+
+	def test_request_rejects_cpu_above_the_firecracker_limit(self) -> None:
+		with self.assertRaisesRegex(ValueError, "must not exceed 32000"):
+			VirtualMachineCreateRequest.from_value(
+				{
+					"virtual_machine_image": "Ubuntu 24.04",
+					"cpu_millicores": 32001,
+					"memory_mib": 2048,
+					"disk_mib": 10240,
+					"tenant_id": 7,
+				}
+			)
+
+	def test_request_rejects_cpu_below_the_minimum(self) -> None:
+		with self.assertRaisesRegex(ValueError, "must be at least 100"):
+			VirtualMachineCreateRequest.from_value(
+				{
+					"virtual_machine_image": "Ubuntu 24.04",
+					"cpu_millicores": 99,
+					"memory_mib": 2048,
+					"disk_mib": 10240,
+					"tenant_id": 7,
+				}
+			)
 
 	def test_request_parses_metadata(self) -> None:
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "Ubuntu 24.04",
-				"vcpus": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 2048,
 				"disk_mib": 10240,
 				"tenant_id": 7,
@@ -114,7 +152,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 			VirtualMachineCreateRequest.from_value(
 				{
 					"virtual_machine_image": "Ubuntu 24.04",
-					"vcpus": 2,
+					"cpu_millicores": 2000,
 					"memory_mib": 2048,
 					"disk_mib": 10240,
 					"tenant_id": 7,
@@ -126,7 +164,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "Ubuntu 24.04",
-				"vcpus": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 2048,
 				"disk_mib": 10240,
 				"tenant_id": 7,
@@ -142,7 +180,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "Ubuntu 24.04",
-				"vcpus": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 2048,
 				"disk_mib": 10240,
 				"tenant_id": 7,
@@ -157,7 +195,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "Ubuntu 24.04",
-				"vcpus": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 2048,
 				"disk_mib": 10240,
 				"tenant_id": 7,
@@ -172,7 +210,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 	def test_request_rejects_a_public_address_without_uplink(self) -> None:
 		base = {
 			"virtual_machine_image": "Ubuntu 24.04",
-			"vcpus": 2,
+			"cpu_millicores": 2000,
 			"memory_mib": 2048,
 			"disk_mib": 10240,
 			"tenant_id": 7,
@@ -190,7 +228,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 			VirtualMachineCreateRequest.from_value(
 				{
 					"virtual_machine_image": "Ubuntu 24.04",
-					"vcpus": 2,
+					"cpu_millicores": 2000,
 					"memory_mib": 2048,
 					"disk_mib": 10240,
 					"tenant_id": 7,
@@ -203,7 +241,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 			VirtualMachineCreateRequest.from_value(
 				{
 					"virtual_machine_image": "Ubuntu 24.04",
-					"vcpus": True,
+					"cpu_millicores": True,
 					"memory_mib": 2048,
 					"disk_mib": 10240,
 					"tenant_id": 7,
@@ -215,7 +253,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 			VirtualMachineCreateRequest.from_value(
 				{
 					"virtual_machine_image": "Ubuntu 24.04",
-					"vcpus": 2,
+					"cpu_millicores": 2000,
 					"memory_mib": 2048,
 					"disk_mib": 10240,
 					"tenant_id": True,
@@ -235,7 +273,7 @@ class TestVirtualMachineDocument(UnitTestCase):
 
 class TestVirtualMachineService(UnitTestCase):
 	def test_machine_image_uses_its_own_artifacts(self) -> None:
-		request = VirtualMachineCreateRequest("machine-image", 2, 2048, 10240, 7)
+		request = VirtualMachineCreateRequest("machine-image", 2000, 2048, 10240, 7)
 		image_request = {
 			"ref": "sha256:machine",
 			"architecture": "amd64",
@@ -256,7 +294,7 @@ class TestVirtualMachineService(UnitTestCase):
 	def test_metal_request_carries_throughput_limits(self) -> None:
 		request = VirtualMachineCreateRequest(
 			"machine-image",
-			2,
+			2000,
 			2048,
 			10240,
 			7,
@@ -274,7 +312,7 @@ class TestVirtualMachineService(UnitTestCase):
 		self.assertEqual(
 			metal_request["compute"],
 			{
-				"virtual_cpu_count": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 2048,
 				"sleep_after_idle_seconds": 0,
 			},
@@ -315,7 +353,7 @@ class TestMetalClient(UnitTestCase):
 		response = metal_virtual_machine_response(202)
 
 		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.put_virtual_machine("VM-00001", {"vcpus": 1})
+			client.put_virtual_machine("VM-00001", {"cpu_millicores": 1000})
 
 		self.assertEqual(request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001"))
 
@@ -549,7 +587,7 @@ class TestMetalVirtualMachineModel(UnitTestCase):
 	def test_model_parses_nested_desired_and_observed_state(self) -> None:
 		information = MetalVirtualMachine.from_dict(METAL_VIRTUAL_MACHINE_RESPONSE)
 
-		self.assertEqual(information.desired.compute.virtual_cpu_count, 2)
+		self.assertEqual(information.desired.compute.cpu_millicores, 2000)
 		self.assertEqual(information.desired.disk.size_mib, 2048)
 		self.assertEqual(information.desired.network.wireguard_mesh_ipv6, "fdaa:1::1")
 		self.assertEqual(information.observed.disk.used_mib, 1024)
@@ -934,7 +972,7 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "image-1",
-				"vcpus": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 1024,
 				"disk_mib": 1024,
 				"tenant_id": 0,

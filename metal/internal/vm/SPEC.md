@@ -31,6 +31,8 @@ machines/<id>/status.json   observed state and operation progress
 
 The create fingerprint identifies one reservation request. It includes `sleep_after_idle_seconds` and excludes signed image URLs.
 
+`cpu_millicores` is the CPU entitlement. `1000` millicores equals one CPU core. The API accepts 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. Firecracker receives `ceil(cpu_millicores / 1000)` guest vCPUs, and systemd enforces the exact millicore entitlement.
+
 `sleep_after_idle_seconds` is compute configuration. `0` disables automatic idle shutdown. A timeout-only update does not change `SpecificationGeneration` because it does not change the Firecracker machine shape.
 
 The daemon validates every record at startup. It does not repair or remove an invalid record.

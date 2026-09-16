@@ -15,7 +15,10 @@ from atlas.vm.core.multipart_upload import (
 	get_multipart_part_count,
 )
 from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
-from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
+from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import (
+	MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT,
+	VirtualMachineImage,
+)
 
 
 def artifact_url(image, artifact, expiry_seconds=0) -> str:
@@ -35,7 +38,7 @@ class TestVirtualMachineImage(UnitTestCase):
 			"kernel_file": None,
 			"image_size_mib": 10,
 			"kernel_size_mib": 5,
-			"platform": "amd64",
+			"architecture": "amd64",
 			"status": "Available",
 			"title": "Machine image",
 			"cache_image": 0,
@@ -168,6 +171,20 @@ class TestVirtualMachineImage(UnitTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			image.validate_memory_snapshot_configuration()
 
+	def test_memory_snapshot_rejects_more_vcpus_than_firecracker_allows(self) -> None:
+		image = self.make_image(
+			memory_snapshot=1,
+			memory_snapshot_virtual_cpu_count=MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT + 1,
+			memory_snapshot_memory_mib=2048,
+			memory_snapshot_disk_mib=10240,
+		)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.validate_memory_snapshot_configuration()
+
+		image.memory_snapshot_virtual_cpu_count = MAXIMUM_SNAPSHOT_VIRTUAL_CPU_COUNT
+		image.validate_memory_snapshot_configuration()
+
 	def test_memory_without_cache_remains_a_normal_image_request(self) -> None:
 		image = self.make_image(
 			memory_snapshot=1,
@@ -221,21 +238,23 @@ class TestVirtualMachineImage(UnitTestCase):
 
 
 class TestVirtualMachineImageTransfer(UnitTestCase):
-	def test_snapshot_uuid_becomes_machine_image_name(self) -> None:
+	def test_snapshot_uses_the_rounded_up_guest_cpu_count(self) -> None:
 		virtual_machine = SimpleNamespace(
 			name="VM-00001",
 			server="server-1",
 			virtual_machine_image="system-image",
+			architecture="amd64",
+			cpu_millicores=1500,
+			memory_mib=2048,
 			disk_mib=1024,
 			tenant_id=7,
 		)
 		original_image = SimpleNamespace(
-			platform="amd64",
-			operating_system="Ubuntu",
-			operating_system_version="24.04",
+			architecture="amd64",
 		)
 		server = SimpleNamespace(name="server-1")
 		image = Mock()
+		image_values = {}
 		metal_client = Mock()
 		metal_client.create_snapshot.return_value = {
 			"id": "01900000-0000-7000-8000-000000000001",
@@ -246,6 +265,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 		def get_doc(doctype, name=None):
 			if isinstance(doctype, dict):
+				image_values.update(doctype)
 				return image
 			if doctype == "Virtual Machine Image":
 				return original_image
@@ -256,13 +276,90 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
 			patch.object(service, "enqueue") as enqueue_transfer,
 		):
-			image_name = service.create_from_virtual_machine(virtual_machine, "Machine image")
+			image_name = service.create_from_virtual_machine(
+				virtual_machine, "Machine image", memory_snapshot=True
+			)
 
 		self.assertEqual(image_name, "01900000-0000-7000-8000-000000000001")
 		image.insert.assert_called_once_with(
 			set_name="01900000-0000-7000-8000-000000000001",
 		)
+		self.assertEqual(image_values["memory_snapshot_virtual_cpu_count"], 2)
+		self.assertEqual(image_values["memory_snapshot_memory_mib"], 2048)
 		enqueue_transfer.assert_called_once_with("01900000-0000-7000-8000-000000000001")
+
+	def test_requested_tags_reach_the_new_image(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			server="server-1",
+			virtual_machine_image="system-image",
+			architecture="amd64",
+			disk_mib=1024,
+			tenant_id=0,
+		)
+		values = {}
+		metal_client = Mock()
+		metal_client.create_snapshot.return_value = {
+			"id": "01900000-0000-7000-8000-000000000002",
+			"rootfs": {"size_bytes": 1024 * 1024},
+			"kernel": {"size_bytes": 1024 * 1024},
+		}
+		service = VirtualMachineImageTransferService()
+
+		def get_doc(doctype, name=None):
+			if isinstance(doctype, dict):
+				values.update(doctype)
+				return Mock()
+			return SimpleNamespace(name="server-1")
+
+		with (
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", side_effect=get_doc),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
+			patch.object(service, "enqueue"),
+		):
+			service.create_from_virtual_machine(
+				virtual_machine,
+				"Pilot image",
+				tags={"purpose": "pilot", "pilot_version": "1.2.3"},
+			)
+
+		self.assertEqual(
+			values["tags"],
+			[{"key": "purpose", "value": "pilot"}, {"key": "pilot_version", "value": "1.2.3"}],
+		)
+
+	def test_an_image_without_tags_carries_none(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			server="server-1",
+			virtual_machine_image="system-image",
+			architecture="amd64",
+			disk_mib=1024,
+			tenant_id=7,
+		)
+		values = {}
+		metal_client = Mock()
+		metal_client.create_snapshot.return_value = {
+			"id": "01900000-0000-7000-8000-000000000003",
+			"rootfs": {"size_bytes": 1024 * 1024},
+			"kernel": {"size_bytes": 1024 * 1024},
+		}
+		service = VirtualMachineImageTransferService()
+
+		def get_doc(doctype, name=None):
+			if isinstance(doctype, dict):
+				values.update(doctype)
+				return Mock()
+			return SimpleNamespace(name="server-1")
+
+		with (
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", side_effect=get_doc),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
+			patch.object(service, "enqueue"),
+		):
+			service.create_from_virtual_machine(virtual_machine, "Machine image")
+
+		self.assertEqual(values["tags"], [])
 
 	def test_part_count_has_no_empty_boundary_part(self) -> None:
 		self.assertEqual(get_multipart_part_count(MULTIPART_PART_SIZE_MIB), 1)

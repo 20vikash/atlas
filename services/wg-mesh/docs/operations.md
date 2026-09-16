@@ -26,7 +26,7 @@ The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds 
 
 ## Requirements
 
-Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
+Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Use a prefix that covers every other host, because the VM hook returns the tunnel packet to Linux routing and the host must have a route to the remote host address. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
 
 Build and load the Atlas neighbour kernel module on every host before you configure Atlas WG Mesh. The NDP and NUD hooks call its kfuncs, so the BPF object cannot load without it:
 
@@ -48,7 +48,7 @@ Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 | WireGuard address range    | `fdab::/16`                  |
 | Shared VLAN route          | `fdaa::/16 dev <uplink>`     |
 | Uplink MTU                 | 1500 or greater              |
-| WireGuard MTU              | 1420                         |
+| WireGuard MTU              | Uplink MTU minus 60          |
 | VM interface and guest MTU | 1380                         |
 
 Discovery uses IPv6 NDP on the shared VLAN. Neighbour advertisements are not authenticated, so restrict the VLAN to trusted participating hosts. Cross-tenant traffic is permitted only when one endpoint is a controller-whitelisted privileged tenant-`0` VM address, so reserve those addresses for trusted platform services.

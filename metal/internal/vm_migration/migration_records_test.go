@@ -25,7 +25,7 @@ func newTargetRecord() TargetMigrationRecord {
 func TestTargetRecordRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	record := newTargetRecord()
-	record.Config = &PortableConfig{VirtualMachineID: "vm-1", Specification: vm.Specification{VirtualCPUCount: 2, MemoryMiB: 2048}}
+	record.Config = &PortableConfig{VirtualMachineID: "vm-1", Specification: vm.Specification{CPUMillicores: 2000, MemoryMiB: 2048}}
 	record.UserID = 100001
 	record.GroupID = 100001
 
@@ -185,23 +185,18 @@ func TestDropUnreadableRecordsRemovesACorruptRecord(t *testing.T) {
 	}
 }
 
-func TestReadTargetIgnoresAnUnknownField(t *testing.T) {
+func TestReadTargetRejectsAnUnknownField(t *testing.T) {
 	directory := t.TempDir()
 	migrationDirectory := filepath.Join(directory, "vm-1", migrationSubdirectory)
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	// A record from another schema still loads, so a schema change cannot brick the daemon.
 	body := `{"schema_version":1,"id":"mig-1","virtual_machine_id":"vm-1","source":"x","status":"running","phase":"preparing","created_at":"2026-01-01T00:00:00Z","caller":"gone"}`
 	if err := os.WriteFile(filepath.Join(migrationDirectory, targetFileName), []byte(body), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	record, err := newMigrationStore(directory).readTarget("vm-1")
-	if err != nil {
-		t.Fatalf("an unknown field was rejected: %v", err)
-	}
-	if record.ID != "mig-1" || record.Status != MigrationRunning {
-		t.Fatalf("record = %+v", record)
+	if _, err := newMigrationStore(directory).readTarget("vm-1"); err == nil {
+		t.Fatal("an unknown field was accepted")
 	}
 }
 

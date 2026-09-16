@@ -21,7 +21,7 @@ from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request
 
 CREATE_BODY = {
 	"image_id": "system-image",
-	"vcpus": 2,
+	"cpu_millicores": 2000,
 	"memory_mib": 2048,
 	"disk_mib": 20480,
 }
@@ -33,7 +33,8 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"name": "vm-00001",
 		"tenant_id": tenant_id,
 		"virtual_machine_image": "system-image",
-		"vcpus": 2,
+		"architecture": "amd64",
+		"cpu_millicores": 2000,
 		"memory_mib": 2048,
 		"disk_mib": 20480,
 		"sleep_after_idle_seconds": 0,
@@ -89,6 +90,14 @@ def stored_rows(rows: list[SimpleNamespace]):
 		return rows if doctype == "Virtual Machine" else query(doctype, *args, **kwargs)
 
 	return patch("atlas.api.routes.virtual_machines.frappe.get_list", side_effect=get_list)
+
+
+def stored_tags(tags: dict[str, dict[str, str]] | None = None):
+	"""Patch the tag query that a list route runs for its page of rows."""
+	return patch(
+		"atlas.api.routes.virtual_machines.read_tags_for",
+		side_effect=lambda doctype, names: {name: (tags or {}).get(name, {}) for name in names},
+	)
 
 
 def owned_document(virtual_machine: SimpleNamespace):
@@ -185,8 +194,8 @@ class TestCreateVirtualMachine(UnitTestCase):
 			self.assertEqual(status, 400)
 			self.assertIn(field, [item["name"] for item in body["error"]["fields"]])
 
-	def test_create_rejects_values_that_are_not_positive(self) -> None:
-		status, _, _ = self.create({**CREATE_BODY, "vcpus": 0})
+	def test_create_rejects_cpu_below_the_minimum(self) -> None:
+		status, _, _ = self.create({**CREATE_BODY, "cpu_millicores": 99})
 
 		self.assertEqual(status, 400)
 
@@ -207,6 +216,7 @@ class TestReadVirtualMachines(UnitTestCase):
 			),
 			stored_rows(rows) as get_list,
 			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
+			stored_tags(),
 		):
 			status, body = call_route(list_virtual_machines)
 
@@ -227,6 +237,7 @@ class TestReadVirtualMachines(UnitTestCase):
 				"atlas.api.routes.virtual_machines.get_reported_state_rows",
 				return_value={"vm-00001": state},
 			),
+			stored_tags(),
 		):
 			status, body = call_route(list_virtual_machines)
 
@@ -243,6 +254,7 @@ class TestReadVirtualMachines(UnitTestCase):
 			api_request("GET", "/api/atlas/virtual-machines", tenant_id=TENANT_ID),
 			stored_rows(rows),
 			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
+			stored_tags(),
 		):
 			status, body = call_route(list_virtual_machines)
 
@@ -307,13 +319,28 @@ class TestVirtualMachineActions(UnitTestCase):
 
 
 class TestVirtualMachineConfiguration(UnitTestCase):
+	def test_compute_change_rejects_cpu_below_the_minimum(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/compute",
+				tenant_id=TENANT_ID,
+				json={"cpu_millicores": 99},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 400)
+		virtual_machine.update_compute.assert_not_called()
+
 	def test_compute_change_calls_the_virtual_machine_method(self) -> None:
 		with (
 			api_request(
 				"PATCH",
 				"/api/atlas/virtual-machines/vm-00001/compute",
 				tenant_id=TENANT_ID,
-				json={"vcpus": 4},
+				json={"cpu_millicores": 4000},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
 		):
@@ -321,7 +348,7 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		self.assertEqual(body["id"], "vm-00001")
-		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
+		virtual_machine.update_compute.assert_called_once_with({"cpu_millicores": 4000})
 
 	def test_compute_change_keeps_the_value_that_is_absent(self) -> None:
 		with (
@@ -329,14 +356,14 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 				"PATCH",
 				"/api/atlas/virtual-machines/vm-00001/compute",
 				tenant_id=TENANT_ID,
-				json={"vcpus": 4},
+				json={"cpu_millicores": 4000},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
 		):
 			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
 
 		self.assertEqual(status, 202)
-		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
+		virtual_machine.update_compute.assert_called_once_with({"cpu_millicores": 4000})
 
 	def test_an_idle_timeout_change_reaches_the_virtual_machine_method(self) -> None:
 		with (

@@ -9,6 +9,7 @@ from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
+from atlas.vm.core.vm_state import has_live_virtual_machine_for_image
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -50,7 +51,7 @@ class VirtualMachineImageDeletionService:
 			filters={"image_type": "machine", "status": "Archived"},
 			pluck="name",
 		):
-			if frappe.db.exists("Virtual Machine", {"virtual_machine_image": name}):
+			if has_live_virtual_machine_for_image(name):
 				continue
 
 			frappe.db.set_value("Virtual Machine Image", name, "status", "Deleting")
@@ -60,13 +61,13 @@ class VirtualMachineImageDeletionService:
 	def is_reclaimable(image: VirtualMachineImage) -> bool:
 		"""Return whether the stored artifacts can be removed now.
 
-		A System image stays shared, so only a Machine image that no virtual
-		machine references releases its storage.
+		A System image stays shared, so only a Machine image that no live virtual
+		machine needs releases its storage.
 		"""
 		if image.image_type != "machine":
 			return False
 
-		return not frappe.db.exists("Virtual Machine", {"virtual_machine_image": image.name})
+		return not has_live_virtual_machine_for_image(cast(str, image.name))
 
 	def enqueue(self, image_name: str) -> None:
 		"""Enqueue one repeatable Machine image cleanup."""
@@ -92,9 +93,9 @@ class VirtualMachineImageDeletionService:
 
 	@staticmethod
 	def validate_is_unused(image_name: str) -> None:
-		"""Reject deletion while a virtual machine uses the image."""
-		if frappe.db.exists("Virtual Machine", {"virtual_machine_image": image_name}):
-			frappe.throw(_("A Virtual Machine uses this image."), exc=VirtualMachineImageInUse)
+		"""Reject deletion while a live virtual machine needs the image."""
+		if has_live_virtual_machine_for_image(image_name):
+			frappe.throw(_("A live Virtual Machine uses this image."), exc=VirtualMachineImageInUse)
 
 	@staticmethod
 	def abort_uploads(image: VirtualMachineImage, client: ObjectStorageClient) -> None:

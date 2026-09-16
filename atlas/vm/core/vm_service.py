@@ -11,7 +11,12 @@ from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import EGRESS_MODES, VirtualMachineCreateRequest
+from atlas.vm.core.models import (
+	EGRESS_MODES,
+	MAXIMUM_CPU_MILLICORES,
+	MINIMUM_CPU_MILLICORES,
+	VirtualMachineCreateRequest,
+)
 from atlas.vm.core.placement import PlacementService
 
 if TYPE_CHECKING:
@@ -64,8 +69,8 @@ class VirtualMachineService:
 
 		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
-		server = PlacementService().select_server(request, image.platform)
-		virtual_machine = cls.insert_draft(request, cast(str, image.name), cast(str, server.name))
+		server = PlacementService().select_server(request, image.architecture)
+		virtual_machine = cls.insert_draft(request, image, cast(str, server.name))
 		service = cls(virtual_machine)
 		server_ip_address = (
 			service.assign_ip_address(request.server_ip_address) if request.server_ip_address else None
@@ -101,16 +106,21 @@ class VirtualMachineService:
 
 	@staticmethod
 	def insert_draft(
-		request: VirtualMachineCreateRequest, image_name: str, server_name: str
+		request: VirtualMachineCreateRequest, image: VirtualMachineImage, server_name: str
 	) -> VirtualMachine:
-		"""Insert one draft that reserves capacity before a Metal request."""
+		"""Insert one draft that reserves capacity before a Metal request.
+
+		The draft copies the image architecture, so later placement never reads the
+		image again and the image stays deletable.
+		"""
 		virtual_machine = frappe.get_doc(
 			{
 				"doctype": "Virtual Machine",
 				"is_draft": 1,
 				"server": server_name,
-				"virtual_machine_image": image_name,
-				"vcpus": request.virtual_cpu_count,
+				"virtual_machine_image": image.name,
+				"architecture": image.architecture,
+				"cpu_millicores": request.cpu_millicores,
 				"memory_mib": request.memory_mib,
 				"disk_mib": request.disk_mib,
 				"tenant_id": request.tenant_id,
@@ -130,7 +140,7 @@ class VirtualMachineService:
 		"""Return the complete Metal create request."""
 		return {
 			"compute": {
-				"virtual_cpu_count": request.virtual_cpu_count,
+				"cpu_millicores": request.cpu_millicores,
 				"memory_mib": request.memory_mib,
 				"sleep_after_idle_seconds": request.sleep_after_idle_seconds,
 			},
@@ -242,16 +252,29 @@ class VirtualMachineService:
 
 	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Apply selected compute changes."""
+		cpu_millicores = changes.get("cpu_millicores")
+		if cpu_millicores is not None and (
+			not isinstance(cpu_millicores, int)
+			or isinstance(cpu_millicores, bool)
+			or not MINIMUM_CPU_MILLICORES <= cpu_millicores <= MAXIMUM_CPU_MILLICORES
+		):
+			frappe.throw(
+				_("CPU must be between {0} and {1} millicores.").format(
+					MINIMUM_CPU_MILLICORES, MAXIMUM_CPU_MILLICORES
+				),
+				exc=AtlasUserError,
+			)
+
 		information = self.require_information()
 		current_compute = information.desired.compute
 		request = {
-			"virtual_cpu_count": current_compute.virtual_cpu_count,
+			"cpu_millicores": current_compute.cpu_millicores,
 			"memory_mib": current_compute.memory_mib,
 			"sleep_after_idle_seconds": self.virtual_machine.sleep_after_idle_seconds,
 			**changes,
 		}
 		is_shape_changed = (
-			request["virtual_cpu_count"] != current_compute.virtual_cpu_count
+			request["cpu_millicores"] != current_compute.cpu_millicores
 			or request["memory_mib"] != current_compute.memory_mib
 		)
 		if is_shape_changed and information.observed.state != "stopped":
@@ -262,7 +285,7 @@ class VirtualMachineService:
 		result = self.set_compute(request)
 		if is_shape_changed:
 			self.virtual_machine.db_set(
-				{"vcpus": request["virtual_cpu_count"], "memory_mib": request["memory_mib"]}
+				{"cpu_millicores": request["cpu_millicores"], "memory_mib": request["memory_mib"]}
 			)
 		if request["sleep_after_idle_seconds"] != self.virtual_machine.sleep_after_idle_seconds:
 			self.virtual_machine.db_set("sleep_after_idle_seconds", request["sleep_after_idle_seconds"])

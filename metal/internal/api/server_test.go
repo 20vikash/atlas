@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -39,7 +40,7 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		ID:                            id,
 		State:                         vm.StateUnknown,
 		DesiredState:                  vm.StateRunning,
-		VirtualCPUCount:               specification.VirtualCPUCount,
+		CPUMillicores:                 specification.CPUMillicores,
 		MemoryMiB:                     specification.MemoryMiB,
 		DiskMiB:                       specification.DiskMiB,
 		Image:                         specification.Image,
@@ -154,13 +155,13 @@ func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id strin
 		return vm.ErrNotFound
 	}
 	// A shape change needs a stopped VM. An idle timeout change does not.
-	shapeChanged := virtualMachine.info.VirtualCPUCount != compute.VirtualCPUCount ||
+	shapeChanged := virtualMachine.info.CPUMillicores != compute.CPUMillicores ||
 		virtualMachine.info.MemoryMiB != compute.MemoryMiB
 	if shapeChanged {
 		if virtualMachine.info.State != vm.StateStopped {
 			return vm.ErrConflict
 		}
-		virtualMachine.info.VirtualCPUCount = compute.VirtualCPUCount
+		virtualMachine.info.CPUMillicores = compute.CPUMillicores
 		virtualMachine.info.MemoryMiB = compute.MemoryMiB
 		virtualMachine.info.DesiredState = vm.StateRunning
 	}
@@ -370,7 +371,7 @@ func (stubSerialBroker) Attach(context.Context, string, io.ReadWriter, <-chan co
 }
 
 const (
-	validCreateRequest = `{"compute":{"virtual_cpu_count":1,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink"},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
+	validCreateRequest = `{"compute":{"cpu_millicores":1000,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink"},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
 	validSSHKey        = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA user@example"
 )
 
@@ -501,7 +502,7 @@ func TestListReturnsAnArrayOfNestedResources(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response) != 1 || response[0].Desired.Compute.VirtualCPUCount != 1 {
+	if len(response) != 1 || response[0].Desired.Compute.CPUMillicores != 1000 {
 		t.Fatalf("virtual machine list = %+v", response)
 	}
 }
@@ -613,8 +614,8 @@ func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
 func TestCreateStoresAndReturnsTheIdleTimeout(t *testing.T) {
 	srv := newTestServer(t)
 	body := strings.Replace(validCreateRequest,
-		`"compute":{"virtual_cpu_count":1,"memory_mib":512}`,
-		`"compute":{"virtual_cpu_count":1,"memory_mib":512,"sleep_after_idle_seconds":1800}`, 1)
+		`"compute":{"cpu_millicores":1000,"memory_mib":512}`,
+		`"compute":{"cpu_millicores":1000,"memory_mib":512,"sleep_after_idle_seconds":1800}`, 1)
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
@@ -649,7 +650,7 @@ func TestSetComputeStoresTheIdleTimeout(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	body := `{"virtual_cpu_count":1,"memory_mib":512,"sleep_after_idle_seconds":1800}`
+	body := `{"cpu_millicores":1000,"memory_mib":512,"sleep_after_idle_seconds":1800}`
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
@@ -664,7 +665,7 @@ func TestSetComputeRejectsANegativeIdleTimeout(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	body := `{"virtual_cpu_count":1,"memory_mib":512,"sleep_after_idle_seconds":-1}`
+	body := `{"cpu_millicores":1000,"memory_mib":512,"sleep_after_idle_seconds":-1}`
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusBadRequest)
 }
 
@@ -672,7 +673,7 @@ func TestSetComputeRejectsAnUnsafeIdleTimeout(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	body := `{"virtual_cpu_count":1,"memory_mib":512,"sleep_after_idle_seconds":9223372037}`
+	body := `{"cpu_millicores":1000,"memory_mib":512,"sleep_after_idle_seconds":9223372037}`
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", body, http.StatusBadRequest)
 }
 
@@ -762,13 +763,13 @@ func TestSetDiskRejectsShrink(t *testing.T) {
 func TestSetComputeNeedsStoppedVM(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":1,"memory_mib":256}`, http.StatusConflict)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"cpu_millicores":500,"memory_mib":512}`, http.StatusConflict)
 }
 
 func TestSetComputeRequiresBothValues(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":1}`, http.StatusBadRequest)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"cpu_millicores":500}`, http.StatusBadRequest)
 }
 
 func TestSetComputeChecksOnlyAdditionalCapacity(t *testing.T) {
@@ -808,7 +809,7 @@ func TestSetComputeUpdatesStoppedVM(t *testing.T) {
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 	driver.virtualMachines["vm1"].info.State = vm.StateStopped
 
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":1,"memory_mib":256}`, http.StatusAccepted)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"cpu_millicores":500,"memory_mib":256}`, http.StatusAccepted)
 
 	m := driver.virtualMachines["vm1"]
 	if m.info.MemoryMiB != 256 {
@@ -816,6 +817,29 @@ func TestSetComputeUpdatesStoppedVM(t *testing.T) {
 	}
 	if m.info.DesiredState != vm.StateRunning {
 		t.Errorf("desired = %q, want running", m.info.DesiredState)
+	}
+}
+
+func TestSetComputeAcceptsMaximumCPUEntitlement(t *testing.T) {
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
+	srv := newServer(t, driver)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	driver.virtualMachines["vm1"].info.State = vm.StateStopped
+
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"cpu_millicores":32000,"memory_mib":256}`, http.StatusAccepted)
+
+	if got := driver.virtualMachines["vm1"].info.CPUMillicores; got != 32000 {
+		t.Errorf("CPU millicores = %d, want 32000", got)
+	}
+}
+
+func TestComputeRejectsCPUEntitlementOutsideFirecrackerRange(t *testing.T) {
+	srv := newTestServer(t)
+
+	for _, cpuMillicores := range []int{99, 32001} {
+		body := strings.Replace(validCreateRequest, `"cpu_millicores":1000`,
+			fmt.Sprintf(`"cpu_millicores":%d`, cpuMillicores), 1)
+		do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusBadRequest)
 	}
 }
 

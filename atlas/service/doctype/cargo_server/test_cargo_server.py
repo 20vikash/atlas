@@ -13,7 +13,7 @@ from atlas.service.doctype.cargo_server.cargo_server import CargoServer
 
 VALID_REQUEST = {
 	"virtual_machine_image": "image-1",
-	"vcpus": 2,
+	"cpu_millicores": 2000,
 	"memory_mib": 4096,
 	"disk_mib": 16384,
 	"server_ip_address": "203.0.113.9",
@@ -79,6 +79,9 @@ class TestCargoServerProvisionRequest(UnitTestCase):
 		self.assertEqual(request["egress"], "uplink")
 		self.assertEqual(request["hostname"], "cargo")
 		self.assertEqual(request["server_ip_address"], "203.0.113.9")
+		self.assertEqual(request["cpu_millicores"], 2000)
+		self.assertEqual(request["memory_mib"], 4096)
+		self.assertEqual(request["disk_mib"], 16384)
 
 	def test_a_busy_lifecycle_lock_refuses_the_request(self) -> None:
 		with (

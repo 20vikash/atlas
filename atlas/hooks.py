@@ -105,6 +105,7 @@ after_install = [
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
 after_migrate = [
+	"atlas.atlas.core.install.realign_scheduled_job_baselines",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
@@ -211,8 +212,7 @@ scheduler_events = {
 			"atlas.metal_server.usage.enqueue_server_syncs",
 		],
 		"* * * * * */30": [
-			# Poll and advance in-progress Machine image uploads every 30 seconds.
-			"atlas.vm.core.vm_image_transfer.enqueue_pending_machine_image_transfers",
+			"atlas.vm.core.vm_image_transfer.enqueue_pending_virtual_machine_image_transfers",
 			"atlas.vm.core.vm_image_deletion.enqueue_pending_virtual_machine_image_deletions",
 		],
 		"*/15 * * * *": [
@@ -220,6 +220,8 @@ scheduler_events = {
 			"atlas.atlas.core.artifacts.delete_unlinked_files",
 			# Migrate bootstrap images after object storage is configured.
 			"atlas.vm.core.vm_image_storage_migration.enqueue_site_file_image_migrations",
+			# Drop the site files that object storage replaced, after their retention time.
+			"atlas.vm.core.vm_image_storage_migration.delete_expired_site_files",
 		],
 		"0 */12 * * *": [
 			"atlas.atlas.doctype.atlas_settings.atlas_settings.rotate_proxy_cluster_password",
@@ -230,6 +232,7 @@ scheduler_events = {
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",
 			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_cargo_provisioning",
 			"atlas.service.core.cargo.bucket.enqueue_pending_bucket_provisioning",
+			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_pilot_release_tracker_enable",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
 			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],

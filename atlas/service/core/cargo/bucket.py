@@ -100,6 +100,10 @@ class CargoBucket:
 		self.settings.save(ignore_permissions=True)
 		frappe.db.commit()  # nosemgrep
 
+		from atlas.service.doctype.cargo_server.cargo_server import enqueue_pilot_release_tracker_enable
+
+		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+
 
 def enqueue_bucket_provisioning(enqueue_after_commit: bool = True) -> None:
 	"""Queue Atlas bucket creation on the regional Cargo."""

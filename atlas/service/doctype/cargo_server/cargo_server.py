@@ -12,11 +12,26 @@ from frappe.model.document import Document
 from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 
+from atlas.atlas.core.background_jobs import run_as_admin
+from atlas.atlas.core.ssh import SSHRunner
+from atlas.service.core.cargo.storage_cluster import (
+	remove_storage_cluster_config,
+	store_storage_cluster_config,
+)
+
 if TYPE_CHECKING:
 	from collections.abc import Iterator
 
 LIFECYCLE_LOCK_NAME = "atlas:cargo-server:lifecycle"
 PROVISIONABLE_STATUSES = ("Not Provisioned", "Archived")
+PILOT_ADMIN_PASSWORD_RESET_COMMAND = """set -euo pipefail
+quoted_password=$(printf '%q' "$PILOT_ADMIN_PASSWORD")
+su - frappe -c "pilot set-admin-password --password $quoted_password"
+"""
+PILOT_RELEASE_TRACKER_COMMAND = """set -euo pipefail
+quoted_site=$(printf '%q' "$CARGO_SITE")
+su - frappe -c "pilot -b cargo --site $quoted_site $PILOT_RELEASE_TRACKER_COMMAND"
+"""
 
 
 class CargoServer(Document):
@@ -32,6 +47,8 @@ class CargoServer(Document):
 
 		failure_message: DF.SmallText | None
 		installation_task: DF.Link | None
+		auto_build_pilot_images: DF.Check
+		pilot_release_tracker_pending: DF.Check
 		status: DF.Literal["Not Provisioned", "Pending", "Provisioning", "Active", "Failed", "Archived"]
 		virtual_machine: DF.Link | None
 	# end: auto-generated types
@@ -39,8 +56,17 @@ class CargoServer(Document):
 	@property
 	def domain(self) -> str:
 		"""Return the public Cargo domain."""
-		wildcard_domain = frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
-		return f"cargo.{wildcard_domain}"
+		return f"cargo.{self.wildcard_domain}"
+
+	@property
+	def pilot_domain(self) -> str:
+		"""Return the domain of the Pilot administration panel on the Cargo host."""
+		return f"cargo-pilot.{self.wildcard_domain}"
+
+	@property
+	def wildcard_domain(self) -> str:
+		"""Return the regional wildcard domain."""
+		return frappe.get_cached_value("Atlas Settings", "Atlas Settings", "wildcard_domain")
 
 	@frappe.whitelist(methods=["POST"])
 	def provision(self, request: str | dict[str, Any]) -> dict[str, str | bool]:
@@ -53,6 +79,7 @@ class CargoServer(Document):
 		with cargo_lifecycle_lock():
 			cargo_server: CargoServer = frappe.get_single("Cargo Server")
 			cargo_server._validate_provision_request(values)
+			store_storage_cluster_config(values.get("storage_cluster"))
 			cargo_server.status = "Pending"
 			cargo_server.failure_message = None
 			cargo_server.installation_task = None
@@ -68,6 +95,44 @@ class CargoServer(Document):
 		else:
 			frappe.msgprint(_("Cargo Server setup has been queued. Please check after some time."))
 		return {"name": cargo_server.name, "is_draft": is_draft}
+
+	@frappe.whitelist(methods=["POST"])
+	def reset_pilot_admin_password(self) -> dict[str, str]:
+		"""Set a new Pilot administration password on the Cargo host and return it."""
+		_validate_system_manager()
+		with cargo_lifecycle_lock():
+			cargo_server: CargoServer = frappe.get_single("Cargo Server")
+			if cargo_server.status != "Active":
+				frappe.throw(_("Cargo Server must be Active to reset the Pilot administration password."))
+
+			from atlas.service.core.cargo.provisioning import generate_installer_password
+
+			password = generate_installer_password()
+			virtual_machine = frappe.get_doc("Virtual Machine", cargo_server.virtual_machine)
+			result = SSHRunner(virtual_machine.ssh_host).run_command(
+				PILOT_ADMIN_PASSWORD_RESET_COMMAND,
+				data={"PILOT_ADMIN_PASSWORD": password},
+			)
+			if not result.is_success:
+				frappe.throw(_("The Pilot administration password reset failed."))
+
+		return {"password": password, "domain": cargo_server.pilot_domain}
+
+	@frappe.whitelist(methods=["POST"])
+	def enable_pilot_release_tracker(self) -> None:
+		"""Enable image builds for new Pilot releases."""
+		_validate_system_manager()
+		with cargo_lifecycle_lock():
+			cargo_server: CargoServer = frappe.get_single("Cargo Server")
+			cargo_server._set_pilot_release_tracker(enabled=True)
+
+	@frappe.whitelist(methods=["POST"])
+	def disable_pilot_release_tracker(self) -> None:
+		"""Disable image builds for new Pilot releases."""
+		_validate_system_manager()
+		with cargo_lifecycle_lock():
+			cargo_server: CargoServer = frappe.get_single("Cargo Server")
+			cargo_server._set_pilot_release_tracker(enabled=False)
 
 	@frappe.whitelist(methods=["POST"])
 	def archive(self) -> None:
@@ -93,6 +158,7 @@ class CargoServer(Document):
 				frappe.db.commit()  # nosemgrep
 				raise
 
+			remove_storage_cluster_config()
 			cargo_server.status = "Archived"
 			cargo_server.failure_message = None
 			cargo_server.virtual_machine = None
@@ -145,7 +211,7 @@ class CargoServer(Document):
 
 		request = {
 			"virtual_machine_image": values.get("virtual_machine_image"),
-			"vcpus": values.get("vcpus"),
+			"cpu_millicores": values.get("cpu_millicores"),
 			"memory_mib": values.get("memory_mib"),
 			"disk_mib": values.get("disk_mib"),
 			"tenant_id": 0,
@@ -165,6 +231,26 @@ class CargoServer(Document):
 			self.failure_message = f"virtual-machine: {error}"
 			return True
 
+	def _set_pilot_release_tracker(self, enabled: bool) -> None:
+		"""Set Cargo release tracking after its image storage is ready."""
+		if self.status != "Active":
+			frappe.throw(_("Cargo Server must be Active to change Pilot release tracking."))
+		if enabled and not can_enable_pilot_release_tracker():
+			frappe.throw(_("Wait for object storage and all available bootstrap image migrations."))
+
+		virtual_machine = frappe.get_doc("Virtual Machine", self.virtual_machine)
+		command = "enable-pilot-release-tracker" if enabled else "disable-pilot-release-tracker"
+		result = SSHRunner(virtual_machine.ssh_host).run_command(
+			PILOT_RELEASE_TRACKER_COMMAND,
+			data={"CARGO_SITE": self.domain, "PILOT_RELEASE_TRACKER_COMMAND": command},
+		)
+		if not result.is_success:
+			frappe.throw(_("Cargo could not change Pilot release tracking."))
+
+		self.auto_build_pilot_images = enabled
+		self.pilot_release_tracker_pending = False
+		self.save(ignore_permissions=True)
+
 
 @contextmanager
 def cargo_lifecycle_lock() -> Iterator[None]:
@@ -181,6 +267,49 @@ def _validate_system_manager() -> None:
 	user_type = frappe.get_cached_value("User", frappe.session.user, "user_type")
 	if user_type != "System User":
 		frappe.throw(_("Only System Users can manage Cargo Server."), frappe.PermissionError)
+
+
+def has_site_file_images() -> bool:
+	"""Return true while an available bootstrap image uses site file storage."""
+	return frappe.db.exists("Virtual Machine Image", {"artifact_storage": "Site File", "status": "Available"})
+
+
+def can_enable_pilot_release_tracker() -> bool:
+	"""Return true when Cargo can build new images in object storage."""
+	return frappe.get_single("Atlas Settings").is_object_storage_configured and not has_site_file_images()
+
+
+def enqueue_pilot_release_tracker_enable(enqueue_after_commit: bool = True) -> None:
+	"""Queue release tracking when bootstrap image migration makes it possible."""
+	frappe.enqueue(
+		"atlas.service.doctype.cargo_server.cargo_server.enable_pilot_release_tracker_after_migration",
+		queue="long",
+		timeout=120,
+		job_id="atlas||cargo-server||enable-pilot-release-tracker",
+		deduplicate=True,
+		enqueue_after_commit=enqueue_after_commit,
+	)
+
+
+def enqueue_pending_pilot_release_tracker_enable() -> None:
+	"""Retry automatic release tracking while it remains pending."""
+	cargo_server: CargoServer = frappe.get_single("Cargo Server")
+	if cargo_server.pilot_release_tracker_pending:
+		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+
+
+@run_as_admin
+def enable_pilot_release_tracker_after_migration() -> None:
+	"""Enable Cargo release tracking after the last bootstrap image migration."""
+	with cargo_lifecycle_lock():
+		cargo_server: CargoServer = frappe.get_single("Cargo Server")
+		if (
+			not cargo_server.pilot_release_tracker_pending
+			or cargo_server.status != "Active"
+			or not can_enable_pilot_release_tracker()
+		):
+			return
+		cargo_server._set_pilot_release_tracker(enabled=True)
 
 
 def enqueue_pending_cargo_provisioning() -> None:

@@ -98,8 +98,7 @@ func (m *VMMigration) reserveShape(ctx context.Context, specification vm.Specifi
 	if err != nil {
 		return err
 	}
-	if specification.VirtualCPUCount > available.CPUCount ||
-		specification.MemoryMiB > available.MemoryMiB ||
+	if specification.MemoryMiB > available.MemoryMiB ||
 		specification.DiskMiB > available.StorageMiB {
 		return vm.ErrConflict
 	}

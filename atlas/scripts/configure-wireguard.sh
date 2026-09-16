@@ -3,7 +3,6 @@
 set -eu
 
 : "${WIREGUARD_ADDRESS:?WIREGUARD_ADDRESS is required}"
-: "${WIREGUARD_MTU:?WIREGUARD_MTU is required}"
 
 interface=${WIREGUARD_INTERFACE:-wg0}
 listen_port=${WIREGUARD_LISTEN_PORT:-51820}
@@ -27,8 +26,17 @@ esac
 
 step() { echo "==> $*" >&2; }
 
-if [ "$WIREGUARD_MTU" -lt 1280 ]; then
-	echo "WIREGUARD_MTU must be at least 1280 for IPv6, got $WIREGUARD_MTU" >&2
+# The tunnel crosses the uplink, so its MTU sets the WireGuard MTU. The overhead
+# is one IPv4 header, one UDP header, and the WireGuard header.
+uplink=$(ip -4 route show default | awk 'NR == 1 { print $5 }')
+if [ -z "$uplink" ]; then
+	echo "this host has no IPv4 default route" >&2
+	exit 1
+fi
+wireguard_mtu=$(($(cat "/sys/class/net/$uplink/mtu") - 20 - 8 - 32))
+
+if [ "$wireguard_mtu" -lt 1280 ]; then
+	echo "$uplink leaves $wireguard_mtu for WireGuard, below the 1280 IPv6 minimum" >&2
 	exit 1
 fi
 
@@ -47,12 +55,13 @@ fi
 
 step "config ($config_file)"
 if [ ! -f "$config_file" ]; then
-		# The mesh gives each host a /128. The daemon adds peers.
+	# The region prefix makes every peer on-link. The daemon adds peers, and
+	# `wg set` installs no route of its own.
 	cat > "$config_file" <<EOF
 [Interface]
-Address = $WIREGUARD_ADDRESS/128
+Address = $WIREGUARD_ADDRESS/32
 ListenPort = $listen_port
-MTU = $WIREGUARD_MTU
+MTU = $wireguard_mtu
 PostUp = wg set %i private-key $private_key_file
 EOF
 	chmod 600 "$config_file"

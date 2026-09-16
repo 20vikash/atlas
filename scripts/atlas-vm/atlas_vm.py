@@ -523,12 +523,14 @@ class ConsoleReader:
 
 
 NETWORK_SCRIPT_BODY = r"""
-# The tap device is excluded from PREROUTING, so guest traffic to a forwarded
-# port leaves the host instead of returning to the VM.
+# Each forward matches the host address, because a match on the port alone also
+# captures traffic that another guest sends through this host to a remote server.
 rules() {
-	local uplink pair host_port guest_port
+	local uplink uplink_address pair host_port guest_port
 	uplink=$(ip -4 route show default | awk 'NR == 1 { print $5 }')
 	[[ -n $uplink ]] || { echo "this host has no IPv4 default route" >&2; exit 1; }
+	uplink_address=$(ip -4 -o addr show dev "$uplink" | awk 'NR == 1 { split($4, field, "/"); print field[1] }')
+	[[ -n $uplink_address ]] || { echo "$uplink has no IPv4 address" >&2; exit 1; }
 
 	echo "-t nat -A POSTROUTING -s $vm_address/32 -o $uplink -j MASQUERADE"
 	echo "-t nat -A POSTROUTING -s 127.0.0.0/8 -d $vm_address -j SNAT --to-source $host_address"
@@ -537,7 +539,8 @@ rules() {
 	for pair in $forwards; do
 		host_port=${pair%%:*}
 		guest_port=${pair##*:}
-		echo "-t nat -A PREROUTING ! -i $tap_device -p tcp --dport $host_port -j DNAT --to-destination $vm_address:$guest_port"
+		echo "-t nat -A PREROUTING -d $uplink_address -p tcp --dport $host_port -j DNAT --to-destination $vm_address:$guest_port"
+		echo "-t nat -A OUTPUT -d $uplink_address -p tcp --dport $host_port -j DNAT --to-destination $vm_address:$guest_port"
 		echo "-t nat -A OUTPUT -d $host_address -p tcp --dport $host_port -j DNAT --to-destination $vm_address:$guest_port"
 		echo "-t nat -A OUTPUT -d 127.0.0.1 -p tcp --dport $host_port -j DNAT --to-destination $vm_address:$guest_port"
 	done

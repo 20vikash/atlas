@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-from frappe.tests import UnitTestCase
+import frappe
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from atlas.vm.core import vm_state
 
@@ -91,3 +92,68 @@ class TestVirtualMachineState(UnitTestCase):
 
 		self.assertEqual(len(calls["saved"]), 2)
 		self.assertEqual(calls["commit"].call_count, 0)
+
+
+class TestLiveVirtualMachineLookup(IntegrationTestCase):
+	"""The image deletion guard reads the stored host state, not the virtual machine row alone."""
+
+	def setUp(self) -> None:
+		self.image_name = frappe.generate_hash(length=10)
+
+	def insert_virtual_machine(self, **overrides) -> str:
+		"""Write one virtual machine row that uses the image of this test.
+
+		The row skips validation, because this test needs the stored shape and not
+		a live host, a server, or a Metal request.
+		"""
+		virtual_machine = frappe.new_doc("Virtual Machine")
+		virtual_machine.update(
+			{
+				"name": frappe.generate_hash(length=10),
+				"server": "metal-test",
+				"virtual_machine_image": self.image_name,
+				"architecture": "amd64",
+				"cpu_millicores": 1000,
+				"memory_mib": 1024,
+				"disk_mib": 10240,
+				"tenant_id": 7,
+				**overrides,
+			}
+		)
+		virtual_machine.db_insert()
+		return virtual_machine.name
+
+	def store_state(self, name: str, status: str) -> None:
+		"""Write one reported host state for a virtual machine."""
+		state = frappe.new_doc("Virtual Machine State")
+		state.update({"name": name, "virtual_machine": name, "status": status})
+		state.db_insert()
+
+	def test_a_running_virtual_machine_holds_the_image(self) -> None:
+		self.store_state(self.insert_virtual_machine(), "running")
+
+		self.assertTrue(vm_state.has_live_virtual_machine_for_image(self.image_name))
+
+	def test_a_stopped_virtual_machine_holds_the_image(self) -> None:
+		self.store_state(self.insert_virtual_machine(), "stopped")
+
+		self.assertTrue(vm_state.has_live_virtual_machine_for_image(self.image_name))
+
+	def test_a_draft_holds_the_image_before_any_reported_state(self) -> None:
+		self.insert_virtual_machine(is_draft=1)
+
+		self.assertTrue(vm_state.has_live_virtual_machine_for_image(self.image_name))
+
+	def test_a_virtual_machine_with_no_reported_state_does_not_hold_the_image(self) -> None:
+		self.insert_virtual_machine()
+
+		self.assertFalse(vm_state.has_live_virtual_machine_for_image(self.image_name))
+
+	def test_a_terminating_virtual_machine_does_not_hold_the_image(self) -> None:
+		name = self.insert_virtual_machine(is_terminating=1)
+		self.store_state(name, "running")
+
+		self.assertFalse(vm_state.has_live_virtual_machine_for_image(self.image_name))
+
+	def test_an_image_with_no_virtual_machine_is_free(self) -> None:
+		self.assertFalse(vm_state.has_live_virtual_machine_for_image(self.image_name))
