@@ -805,6 +805,19 @@ func TestSetComputeUpdatesStoppedVM(t *testing.T) {
 	}
 }
 
+func TestSetComputeOversubscribesCPU(t *testing.T) {
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
+	srv := newServer(t, driver)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	driver.virtualMachines["vm1"].info.State = vm.StateStopped
+
+	do(t, srv, http.MethodPut, "/v1/vms/vm1/compute", `{"virtual_cpu_count":64,"memory_mib":256}`, http.StatusAccepted)
+
+	if got := driver.virtualMachines["vm1"].info.VirtualCPUCount; got != 64 {
+		t.Errorf("virtual CPU count = %d, want 64", got)
+	}
+}
+
 func TestHealth(t *testing.T) {
 	do(t, newTestServer(t), http.MethodGet, "/health", "", http.StatusOK)
 }

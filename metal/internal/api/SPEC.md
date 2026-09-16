@@ -81,7 +81,7 @@ PUT is used wherever a request replaces desired state, so a repeat is safe. POST
 
 ## Capacity
 
-Compute and disk updates are checked against host capacity before they are stored, and an increase the host cannot satisfy is refused with `409`. Only the increase is checked, because the VM already holds what it reserves.
+Compute and disk updates are checked against host memory and storage before they are stored, and an increase the host cannot satisfy is refused with `409`. Only the increase is checked, because the VM already holds what it reserves. Virtual CPUs are oversubscribed, so a CPU increase is always accepted.
 
 Nothing else is checked this way: the remaining fields do not consume a host resource.
 

@@ -39,7 +39,7 @@ The steps run in order and stop at the first error, so a failed step leaves the 
 
 ## Capacity
 
-CPU is reported against reservations, not against host load: available CPU is the host count minus the virtual CPUs that existing VMs reserve, and it never goes below zero. The host may therefore be busy while CPU still reads as available.
+CPU is reported against reservations, not against host load: available CPU is the host count minus the virtual CPUs that existing VMs reserve, and it never goes below zero. The host may therefore be busy while CPU still reads as available. The report is for visibility only. Virtual CPUs are oversubscribed, so no admission check uses it and available CPU can read as zero while the host accepts more VMs.
 
 Memory and storage are read from the host instead. Available memory comes from `MemAvailable` in `/proc/meminfo`, which counts cache the kernel can reclaim. Free memory alone would understate what a new guest can use.
 

@@ -326,7 +326,7 @@ func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string)
 }
 
 func ampleCapacity(context.Context) (AvailableCapacity, error) {
-	return AvailableCapacity{CPUCount: 64, MemoryMiB: 262144, StorageMiB: 4194304}, nil
+	return AvailableCapacity{MemoryMiB: 262144, StorageMiB: 4194304}, nil
 }
 
 func newMigrationManager(t *testing.T) (*VMMigration, *fakeMachines, *fakeSourceClient) {

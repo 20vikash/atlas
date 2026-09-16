@@ -20,12 +20,20 @@ class TestPlacementCapacity(UnitTestCase):
 		self.assertEqual(remaining.available_memory_mib, 14336)
 		self.assertEqual(remaining.available_storage_mib, 92160)
 
-	def test_capacity_checks_each_resource_and_architecture(self) -> None:
+	def test_capacity_checks_memory_storage_and_architecture(self) -> None:
 		request = VirtualMachineCreateRequest("image", 2, 2048, 10240, 7)
 		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 4, 4096, 20480)
 
 		self.assertTrue(capacity.can_host(request, "amd64"))
 		self.assertFalse(capacity.can_host(request, "arm64"))
+		self.assertFalse(capacity.reserve(0, 4096, 0).can_host(request, "amd64"))
+		self.assertFalse(capacity.reserve(0, 0, 20480).can_host(request, "amd64"))
+
+	def test_capacity_oversubscribes_virtual_cpus(self) -> None:
+		request = VirtualMachineCreateRequest("image", 64, 2048, 10240, 7)
+		capacity = PlacementCapacity("server-1", "amd64", datetime.now(), 0, 4096, 20480)
+
+		self.assertTrue(capacity.can_host(request, "amd64"))
 
 
 class TestPlacementService(UnitTestCase):
