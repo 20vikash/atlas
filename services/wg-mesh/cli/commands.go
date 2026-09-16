@@ -101,10 +101,7 @@ func installHost(uplinkName, wireGuardName string) error {
 		return rollbackInstall(err, uplinkName)
 	}
 
-	// The NUD hook is a tracepoint link, so its attach owns no tc filter.
-	if err := attachNUDHook(
-		filepath.Join(pinDirectory, nudProgram),
-	); err != nil {
+	if err := attachNUDHooks(); err != nil {
 		return rollbackInstall(err, uplinkName)
 	}
 

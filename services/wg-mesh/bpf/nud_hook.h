@@ -31,6 +31,7 @@
 #define AF_INET6 10
 #endif
 
+
 /*
  * Raw tracepoint context for:
  *
@@ -72,6 +73,50 @@ struct trace_event_raw_neigh_timer_handler
 
 
 /*
+ * Raw tracepoint context for:
+ *
+ *     tracepoint/neigh/neigh_update
+ *
+ * Layout matches:
+ *
+ *     /sys/kernel/tracing/events/neigh/neigh_update/format
+ */
+struct trace_event_raw_neigh_update
+{
+	__u16 common_type;
+	__u8 common_flags;
+	__u8 common_preempt_count;
+	__s32 common_pid;
+
+	__u32 family;
+	__u32 dev;
+
+	__u8 lladdr[32];
+	__u8 lladdr_len;
+
+	__u8 flags;
+	__u8 nud_state;
+	__u8 type;
+	__u8 dead;
+
+	__s32 refcnt;
+
+	__u8 primary_key4[4];
+	__u8 primary_key6[16];
+
+	unsigned long confirmed;
+	unsigned long updated;
+	unsigned long used;
+
+	__u8 new_lladdr[32];
+	__u8 new_state;
+
+	__u32 update_flags;
+	__u32 pid;
+};
+
+
+/*
  * Kernel kfunc provided by the Atlas neighbour module.
  */
 extern int atlas_delete_neigh(
@@ -84,12 +129,12 @@ extern int atlas_delete_neigh(
  * Get the IPv6 neighbour address from the tracepoint.
  */
 static __always_inline void get_nud_address(
-	struct trace_event_raw_neigh_timer_handler *ctx,
+	const __u8 *primary_key6,
 	struct in6_addr *address)
 {
 	__builtin_memcpy(
 		address,
-		ctx->primary_key6,
+		primary_key6,
 		sizeof(*address));
 }
 
@@ -117,6 +162,9 @@ static __always_inline void split_address(
 
 /*
  * Reset the consecutive failure counter.
+ *
+ * Keep the entry with value 0 rather than deleting it. This makes
+ * the state explicitly represent a successful/reset neighbour.
  */
 static __always_inline void reset_nud_failures(
 	const struct in6_addr *vm)
@@ -220,10 +268,13 @@ static __always_inline void remove_remote_vm(
 
 
 /*
- * NUD timer handler hook.
+ * NUD failure hook.
+ *
+ * neigh_timer_handler observes the NUD timer processing where
+ * the neighbour reaches NUD_FAILED.
  */
 SEC("tracepoint/neigh/neigh_timer_handler")
-int handle_atlas_nud(
+int handle_atlas_nud_failure(
 	struct trace_event_raw_neigh_timer_handler *ctx)
 {
 	struct in6_addr vm = {};
@@ -239,7 +290,7 @@ int handle_atlas_nud(
 	 * Extract the neighbour IPv6 address.
 	 */
 	get_nud_address(
-		ctx,
+		ctx->primary_key6,
 		&vm);
 
 	/*
@@ -259,16 +310,6 @@ int handle_atlas_nud(
 	 */
 	if (!(ctx->flags & NTF_EXT_LEARNED))
 		return 0;
-
-	/*
-	 * A reachable neighbour breaks the failure streak.
-	 */
-	if (ctx->nud_state == NUD_REACHABLE)
-	{
-		reset_nud_failures(&vm);
-
-		return 0;
-	}
 
 	/*
 	 * Only NUD_FAILED counts as a failure.
@@ -297,6 +338,71 @@ int handle_atlas_nud(
 	 *   3. NUD failure counter
 	 */
 	remove_remote_vm(&vm);
+
+	return 0;
+}
+
+
+/*
+ * NUD success hook.
+ *
+ * neigh_update is used to observe the state that the neighbour
+ * update is changing to. The current state may still be the old
+ * state, so use new_state rather than nud_state.
+ */
+SEC("tracepoint/neigh/neigh_update")
+int handle_atlas_nud_reachable(
+	struct trace_event_raw_neigh_update *ctx)
+{
+	struct in6_addr vm = {};
+
+	/*
+	 * We only care about IPv6 neighbours.
+	 */
+	if (ctx->family != AF_INET6)
+		return 0;
+
+	/*
+	 * Extract the neighbour IPv6 address.
+	 */
+	get_nud_address(
+		ctx->primary_key6,
+		&vm);
+
+	/*
+	 * Only reset counters for addresses that Atlas currently
+	 * knows as remote VMs.
+	 */
+	if (!bpf_map_lookup_elem(
+		    &remote_vms,
+		    &vm))
+		return 0;
+
+	/*
+	 * The tracepoint exposes the neighbour flags as a u8.
+	 *
+	 * NTF_EXT_LEARNED is representable here and identifies
+	 * the externally learned Atlas neighbour.
+	 */
+	if (!(ctx->flags & NTF_EXT_LEARNED))
+		return 0;
+
+	/*
+	 * The tracepoint's nud_state is the current state.
+	 *
+	 * new_state is the state the update is requesting.
+	 *
+	 * We reset the failure streak when the neighbour is being
+	 * changed to NUD_REACHABLE.
+	 */
+	if (ctx->new_state != NUD_REACHABLE)
+		return 0;
+
+	/*
+	 * Successful reachability breaks the consecutive
+	 * failure streak.
+	 */
+	reset_nud_failures(&vm);
 
 	return 0;
 }

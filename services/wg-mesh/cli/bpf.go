@@ -21,17 +21,21 @@ const (
 	vmBPFProgram     = "handle_vm_packet"
 	ndpProgram       = "handle_ndp_packet"
 	wireguardProgram = "handle_wireguard_packet"
-	nudProgram       = "handle_atlas_nud"
+
+	nudFailureProgram   = "handle_atlas_nud_failure"
+	nudReachableProgram = "handle_atlas_nud_reachable"
 
 	ndpUnicastEgressProgram  = "handle_ndp_unicast_egress"
 	ndpUnicastIngressProgram = "handle_ndp_unicast_ingress"
 )
 
-// The NUD hook is not a tc hook: it attaches to the neigh_timer_handler
-// tracepoint.
+// The NUD hooks are not TC hooks: they attach to neighbour tracepoints.
 const nudTracepointCategory = "neigh"
 
-const nudTracepointName = "neigh_timer_handler"
+const (
+	nudFailureTracepointName   = "neigh_timer_handler"
+	nudReachableTracepointName = "neigh_update"
+)
 
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
@@ -83,35 +87,47 @@ func programPath(program string) (string, error) {
 	return top, nil
 }
 
-// nudHookLinkPinPath is the stable pin of the NUD tracepoint link. A pinned
-// link keeps the hook attached after this process exits.
-func nudHookLinkPinPath() string {
+// nudHookLinkPinPath returns the stable pin path for a NUD tracepoint link.
+//
+// Each NUD program has its own link because the two programs attach to
+// different tracepoints.
+func nudHookLinkPinPath(program string) string {
 	return filepath.Join(
 		pinDirectory,
 		"links",
-		nudProgram,
+		program,
 	)
 }
 
-// attachNUDHook attaches the NUD tracepoint program to the kernel
-// neigh_timer_handler tracepoint and pins the link. A perf event link cannot
-// update its program, so an existing link is replaced with one that runs the
-// program at the given path.
-func attachNUDHook(programPath string) error {
+// attachNUDHook attaches one NUD tracepoint program and pins its link.
+//
+// A pinned link keeps the hook attached after this process exits.
+//
+// An existing link is replaced with a new link running the program at the
+// given path.
+func attachNUDHook(
+	programName string,
+	tracepointName string,
+) error {
+	bpfProgramPath, err := programPath(programName)
+	if err != nil {
+		return err
+	}
+
 	program, err := ebpf.LoadPinnedProgram(
-		programPath,
+		bpfProgramPath,
 		nil,
 	)
 	if err != nil {
 		return fmt.Errorf(
 			"load the pinned NUD program %s: %w",
-			programPath,
+			bpfProgramPath,
 			err,
 		)
 	}
 	defer program.Close()
 
-	linkPinPath := nudHookLinkPinPath()
+	linkPinPath := nudHookLinkPinPath(programName)
 
 	existingLink, err := link.LoadPinnedLink(
 		linkPinPath,
@@ -129,29 +145,31 @@ func attachNUDHook(programPath string) error {
 
 		if unpinError != nil || closeError != nil {
 			return fmt.Errorf(
-				"replace the pinned NUD link: %w",
+				"replace the pinned NUD link %s: %w",
+				programName,
 				errors.Join(unpinError, closeError),
 			)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf(
-			"open the pinned NUD link: %w",
+			"open the pinned NUD link %s: %w",
+			programName,
 			err,
 		)
 	}
 
 	newLink, err := link.Tracepoint(
 		nudTracepointCategory,
-		nudTracepointName,
+		tracepointName,
 		program,
 		nil,
 	)
 	if err != nil {
 		return fmt.Errorf(
 			"attach %s to the %s/%s tracepoint: %w",
-			nudProgram,
+			programName,
 			nudTracepointCategory,
-			nudTracepointName,
+			tracepointName,
 			err,
 		)
 	}
@@ -161,19 +179,50 @@ func attachNUDHook(programPath string) error {
 		0755,
 	); err != nil {
 		newLink.Close()
-		return err
+		return fmt.Errorf(
+			"create NUD link pin directory: %w",
+			err,
+		)
 	}
 
 	if err := newLink.Pin(linkPinPath); err != nil {
 		newLink.Close()
 		return fmt.Errorf(
-			"pin the NUD tracepoint link: %w",
+			"pin the NUD tracepoint link %s: %w",
+			programName,
 			err,
 		)
 	}
 
 	// The pin holds the attachment, so releasing this handle is safe.
 	return newLink.Close()
+}
+
+// attachNUDHooks attaches both NUD tracepoint programs.
+//
+// Failure tracking:
+//
+//	neigh_timer_handler -> handle_atlas_nud_failure
+//
+// Successful reachability:
+//
+//	neigh_update -> handle_atlas_nud_reachable
+func attachNUDHooks() error {
+	if err := attachNUDHook(
+		nudFailureProgram,
+		nudFailureTracepointName,
+	); err != nil {
+		return err
+	}
+
+	if err := attachNUDHook(
+		nudReachableProgram,
+		nudReachableTracepointName,
+	); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func pinCollection(
