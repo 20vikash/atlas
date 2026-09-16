@@ -10,6 +10,8 @@ from ..types import UNSET, Unset
 
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.image_response_tags import ImageResponseTags
 
 
 
@@ -24,6 +26,7 @@ class ImageResponse:
     """ A tenant virtual machine image.
 
         Attributes:
+            architecture (str):
             cache_image (bool):
             created_at (int):
             enabled (bool):
@@ -31,17 +34,16 @@ class ImageResponse:
             image_type (str):
             kernel_size_mib (int):
             memory_snapshot (bool):
-            operating_system (str):
-            operating_system_version (str):
-            platform (str):
             rootfs_size_mib (int):
             status (str):
+            tags (ImageResponseTags):
             tenant_id (int):
             title (str):
             transfer_error (None | str):
             transfer_progress (int):
      """
 
+    architecture: str
     cache_image: bool
     created_at: int
     enabled: bool
@@ -49,11 +51,9 @@ class ImageResponse:
     image_type: str
     kernel_size_mib: int
     memory_snapshot: bool
-    operating_system: str
-    operating_system_version: str
-    platform: str
     rootfs_size_mib: int
     status: str
+    tags: ImageResponseTags
     tenant_id: int
     title: str
     transfer_error: None | str
@@ -65,6 +65,9 @@ class ImageResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.image_response_tags import ImageResponseTags # noqa: PLC0415
+        architecture = self.architecture
+
         cache_image = self.cache_image
 
         created_at = self.created_at
@@ -79,15 +82,11 @@ class ImageResponse:
 
         memory_snapshot = self.memory_snapshot
 
-        operating_system = self.operating_system
-
-        operating_system_version = self.operating_system_version
-
-        platform = self.platform
-
         rootfs_size_mib = self.rootfs_size_mib
 
         status = self.status
+
+        tags = self.tags.to_dict()
 
         tenant_id = self.tenant_id
 
@@ -102,6 +101,7 @@ class ImageResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
+            "architecture": architecture,
             "cache_image": cache_image,
             "created_at": created_at,
             "enabled": enabled,
@@ -109,11 +109,9 @@ class ImageResponse:
             "image_type": image_type,
             "kernel_size_mib": kernel_size_mib,
             "memory_snapshot": memory_snapshot,
-            "operating_system": operating_system,
-            "operating_system_version": operating_system_version,
-            "platform": platform,
             "rootfs_size_mib": rootfs_size_mib,
             "status": status,
+            "tags": tags,
             "tenant_id": tenant_id,
             "title": title,
             "transfer_error": transfer_error,
@@ -126,7 +124,10 @@ class ImageResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.image_response_tags import ImageResponseTags # noqa: PLC0415
         d = dict(src_dict)
+        architecture = d.pop("architecture")
+
         cache_image = d.pop("cache_image")
 
         created_at = d.pop("created_at")
@@ -141,15 +142,14 @@ class ImageResponse:
 
         memory_snapshot = d.pop("memory_snapshot")
 
-        operating_system = d.pop("operating_system")
-
-        operating_system_version = d.pop("operating_system_version")
-
-        platform = d.pop("platform")
-
         rootfs_size_mib = d.pop("rootfs_size_mib")
 
         status = d.pop("status")
+
+        tags = ImageResponseTags.from_dict(d.pop("tags"))
+
+
+
 
         tenant_id = d.pop("tenant_id")
 
@@ -166,6 +166,7 @@ class ImageResponse:
         transfer_progress = d.pop("transfer_progress")
 
         image_response = cls(
+            architecture=architecture,
             cache_image=cache_image,
             created_at=created_at,
             enabled=enabled,
@@ -173,11 +174,9 @@ class ImageResponse:
             image_type=image_type,
             kernel_size_mib=kernel_size_mib,
             memory_snapshot=memory_snapshot,
-            operating_system=operating_system,
-            operating_system_version=operating_system_version,
-            platform=platform,
             rootfs_size_mib=rootfs_size_mib,
             status=status,
+            tags=tags,
             tenant_id=tenant_id,
             title=title,
             transfer_error=transfer_error,

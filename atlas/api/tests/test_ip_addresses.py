@@ -84,6 +84,7 @@ class TestReadIPAddresses(UnitTestCase):
 			patch(
 				"atlas.api.routes.ip_addresses.frappe.get_list", return_value=[build_ip_address()]
 			) as get_list,
+			patch("atlas.api.routes.ip_addresses.read_tags_for", return_value={"203.0.113.10": {}}),
 		):
 			status, body = call_route(list_ip_addresses)
 

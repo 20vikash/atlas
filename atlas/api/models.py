@@ -8,6 +8,7 @@ from frappe.utils import get_datetime, get_system_timezone
 from pydantic import BaseModel, ConfigDict, Field
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
+from atlas.atlas.core.tags import read_tags
 from atlas.vm.core.models import VirtualMachineCreateRequest
 
 if TYPE_CHECKING:
@@ -67,6 +68,7 @@ class IPAddressResponse(BaseModel):
 					"address": "203.0.113.10",
 					"state": "reserved",
 					"virtual_machine_id": None,
+					"tags": {"pool": "edge"},
 					"created_at": 1788834165,
 				}
 			]
@@ -78,11 +80,14 @@ class IPAddressResponse(BaseModel):
 	address: str
 	state: str
 	virtual_machine_id: str | None
+	tags: dict[str, str]
 	created_at: int
 
 	@classmethod
-	def from_document(cls, ip_address: MetalServerIPAddress) -> IPAddressResponse:
-		"""Build a response from an IP address document or query row."""
+	def from_document(
+		cls, ip_address: MetalServerIPAddress, tags: dict[str, str] | None = None
+	) -> IPAddressResponse:
+		"""Build a response from an IP address document, or from a query row with its tags."""
 		state = "reserved" if ip_address.status == "Allocated" else ip_address.status.lower()
 		return cls(
 			id=ip_address.name,
@@ -90,6 +95,7 @@ class IPAddressResponse(BaseModel):
 			address=ip_address.address,
 			state=state,
 			virtual_machine_id=ip_address.virtual_machine or None,
+			tags=read_tags(ip_address) if tags is None else tags,
 			created_at=to_unix_timestamp(ip_address.creation),
 		)
 
@@ -105,9 +111,7 @@ class ImageResponse(BaseModel):
 					"tenant_id": 7,
 					"title": "Worker snapshot",
 					"image_type": "machine",
-					"platform": "amd64",
-					"operating_system": "Ubuntu",
-					"operating_system_version": "24.04",
+					"architecture": "amd64",
 					"status": "available",
 					"enabled": True,
 					"cache_image": False,
@@ -116,6 +120,7 @@ class ImageResponse(BaseModel):
 					"kernel_size_mib": 8,
 					"transfer_progress": 100,
 					"transfer_error": None,
+					"tags": {"os": "Ubuntu", "os_version": "24.04"},
 					"created_at": 1788834165,
 				}
 			]
@@ -126,9 +131,7 @@ class ImageResponse(BaseModel):
 	tenant_id: int
 	title: str
 	image_type: str
-	platform: str
-	operating_system: str
-	operating_system_version: str
+	architecture: str
 	status: str
 	enabled: bool
 	cache_image: bool
@@ -137,19 +140,18 @@ class ImageResponse(BaseModel):
 	kernel_size_mib: int
 	transfer_progress: int
 	transfer_error: str | None
+	tags: dict[str, str]
 	created_at: int
 
 	@classmethod
-	def from_document(cls, image: VirtualMachineImage) -> ImageResponse:
-		"""Build a response from an image document or query row."""
+	def from_document(cls, image: VirtualMachineImage, tags: dict[str, str] | None = None) -> ImageResponse:
+		"""Build a response from an image document, or from a query row with its tags."""
 		return cls(
 			id=image.name,
 			tenant_id=image.tenant_id,
 			title=image.title,
 			image_type=image.image_type,
-			platform=image.platform,
-			operating_system=image.operating_system,
-			operating_system_version=image.operating_system_version,
+			architecture=image.architecture,
 			status=image.status.lower(),
 			enabled=bool(image.enabled),
 			cache_image=bool(image.cache_image),
@@ -158,6 +160,7 @@ class ImageResponse(BaseModel):
 			kernel_size_mib=image.kernel_size_mib,
 			transfer_progress=image.transfer_progress,
 			transfer_error=image.transfer_error or None,
+			tags=read_tags(image) if tags is None else tags,
 			created_at=to_unix_timestamp(image.creation),
 		)
 
@@ -347,10 +350,12 @@ class VirtualMachineResponse(BaseModel):
 					"id": "vm-00001",
 					"tenant_id": 7,
 					"image_id": "8f1c2d3e4b5a6978",
+					"architecture": "amd64",
 					"vcpus": 2,
 					"memory_mib": 2048,
 					"disk_mib": 20480,
 					"sleep_after_idle_seconds": 0,
+					"tags": {"env": "prod"},
 					"created_at": 1788834165,
 				}
 			]
@@ -360,23 +365,29 @@ class VirtualMachineResponse(BaseModel):
 	id: str
 	tenant_id: int
 	image_id: str
+	architecture: str
 	vcpus: int
 	memory_mib: int
 	disk_mib: int
 	sleep_after_idle_seconds: int
+	tags: dict[str, str]
 	created_at: int
 
 	@classmethod
-	def from_document(cls, virtual_machine: VirtualMachine) -> VirtualMachineResponse:
-		"""Build a response from a virtual machine document or query row."""
+	def from_document(
+		cls, virtual_machine: VirtualMachine, tags: dict[str, str] | None = None
+	) -> VirtualMachineResponse:
+		"""Build a response from a VM document, or from a query row with its tags."""
 		return cls(
 			id=virtual_machine.name,
 			tenant_id=virtual_machine.tenant_id,
 			image_id=virtual_machine.virtual_machine_image,
+			architecture=virtual_machine.architecture,
 			vcpus=virtual_machine.vcpus,
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
+			tags=read_tags(virtual_machine) if tags is None else tags,
 			created_at=to_unix_timestamp(virtual_machine.creation),
 		)
 
@@ -401,10 +412,10 @@ class VirtualMachineListResponse(VirtualMachineResponse):
 
 	@classmethod
 	def from_document_and_state(
-		cls, virtual_machine: VirtualMachine, state: Any | None
+		cls, virtual_machine: VirtualMachine, state: Any | None, tags: dict[str, str] | None = None
 	) -> VirtualMachineListResponse:
 		"""Build a list response from Atlas and the stored host state."""
-		stored = VirtualMachineResponse.from_document(virtual_machine)
+		stored = VirtualMachineResponse.from_document(virtual_machine, tags)
 		return cls(
 			**stored.model_dump(),
 			last_known_state=get_current_state(virtual_machine, state.status if state else None),
@@ -486,6 +497,8 @@ class VirtualMachineDetailResponse(BaseModel):
 	id: str
 	tenant_id: int
 	image_id: str
+	architecture: str
+	tags: dict[str, str]
 	created_at: int
 	is_privileged: bool
 	desired_state: str | None
@@ -507,6 +520,8 @@ class VirtualMachineDetailResponse(BaseModel):
 			id=virtual_machine.name,
 			tenant_id=virtual_machine.tenant_id,
 			image_id=virtual_machine.virtual_machine_image,
+			architecture=virtual_machine.architecture,
+			tags=read_tags(virtual_machine),
 			created_at=to_unix_timestamp(virtual_machine.creation),
 			is_privileged=bool(virtual_machine.is_privileged),
 			desired_state=desired.state if desired else None,

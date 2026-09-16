@@ -33,6 +33,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"name": "vm-00001",
 		"tenant_id": tenant_id,
 		"virtual_machine_image": "system-image",
+		"architecture": "amd64",
 		"vcpus": 2,
 		"memory_mib": 2048,
 		"disk_mib": 20480,
@@ -89,6 +90,14 @@ def stored_rows(rows: list[SimpleNamespace]):
 		return rows if doctype == "Virtual Machine" else query(doctype, *args, **kwargs)
 
 	return patch("atlas.api.routes.virtual_machines.frappe.get_list", side_effect=get_list)
+
+
+def stored_tags(tags: dict[str, dict[str, str]] | None = None):
+	"""Patch the tag query that a list route runs for its page of rows."""
+	return patch(
+		"atlas.api.routes.virtual_machines.read_tags_for",
+		side_effect=lambda doctype, names: {name: (tags or {}).get(name, {}) for name in names},
+	)
 
 
 def owned_document(virtual_machine: SimpleNamespace):
@@ -207,6 +216,7 @@ class TestReadVirtualMachines(UnitTestCase):
 			),
 			stored_rows(rows) as get_list,
 			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
+			stored_tags(),
 		):
 			status, body = call_route(list_virtual_machines)
 
@@ -227,6 +237,7 @@ class TestReadVirtualMachines(UnitTestCase):
 				"atlas.api.routes.virtual_machines.get_reported_state_rows",
 				return_value={"vm-00001": state},
 			),
+			stored_tags(),
 		):
 			status, body = call_route(list_virtual_machines)
 
@@ -243,6 +254,7 @@ class TestReadVirtualMachines(UnitTestCase):
 			api_request("GET", "/api/atlas/virtual-machines", tenant_id=TENANT_ID),
 			stored_rows(rows),
 			patch("atlas.api.routes.virtual_machines.get_reported_state_rows", return_value={}),
+			stored_tags(),
 		):
 			status, body = call_route(list_virtual_machines)
 

@@ -16,7 +16,8 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 |---|---|
 | `VirtualMachine` (DocType) | The reservation, permissions, and the whitelisted API. Runtime values read through. |
 | `VirtualMachineImage` (DocType) | The durable boot artifact and its immutable reference. |
-| `Virtual Machine State` (DocType) | The last status a host reported for one VM. The name is the VM name. |
+| `Virtual Machine State` (DocType) | The last status a host reported for one VM. The name is the VM name. It also answers whether a live VM still needs an image. |
+| `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Metal Server IP Address. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
 | `PlacementService` | Choosing and locking the host for a new VM. |
 | `MetalClient` | `/v1` HTTP transport and error classification. |
@@ -66,6 +67,10 @@ Two scheduled jobs settle records that a lost response left uncertain: stale dra
 
 Virtual Machine Image is the durable boot artifact. `image_type` is `System` or `Machine`. Each image carries a tenant ID, and a Machine image inherits the tenant of its source virtual machine. System images are shared with every tenant. Machine images are visible only to their owning tenant. Each image has its own rootfs and kernel location, exact byte size, and SHA-256 value. The immutable reference uses the architecture and both artifact hashes.
 
+An image also carries `architecture` and a `tags` table. Use a tag for any other selection value, such as the operating system name and version that `build-ubuntu-base-image` writes.
+
+A virtual machine reads its image once, at creation. It copies the architecture into its own `architecture` field and stores the image name as plain text. There is no link from a virtual machine to an image, so an image can be deleted while its virtual machines run. Placement and migration use the stored architecture and never read the image again.
+
 `artifact_storage` is the single owner of the artifact location. `Object Storage` uses the object keys and signs a URL for 24 hours. `Site File` uses two public site Files and their permanent URLs, which lets Atlas boot a VM before object storage exists. Only a System image can use `Site File`, and the tenant download route refuses one. `vm_image_storage_migration.py` moves an image to object storage after the credentials exist. Atlas Settings queues the migration when the object storage fields change, and a job every 15 minutes queues what is left. See [docs/images.md](../docs/images.md).
 
 Only enabled, Available images can create VMs. Atlas sends enabled, Available images with `cache_image` to each host through `POST /v1/sync`. Signed URLs are valid for 24 hours.
@@ -95,7 +100,9 @@ The image record keeps the source server, upload IDs, status, and errors. Atlas 
 
 ## Machine image deletion
 
-`vm_image_deletion.py` owns Machine image removal. The request marks the image `Deleting`, disables it, and queues a repeatable cleanup job. Atlas refuses the request while a virtual machine uses the image.
+`vm_image_deletion.py` owns Machine image removal. The request marks the image `Deleting`, disables it, and queues a repeatable cleanup job.
+
+A live virtual machine holds its image. A virtual machine is live when it is a draft, because Metal can still pull the artifacts, or when its host reports `running`, `stopped`, or `paused`. A terminating virtual machine, and one with no reported state, does not hold the image. While an image is held, the request archives the image instead of deleting it. A job every 30 seconds reclaims an archived image after its last live virtual machine is gone.
 
 The job aborts every incomplete multipart upload, deletes both stored objects, removes the remaining Metal staging data, and then deletes the record. If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and queues it again every 30 seconds.
 
