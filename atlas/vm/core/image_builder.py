@@ -102,7 +102,11 @@ def publish_ubuntu_image(
 			"version": 1,
 			"image_type": "system",
 			"architecture": architecture,
-			"tags": [{"key": "os", "value": "Ubuntu"}, {"key": "os_version", "value": version}],
+			"tags": [
+				{"key": "purpose", "value": "base"},
+				{"key": "os", "value": "Ubuntu"},
+				{"key": "os_version", "value": version},
+			],
 			**file_values,
 		}
 	).insert()

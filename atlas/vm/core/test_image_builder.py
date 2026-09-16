@@ -79,3 +79,7 @@ class TestUbuntuImageBuilder(UnitTestCase):
 		self.assertEqual(created["kernel_file"], "file-kernel")
 		self.assertIsNone(created["image_object_key"])
 		self.assertIsNone(created["kernel_object_key"])
+		self.assertEqual(
+			{tag["key"]: tag["value"] for tag in created["tags"]},
+			{"purpose": "base", "os": "Ubuntu", "os_version": "24.04"},
+		)
