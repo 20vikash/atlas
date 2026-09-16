@@ -276,30 +276,17 @@ static int __init atlas_neigh_init(void)
 	int result;
 
 	/*
-	 * Existing Atlas NDP TC programs.
+	 * Register under the common hook, which serves every program type.
+	 * The NDP programs are tc and the NUD program is a tracepoint, and
+	 * the tracepoint type has no hook of its own.
 	 */
 	result = register_btf_kfunc_id_set(
-		BPF_PROG_TYPE_SCHED_CLS,
+		BPF_PROG_TYPE_UNSPEC,
 		&atlas_neigh_kfunc_set);
 
 	if (result) {
 		pr_err(
-			"atlas_neigh: SCHED_CLS kfunc registration failed: %d\n",
-			result);
-
-		return result;
-	}
-
-	/*
-	 * Atlas NUD tracepoint program.
-	 */
-	result = register_btf_kfunc_id_set(
-		BPF_PROG_TYPE_TRACEPOINT,
-		&atlas_neigh_kfunc_set);
-
-	if (result) {
-		pr_err(
-			"atlas_neigh: TRACEPOINT kfunc registration failed: %d\n",
+			"atlas_neigh: kfunc registration failed: %d\n",
 			result);
 
 		return result;
@@ -307,7 +294,7 @@ static int __init atlas_neigh_init(void)
 
 	pr_info(
 		"atlas_neigh: register and delete kfuncs registered "
-		"for SCHED_CLS and TRACEPOINT\n");
+		"for every program type\n");
 
 	return 0;
 }
