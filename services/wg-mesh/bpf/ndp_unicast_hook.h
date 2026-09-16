@@ -68,7 +68,7 @@ struct atlas_unicast_pseudo_header
 };
 
 /*
- * Atlas neighbour kfunc v3, provided by the Atlas kernel module.
+ * Atlas neighbour kfunc, provided by the Atlas kernel module.
  *
  * The unicast hook registers learned VM neighbours itself, because the
  * multicast NDP hook is not attached in a unicast environment.
@@ -80,7 +80,7 @@ struct atlas_unicast_pseudo_header
  *
  * The MAC is packed into the low 6 bytes of mac.
  */
-extern int atlas_register_neigh_v3(
+extern int atlas_register_neigh(
 	__u32 ifindex,
 	__u64 addr_hi,
 	__u64 addr_lo,
@@ -1459,7 +1459,7 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 					eth->h_source,
 					ETH_ALEN);
 
-				if (atlas_register_neigh_v3(
+				if (atlas_register_neigh(
 					    packet->ifindex,
 					    addr_hi,
 					    addr_lo,

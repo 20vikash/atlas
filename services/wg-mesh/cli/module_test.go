@@ -31,7 +31,15 @@ func TestWriteKernelModuleSourcesWritesEveryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"atlas_neigh.c", "atlas_neigh_v3.c", "Makefile"} {
+	embeddedNames, err := kernelModuleSources.ReadDir("kernel_module")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(embeddedNames) != 2 {
+		t.Fatalf("the embed holds %d files, want the module source and its Makefile", len(embeddedNames))
+	}
+
+	for _, name := range []string{"atlas_neigh.c", "Makefile"} {
 		embedded, err := kernelModuleSources.ReadFile("kernel_module/" + name)
 		if err != nil {
 			t.Fatalf("the embed holds no %s: %v", name, err)
