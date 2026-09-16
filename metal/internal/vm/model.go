@@ -57,11 +57,22 @@ type Disk struct {
 
 // NetworkConfiguration contains the requested VM network configuration.
 type NetworkConfiguration struct {
-	PublicIPv4                    string `json:"public_ipv4"`
-	WireGuardMeshIPv6             string `json:"wireguard_mesh_ipv6"`
-	PrivateNetworkThroughputMiBps int    `json:"private_network_throughput_mibps"`
-	PublicNetworkThroughputMiBps  int    `json:"public_network_throughput_mibps"`
-	Egress                        Egress `json:"egress"`
+	PublicIPv4                    string                `json:"public_ipv4"`
+	WireGuardMeshIPv6             string                `json:"wireguard_mesh_ipv6"`
+	PrivateNetworkThroughputMiBps int                   `json:"private_network_throughput_mibps"`
+	PublicNetworkThroughputMiBps  int                   `json:"public_network_throughput_mibps"`
+	Egress                        Egress                `json:"egress"`
+	Firewall                      FirewallConfiguration `json:"firewall"`
+}
+
+// Equal reports whether two network configurations contain the same desired values.
+func (configuration NetworkConfiguration) Equal(other NetworkConfiguration) bool {
+	return configuration.PublicIPv4 == other.PublicIPv4 &&
+		configuration.WireGuardMeshIPv6 == other.WireGuardMeshIPv6 &&
+		configuration.PrivateNetworkThroughputMiBps == other.PrivateNetworkThroughputMiBps &&
+		configuration.PublicNetworkThroughputMiBps == other.PublicNetworkThroughputMiBps &&
+		configuration.Egress == other.Egress &&
+		configuration.Firewall.Equal(other.Firewall)
 }
 
 // SameReservation reports whether two specifications reserve the same VM. It
@@ -76,7 +87,7 @@ func (specification Specification) SameReservation(other Specification) bool {
 		strings.EqualFold(specification.Image.RootfsSHA256, other.Image.RootfsSHA256) &&
 		strings.EqualFold(specification.Image.KernelSHA256, other.Image.KernelSHA256) &&
 		specification.Image.Architecture == other.Image.Architecture &&
-		specification.Network == other.Network &&
+		specification.Network.Equal(other.Network) &&
 		slices.Equal(specification.SSHKeys, other.SSHKeys) &&
 		specification.Hostname == other.Hostname &&
 		specification.UserData == other.UserData &&
@@ -198,6 +209,7 @@ type Information struct {
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
 	Egress                        Egress
+	Firewall                      FirewallConfiguration
 	DesiredGeneration             uint64
 	DesiredRestartGeneration      uint64
 	ObservedGeneration            uint64

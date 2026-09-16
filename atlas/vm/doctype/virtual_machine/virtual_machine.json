@@ -35,6 +35,7 @@
   "mac",
   "public_network_throughput_mibps",
   "other_data_section",
+  "firewall_summary",
   "ssh_keys",
   "metadata",
   "section_break_tags",
@@ -239,6 +240,14 @@
    "fieldtype": "Int",
    "is_virtual": 1,
    "label": "Public Throughput (MiB/s)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "firewall_summary",
+   "fieldtype": "Code",
+   "is_virtual": 1,
+   "label": "Firewall",
+   "options": "JSON",
    "read_only": 1
   },
   {

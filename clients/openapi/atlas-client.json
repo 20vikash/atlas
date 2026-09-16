@@ -139,6 +139,9 @@
             "title": "Egress",
             "type": "string"
           },
+          "firewall": {
+            "$ref": "#/components/schemas/FirewallPayload"
+          },
           "hostname": {
             "default": "",
             "title": "Hostname",
@@ -264,6 +267,181 @@
           }
         },
         "title": "DiskUpdatePayload",
+        "type": "object"
+      },
+      "FirewallPayload": {
+        "additionalProperties": false,
+        "description": "The complete desired firewall configuration.",
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "inbound": {
+            "items": {
+              "$ref": "#/components/schemas/FirewallRulePayload"
+            },
+            "title": "Inbound",
+            "type": "array"
+          },
+          "outbound": {
+            "items": {
+              "$ref": "#/components/schemas/FirewallRulePayload"
+            },
+            "title": "Outbound",
+            "type": "array"
+          }
+        },
+        "title": "FirewallPayload",
+        "type": "object"
+      },
+      "FirewallResponse": {
+        "description": "The complete desired firewall configuration.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "inbound": {
+            "items": {
+              "$ref": "#/components/schemas/FirewallRuleResponse"
+            },
+            "title": "Inbound",
+            "type": "array"
+          },
+          "outbound": {
+            "items": {
+              "$ref": "#/components/schemas/FirewallRuleResponse"
+            },
+            "title": "Outbound",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "inbound",
+          "outbound"
+        ],
+        "title": "FirewallResponse",
+        "type": "object"
+      },
+      "FirewallRulePayload": {
+        "additionalProperties": false,
+        "description": "One firewall allow rule.",
+        "properties": {
+          "cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Cidrs",
+            "type": "array"
+          },
+          "ports": {
+            "default": "",
+            "title": "Ports",
+            "type": "string"
+          },
+          "protocol": {
+            "enum": [
+              "any",
+              "tcp",
+              "udp",
+              "icmp"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol",
+          "cidrs"
+        ],
+        "title": "FirewallRulePayload",
+        "type": "object"
+      },
+      "FirewallRuleResponse": {
+        "description": "One desired firewall allow rule.",
+        "properties": {
+          "cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cidrs",
+            "type": "array"
+          },
+          "ports": {
+            "title": "Ports",
+            "type": "string"
+          },
+          "protocol": {
+            "enum": [
+              "any",
+              "tcp",
+              "udp",
+              "icmp"
+            ],
+            "title": "Protocol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol",
+          "ports",
+          "cidrs"
+        ],
+        "title": "FirewallRuleResponse",
+        "type": "object"
+      },
+      "FirewallUpdatePayload": {
+        "additionalProperties": false,
+        "description": "Selected firewall fields to replace.",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Enabled"
+          },
+          "inbound": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FirewallRulePayload"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Inbound"
+          },
+          "outbound": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FirewallRulePayload"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Outbound"
+          }
+        },
+        "title": "FirewallUpdatePayload",
         "type": "object"
       },
       "IPAddressAssignmentPayload": {
@@ -632,6 +810,17 @@
             "default": null,
             "title": "Egress"
           },
+          "firewall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FirewallUpdatePayload"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "private_network_throughput_mibps": {
             "anyOf": [
               {
@@ -916,6 +1105,11 @@
             "is_privileged": false,
             "network": {
               "egress": "uplink",
+              "firewall": {
+                "enabled": false,
+                "inbound": [],
+                "outbound": []
+              },
               "mac": "52:54:00:12:34:56",
               "mesh_ipv6": "fdaa:1::5",
               "private_network_throughput_mibps": 0,
@@ -1199,6 +1393,9 @@
             ],
             "title": "Egress"
           },
+          "firewall": {
+            "$ref": "#/components/schemas/FirewallResponse"
+          },
           "mac": {
             "anyOf": [
               {
@@ -1247,7 +1444,8 @@
           "mesh_ipv6",
           "mac",
           "private_network_throughput_mibps",
-          "public_network_throughput_mibps"
+          "public_network_throughput_mibps",
+          "firewall"
         ],
         "title": "VirtualMachineNetwork",
         "type": "object"
@@ -2655,7 +2853,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/network": {
       "patch": {
-        "description": "Changes egress and network throughput limits. Egress controls internet reachability and does not change mesh reachability.",
+        "description": "Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability and does not change mesh reachability.",
         "operationId": "update_virtual_machine_network",
         "parameters": [
           {
@@ -2682,8 +2880,18 @@
           "content": {
             "application/json": {
               "example": {
-                "egress": "uplink",
-                "public_network_throughput_mibps": 50
+                "firewall": {
+                  "enabled": true,
+                  "inbound": [
+                    {
+                      "cidrs": [
+                        "203.0.113.0/24"
+                      ],
+                      "ports": "22",
+                      "protocol": "tcp"
+                    }
+                  ]
+                }
               },
               "schema": {
                 "$ref": "#/components/schemas/NetworkUpdatePayload"

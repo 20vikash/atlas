@@ -50,6 +50,7 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
+		Firewall:                      specification.Network.Firewall,
 		SleepAfterIdleSeconds:         specification.SleepAfterIdleSeconds,
 		DesiredGeneration:             1,
 	}}
@@ -129,6 +130,7 @@ func (manager *fakeVirtualMachineManager) SetNetwork(_ context.Context, id strin
 	virtualMachine.info.WireGuardMeshIPv6 = configuration.WireGuardMeshIPv6
 	virtualMachine.info.PrivateNetworkThroughputMiBps = configuration.PrivateNetworkThroughputMiBps
 	virtualMachine.info.PublicNetworkThroughputMiBps = configuration.PublicNetworkThroughputMiBps
+	virtualMachine.info.Firewall = configuration.Firewall
 	virtualMachine.info.DesiredGeneration++
 	return nil
 }
@@ -357,7 +359,7 @@ func (stubSerialBroker) Attach(context.Context, string, io.ReadWriter, <-chan co
 }
 
 const (
-	validCreateRequest = `{"compute":{"cpu_millicores":1000,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink"},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
+	validCreateRequest = `{"compute":{"cpu_millicores":1000,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink","firewall":{"enabled":false,"inbound":[],"outbound":[]}},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
 	validSSHKey        = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA user@example"
 )
 
@@ -667,7 +669,7 @@ func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	body := `{"egress":"uplink","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"public_network_throughput_mibps":50}`
+	body := `{"egress":"uplink","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"firewall":{"enabled":true,"inbound":[{"protocol":"tcp","ports":"22","cidrs":["203.0.113.0/24"]}],"outbound":[]}}`
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/network", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
@@ -680,6 +682,9 @@ func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {
 	if response.Desired.Network.PrivateNetworkThroughputMiBps != 100 || response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
 		t.Fatalf("network throughput = %+v", response.Desired.Network)
 	}
+	if !response.Desired.Network.Firewall.Enabled || len(response.Desired.Network.Firewall.Inbound) != 1 {
+		t.Fatalf("firewall = %+v", response.Desired.Network.Firewall)
+	}
 }
 
 func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
@@ -687,7 +692,7 @@ func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
-		`{"egress":"mesh","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100}`, http.StatusAccepted)
+		`{"egress":"mesh","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
@@ -697,11 +702,11 @@ func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
 	}
 
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
-		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1"}`, http.StatusBadRequest)
+		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusBadRequest)
 
 	// Stored public limits must not block an egress mode change.
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
-		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50}`, http.StatusAccepted)
+		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50,"firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusAccepted)
 }
 
 func TestSetDiskAppliesCompleteSpecificationAndRejectsInvalidLimits(t *testing.T) {

@@ -6,7 +6,7 @@ For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-
 
 ## Purpose
 
-Every virtual machine gets the same private addresses. That is only safe because each VM owns a network namespace, so nothing has to be allocated per VM and nothing has to be remembered between restarts. What cannot be fixed, the veth names and the transit `/30`, is derived from the VM user ID instead of stored.
+Every virtual machine gets the same private addresses. That is safe because each VM owns a network namespace. Fixed values and values derived from the VM user ID remove the need for an address allocator.
 
 This package makes one virtual machine network agree with its desired state, and it applies the host WireGuard peer set.
 
@@ -29,13 +29,14 @@ This package makes one virtual machine network agree with its desired state, and
 
 ## Convergence
 
-For one virtual machine network, `Ensure` is the only entry point. It never diffs against stored state, because it holds none: it reads the host, and makes the host match.
+For one virtual machine network, `Ensure` is the only entry point. It reads the host and makes the host match. It does not store applied network state.
 
 ```text
 Ensure
   |
   +- ensureNamespace      create the namespace when absent
   +- ensureNamespaceBase  loopback, TAP, gateway address
+  +- convergeFirewall     IPv4 and IPv6 filter tables
   +- removeUnwanted       what this request no longer asks for
   +- addWanted            veth -> internet path -> public IPv4 -> mesh
   +- traffic control      policers on the namespace end of the veth
@@ -52,6 +53,18 @@ A failed step leaves the partial host state. The next `Ensure` continues from it
 | `none` | absent | absent | rejected |
 
 `Release` removes the mesh registration first, because deleting the namespace also deletes the veth pair the registration names.
+
+## Firewall
+
+The firewall owns the filter tables inside the VM network namespace. It filters both public and mesh traffic before packets reach `tap0`.
+
+An enabled firewall gives `FORWARD` a default drop policy. It accepts established and related connections before it evaluates allow rules. An empty direction permits no new connection in that direction. A disabled firewall gives `FORWARD` an accept policy and keeps the desired rules for later use.
+
+Each allow rule selects `any`, `tcp`, `udp`, or `icmp`. A TCP or UDP rule can select one destination port or one inclusive destination port range. An empty port value selects all ports. Each rule has one or more canonical IPv4 or IPv6 prefixes.
+
+Metal reads both filter tables before it applies a firewall change. Metal replaces only tables that differ. If the second table update fails, Metal restores the first table to prevent a split policy. A new namespace and a changed effective firewall cause an immediate inspection. An unchanged firewall has a drift audit once per minute. The memory-only audit cache is not applied state. A process restart causes a new inspection.
+
+Metal applies the firewall before it adds the veth, public address, or mesh registration. Existing tracked connections continue because the first enabled rule accepts `ESTABLISHED,RELATED` traffic.
 
 ## Host rules
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,6 +13,119 @@ EGRESS_MODES = ("uplink", "mesh", "none")
 MINIMUM_CPU_MILLICORES = 100
 MAXIMUM_CPU_MILLICORES = 32_000
 MAXIMUM_SLEEP_AFTER_IDLE_SECONDS = 9_223_372_036
+FIREWALL_PROTOCOLS = ("any", "tcp", "udp", "icmp")
+MAXIMUM_FIREWALL_PREFIXES = 50
+FIREWALL_PORTS_PATTERN = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
+
+
+@dataclass(frozen=True, slots=True)
+class FirewallRule:
+	"""Store one validated firewall allow rule."""
+
+	protocol: str
+	ports: str
+	cidrs: tuple[str, ...]
+
+	@classmethod
+	def from_value(cls, value: object) -> FirewallRule:
+		"""Parse one firewall rule."""
+		if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+			raise ValueError("Each firewall rule must be an object.")
+		unknown = set(value) - {"protocol", "ports", "cidrs"}
+		if unknown:
+			raise ValueError(f"Unknown firewall rule field: {sorted(unknown)[0]}.")
+
+		protocol = value.get("protocol")
+		if protocol not in FIREWALL_PROTOCOLS:
+			raise ValueError("Firewall protocol must be any, tcp, udp, or icmp.")
+		ports = value.get("ports") or ""
+		if not isinstance(ports, str):
+			raise ValueError("Firewall ports must be a string.")
+		cls.validate_ports(protocol, ports)
+
+		cidr_values = value.get("cidrs")
+		if not isinstance(cidr_values, list) or not cidr_values:
+			raise ValueError("Firewall CIDRs must be a non-empty list.")
+		cidrs = tuple(cls.canonical_cidr(cidr) for cidr in cidr_values)
+		return cls(protocol=protocol, ports=ports, cidrs=cidrs)
+
+	@staticmethod
+	def validate_ports(protocol: str, ports: str) -> None:
+		"""Reject a port value that Metal cannot apply."""
+		if not ports:
+			return
+		if protocol not in {"tcp", "udp"}:
+			raise ValueError("Firewall ports are valid only for tcp or udp.")
+		if not FIREWALL_PORTS_PATTERN.fullmatch(ports):
+			raise ValueError("Firewall ports must be one port or one inclusive range.")
+
+		start_value, separator, end_value = ports.partition("-")
+		start = int(start_value)
+		end = int(end_value) if separator else start
+		if str(start) != start_value or (separator and str(end) != end_value):
+			raise ValueError("Firewall ports must not contain leading zeros.")
+		if start < 1 or end > 65535 or start > end:
+			raise ValueError("Firewall ports must be between 1 and 65535 in ascending order.")
+
+	@staticmethod
+	def canonical_cidr(value: object) -> str:
+		"""Return one canonical IP prefix."""
+		if not isinstance(value, str):
+			raise ValueError("Each firewall CIDR must be a string.")
+		try:
+			network = ipaddress.ip_network(value, strict=True)
+		except ValueError as error:
+			raise ValueError(f"Firewall CIDR {value!r} must be a canonical IPv4 or IPv6 prefix.") from error
+		return str(network)
+
+	def as_dict(self) -> dict[str, object]:
+		"""Return a JSON-compatible rule."""
+		return {"protocol": self.protocol, "ports": self.ports, "cidrs": list(self.cidrs)}
+
+
+@dataclass(frozen=True, slots=True)
+class FirewallConfiguration:
+	"""Store the complete desired firewall configuration."""
+
+	enabled: bool = False
+	inbound: tuple[FirewallRule, ...] = ()
+	outbound: tuple[FirewallRule, ...] = ()
+
+	@classmethod
+	def from_value(cls, value: object | None) -> FirewallConfiguration:
+		"""Parse and validate one complete firewall configuration."""
+		if value is None:
+			return cls()
+		if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+			raise ValueError("Firewall must be an object.")
+		unknown = set(value) - {"enabled", "inbound", "outbound"}
+		if unknown:
+			raise ValueError(f"Unknown firewall field: {sorted(unknown)[0]}.")
+
+		inbound = cls.rules_from_value(value.get("inbound", []), "inbound")
+		outbound = cls.rules_from_value(value.get("outbound", []), "outbound")
+		if sum(len(rule.cidrs) for rule in (*inbound, *outbound)) > MAXIMUM_FIREWALL_PREFIXES:
+			raise ValueError(f"Firewall must not exceed {MAXIMUM_FIREWALL_PREFIXES} prefix entries.")
+		return cls(
+			enabled=strict_bool(value.get("enabled"), "firewall.enabled"),
+			inbound=inbound,
+			outbound=outbound,
+		)
+
+	@staticmethod
+	def rules_from_value(value: object, direction: str) -> tuple[FirewallRule, ...]:
+		"""Parse one direction's complete rule list."""
+		if not isinstance(value, list):
+			raise ValueError(f"Firewall {direction} rules must be a list.")
+		return tuple(FirewallRule.from_value(rule) for rule in value)
+
+	def as_dict(self) -> dict[str, object]:
+		"""Return a JSON-compatible firewall configuration."""
+		return {
+			"enabled": self.enabled,
+			"inbound": [rule.as_dict() for rule in self.inbound],
+			"outbound": [rule.as_dict() for rule in self.outbound],
+		}
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +149,7 @@ class VirtualMachineCreateRequest:
 	public_network_throughput_mibps: int = 0
 	server_ip_address: str | None = None
 	metadata: dict[str, str] = field(default_factory=dict)
+	firewall: FirewallConfiguration = field(default_factory=FirewallConfiguration)
 
 	@classmethod
 	def from_value(cls, value: str | dict[str, Any]) -> VirtualMachineCreateRequest:
@@ -90,6 +206,7 @@ class VirtualMachineCreateRequest:
 			public_network_throughput_mibps=public_network_throughput_mibps,
 			server_ip_address=server_ip_address,
 			metadata=cls.metadata_map(payload),
+			firewall=FirewallConfiguration.from_value(payload.get("firewall")),
 		)
 
 	@staticmethod

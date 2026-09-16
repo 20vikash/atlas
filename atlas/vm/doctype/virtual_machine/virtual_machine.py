@@ -39,7 +39,9 @@ class VirtualMachine(Document):
 
 		active_migration: DF.Link | None
 		architecture: DF.Literal["amd64", "arm64"]
+		cpu_millicores: DF.Int
 		disk_mib: DF.Int
+		firewall_summary: DF.Code | None
 		is_draft: DF.Check
 		is_privileged: DF.Check
 		is_terminating: DF.Check
@@ -49,7 +51,6 @@ class VirtualMachine(Document):
 		sleep_after_idle_seconds: DF.Int
 		tags: DF.Table[AtlasTag]
 		tenant_id: DF.Int
-		cpu_millicores: DF.Int
 		virtual_machine_image: DF.Data
 	# end: auto-generated types
 
@@ -175,6 +176,11 @@ class VirtualMachine(Document):
 		"""Return the public network limit. Zero applies no limit."""
 		information = self.get_metal_vm_info()
 		return information.desired.network.public_network_throughput_mibps if information else 0
+
+	@property
+	def firewall_summary(self) -> str:
+		"""Return the empty initial value that the form replaces after its explicit firewall read."""
+		return ""
 
 	@property
 	def ssh_keys(self) -> str:
@@ -354,6 +360,20 @@ class VirtualMachine(Document):
 			}
 		)
 
+	@frappe.whitelist(methods=["GET"])
+	def read_firewall(self) -> dict[str, Any]:
+		"""Return the complete desired firewall when the user opens the editor."""
+		self.check_permission("read")
+		information = self.get_metal_vm_info()
+		if not information:
+			return {"enabled": False, "inbound": [], "outbound": []}
+		return information.desired.network.firewall.as_dict()
+
+	@frappe.whitelist(methods=["POST"])
+	def update_firewall(self, firewall: dict[str, Any]) -> dict[str, Any]:
+		"""Change the firewall without a VM restart."""
+		return self.update_network({"firewall": firewall})
+
 	@frappe.whitelist(methods=["POST"])
 	def update_disk_limits(self, disk_throughput_mibps: int, disk_iops: int) -> dict[str, Any]:
 		"""Change the disk limits in MiB/s and IOPS without a VM restart. 0 removes a limit."""
@@ -422,7 +442,7 @@ class VirtualMachine(Document):
 		return VirtualMachineService(self).update_disk(changes)
 
 	def update_network(self, changes: dict[str, Any]) -> dict[str, Any]:
-		"""Apply selected egress and throughput changes."""
+		"""Apply selected network changes."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		return VirtualMachineService(self).apply_network_changes(changes)

@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	traffic "github.com/frappe/atlas/metal/internal/network/traffic"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // fakeTrafficMonitor records traffic monitor calls.
@@ -68,6 +70,73 @@ func TestTrafficTrackingIsSkippedWithoutAMonitor(t *testing.T) {
 	allocator := NewLinuxAllocator(nil, nil)
 	if err := allocator.convergeTrafficMonitoring(true, request{VirtualMachineID: "vm-1", UserID: 1001}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFirewallAuditRunsForChangesAndAtItsInterval(t *testing.T) {
+	now := time.Date(2026, time.September, 17, 12, 0, 0, 0, time.UTC)
+	allocator := &LinuxAllocator{now: func() time.Time { return now }}
+	disabled, err := firewallFingerprint(vm.FirewallConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := firewallFingerprint(vm.FirewallConfiguration{Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !allocator.isFirewallAuditDue("vm-1", disabled, false) {
+		t.Fatal("first firewall inspection was skipped")
+	}
+	allocator.recordFirewallAudit("vm-1", disabled)
+	if allocator.isFirewallAuditDue("vm-1", disabled, false) {
+		t.Fatal("unchanged firewall was inspected again immediately")
+	}
+	if !allocator.isFirewallAuditDue("vm-1", enabled, false) {
+		t.Fatal("changed firewall was not inspected")
+	}
+
+	now = now.Add(firewallAuditInterval)
+	if !allocator.isFirewallAuditDue("vm-1", disabled, false) {
+		t.Fatal("periodic firewall audit was skipped")
+	}
+}
+
+func TestFirewallAuditCanBeForcedAndForgotten(t *testing.T) {
+	allocator := newLinuxAllocator(nil, nil)
+	fingerprint, err := firewallFingerprint(vm.FirewallConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocator.recordFirewallAudit("vm-1", fingerprint)
+
+	if !allocator.isFirewallAuditDue("vm-1", fingerprint, true) {
+		t.Fatal("forced firewall inspection was skipped")
+	}
+	allocator.forgetFirewallAudit("vm-1")
+	if !allocator.isFirewallAuditDue("vm-1", fingerprint, false) {
+		t.Fatal("forgotten firewall inspection was skipped")
+	}
+}
+
+func TestDisabledFirewallIgnoresRetainedRuleChanges(t *testing.T) {
+	first, err := firewallFingerprint(vm.FirewallConfiguration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := firewallFingerprint(vm.FirewallConfiguration{
+		Inbound: []vm.FirewallRule{{
+			Protocol: vm.FirewallProtocolTCP,
+			Ports:    "22",
+			CIDRs:    []string{"203.0.113.0/24"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first != second {
+		t.Fatal("retained rules changed the effective disabled firewall")
 	}
 }
 

@@ -5,13 +5,16 @@ from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 from frappe.utils import get_datetime, get_system_timezone
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
 from atlas.atlas.core.tags import read_tags
 from atlas.vm.core.models import (
 	MAXIMUM_CPU_MILLICORES,
+	MAXIMUM_FIREWALL_PREFIXES,
 	MINIMUM_CPU_MILLICORES,
+	FirewallConfiguration,
+	FirewallRule,
 	VirtualMachineCreateRequest,
 )
 
@@ -24,6 +27,7 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 EgressMode = Literal["uplink", "mesh", "none"]
+FirewallProtocol = Literal["any", "tcp", "udp", "icmp"]
 AUTO_IP_ADDRESS = "auto"
 
 
@@ -223,6 +227,53 @@ class ImageDownloadResponse(BaseModel):
 		)
 
 
+class FirewallRulePayload(StrictModel):
+	"""One firewall allow rule."""
+
+	protocol: FirewallProtocol
+	ports: str = ""
+	cidrs: list[str] = Field(min_length=1)
+
+	@model_validator(mode="after")
+	def validate_rule(self) -> FirewallRulePayload:
+		"""Apply the shared firewall rule validation."""
+		FirewallRule.from_value(self.model_dump())
+		return self
+
+
+class FirewallPayload(StrictModel):
+	"""The complete desired firewall configuration."""
+
+	enabled: bool = False
+	inbound: list[FirewallRulePayload] = Field(default_factory=list)
+	outbound: list[FirewallRulePayload] = Field(default_factory=list)
+
+	@model_validator(mode="after")
+	def validate_effective_rule_count(self) -> FirewallPayload:
+		"""Limit the expanded CIDR count."""
+		count = sum(len(rule.cidrs) for rule in (*self.inbound, *self.outbound))
+		if count > MAXIMUM_FIREWALL_PREFIXES:
+			raise ValueError(f"Firewall must not exceed {MAXIMUM_FIREWALL_PREFIXES} prefix entries.")
+		return self
+
+
+class FirewallUpdatePayload(PatchPayload):
+	"""Selected firewall fields to replace."""
+
+	enabled: bool | None = None
+	inbound: list[FirewallRulePayload] | None = None
+	outbound: list[FirewallRulePayload] | None = None
+
+	@model_validator(mode="after")
+	def validate_effective_rule_count(self) -> FirewallUpdatePayload:
+		"""Reject a partial list that exceeds the complete firewall limit."""
+		rules = (self.inbound or []) + (self.outbound or [])
+		count = sum(len(rule.cidrs) for rule in rules)
+		if count > MAXIMUM_FIREWALL_PREFIXES:
+			raise ValueError(f"Firewall must not exceed {MAXIMUM_FIREWALL_PREFIXES} prefix entries.")
+		return self
+
+
 class CreateVirtualMachinePayload(StrictModel):
 	"""Values that create one virtual machine."""
 
@@ -242,6 +293,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	disk_iops: int = Field(default=0, ge=0)
 	private_network_throughput_mibps: int = Field(default=0, ge=0)
 	public_network_throughput_mibps: int = Field(default=0, ge=0)
+	firewall: FirewallPayload = Field(default_factory=FirewallPayload)
 
 	def to_domain_request(
 		self, tenant_id: int, image_name: str, ip_address_name: str | None
@@ -264,6 +316,7 @@ class CreateVirtualMachinePayload(StrictModel):
 			disk_iops=self.disk_iops,
 			private_network_throughput_mibps=self.private_network_throughput_mibps,
 			public_network_throughput_mibps=self.public_network_throughput_mibps,
+			firewall=FirewallConfiguration.from_value(self.firewall.model_dump()),
 			server_ip_address=ip_address_name,
 		)
 
@@ -301,6 +354,7 @@ class NetworkUpdatePayload(PatchPayload):
 	egress: EgressMode | None = None
 	private_network_throughput_mibps: int | None = Field(default=None, ge=0)
 	public_network_throughput_mibps: int | None = Field(default=None, ge=0)
+	firewall: FirewallUpdatePayload | None = None
 
 
 class SSHKeysReplacementPayload(StrictModel):
@@ -449,6 +503,22 @@ class VirtualMachineDisk(BaseModel):
 	used_mib: int | None
 
 
+class FirewallRuleResponse(BaseModel):
+	"""One desired firewall allow rule."""
+
+	protocol: FirewallProtocol
+	ports: str
+	cidrs: list[str]
+
+
+class FirewallResponse(BaseModel):
+	"""The complete desired firewall configuration."""
+
+	enabled: bool
+	inbound: list[FirewallRuleResponse]
+	outbound: list[FirewallRuleResponse]
+
+
 class VirtualMachineNetwork(BaseModel):
 	"""The addresses and network limits of one virtual machine."""
 
@@ -458,6 +528,7 @@ class VirtualMachineNetwork(BaseModel):
 	mac: str | None
 	private_network_throughput_mibps: int
 	public_network_throughput_mibps: int
+	firewall: FirewallResponse
 
 
 class VirtualMachineGuest(BaseModel):
@@ -492,6 +563,7 @@ class VirtualMachineDetailResponse(BaseModel):
 						"mac": "52:54:00:12:34:56",
 						"private_network_throughput_mibps": 0,
 						"public_network_throughput_mibps": 0,
+						"firewall": {"enabled": False, "inbound": [], "outbound": []},
 					},
 					"guest": {
 						"hostname": "worker-1",
@@ -557,6 +629,15 @@ class VirtualMachineDetailResponse(BaseModel):
 				),
 				public_network_throughput_mibps=(
 					desired.network.public_network_throughput_mibps if desired else 0
+				),
+				firewall=FirewallResponse.model_validate(
+					desired.network.firewall.as_dict()
+					if desired
+					else {
+						"enabled": False,
+						"inbound": [],
+						"outbound": [],
+					}
 				),
 			),
 			guest=VirtualMachineGuest(

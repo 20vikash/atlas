@@ -51,6 +51,37 @@ class MetalNetwork:
 	wireguard_mesh_ipv6: str
 	private_network_throughput_mibps: int
 	public_network_throughput_mibps: int
+	firewall: MetalFirewall
+
+
+@dataclass(frozen=True, slots=True)
+class MetalFirewallRule:
+	"""Store one desired firewall allow rule."""
+
+	protocol: str
+	ports: str
+	cidrs: tuple[str, ...]
+
+	def as_dict(self) -> dict[str, Any]:
+		"""Return a JSON-compatible rule."""
+		return {"protocol": self.protocol, "ports": self.ports, "cidrs": list(self.cidrs)}
+
+
+@dataclass(frozen=True, slots=True)
+class MetalFirewall:
+	"""Store the complete desired firewall configuration."""
+
+	enabled: bool
+	inbound: tuple[MetalFirewallRule, ...]
+	outbound: tuple[MetalFirewallRule, ...]
+
+	def as_dict(self) -> dict[str, Any]:
+		"""Return a JSON-compatible firewall configuration."""
+		return {
+			"enabled": self.enabled,
+			"inbound": [rule.as_dict() for rule in self.inbound],
+			"outbound": [rule.as_dict() for rule in self.outbound],
+		}
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +176,7 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 	disk = object_field(value, "disk")
 	image = object_field(value, "image")
 	network = object_field(value, "network")
+	firewall = object_field(network, "firewall")
 	guest = object_field(value, "guest")
 	return MetalDesiredState(
 		generation=integer_field(value, "generation"),
@@ -167,6 +199,11 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 			wireguard_mesh_ipv6=string_field(network, "wireguard_mesh_ipv6"),
 			private_network_throughput_mibps=integer_field(network, "private_network_throughput_mibps"),
 			public_network_throughput_mibps=integer_field(network, "public_network_throughput_mibps"),
+			firewall=MetalFirewall(
+				enabled=boolean_field(firewall, "enabled"),
+				inbound=parse_firewall_rules(firewall, "inbound"),
+				outbound=parse_firewall_rules(firewall, "outbound"),
+			),
 		),
 		guest=MetalGuest(
 			hostname=string_field(guest, "hostname"),
@@ -174,6 +211,25 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 			metadata=string_map_field(guest, "metadata"),
 		),
 	)
+
+
+def parse_firewall_rules(value: dict[str, Any], field_name: str) -> tuple[MetalFirewallRule, ...]:
+	"""Parse one firewall direction from a Metal response."""
+	rules = value.get(field_name)
+	if not isinstance(rules, list):
+		raise ValueError(f"{field_name} must be a list")
+
+	parsed_rules = []
+	for rule in rules:
+		rule_object = object_value(rule, field_name)
+		parsed_rules.append(
+			MetalFirewallRule(
+				protocol=string_field(rule_object, "protocol"),
+				ports=string_field(rule_object, "ports", default=""),
+				cidrs=string_tuple_field(rule_object, "cidrs"),
+			)
+		)
+	return tuple(parsed_rules)
 
 
 def parse_image(value: dict[str, Any]) -> MetalImage:

@@ -15,6 +15,7 @@ type request struct {
 	WireGuardMeshIPv6             string
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
+	Firewall                      vm.FirewallConfiguration
 	UserID                        uint32
 	GroupID                       uint32
 }

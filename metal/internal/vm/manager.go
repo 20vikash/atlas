@@ -312,6 +312,7 @@ func createFingerprint(specification Specification) (string, error) {
 func cloneSpecification(specification Specification) Specification {
 	specification.SSHKeys = slices.Clone(specification.SSHKeys)
 	specification.Metadata = maps.Clone(specification.Metadata)
+	specification.Network.Firewall = specification.Network.Firewall.clone()
 	if specification.Image.MemorySnapshotConfiguration != nil {
 		configuration := *specification.Image.MemorySnapshotConfiguration
 		specification.Image.MemorySnapshotConfiguration = &configuration
@@ -356,6 +357,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		PrivateNetworkThroughputMiBps: desired.Specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  desired.Specification.Network.PublicNetworkThroughputMiBps,
 		Egress:                        desired.Specification.Network.Egress,
+		Firewall:                      desired.Specification.Network.Firewall.clone(),
 		DesiredGeneration:             desired.Generation,
 		DesiredRestartGeneration:      desired.RestartGeneration,
 		ObservedGeneration:            observed.Generation,

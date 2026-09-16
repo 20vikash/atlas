@@ -16,8 +16,10 @@ from atlas.api.routes.virtual_machines import (
 	start_virtual_machine,
 	stop_virtual_machine,
 	update_virtual_machine_compute,
+	update_virtual_machine_network,
 )
 from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request, call_route
+from atlas.vm.core.metal_models import MetalFirewall, MetalFirewallRule
 
 CREATE_BODY = {
 	"image_id": "system-image",
@@ -49,6 +51,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"update_compute": Mock(),
 		"attach_ip_address": Mock(),
 		"detach_ip_address": Mock(),
+		"update_network": Mock(),
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
@@ -66,6 +69,11 @@ def build_metal_information() -> SimpleNamespace:
 				wireguard_mesh_ipv6="fdaa:1::5",
 				private_network_throughput_mibps=0,
 				public_network_throughput_mibps=0,
+				firewall=MetalFirewall(
+					enabled=True,
+					inbound=(MetalFirewallRule("tcp", "22", ("203.0.113.0/24",)),),
+					outbound=(),
+				),
 			),
 			guest=SimpleNamespace(
 				hostname="worker-1",
@@ -127,6 +135,8 @@ class TestVirtualMachineViews(UnitTestCase):
 		self.assertEqual(detail.network.mesh_ipv6, "fdaa:1::5")
 		self.assertEqual(detail.network.mac, "52:54:00:12:34:56")
 		self.assertEqual(detail.network.egress, "uplink")
+		self.assertTrue(detail.network.firewall.enabled)
+		self.assertEqual(detail.network.firewall.inbound[0].ports, "22")
 		self.assertEqual(detail.disk.iops, 500)
 		self.assertEqual(detail.disk.used_mib, 8123)
 		self.assertEqual(detail.guest.ssh_keys, ["ssh-ed25519 AAAA"])
@@ -186,6 +196,22 @@ class TestCreateVirtualMachine(UnitTestCase):
 
 		self.assertEqual(status, 201)
 		self.assertTrue(create.call_args.args[0].is_privileged)
+
+	def test_create_passes_the_firewall(self) -> None:
+		status, _, create = self.create(
+			{
+				**CREATE_BODY,
+				"firewall": {
+					"enabled": True,
+					"inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+				},
+			}
+		)
+
+		self.assertEqual(status, 201)
+		firewall = create.call_args.args[0].firewall
+		self.assertTrue(firewall.enabled)
+		self.assertEqual(firewall.inbound[0].cidrs, ("203.0.113.0/24",))
 
 	def test_create_rejects_a_field_the_caller_cannot_set(self) -> None:
 		for field in ("tenant_id", "server", "is_sleepy", "idle_timeout_seconds"):
@@ -319,6 +345,36 @@ class TestVirtualMachineActions(UnitTestCase):
 
 
 class TestVirtualMachineConfiguration(UnitTestCase):
+	def test_network_change_passes_a_partial_firewall(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/network",
+				tenant_id=TENANT_ID,
+				json={"firewall": {"enabled": True}},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _ = call_route(update_virtual_machine_network, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 202)
+		virtual_machine.update_network.assert_called_once_with({"firewall": {"enabled": True}})
+
+	def test_network_change_rejects_an_invalid_firewall_rule(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/network",
+				tenant_id=TENANT_ID,
+				json={"firewall": {"inbound": [{"protocol": "tcp", "ports": "0", "cidrs": ["0.0.0.0/0"]}]}},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _ = call_route(update_virtual_machine_network, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 400)
+		virtual_machine.update_network.assert_not_called()
+
 	def test_compute_change_rejects_cpu_below_the_minimum(self) -> None:
 		with (
 			api_request(

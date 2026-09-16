@@ -42,6 +42,11 @@ def complete_response() -> dict:
 				"wireguard_mesh_ipv6": "fdaa::1",
 				"private_network_throughput_mibps": 10,
 				"public_network_throughput_mibps": 20,
+				"firewall": {
+					"enabled": True,
+					"inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+					"outbound": [{"protocol": "any", "cidrs": ["0.0.0.0/0", "::/0"]}],
+				},
 			},
 			"guest": {"hostname": "web", "ssh_keys": ["ssh-ed25519 AAAA"], "metadata": {"role": "web"}},
 		},
@@ -88,6 +93,7 @@ def new_virtual_machine_response() -> dict:
 				"wireguard_mesh_ipv6": "",
 				"private_network_throughput_mibps": 0,
 				"public_network_throughput_mibps": 0,
+				"firewall": {"enabled": False, "inbound": [], "outbound": []},
 			},
 			"guest": {"hostname": "", "ssh_keys": [], "metadata": {}},
 		},
@@ -112,6 +118,8 @@ class TestMetalVirtualMachineParsing(UnitTestCase):
 		self.assertEqual(machine.desired.image.rootfs.sha256, "a" * 64)
 		self.assertEqual(machine.desired.guest.ssh_keys, ("ssh-ed25519 AAAA",))
 		self.assertEqual(machine.desired.guest.metadata, {"role": "web"})
+		self.assertTrue(machine.desired.network.firewall.enabled)
+		self.assertEqual(machine.desired.network.firewall.inbound[0].ports, "22")
 		self.assertEqual(machine.observed.network.mac, "06:00:ac:10:00:02")
 		self.assertEqual(machine.observed.error.message, "network failed")
 

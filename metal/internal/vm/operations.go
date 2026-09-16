@@ -93,7 +93,7 @@ func (manager *Manager) SetNetwork(ctx context.Context, identifier string, confi
 	if err != nil {
 		return err
 	}
-	if configuration == record.Specification.Network {
+	if configuration.Equal(record.Specification.Network) {
 		return nil
 	}
 	if inUse, err := manager.publicIPv4InUse(identifier, configuration.PublicIPv4); err != nil {

@@ -78,8 +78,8 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update network
 
-     Changes egress and network throughput limits. Egress controls internet reachability and does not
-    change mesh reachability.
+     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
+    and does not change mesh reachability.
 
     Args:
         virtual_machine_id (str):
@@ -118,8 +118,8 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """ Update network
 
-     Changes egress and network throughput limits. Egress controls internet reachability and does not
-    change mesh reachability.
+     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
+    and does not change mesh reachability.
 
     Args:
         virtual_machine_id (str):
@@ -153,8 +153,8 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update network
 
-     Changes egress and network throughput limits. Egress controls internet reachability and does not
-    change mesh reachability.
+     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
+    and does not change mesh reachability.
 
     Args:
         virtual_machine_id (str):
@@ -193,8 +193,8 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """ Update network
 
-     Changes egress and network throughput limits. Egress controls internet reachability and does not
-    change mesh reachability.
+     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
+    and does not change mesh reachability.
 
     Args:
         virtual_machine_id (str):

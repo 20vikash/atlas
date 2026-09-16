@@ -7,6 +7,7 @@ frappe.ui.form.on("Virtual Machine", {
 
 		// All fields mirror Metal and are edited through actions, never a direct save.
 		frm.disable_save();
+		loadFirewallConfiguration(frm);
 
 		const current_state = frm.doc.current_state;
 		const is_running = current_state === "running";
@@ -105,6 +106,11 @@ frappe.ui.form.on("Virtual Machine", {
 		frm.add_custom_button(
 			__("Edit Network Throughput"),
 			() => showEditThroughputDialog(frm),
+			__("Actions")
+		);
+		frm.add_custom_button(
+			__("Edit Firewall"),
+			() => showEditFirewallDialog(frm),
 			__("Actions")
 		);
 		frm.add_custom_button(
@@ -485,6 +491,138 @@ function showEditThroughputDialog(frm) {
 		__("Edit Network Throughput"),
 		__("Save")
 	);
+}
+
+function firewallRuleFields() {
+	return [
+		{
+			fieldname: "direction",
+			fieldtype: "Select",
+			label: __("Direction"),
+			options: "inbound\noutbound",
+			reqd: 1,
+			in_list_view: 1,
+		},
+		{
+			fieldname: "protocol",
+			fieldtype: "Select",
+			label: __("Protocol"),
+			options: "any\ntcp\nudp\nicmp",
+			reqd: 1,
+			in_list_view: 1,
+		},
+		{
+			fieldname: "ports",
+			fieldtype: "Data",
+			label: __("Ports"),
+			description: __("Use one port or one range, such as 22 or 8000-9000."),
+			in_list_view: 1,
+		},
+		{
+			fieldname: "cidrs",
+			fieldtype: "Data",
+			label: __("CIDRs"),
+			reqd: 1,
+			description: __("Separate IPv4 and IPv6 prefixes with commas or spaces."),
+			in_list_view: 1,
+		},
+	];
+}
+
+function firewallRows(value) {
+	const rows = [];
+	["inbound", "outbound"].forEach((direction) => {
+		(value[direction] || []).forEach((rule) => {
+			rows.push({
+				direction,
+				protocol: rule.protocol,
+				ports: rule.ports || "",
+				cidrs: (rule.cidrs || []).join(", "),
+			});
+		});
+	});
+	return rows;
+}
+
+function firewallValue(enabled, rows) {
+	const firewall = { enabled: Boolean(enabled), inbound: [], outbound: [] };
+	(rows || []).forEach((row) => {
+		if (!row.direction && !row.protocol && !row.cidrs) return;
+		if (!["inbound", "outbound"].includes(row.direction)) {
+			frappe.throw(__("Each firewall rule needs a direction."));
+		}
+		firewall[row.direction].push({
+			protocol: row.protocol,
+			ports: (row.ports || "").trim(),
+			cidrs: (row.cidrs || "")
+				.split(/[\s,]+/)
+				.map((cidr) => cidr.trim())
+				.filter(Boolean),
+		});
+	});
+	return firewall;
+}
+
+function showEditFirewallDialog(frm) {
+	if (frm.firewall_configuration) {
+		openEditFirewallDialog(frm, frm.firewall_configuration);
+		return;
+	}
+
+	loadFirewallConfiguration(frm, true).then((firewall) => openEditFirewallDialog(frm, firewall));
+}
+
+function loadFirewallConfiguration(frm, freeze = false) {
+	return frm
+		.call({
+			method: "read_firewall",
+			doc: frm.doc,
+			type: "GET",
+			freeze,
+			freeze_message: __("Reading firewall..."),
+		})
+		.then(({ message }) => {
+			frm.firewall_configuration = message;
+			frm.doc.firewall_summary = JSON.stringify(message, null, 2);
+			frm.refresh_field("firewall_summary");
+			return message;
+		});
+}
+
+function openEditFirewallDialog(frm, current) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Edit Firewall"),
+		size: "large",
+		fields: [
+			{
+				fieldname: "enabled",
+				fieldtype: "Check",
+				label: __("Enabled"),
+				default: current.enabled,
+			},
+			{
+				fieldname: "rules",
+				fieldtype: "Table",
+				label: __("Allow Rules"),
+				in_place_edit: true,
+				data: firewallRows(current),
+				fields: firewallRuleFields(),
+			},
+		],
+		primary_action_label: __("Save"),
+		primary_action({ enabled, rules }) {
+			const firewall = firewallValue(enabled, rules);
+			dialog.hide();
+			frm.call({
+				method: "update_firewall",
+				doc: frm.doc,
+				args: { firewall },
+				freeze: true,
+				freeze_message: __("Updating firewall..."),
+			}).then(() => frm.reload_doc());
+		},
+	});
+	dialog.show();
 }
 
 function showEgressDialog(frm) {

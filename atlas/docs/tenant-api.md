@@ -78,6 +78,8 @@ A `PATCH` request needs at least one supported field. A field that is not in the
 
 A route that asks the host for work returns `202`. Poll the resource route for completion.
 
+Use `PATCH /api/atlas/virtual-machines/{id}/network` to change firewall fields. The firewall contains `enabled`, `inbound`, and `outbound`. A missing field does not change.
+
 All absolute time fields use Unix timestamps in seconds. Duration fields such as `expires_in` also use seconds.
 
 ## Behavior

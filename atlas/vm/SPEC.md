@@ -163,9 +163,16 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 | Attach IP Address | Sets an attach intent and sends the address with `uplink` egress. |
 | Detach IP Address | Sends an empty address and sets a detach intent. |
 | Edit Network Throughput | Sends private and public limits in MiB/s. `0` removes a limit. |
+| Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
 | Change Egress Mode | Sends `uplink`, `mesh`, or `none`. |
 
-Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, and throughput limits can also be set during creation.
+Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, throughput limits, and firewall rules can also be set during creation.
+
+The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change one firewall field. Atlas merges it with the current desired firewall and sends the complete network to Metal.
+
+Firewall rules are allow rules for public and mesh traffic. They support `any`, `tcp`, `udp`, and `icmp`. TCP and UDP rules can select one destination port or one inclusive range. Each rule needs one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries.
+
+A disabled firewall permits all traffic and keeps its rules. An enabled firewall blocks unmatched new traffic. An empty direction blocks new traffic in that direction. Established and related connections continue.
 
 Egress controls internet reachability. It does not control mesh reachability.
 
