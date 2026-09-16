@@ -17,18 +17,7 @@
 #define ATLAS_TLLAO_TYPE 2
 #define ATLAS_TLLAO_LENGTH 1
 
-/*
- * Additional NDP debug operations.
- *
- * Existing operations 1..6:
- *
- *   1 WHO_HAS
- *   2 FOUND
- *   3 NOT_HERE
- *   4 NOW_HERE
- *   5 ANNOUNCE
- *   6 LEARN
- */
+
 #define NDP_OPERATION_APPEND_NO_CONFIG            7
 #define NDP_OPERATION_APPEND_TOO_LARGE            8
 #define NDP_OPERATION_APPEND_TAIL_FAILED          9
