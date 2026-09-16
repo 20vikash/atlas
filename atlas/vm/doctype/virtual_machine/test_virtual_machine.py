@@ -10,7 +10,7 @@ from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core import vm_service as virtual_machine_service_module
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import VirtualMachineCreateRequest
+from atlas.vm.core.models import FirewallConfiguration, FirewallRule, VirtualMachineCreateRequest
 from atlas.vm.core.vm_service import VirtualMachineService
 from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
 from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
@@ -42,6 +42,7 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 			"wireguard_mesh_ipv6": "fdaa:1::1",
 			"private_network_throughput_mibps": 100,
 			"public_network_throughput_mibps": 50,
+			"firewall": {"enabled": False, "inbound": [], "outbound": []},
 		},
 		"guest": {
 			"hostname": "worker-1",
@@ -95,6 +96,61 @@ class TestVirtualMachineRequest(UnitTestCase):
 		self.assertEqual(request.ssh_keys, ("key-one", "key-two"))
 		self.assertEqual(request.cpu_millicores, 1500)
 		self.assertEqual(request.egress, "uplink")
+		self.assertEqual(request.firewall, FirewallConfiguration())
+
+	def test_request_parses_a_firewall(self) -> None:
+		request = VirtualMachineCreateRequest.from_value(
+			{
+				"virtual_machine_image": "Ubuntu 24.04",
+				"cpu_millicores": 1500,
+				"memory_mib": 2048,
+				"disk_mib": 10240,
+				"tenant_id": 7,
+				"firewall": {
+					"enabled": True,
+					"inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+				},
+			}
+		)
+
+		self.assertTrue(request.firewall.enabled)
+		self.assertEqual(
+			request.firewall.inbound,
+			(FirewallRule(protocol="tcp", ports="22", cidrs=("203.0.113.0/24",)),),
+		)
+
+	def test_request_rejects_a_noncanonical_firewall_cidr(self) -> None:
+		with self.assertRaisesRegex(ValueError, "canonical"):
+			VirtualMachineCreateRequest.from_value(
+				{
+					"virtual_machine_image": "Ubuntu 24.04",
+					"cpu_millicores": 1500,
+					"memory_mib": 2048,
+					"disk_mib": 10240,
+					"tenant_id": 7,
+					"firewall": {"inbound": [{"protocol": "any", "cidrs": ["203.0.113.7/24"]}]},
+				}
+			)
+
+	def test_request_limits_firewall_prefix_entries(self) -> None:
+		with self.assertRaisesRegex(ValueError, "50 prefix entries"):
+			VirtualMachineCreateRequest.from_value(
+				{
+					"virtual_machine_image": "Ubuntu 24.04",
+					"cpu_millicores": 1500,
+					"memory_mib": 2048,
+					"disk_mib": 10240,
+					"tenant_id": 7,
+					"firewall": {
+						"inbound": [
+							{
+								"protocol": "any",
+								"cidrs": [f"10.0.0.{index}/32" for index in range(51)],
+							}
+						]
+					},
+				}
+			)
 
 	def test_request_accepts_the_infrastructure_tenant(self) -> None:
 		request = VirtualMachineCreateRequest.from_value(
@@ -321,6 +377,9 @@ class TestVirtualMachineService(UnitTestCase):
 		self.assertEqual(metal_request["guest"]["ssh_keys"], [])
 		self.assertEqual(metal_request["network"]["private_network_throughput_mibps"], 100)
 		self.assertEqual(metal_request["network"]["public_network_throughput_mibps"], 50)
+		self.assertEqual(
+			metal_request["network"]["firewall"], {"enabled": False, "inbound": [], "outbound": []}
+		)
 
 
 class TestMetalClient(UnitTestCase):
@@ -688,8 +747,45 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				"wireguard_mesh_ipv6": "fdaa:1::1",
 				"private_network_throughput_mibps": 100,
 				"public_network_throughput_mibps": 25,
+				"firewall": {"enabled": False, "inbound": [], "outbound": []},
 			},
 		)
+
+	def test_update_network_merges_partial_firewall_fields(self) -> None:
+		virtual_machine, client = self.build_virtual_machine(
+			{
+				"firewall": {
+					"enabled": False,
+					"inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+					"outbound": [{"protocol": "any", "cidrs": ["0.0.0.0/0", "::/0"]}],
+				}
+			}
+		)
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+		):
+			VirtualMachineService(virtual_machine).apply_network_changes({"firewall": {"enabled": True}})
+
+		firewall = client.set_virtual_machine_network.call_args.args[1]["firewall"]
+		self.assertTrue(firewall["enabled"])
+		self.assertEqual(firewall["inbound"][0]["ports"], "22")
+		self.assertEqual(firewall["outbound"][0]["cidrs"], ["0.0.0.0/0", "::/0"])
+
+	def test_update_network_rejects_an_invalid_partial_firewall(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({})
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+			self.assertRaisesRegex(frappe.ValidationError, "between 1 and 65535"),
+		):
+			VirtualMachineService(virtual_machine).apply_network_changes(
+				{"firewall": {"inbound": [{"protocol": "tcp", "ports": "0", "cidrs": ["0.0.0.0/0"]}]}}
+			)
+
+		client.set_virtual_machine_network.assert_not_called()
 
 	def test_update_network_stops_when_metal_request_fails(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({})

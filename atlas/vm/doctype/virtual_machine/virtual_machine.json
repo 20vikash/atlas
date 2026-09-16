@@ -28,6 +28,8 @@
   "disk_iops",
   "section_break_network",
   "egress",
+  "firewall_enabled",
+  "firewall_rules",
   "wireguard_mesh_ipv6",
   "private_network_throughput_mibps",
   "column_break_network",
@@ -200,6 +202,21 @@
    "fieldtype": "Data",
    "is_virtual": 1,
    "label": "Egress",
+   "read_only": 1
+  },
+  {
+   "fieldname": "firewall_enabled",
+   "fieldtype": "Check",
+   "is_virtual": 1,
+   "label": "Firewall Enabled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "firewall_rules",
+   "fieldtype": "Code",
+   "is_virtual": 1,
+   "label": "Firewall Rules",
+   "options": "JSON",
    "read_only": 1
   },
   {

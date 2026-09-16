@@ -355,7 +355,12 @@ def update_virtual_machine_disk(
 
 @virtual_machine_configuration.patch("<virtual_machine_id>/network")
 @api_docs(
-	request_example={"egress": "uplink", "public_network_throughput_mibps": 50},
+	request_example={
+		"firewall": {
+			"enabled": True,
+			"inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+		}
+	},
 	responses=ACCEPTED_RESPONSE,
 )
 def update_virtual_machine_network(
@@ -363,7 +368,7 @@ def update_virtual_machine_network(
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Update network.
 
-	Changes egress and network throughput limits. Egress controls internet reachability and does not change mesh reachability.
+	Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability and does not change mesh reachability.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.update_network(payload.model_dump(exclude_unset=True))

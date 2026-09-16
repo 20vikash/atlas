@@ -15,6 +15,7 @@ from atlas.vm.core.models import (
 	EGRESS_MODES,
 	MAXIMUM_CPU_MILLICORES,
 	MINIMUM_CPU_MILLICORES,
+	FirewallConfiguration,
 	VirtualMachineCreateRequest,
 )
 from atlas.vm.core.placement import PlacementService
@@ -156,6 +157,7 @@ class VirtualMachineService:
 				"private_network_throughput_mibps": request.private_network_throughput_mibps,
 				"public_network_throughput_mibps": request.public_network_throughput_mibps,
 				"egress": request.egress,
+				"firewall": request.firewall.as_dict(),
 			},
 			"guest": {
 				"hostname": request.hostname,
@@ -322,6 +324,17 @@ class VirtualMachineService:
 	def update_network(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Replace the complete network after applying selected changes."""
 		current_network = self.require_information().desired.network
+		firewall = {
+			"enabled": current_network.firewall.enabled,
+			"inbound": [rule.as_dict() for rule in current_network.firewall.inbound],
+			"outbound": [rule.as_dict() for rule in current_network.firewall.outbound],
+		}
+		if "firewall" in changes:
+			firewall_change = changes["firewall"]
+			if not isinstance(firewall_change, dict):
+				raise ValueError("Firewall change must be an object.")
+			firewall = {**firewall, **firewall_change}
+			firewall = FirewallConfiguration.from_value(firewall).as_dict()
 		request = {
 			"egress": current_network.egress,
 			"public_ipv4": current_network.public_ipv4,
@@ -329,6 +342,7 @@ class VirtualMachineService:
 			"private_network_throughput_mibps": current_network.private_network_throughput_mibps,
 			"public_network_throughput_mibps": current_network.public_network_throughput_mibps,
 			**changes,
+			"firewall": firewall,
 		}
 		information = self.perform_metal_operation(
 			lambda metal_client: metal_client.set_virtual_machine_network(
@@ -349,7 +363,11 @@ class VirtualMachineService:
 				exc=AtlasUserError,
 			)
 
-		return self.update_network(changes)
+		try:
+			return self.update_network(changes)
+		except ValueError as error:
+			frappe.throw(_(str(error)), exc=AtlasUserError)
+			raise AssertionError from error
 
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
 		"""Set the address intent before the Metal network request."""
