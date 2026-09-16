@@ -63,10 +63,7 @@ func upgradeBPF(force bool) error {
 		if force {
 			return forceUpgrade(config)
 		}
-		return fmt.Errorf(
-			"BPF maps are incompatible; rerun with --force after adding a migration: %w",
-			err,
-		)
+		return fmt.Errorf("BPF maps are incompatible; rerun with --force after adding a migration: %w", err)
 	}
 	defer collection.Close()
 
@@ -104,27 +101,15 @@ func upgradeBPF(force bool) error {
 		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
 	}
 
-	if err := attachHookPath(
-		interfaces.uplinkName,
-		filepath.Join(release, ndpProgram),
-		"ingress",
-	); err != nil {
+	if err := attachHookPath(interfaces.uplinkName, filepath.Join(release, ndpProgram), "ingress"); err != nil {
 		return err
 	}
 
-	if err := attachHookPath(
-		interfaces.uplinkName,
-		filepath.Join(release, ndpProgram),
-		"egress",
-	); err != nil {
+	if err := attachHookPath(interfaces.uplinkName, filepath.Join(release, ndpProgram), "egress"); err != nil {
 		return err
 	}
 
-	if err := attachHookPath(
-		interfaces.wireGuardName,
-		filepath.Join(release, wireguardProgram),
-		"ingress",
-	); err != nil {
+	if err := attachHookPath(interfaces.wireGuardName, filepath.Join(release, wireguardProgram), "ingress"); err != nil {
 		return err
 	}
 
@@ -134,11 +119,7 @@ func upgradeBPF(force bool) error {
 	}
 
 	for _, interfaceName := range vmInterfaces {
-		if err := attachHookPath(
-			interfaceName,
-			filepath.Join(release, vmBPFProgram),
-			"ingress",
-		); err != nil {
+		if err := attachHookPath(interfaceName, filepath.Join(release, vmBPFProgram), "ingress"); err != nil {
 			return err
 		}
 	}
@@ -238,10 +219,7 @@ func forceUpgrade(config hostConfig) error {
 
 	hash := bpfHash()
 
-	fmt.Printf(
-		"Atlas WG Mesh BPF force-upgraded to %x; learned remote locations were cleared\n",
-		hash[:6],
-	)
+	fmt.Printf("Atlas WG Mesh BPF force-upgraded to %x; learned remote locations were cleared\n", hash[:6])
 
 	return nil
 }
@@ -265,9 +243,7 @@ func virtualMachineInterfaces() (map[[16]byte]string, error) {
 	for iterator.Next(&vm, &value) {
 		address := netip.AddrFrom16(vm).String()
 
-		output, err := commandOutput(
-			"ip", "-o", "-6", "route", "show", address+"/128",
-		)
+		output, err := commandOutput("ip", "-o", "-6", "route", "show", address+"/128")
 		if err != nil {
 			return nil, err
 		}
@@ -334,8 +310,6 @@ func cleanReleases(current string, previous [32]byte) {
 			continue
 		}
 
-		_ = os.RemoveAll(
-			filepath.Join(pinDirectory, "releases", entry.Name()),
-		)
+		_ = os.RemoveAll(filepath.Join(pinDirectory, "releases", entry.Name()))
 	}
 }

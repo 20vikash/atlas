@@ -1,19 +1,8 @@
 /* SPDX-License-Identifier: AGPL-3.0 */
-/*
- * Atlas WG Mesh NUD failure tracking.
- *
- * Tracks consecutive NUD failures for remote VMs.
- *
- *   NUD_REACHABLE
- *       -> failure count = 0
- *
- *   NUD_FAILED
- *       -> failure count++
- *
- *   20 consecutive failures
- *       -> remove VM from remote_vms
- *       -> clear the Linux neighbour entry
- *       -> remove failure counter
+/* Atlas WG Mesh NUD failure tracking: NUD_REACHABLE resets the failure
+ * count, NUD_FAILED increments it, and 20 consecutive failures remove the
+ * VM from remote_vms, clear the Linux neighbour entry, and remove the
+ * failure counter.
  */
 #ifndef ATLAS_NUD_HOOK_H
 #define ATLAS_NUD_HOOK_H
@@ -31,15 +20,8 @@
 #define AF_INET6 10
 #endif
 
-
-/*
- * Raw tracepoint context for:
- *
- *     tracepoint/neigh/neigh_timer_handler
- *
- * Layout matches:
- *
- *     /sys/kernel/tracing/events/neigh/neigh_timer_handler/format
+/* Raw tracepoint context for tracepoint/neigh/neigh_timer_handler. Layout
+ * matches /sys/kernel/tracing/events/neigh/neigh_timer_handler/format.
  */
 struct trace_event_raw_neigh_timer_handler
 {
@@ -71,15 +53,8 @@ struct trace_event_raw_neigh_timer_handler
 	__u32 err;
 };
 
-
-/*
- * Raw tracepoint context for:
- *
- *     tracepoint/neigh/neigh_update
- *
- * Layout matches:
- *
- *     /sys/kernel/tracing/events/neigh/neigh_update/format
+/* Raw tracepoint context for tracepoint/neigh/neigh_update. Layout
+ * matches /sys/kernel/tracing/events/neigh/neigh_update/format.
  */
 struct trace_event_raw_neigh_update
 {
@@ -115,115 +90,62 @@ struct trace_event_raw_neigh_update
 	__u32 pid;
 };
 
+/* Kernel kfunc provided by the Atlas neighbour module. */
+extern int atlas_delete_neigh(__u32 ifindex, __u64 addr_hi, __u64 addr_lo) __ksym;
 
-/*
- * Kernel kfunc provided by the Atlas neighbour module.
- */
-extern int atlas_delete_neigh(
-	__u32 ifindex,
-	__u64 addr_hi,
-	__u64 addr_lo) __ksym;
-
-
-/*
- * Get the IPv6 neighbour address from the tracepoint.
- */
-static __always_inline void get_nud_address(
-	const __u8 *primary_key6,
-	struct in6_addr *address)
+/* Get the IPv6 neighbour address from the tracepoint. */
+static __always_inline void get_nud_address(const __u8 *primary_key6, struct in6_addr *address)
 {
-	__builtin_memcpy(
-		address,
-		primary_key6,
-		sizeof(*address));
+	__builtin_memcpy(address, primary_key6, sizeof(*address));
 }
 
-
-/*
- * Convert the IPv6 address into the scalar arguments
- * expected by atlas_delete_neigh().
+/* Convert the IPv6 address into the scalar arguments expected by
+ * atlas_delete_neigh().
  */
-static __always_inline void split_address(
-	const struct in6_addr *address,
-	__u64 *addr_hi,
-	__u64 *addr_lo)
+static __always_inline void split_address(const struct in6_addr *address, __u64 *addr_hi, __u64 *addr_lo)
 {
-	__builtin_memcpy(
-		addr_hi,
-		&address->s6_addr[0],
-		sizeof(*addr_hi));
+	__builtin_memcpy(addr_hi, &address->s6_addr[0], sizeof(*addr_hi));
 
-	__builtin_memcpy(
-		addr_lo,
-		&address->s6_addr[8],
-		sizeof(*addr_lo));
+	__builtin_memcpy(addr_lo, &address->s6_addr[8], sizeof(*addr_lo));
 }
 
-
-/*
- * Reset the consecutive failure counter.
- *
- * Keep the entry with value 0 rather than deleting it. This makes
- * the state explicitly represent a successful/reset neighbour.
+/* Reset the consecutive failure counter. Keep the entry with value 0
+ * rather than deleting it, so the state explicitly represents a
+ * successful neighbour.
  */
-static __always_inline void reset_nud_failures(
-	const struct in6_addr *vm)
+static __always_inline void reset_nud_failures(const struct in6_addr *vm)
 {
 	__u32 zero = 0;
 
-	bpf_map_update_elem(
-		&nud_failures,
-		vm,
-		&zero,
-		BPF_ANY);
+	bpf_map_update_elem(&nud_failures, vm, &zero, BPF_ANY);
 }
 
-
-/*
- * Increment the consecutive failure counter.
- *
- * Returns the new count.
- */
-static __always_inline __u32 increment_nud_failures(
-	const struct in6_addr *vm)
+/* Increment the consecutive failure counter. Returns the new count. */
+static __always_inline __u32 increment_nud_failures(const struct in6_addr *vm)
 {
 	__u32 *count;
 	__u32 new_count;
 
-	count = bpf_map_lookup_elem(
-		&nud_failures,
-		vm);
+	count = bpf_map_lookup_elem(&nud_failures, vm);
 
 	if (!count)
 	{
 		new_count = 1;
 
-		bpf_map_update_elem(
-			&nud_failures,
-			vm,
-			&new_count,
-			BPF_ANY);
+		bpf_map_update_elem(&nud_failures, vm, &new_count, BPF_ANY);
 
 		return new_count;
 	}
 
 	new_count = *count + 1;
 
-	bpf_map_update_elem(
-		&nud_failures,
-		vm,
-		&new_count,
-		BPF_ANY);
+	bpf_map_update_elem(&nud_failures, vm, &new_count, BPF_ANY);
 
 	return new_count;
 }
 
-
-/*
- * Remove a failed remote VM.
- */
-static __always_inline void remove_remote_vm(
-	const struct in6_addr *vm)
+/* Remove a failed remote VM. */
+static __always_inline void remove_remote_vm(const struct in6_addr *vm)
 {
 	struct config *local_config;
 	__u64 addr_hi;
@@ -231,177 +153,82 @@ static __always_inline void remove_remote_vm(
 
 	local_config = get_config();
 
-	if (!local_config)
-		return;
+	if (!local_config) return;
 
-	/*
-	 * Remove the Atlas routing/discovery state.
-	 */
-	bpf_map_delete_elem(
-		&remote_vms,
-		vm);
+	bpf_map_delete_elem(&remote_vms, vm);
 
-	/*
-	 * Convert the VM address to the scalar representation
-	 * required by the kernel kfunc.
-	 */
-	split_address(
-		vm,
-		&addr_hi,
-		&addr_lo);
+	split_address(vm, &addr_hi, &addr_lo);
 
-	/*
-	 * Clear the corresponding Linux neighbour entry.
-	 */
-	atlas_delete_neigh(
-		local_config->discovery_ifindex,
-		addr_hi,
-		addr_lo);
+		/* Clear the corresponding Linux neighbour entry. */
+	atlas_delete_neigh(local_config->discovery_ifindex, addr_hi, addr_lo);
 
-	/*
-	 * Remove the NUD failure counter.
-	 */
-	bpf_map_delete_elem(
-		&nud_failures,
-		vm);
+	bpf_map_delete_elem(&nud_failures, vm);
 }
 
-
-/*
- * NUD failure hook.
- *
- * neigh_timer_handler observes the NUD timer processing where
- * the neighbour reaches NUD_FAILED.
+/* NUD failure hook. neigh_timer_handler observes the NUD timer processing
+ * where the neighbour reaches NUD_FAILED.
  */
 SEC("tracepoint/neigh/neigh_timer_handler")
-int handle_atlas_nud_failure(
-	struct trace_event_raw_neigh_timer_handler *ctx)
+int handle_atlas_nud_failure(struct trace_event_raw_neigh_timer_handler *ctx)
 {
 	struct in6_addr vm = {};
 	__u32 count;
 
-	/*
-	 * We only care about IPv6 neighbours.
-	 */
-	if (ctx->family != AF_INET6)
-		return 0;
+	if (ctx->family != AF_INET6) return 0;
 
-	/*
-	 * Extract the neighbour IPv6 address.
-	 */
-	get_nud_address(
-		ctx->primary_key6,
-		&vm);
+	get_nud_address(ctx->primary_key6, &vm);
 
-	/*
-	 * Only track addresses that Atlas currently knows
-	 * as remote VMs.
-	 */
-	if (!bpf_map_lookup_elem(
-		    &remote_vms,
-		    &vm))
-		return 0;
+		/* Only track addresses that Atlas currently knows as remote VMs. */
+	if (!bpf_map_lookup_elem(&remote_vms, &vm)) return 0;
 
-	/*
-	 * The tracepoint exposes the neighbour flags as a u8.
-	 *
-	 * NTF_EXT_LEARNED is representable here and identifies
-	 * the externally learned Atlas neighbour.
+		/* The tracepoint exposes the neighbour flags as a u8. NTF_EXT_LEARNED
+	 * identifies the externally learned Atlas neighbour.
 	 */
-	if (!(ctx->flags & NTF_EXT_LEARNED))
-		return 0;
+	if (!(ctx->flags & NTF_EXT_LEARNED)) return 0;
 
-	/*
-	 * Only NUD_FAILED counts as a failure.
-	 */
-	if (ctx->nud_state != NUD_FAILED)
-		return 0;
+	if (ctx->nud_state != NUD_FAILED) return 0;
 
-	/*
-	 * Increment the consecutive failure count.
-	 */
 	count = increment_nud_failures(&vm);
 
-	/*
-	 * Do nothing until we have 20 consecutive failures.
-	 */
-	if (count < ATLAS_NUD_FAILURE_LIMIT)
-		return 0;
+	if (count < ATLAS_NUD_FAILURE_LIMIT) return 0;
 
-	/*
-	 * 20 consecutive failures.
-	 *
-	 * Remove:
-	 *
-	 *   1. remote_vms entry
-	 *   2. Linux neighbour entry
-	 *   3. NUD failure counter
+		/* 20 consecutive failures: remove the remote_vms entry, the Linux
+	 * neighbour entry, and the NUD failure counter.
 	 */
 	remove_remote_vm(&vm);
 
 	return 0;
 }
 
-
-/*
- * NUD success hook.
- *
- * neigh_update is used to observe the state that the neighbour
- * update is changing to. The current state may still be the old
- * state, so use new_state rather than nud_state.
+/* NUD success hook. neigh_update exposes the state that the update is
+ * changing to. The current state may still be the old state, so use
+ * new_state rather than nud_state.
  */
 SEC("tracepoint/neigh/neigh_update")
-int handle_atlas_nud_reachable(
-	struct trace_event_raw_neigh_update *ctx)
+int handle_atlas_nud_reachable(struct trace_event_raw_neigh_update *ctx)
 {
 	struct in6_addr vm = {};
 
-	/*
-	 * We only care about IPv6 neighbours.
-	 */
-	if (ctx->family != AF_INET6)
-		return 0;
+	if (ctx->family != AF_INET6) return 0;
 
-	/*
-	 * Extract the neighbour IPv6 address.
-	 */
-	get_nud_address(
-		ctx->primary_key6,
-		&vm);
+	get_nud_address(ctx->primary_key6, &vm);
 
-	/*
-	 * Only reset counters for addresses that Atlas currently
-	 * knows as remote VMs.
+		/* Only reset counters for addresses that Atlas currently knows as
+	 * remote VMs.
 	 */
-	if (!bpf_map_lookup_elem(
-		    &remote_vms,
-		    &vm))
-		return 0;
+	if (!bpf_map_lookup_elem(&remote_vms, &vm)) return 0;
 
-	/*
-	 * The tracepoint exposes the neighbour flags as a u8.
-	 *
-	 * NTF_EXT_LEARNED is representable here and identifies
-	 * the externally learned Atlas neighbour.
+		/* The tracepoint exposes the neighbour flags as a u8. NTF_EXT_LEARNED
+	 * identifies the externally learned Atlas neighbour.
 	 */
-	if (!(ctx->flags & NTF_EXT_LEARNED))
-		return 0;
+	if (!(ctx->flags & NTF_EXT_LEARNED)) return 0;
 
-	/*
-	 * The tracepoint's nud_state is the current state.
-	 *
-	 * new_state is the state the update is requesting.
-	 *
-	 * We reset the failure streak when the neighbour is being
-	 * changed to NUD_REACHABLE.
+		/* Reset the failure streak only when the neighbour is being changed to
+	 * NUD_REACHABLE: new_state is the requested state, nud_state the current
+	 * one.
 	 */
-	if (ctx->new_state != NUD_REACHABLE)
-		return 0;
+	if (ctx->new_state != NUD_REACHABLE) return 0;
 
-	/*
-	 * Successful reachability breaks the consecutive
-	 * failure streak.
-	 */
 	reset_nud_failures(&vm);
 
 	return 0;

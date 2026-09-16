@@ -18,12 +18,7 @@ func writeTestPeerFile(t *testing.T, contents string) string {
 }
 
 func TestReadUnicastPeerEntries(t *testing.T) {
-	path := writeTestPeerFile(t, ""+
-		"# participating hosts\n"+
-		"10.20.0.11\n"+
-		"\n"+
-		"10.20.0.12 # inline comment\n"+
-		"10.20.0.11\n")
+	path := writeTestPeerFile(t, ""+"# participating hosts\n"+"10.20.0.11\n"+"\n"+"10.20.0.12 # inline comment\n"+"10.20.0.11\n")
 
 	entries, err := readUnicastPeerEntries(path)
 	if err != nil {

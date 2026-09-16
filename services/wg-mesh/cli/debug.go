@@ -94,13 +94,7 @@ var dumpCommand = &cobra.Command{
 	Short: "stream packet and protocol events",
 	Args:  cobra.NoArgs,
 	RunE: func(command *cobra.Command, _ []string) error {
-		filter, err := newDebugFilter(
-			dumpSourceText,
-			dumpDestinationText,
-			dumpActionText,
-			dumpTenant,
-			command.Flags().Changed("tenant"),
-		)
+		filter, err := newDebugFilter(dumpSourceText, dumpDestinationText, dumpActionText, dumpTenant, command.Flags().Changed("tenant"))
 		if err != nil {
 			return err
 		}
@@ -114,13 +108,7 @@ var topCommand = &cobra.Command{
 	Short: "show live packet decisions by VM pair",
 	Args:  cobra.NoArgs,
 	RunE: func(command *cobra.Command, _ []string) error {
-		filter, err := newDebugFilter(
-			topSourceText,
-			topDestinationText,
-			"",
-			topTenant,
-			command.Flags().Changed("tenant"),
-		)
+		filter, err := newDebugFilter(topSourceText, topDestinationText, "", topTenant, command.Flags().Changed("tenant"))
 		if err != nil {
 			return err
 		}
@@ -156,10 +144,7 @@ func resetDebugStats() error {
 	}
 	defer statsMap.Close()
 
-	return statsMap.Put(
-		uint32(0),
-		make([]debugStats, ebpf.MustPossibleCPU()),
-	)
+	return statsMap.Put(uint32(0), make([]debugStats, ebpf.MustPossibleCPU()))
 }
 
 func showDebugStatus() error {
@@ -185,31 +170,12 @@ func showDebugStatus() error {
 		status = "enabled"
 	}
 
-	fmt.Printf(
-		"debug: %s\n"+
-			"accepted: %d\n"+
-			"dropped: %d\n"+
-			"protocol sent: %d\n"+
-			"protocol received: %d\n"+
-			"events lost: %d\n",
-		status,
-		stats.Accepted,
-		stats.Dropped,
-		stats.ProtocolSent,
-		stats.ProtocolReceived,
-		stats.Lost,
-	)
+	fmt.Printf("debug: %s\n"+"accepted: %d\n"+"dropped: %d\n"+"protocol sent: %d\n"+"protocol received: %d\n"+"events lost: %d\n", status, stats.Accepted, stats.Dropped, stats.ProtocolSent, stats.ProtocolReceived, stats.Lost)
 
 	return nil
 }
 
-func newDebugFilter(
-	sourceText,
-	destinationText,
-	actionText string,
-	tenant uint32,
-	hasTenant bool,
-) (debugFilter, error) {
+func newDebugFilter(sourceText, destinationText, actionText string, tenant uint32, hasTenant bool) (debugFilter, error) {
 	filter := debugFilter{}
 
 	var err error
@@ -309,10 +275,7 @@ func parseAction(action string) (uint8, error) {
 	case "redirect":
 		return 2, nil
 	default:
-		return 0, fmt.Errorf(
-			"unknown action %q; use accept, drop, or redirect",
-			action,
-		)
+		return 0, fmt.Errorf("unknown action %q; use accept, drop, or redirect", action)
 	}
 }
 
@@ -459,4 +422,3 @@ func enumName(value uint8, names []string) string {
 
 	return fmt.Sprintf("UNKNOWN(%d)", value)
 }
-

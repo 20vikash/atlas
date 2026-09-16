@@ -22,11 +22,9 @@ const unicastPeerLimit = 256
 const (
 	unicastLockPath = "/run/lock/atlas-wg-mesh-unicast.lock"
 
-	// Filter priorities on the uplink interface. The unicast hooks and the
-	// multicast NDP hook never run together, but a start or stop passes
-	// through a short window with both attached. The multicast hook sits at
-	// priority 10: ingress unicast must decap before it, and egress unicast
-	// must wrap after it, so that window stays safe.
+	// Filter priorities on the uplink. A start or stop passes through a short
+	// window with both hook sets attached: ingress unicast decaps before the
+	// multicast hook at priority 10, and egress unicast wraps after it.
 	unicastIngressFilterPriority = "5"
 	unicastEgressFilterPriority  = "15"
 )
@@ -88,9 +86,8 @@ func parseUnicastPeerAddress(peerText string) (netip.Addr, error) {
 	return peer, nil
 }
 
-// readUnicastPeerEntries reads the peer file as written. Each non-comment
-// line holds one IPv4 address. The file can hold the local host address,
-// because the same file can be copied to every peer.
+// readUnicastPeerEntries reads the peer file as written: one IPv4 address
+// per non-comment line. The file can hold the local host address.
 func readUnicastPeerEntries(path string) ([]netip.Addr, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -158,8 +155,7 @@ func writeUnicastPeerEntries(path string, entries []netip.Addr) error {
 }
 
 // updateUnicastPeerFile adds or removes one peer address. Both directions
-// are safe to repeat: an address that is already present or absent leaves
-// the file unchanged.
+// are safe to repeat.
 func updateUnicastPeerFile(path string, peerText string, add bool) error {
 	peer, err := parseUnicastPeerAddress(peerText)
 	if err != nil {
@@ -260,15 +256,14 @@ func syncUnicastPeerMap(entries []netip.Addr, self [4]byte) error {
 	return nil
 }
 
-// runUnicastDaemon switches the uplink to unicast NDP transport and keeps the
-// peer_list map in step with the peer file. It performs no packet processing:
-// the BPF hooks transport the NDP packets themselves.
+// runUnicastDaemon switches the uplink to unicast NDP transport and keeps
+// the peer_list map in step with the peer file. The BPF hooks do the
+// packet processing.
 //
-// The unicast hooks and the multicast NDP hook never run together. On start,
-// the daemon attaches the unicast hooks and removes the multicast NDP filters
-// from the uplink. On a clean stop, it restores the multicast filters before
-// the unicast filters come off, so neighbour discovery never stops. A failed
-// start leaves the multicast filters in place.
+// On start, the daemon attaches the unicast hooks and removes the multicast
+// NDP filters from the uplink. On a clean stop, it restores the multicast
+// filters first, so neighbour discovery never stops. A failed start leaves
+// the multicast filters in place.
 func runUnicastDaemon(path string, verbose bool) error {
 	config, err := readPinnedConfig()
 	if err != nil {
@@ -341,25 +336,12 @@ func runUnicastDaemon(path string, verbose bool) error {
 	return nil
 }
 
-// installTransportNeighbours adds one neighbour entry on the discovery
-// interface for every peer. Each entry is permanent, externally learned, and
-// managed, and holds no MAC address. The kernel resolves and maintains the
-// MAC address, which the BPF FIB lookup needs to send wrapped packets to a
-// peer.
+// installTransportNeighbours adds one permanent, externally learned,
+// managed neighbour entry per peer on the discovery interface. The entry
+// holds no MAC: the kernel resolves it, which the BPF FIB lookup needs.
 func installTransportNeighbours(peers []netip.Addr, uplinkName string) error {
 	for _, peer := range peers {
-		err := runCommand(
-			"ip",
-			"neigh",
-			"replace",
-			peer.String(),
-			"dev",
-			uplinkName,
-			"nud",
-			"permanent",
-			"extern_learn",
-			"managed",
-		)
+		err := runCommand("ip", "neigh", "replace", peer.String(), "dev", uplinkName, "nud", "permanent", "extern_learn", "managed")
 		if err != nil {
 			return fmt.Errorf("install neighbour entry for %s: %w", peer, err)
 		}

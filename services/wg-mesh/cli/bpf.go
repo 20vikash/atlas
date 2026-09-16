@@ -40,16 +40,10 @@ const (
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
 
-// Must match struct config in bpf/state.h.
-//
-// DiscoveryIndex identifies the shared VLAN/uplink interface used for
-// multicast NDP discovery.
-//
-// DiscoveryMAC is the MAC address of that same interface. The VM TC hook
-// uses it when constructing a multicast Neighbor Solicitation.
-//
-// The trailing padding keeps the Go representation aligned with the BPF
-// struct layout.
+// Must match struct config in bpf/state.h. DiscoveryIndex is the shared
+// VLAN/uplink interface for multicast NDP discovery, and DiscoveryMAC is
+// its MAC. The trailing padding keeps the Go layout aligned with the BPF
+// struct.
 type hostConfig struct {
 	DiscoveryIndex uint32
 	UplinkIPv4     [4]byte
@@ -58,17 +52,11 @@ type hostConfig struct {
 	_              [2]byte
 }
 
-// programPath returns the pin for a program. A fresh install pins at the top
-// level of the pin directory. An upgrade pins under releases/<hash> and
-// removes the top level pin, so look for the installed release first.
+// programPath returns the pin for a program: the installed release first,
+// then the top level pin of a fresh install.
 func programPath(program string) (string, error) {
 	if hash, err := readInstalledHash(); err == nil {
-		release := filepath.Join(
-			pinDirectory,
-			"releases",
-			hex.EncodeToString(hash[:]),
-			program,
-		)
+		release := filepath.Join(pinDirectory, "releases", hex.EncodeToString(hash[:]), program)
 
 		if _, err := os.Stat(release); err == nil {
 			return release, nil
@@ -78,79 +66,42 @@ func programPath(program string) (string, error) {
 	top := filepath.Join(pinDirectory, program)
 
 	if _, err := os.Stat(top); err != nil {
-		return "", fmt.Errorf(
-			"no pinned program %s: run configure or upgrade",
-			program,
-		)
+		return "", fmt.Errorf("no pinned program %s: run configure or upgrade", program)
 	}
 
 	return top, nil
 }
 
 // nudHookLinkPinPath returns the stable pin path for a NUD tracepoint link.
-//
-// Each NUD program has its own link because the two programs attach to
-// different tracepoints.
+// Each NUD program has its own link.
 func nudHookLinkPinPath(program string) string {
-	return filepath.Join(
-		pinDirectory,
-		"links",
-		program,
-	)
+	return filepath.Join(pinDirectory, "links", program)
 }
 
-// attachNUDHook attaches one NUD tracepoint program and pins its link.
-//
-// A pinned link keeps the hook attached after this process exits.
-//
-// An existing link is replaced with a new link running the pinned program
-// that programPath finds for the given program name.
-func attachNUDHook(
-	programName string,
-	tracepointName string,
-) error {
+// attachNUDHook attaches the pinned program that programPath finds for the
+// given program name. A pinned link keeps the hook attached after this
+// process exits; an existing link is replaced.
+func attachNUDHook(programName string, tracepointName string) error {
 	bpfProgramPath, err := programPath(programName)
 	if err != nil {
 		return err
 	}
 
-	return attachNUDHookPath(
-		programName,
-		tracepointName,
-		bpfProgramPath,
-	)
+	return attachNUDHookPath(programName, tracepointName, bpfProgramPath)
 }
 
 // attachNUDHookPath attaches the NUD tracepoint program at the given path
-// and pins its link.
-//
-// A pinned link keeps the hook attached after this process exits.
-//
-// An existing link is replaced with a new link running that program.
-func attachNUDHookPath(
-	programName string,
-	tracepointName string,
-	bpfProgramPath string,
-) error {
-	program, err := ebpf.LoadPinnedProgram(
-		bpfProgramPath,
-		nil,
-	)
+// and pins its link, replacing any existing link.
+func attachNUDHookPath(programName string, tracepointName string, bpfProgramPath string) error {
+	program, err := ebpf.LoadPinnedProgram(bpfProgramPath, nil)
 	if err != nil {
-		return fmt.Errorf(
-			"load the pinned NUD program %s: %w",
-			bpfProgramPath,
-			err,
-		)
+		return fmt.Errorf("load the pinned NUD program %s: %w", bpfProgramPath, err)
 	}
 	defer program.Close()
 
 	linkPinPath := nudHookLinkPinPath(programName)
 
-	existingLink, err := link.LoadPinnedLink(
-		linkPinPath,
-		nil,
-	)
+	existingLink, err := link.LoadPinnedLink(linkPinPath, nil)
 	if err == nil {
 		unpinError := existingLink.Unpin()
 
@@ -162,81 +113,39 @@ func attachNUDHookPath(
 		}
 
 		if unpinError != nil || closeError != nil {
-			return fmt.Errorf(
-				"replace the pinned NUD link %s: %w",
-				programName,
-				errors.Join(unpinError, closeError),
-			)
+			return fmt.Errorf("replace the pinned NUD link %s: %w", programName, errors.Join(unpinError, closeError))
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf(
-			"open the pinned NUD link %s: %w",
-			programName,
-			err,
-		)
+		return fmt.Errorf("open the pinned NUD link %s: %w", programName, err)
 	}
 
-	newLink, err := link.Tracepoint(
-		nudTracepointCategory,
-		tracepointName,
-		program,
-		nil,
-	)
+	newLink, err := link.Tracepoint(nudTracepointCategory, tracepointName, program, nil)
 	if err != nil {
-		return fmt.Errorf(
-			"attach %s to the %s/%s tracepoint: %w",
-			programName,
-			nudTracepointCategory,
-			tracepointName,
-			err,
-		)
+		return fmt.Errorf("attach %s to the %s/%s tracepoint: %w", programName, nudTracepointCategory, tracepointName, err)
 	}
 
-	if err := os.MkdirAll(
-		filepath.Dir(linkPinPath),
-		0755,
-	); err != nil {
+	if err := os.MkdirAll(filepath.Dir(linkPinPath), 0755); err != nil {
 		newLink.Close()
-		return fmt.Errorf(
-			"create NUD link pin directory: %w",
-			err,
-		)
+		return fmt.Errorf("create NUD link pin directory: %w", err)
 	}
 
 	if err := newLink.Pin(linkPinPath); err != nil {
 		newLink.Close()
-		return fmt.Errorf(
-			"pin the NUD tracepoint link %s: %w",
-			programName,
-			err,
-		)
+		return fmt.Errorf("pin the NUD tracepoint link %s: %w", programName, err)
 	}
 
 	// The pin holds the attachment, so releasing this handle is safe.
 	return newLink.Close()
 }
 
-// attachNUDHooks attaches both NUD tracepoint programs.
-//
-// Failure tracking:
-//
-//	neigh_timer_handler -> handle_atlas_nud_failure
-//
-// Successful reachability:
-//
-//	neigh_update -> handle_atlas_nud_reachable
+// attachNUDHooks attaches both NUD tracepoint programs:
+// neigh_timer_handler for failure tracking, neigh_update for reachability.
 func attachNUDHooks() error {
-	if err := attachNUDHook(
-		nudFailureProgram,
-		nudFailureTracepointName,
-	); err != nil {
+	if err := attachNUDHook(nudFailureProgram, nudFailureTracepointName); err != nil {
 		return err
 	}
 
-	if err := attachNUDHook(
-		nudReachableProgram,
-		nudReachableTracepointName,
-	); err != nil {
+	if err := attachNUDHook(nudReachableProgram, nudReachableTracepointName); err != nil {
 		return err
 	}
 
@@ -244,79 +153,48 @@ func attachNUDHooks() error {
 }
 
 // attachNUDHooksFromRelease attaches both NUD tracepoint programs from a
-// release pin directory.
-//
-// An upgrade must attach the programs of its own release. The pins of the
-// previous install may not contain these programs, and may hold an older
-// program version.
+// release pin directory. The pins of the previous install may not contain
+// these programs, and may hold an older program version.
 func attachNUDHooksFromRelease(release string) error {
-	if err := attachNUDHookPath(
-		nudFailureProgram,
-		nudFailureTracepointName,
-		filepath.Join(release, nudFailureProgram),
-	); err != nil {
+	if err := attachNUDHookPath(nudFailureProgram, nudFailureTracepointName, filepath.Join(release, nudFailureProgram)); err != nil {
 		return err
 	}
 
-	if err := attachNUDHookPath(
-		nudReachableProgram,
-		nudReachableTracepointName,
-		filepath.Join(release, nudReachableProgram),
-	); err != nil {
+	if err := attachNUDHookPath(nudReachableProgram, nudReachableTracepointName, filepath.Join(release, nudReachableProgram)); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func pinCollection(
-	collection *ebpf.Collection,
-	config hostConfig,
-) error {
+func pinCollection(collection *ebpf.Collection, config hostConfig) error {
 	if err := os.MkdirAll(pinDirectory, 0755); err != nil {
 		return err
 	}
 
 	for name, bpfMap := range collection.Maps {
-		if err := bpfMap.Pin(
-			filepath.Join(pinDirectory, name),
-		); err != nil {
+		if err := bpfMap.Pin(filepath.Join(pinDirectory, name)); err != nil {
 			return err
 		}
 	}
 
 	for name, program := range collection.Programs {
-		if err := program.Pin(
-			filepath.Join(pinDirectory, name),
-		); err != nil {
+		if err := program.Pin(filepath.Join(pinDirectory, name)); err != nil {
 			return err
 		}
 	}
 
-	if err := collection.Maps["config"].Put(
-		uint32(0),
-		config,
-	); err != nil {
+	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
 		return err
 	}
 
-	return collection.Maps["build_hash"].Put(
-		uint32(0),
-		bpfHash(),
-	)
+	return collection.Maps["build_hash"].Put(uint32(0), bpfHash())
 }
 
-func loadCollection(
-	replacements map[string]*ebpf.Map,
-) (*ebpf.Collection, error) {
-	spec, err := ebpf.LoadCollectionSpecFromReader(
-		bytes.NewReader(bpfObject),
-	)
+func loadCollection(replacements map[string]*ebpf.Map) (*ebpf.Collection, error) {
+	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfObject))
 	if err != nil {
-		return nil, fmt.Errorf(
-			"read embedded BPF object: %w",
-			err,
-		)
+		return nil, fmt.Errorf("read embedded BPF object: %w", err)
 	}
 
 	collection, err := ebpf.NewCollectionWithOptions(
@@ -326,10 +204,7 @@ func loadCollection(
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf(
-			"load BPF programs: %w",
-			err,
-		)
+		return nil, fmt.Errorf("load BPF programs: %w", err)
 	}
 
 	return collection, nil
@@ -348,10 +223,7 @@ func readInstalledHash() ([32]byte, error) {
 
 	var hash [32]byte
 
-	if err := buildMap.Lookup(
-		uint32(0),
-		&hash,
-	); err != nil {
+	if err := buildMap.Lookup(uint32(0), &hash); err != nil {
 		return [32]byte{}, err
 	}
 
@@ -359,10 +231,7 @@ func readInstalledHash() ([32]byte, error) {
 }
 
 func openMap(name string) (*ebpf.Map, error) {
-	return ebpf.LoadPinnedMap(
-		filepath.Join(pinDirectory, name),
-		nil,
-	)
+	return ebpf.LoadPinnedMap(filepath.Join(pinDirectory, name), nil)
 }
 
 func clearPinDirectory() error {
@@ -372,9 +241,7 @@ func clearPinDirectory() error {
 	}
 
 	for _, entry := range entries {
-		if err := os.RemoveAll(
-			filepath.Join(pinDirectory, entry.Name()),
-		); err != nil {
+		if err := os.RemoveAll(filepath.Join(pinDirectory, entry.Name())); err != nil {
 			return err
 		}
 	}
@@ -391,35 +258,24 @@ func readPinnedConfig() (hostConfig, error) {
 
 	var config hostConfig
 
-	if err := configMap.Lookup(
-		uint32(0),
-		&config,
-	); err != nil {
+	if err := configMap.Lookup(uint32(0), &config); err != nil {
 		return hostConfig{}, err
 	}
 
 	return config, nil
 }
 
-func addLocalVirtualMachine(
-	address [16]byte,
-	ifindex uint32,
-) error {
+func addLocalVirtualMachine(address [16]byte, ifindex uint32) error {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
 		return err
 	}
 	defer vmMap.Close()
 
-	return vmMap.Put(
-		address,
-		ifindex,
-	)
+	return vmMap.Put(address, ifindex)
 }
 
-func removeLocalVirtualMachine(
-	address [16]byte,
-) error {
+func removeLocalVirtualMachine(address [16]byte) error {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
 		return err
@@ -429,10 +285,7 @@ func removeLocalVirtualMachine(
 	return vmMap.Delete(address)
 }
 
-func hasOtherLocalVirtualMachineOnInterface(
-	address [16]byte,
-	ifindex uint32,
-) (bool, error) {
+func hasOtherLocalVirtualMachineOnInterface(address [16]byte, ifindex uint32) (bool, error) {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
 		return false, err
@@ -444,10 +297,7 @@ func hasOtherLocalVirtualMachineOnInterface(
 
 	iterator := vmMap.Iterate()
 
-	for iterator.Next(
-		&otherAddress,
-		&otherIndex,
-	) {
+	for iterator.Next(&otherAddress, &otherIndex) {
 		if otherAddress != address &&
 			otherIndex == ifindex {
 			return true, nil
@@ -468,10 +318,7 @@ func (virtualMachine localVirtualMachine) interfaceLabel() string {
 		return virtualMachine.interfaceName
 	}
 
-	return fmt.Sprintf(
-		"ifindex:%d",
-		virtualMachine.ifindex,
-	)
+	return fmt.Sprintf("ifindex:%d", virtualMachine.ifindex)
 }
 
 func localVirtualMachines() ([]localVirtualMachine, error) {
@@ -481,25 +328,17 @@ func localVirtualMachines() ([]localVirtualMachine, error) {
 	}
 	defer vmMap.Close()
 
-	virtualMachines := make(
-		[]localVirtualMachine,
-		0,
-	)
+	virtualMachines := make([]localVirtualMachine, 0)
 
 	var address [16]byte
 	var ifindex uint32
 
 	iterator := vmMap.Iterate()
 
-	for iterator.Next(
-		&address,
-		&ifindex,
-	) {
+	for iterator.Next(&address, &ifindex) {
 		interfaceName := ""
 
-		if device, err := net.InterfaceByIndex(
-			int(ifindex),
-		); err == nil {
+		if device, err := net.InterfaceByIndex(int(ifindex)); err == nil {
 			interfaceName = device.Name
 		}
 
@@ -520,9 +359,7 @@ func localVirtualMachines() ([]localVirtualMachine, error) {
 	sort.Slice(
 		virtualMachines,
 		func(left, right int) bool {
-			return virtualMachines[left].address.Less(
-				virtualMachines[right].address,
-			)
+			return virtualMachines[left].address.Less(virtualMachines[right].address)
 		},
 	)
 
@@ -543,10 +380,7 @@ func remoteLocationCount() (int, uint32, error) {
 
 	iterator := remoteMap.Iterate()
 
-	for iterator.Next(
-		&vm,
-		&host,
-	) {
+	for iterator.Next(&vm, &host) {
 		count++
 	}
 
@@ -566,10 +400,7 @@ func localVirtualMachineCount() (int, error) {
 
 	iterator := vmMap.Iterate()
 
-	for iterator.Next(
-		&address,
-		&value,
-	) {
+	for iterator.Next(&address, &value) {
 		count++
 	}
 
