@@ -84,7 +84,7 @@ def get_available_ip_address(ip_address_id: str) -> MetalServerIPAddress:
 @api_docs(
 	request_example={
 		"image_id": "8f1c2d3e4b5a6978",
-		"vcpus": 2,
+		"cpu_millicores": 2000,
 		"memory_mib": 2048,
 		"disk_mib": 20480,
 		"hostname": "worker-1",
@@ -135,7 +135,7 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 			"tenant_id",
 			"virtual_machine_image",
 			"architecture",
-			"vcpus",
+			"cpu_millicores",
 			"memory_mib",
 			"disk_mib",
 			"sleep_after_idle_seconds",
@@ -309,7 +309,7 @@ def create_virtual_machine_console_token(
 
 @virtual_machine_configuration.patch("<virtual_machine_id>/compute")
 @api_docs(
-	request_example={"vcpus": 4, "sleep_after_idle_seconds": 1800},
+	request_example={"cpu_millicores": 4000, "sleep_after_idle_seconds": 1800},
 	responses=ACCEPTED_RESPONSE,
 )
 def update_virtual_machine_compute(
@@ -317,7 +317,7 @@ def update_virtual_machine_compute(
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Update compute.
 
-	Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs a stopped VM.
+	Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change needs a stopped VM.
 
 	A value of `0` disables automatic idle shutdown.
 	"""

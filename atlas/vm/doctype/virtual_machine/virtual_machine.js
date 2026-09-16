@@ -386,11 +386,17 @@ function showResizeComputeDialog(frm) {
 	frappe.prompt(
 		[
 			{
-				fieldname: "vcpus",
+				fieldname: "cpu_millicores",
 				fieldtype: "Int",
-				label: __("vCPUs"),
+				label: __("CPU (millicores)"),
 				reqd: 1,
-				default: frm.doc.vcpus,
+				min: 100,
+				max: 32000,
+				default: frm.doc.cpu_millicores,
+				description: __(
+					"The valid range is 100 to 32000 millicores. 1000 millicores equals one CPU core."
+				),
+				show_description_on_click: 1,
 			},
 			{
 				fieldname: "memory_mib",
@@ -400,12 +406,12 @@ function showResizeComputeDialog(frm) {
 				default: frm.doc.memory_mib,
 			},
 		],
-		({ vcpus, memory_mib }) =>
+		({ cpu_millicores, memory_mib }) =>
 			frm
 				.call({
 					method: "resize_compute",
 					doc: frm.doc,
-					args: { vcpus, memory_mib },
+					args: { cpu_millicores, memory_mib },
 					freeze: true,
 					freeze_message: __("Resizing compute..."),
 				})

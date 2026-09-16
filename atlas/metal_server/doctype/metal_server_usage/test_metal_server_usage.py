@@ -16,8 +16,8 @@ from atlas.metal_server.usage import (
 from atlas.vm.core.metal_client import MetalClientError
 
 CAPACITY = {
-	"total_cpu_count": 8,
-	"available_cpu_count": 6,
+	"total_cpu_millicores": 8000,
+	"available_cpu_millicores": 6000,
 	"virtual_machine_count": 1,
 	"total_memory_mib": 16384,
 	"available_memory_mib": 8192,
@@ -149,8 +149,8 @@ class TestServerUsage(UnitTestCase):
 
 	def test_capacity_parses_the_metal_response(self) -> None:
 		capacity = {
-			"total_cpu_count": 8,
-			"available_cpu_count": 6,
+			"total_cpu_millicores": 8000,
+			"available_cpu_millicores": 6000,
 			"virtual_machine_count": 1,
 			"total_memory_mib": 16384,
 			"available_memory_mib": 12288,
@@ -158,12 +158,12 @@ class TestServerUsage(UnitTestCase):
 			"available_storage_mib": 80000,
 		}
 
-		self.assertEqual(get_usage_values(capacity)["available_cpu_count"], 6)
+		self.assertEqual(get_usage_values(capacity)["available_cpu_millicores"], 6000)
 
 	def test_capacity_rejects_boolean_values(self) -> None:
 		capacity = {
-			"total_cpu_count": 8,
-			"available_cpu_count": True,
+			"total_cpu_millicores": 8000,
+			"available_cpu_millicores": True,
 			"virtual_machine_count": 1,
 			"total_memory_mib": 16384,
 			"available_memory_mib": 12288,

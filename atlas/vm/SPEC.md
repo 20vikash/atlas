@@ -46,7 +46,7 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
 Capacity comes from a Metal Server Usage sample, which Metal produced at some earlier moment. Placement subtracts every VM created after that sample and every uncertain draft, so a burst of requests cannot spend the same reported capacity twice.
 
-Only memory and storage limit placement. Virtual CPUs are oversubscribed: a host accepts a VM when memory and storage are free, whatever the sum of the virtual CPUs it already hosts. Available CPU stays in the ranking key, so placement still prefers the host with the fewest reserved virtual CPUs.
+Only memory and storage limit placement. CPU entitlement is oversubscribed: a host accepts a VM when memory and storage are free, whatever the sum of `cpu_millicores` it already hosts. Available CPU stays in the ranking key, so placement still prefers the host with the most available millicores.
 
 The chosen Metal Server row is locked and its capacity rechecked before the draft is inserted. The lock is released by the commit, before Atlas calls Metal, so a slow host never holds a row.
 
@@ -183,7 +183,7 @@ Active connections can stop when the public IPv4 address or the egress mode chan
 
 `sleep_after_idle_seconds` lets Metal preserve and stop an idle VM after the configured duration. `0` disables automatic idle shutdown. Set it during creation or with the Edit Idle Shutdown action.
 
-`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas merges each change into the desired compute object. Only a vCPU or memory change needs a stopped VM. Atlas stores the timeout and does not implement idle or traffic behavior.
+`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas merges each change into the desired compute object. `cpu_millicores` is the exact CPU entitlement. `1000` millicores equals one CPU core. The valid range is 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. A CPU or memory change needs a stopped VM. Atlas stores the timeout and does not implement idle or traffic behavior.
 
 ## Disk limits
 

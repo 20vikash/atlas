@@ -19,7 +19,7 @@
   "hostname",
   "error",
   "section_break_compute_and_storage",
-  "vcpus",
+  "cpu_millicores",
   "memory_mib",
   "sleep_after_idle_seconds",
   "column_break_compute",
@@ -109,13 +109,15 @@
    "read_only": 1
   },
   {
-   "fieldname": "vcpus",
+   "description": "1000 millicores equals one CPU core. The valid range is 100 to 32000. Firecracker supports a maximum of 32 guest vCPUs.",
+   "fieldname": "cpu_millicores",
    "fieldtype": "Int",
    "in_list_view": 1,
-   "label": "vCPUs",
+   "label": "CPU (millicores)",
    "read_only": 1,
    "reqd": 1,
-   "set_only_once": 1
+   "set_only_once": 1,
+   "show_description_on_click": 1
   },
   {
    "fieldname": "column_break_compute",

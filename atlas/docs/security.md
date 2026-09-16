@@ -38,7 +38,7 @@ Tenant `0` is the system tenant. A privileged virtual machine reaches every tena
 
 **A service token is a bearer token.** Atlas does not track replay. A stolen token works until it expires, so each issuer must use a short lifetime.
 
-**There are no quotas.** A caller can create virtual machines, reserve provider IP addresses, and request any vCPU, memory, and disk size without a limit. Cost and capacity control belong to the central control plane, not to Atlas.
+**There are no tenant quotas.** A caller can create virtual machines and reserve provider IP addresses without a tenant limit. VM shape validation limits CPU entitlement to 100 through 32000 millicores, but it does not limit aggregate use. Cost and aggregate capacity control belong to the central control plane, not to Atlas.
 
 **The API reference page loads a script from a CDN.** `/api/atlas/docs` is unauthenticated and serves Scalar from `cdn.jsdelivr.net` without a pinned version or an integrity hash. The page shares an origin with the site, so a compromised CDN would run in the browser of a signed-in viewer. Pin the version and add an integrity hash, or serve the bundle from the app.
 

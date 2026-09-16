@@ -49,7 +49,7 @@ class VirtualMachine(Document):
 		sleep_after_idle_seconds: DF.Int
 		tags: DF.Table[AtlasTag]
 		tenant_id: DF.Int
-		vcpus: DF.Int
+		cpu_millicores: DF.Int
 		virtual_machine_image: DF.Data
 	# end: auto-generated types
 
@@ -388,9 +388,9 @@ class VirtualMachine(Document):
 		return self.update_disk({"size_mib": int(disk_mib)})
 
 	@frappe.whitelist(methods=["POST"])
-	def resize_compute(self, vcpus: int, memory_mib: int) -> dict[str, Any]:
+	def resize_compute(self, cpu_millicores: int, memory_mib: int) -> dict[str, Any]:
 		"""Ask Metal to change this VM CPU and memory. The VM must be stopped."""
-		return self.update_compute({"virtual_cpu_count": int(vcpus), "memory_mib": int(memory_mib)})
+		return self.update_compute({"cpu_millicores": int(cpu_millicores), "memory_mib": int(memory_mib)})
 
 	@frappe.whitelist(methods=["POST"])
 	def update_idle_shutdown(self, sleep_after_idle_seconds: int) -> dict[str, Any]:
