@@ -62,7 +62,7 @@ An enabled firewall gives `FORWARD` a default drop policy. It accepts establishe
 
 Each allow rule selects `any`, `tcp`, `udp`, or `icmp`. A TCP or UDP rule can select one destination port or one inclusive destination port range. An empty port value selects all ports. Each rule has one or more canonical IPv4 or IPv6 prefixes.
 
-Metal reads the IPv4 and IPv6 filter tables with `iptables-save` and `ip6tables-save`. Metal replaces a table only when it differs. A new namespace and a changed effective firewall cause an immediate inspection. An unchanged firewall has a drift audit once per minute. The memory-only audit cache is not applied state. A process restart causes a new inspection.
+Metal reads both filter tables before it applies a firewall change. Metal replaces only tables that differ. If the second table update fails, Metal restores the first table to prevent a split policy. A new namespace and a changed effective firewall cause an immediate inspection. An unchanged firewall has a drift audit once per minute. The memory-only audit cache is not applied state. A process restart causes a new inspection.
 
 Metal applies the firewall before it adds the veth, public address, or mesh registration. Existing tracked connections continue because the first enabled rule accepts `ESTABLISHED,RELATED` traffic.
 

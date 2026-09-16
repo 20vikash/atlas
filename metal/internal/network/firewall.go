@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -16,12 +17,28 @@ type firewallFamily struct {
 	isIPv6         bool
 }
 
+type firewallTableUpdate struct {
+	family  firewallFamily
+	current string
+	desired string
+}
+
 // ensureFirewall replaces a namespace filter table only when its desired rules differ.
 func ensureFirewall(ctx context.Context, namespace string, configuration vm.FirewallConfiguration) error {
-	for _, family := range [...]firewallFamily{
+	return ensureFirewallFamilies(ctx, namespace, configuration, []firewallFamily{
 		{saveCommand: "iptables-save", restoreCommand: "iptables-restore"},
 		{saveCommand: "ip6tables-save", restoreCommand: "ip6tables-restore", isIPv6: true},
-	} {
+	})
+}
+
+func ensureFirewallFamilies(
+	ctx context.Context,
+	namespace string,
+	configuration vm.FirewallConfiguration,
+	families []firewallFamily,
+) error {
+	updates := make([]firewallTableUpdate, 0, len(families))
+	for _, family := range families {
 		desired, err := renderFirewallTable(configuration, family.isIPv6)
 		if err != nil {
 			return err
@@ -33,13 +50,47 @@ func ensureFirewall(ctx context.Context, namespace string, configuration vm.Fire
 		if normalizeFirewallTable(current) == normalizeFirewallTable(desired) {
 			continue
 		}
+		updates = append(updates, firewallTableUpdate{family: family, current: current, desired: desired})
+	}
 
-		if err := platform.RunWithInput(ctx, desired, "ip", "netns", "exec", namespace,
-			family.restoreCommand, "--wait", "5"); err != nil {
-			return fmt.Errorf("apply %s firewall: %w", firewallFamilyName(family.isIPv6), err)
+	applied := make([]firewallTableUpdate, 0, len(updates))
+	for _, update := range updates {
+		if err := restoreFirewallTable(ctx, namespace, update.family, update.desired); err != nil {
+			applyError := fmt.Errorf("apply %s firewall: %w", firewallFamilyName(update.family.isIPv6), err)
+			return errors.Join(applyError, rollbackFirewallTables(ctx, namespace, applied))
 		}
+		applied = append(applied, update)
 	}
 	return nil
+}
+
+func rollbackFirewallTables(
+	ctx context.Context,
+	namespace string,
+	updates []firewallTableUpdate,
+) error {
+	var rollbackErrors []error
+	for index := len(updates) - 1; index >= 0; index-- {
+		update := updates[index]
+		if err := restoreFirewallTable(ctx, namespace, update.family, update.current); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf(
+				"roll back %s firewall: %w",
+				firewallFamilyName(update.family.isIPv6),
+				err,
+			))
+		}
+	}
+	return errors.Join(rollbackErrors...)
+}
+
+func restoreFirewallTable(
+	ctx context.Context,
+	namespace string,
+	family firewallFamily,
+	table string,
+) error {
+	return platform.RunWithInput(ctx, table, "ip", "netns", "exec", namespace,
+		family.restoreCommand, "--wait", "5")
 }
 
 func renderFirewallTable(configuration vm.FirewallConfiguration, isIPv6 bool) (string, error) {

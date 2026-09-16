@@ -52,6 +52,40 @@ func TestEnsureFirewallReplacesDrift(t *testing.T) {
 	}
 }
 
+func TestEnsureFirewallRollsBackIPv4WhenIPv6Fails(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to create a network namespace")
+	}
+
+	const namespace = "metal-test-firewall-rollback"
+	runOrSkipTest(t, "ip", "netns", "add", namespace)
+	t.Cleanup(func() { _ = exec.Command("ip", "netns", "del", namespace).Run() })
+
+	if err := ensureFirewall(context.Background(), namespace, vm.FirewallConfiguration{}); err != nil {
+		t.Fatal(err)
+	}
+	err := ensureFirewallFamilies(
+		context.Background(),
+		namespace,
+		vm.FirewallConfiguration{Enabled: true},
+		[]firewallFamily{
+			{saveCommand: "iptables-save", restoreCommand: "iptables-restore"},
+			{saveCommand: "ip6tables-save", restoreCommand: "false", isIPv6: true},
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "apply IPv6 firewall") {
+		t.Fatalf("error = %v, want IPv6 apply failure", err)
+	}
+
+	output, err := platform.RunInNetworkNamespace(context.Background(), namespace, "iptables-save", "-t", "filter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, ":FORWARD ACCEPT") {
+		t.Fatalf("IPv4 firewall was not rolled back:\n%s", output)
+	}
+}
+
 func assertFirewallRule(t *testing.T, namespace, command string, fragments ...string) {
 	t.Helper()
 	output, err := platform.RunInNetworkNamespace(context.Background(), namespace, command, "-t", "filter")
