@@ -72,6 +72,7 @@ def publish_ubuntu_image(
 
 	file_values = {
 		"status": "Available",
+		"transfer_progress": 100,
 		"artifact_storage": storage,
 		"image_object_key": None,
 		"kernel_object_key": None,

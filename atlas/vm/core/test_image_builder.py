@@ -72,6 +72,8 @@ class TestUbuntuImageBuilder(UnitTestCase):
 			)
 
 		get_single.assert_not_called()
+		self.assertEqual(created["status"], "Available")
+		self.assertEqual(created["transfer_progress"], 100)
 		self.assertEqual(created["artifact_storage"], "Site File")
 		self.assertEqual(created["image_file"], "file-rootfs")
 		self.assertEqual(created["kernel_file"], "file-kernel")
