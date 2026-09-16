@@ -207,9 +207,9 @@ func TestNewManagerAllowsTrafficMonitoringToBeDisabled(t *testing.T) {
 
 func testSpecification() Specification {
 	return Specification{
-		VirtualCPUCount: 2,
-		MemoryMiB:       2048,
-		DiskMiB:         4096,
+		CPUMillicores: 2000,
+		MemoryMiB:     2048,
+		DiskMiB:       4096,
 		Image: Image{
 			Name:         "image-1",
 			Architecture: "amd64",
@@ -342,7 +342,7 @@ func TestIdleTimeoutDoesNotChangeSpecificationGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := manager.SetCompute(context.Background(), "machine-1", Compute{
-		VirtualCPUCount: 2, MemoryMiB: 2048, SleepAfterIdleSeconds: 60,
+		CPUMillicores: 2000, MemoryMiB: 2048, SleepAfterIdleSeconds: 60,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestSetComputeRequestsRunningState(t *testing.T) {
 	if err := manager.Reconcile(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.SetCompute(context.Background(), "machine-1", Compute{VirtualCPUCount: 4, MemoryMiB: 4096}); err != nil {
+	if err := manager.SetCompute(context.Background(), "machine-1", Compute{CPUMillicores: 4000, MemoryMiB: 4096}); err != nil {
 		t.Fatal(err)
 	}
 	record, err := manager.store.readDesired("machine-1")
@@ -380,7 +380,7 @@ func TestSetComputeRequestsRunningState(t *testing.T) {
 
 func TestSetComputeRejectsAMissingVirtualMachine(t *testing.T) {
 	manager, _, _, _ := newTestManager(t)
-	if err := manager.SetCompute(context.Background(), "missing", Compute{VirtualCPUCount: 1, MemoryMiB: 1}); !errors.Is(err, ErrNotFound) {
+	if err := manager.SetCompute(context.Background(), "missing", Compute{CPUMillicores: 1000, MemoryMiB: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }
@@ -393,7 +393,7 @@ func TestSetComputeConflictsWithADestroyedVirtualMachine(t *testing.T) {
 	if err := manager.Delete(context.Background(), "machine-1"); err != nil {
 		t.Fatal(err)
 	}
-	compute := Compute{VirtualCPUCount: 1, MemoryMiB: 1, SleepAfterIdleSeconds: 60}
+	compute := Compute{CPUMillicores: 1000, MemoryMiB: 1, SleepAfterIdleSeconds: 60}
 	if err := manager.SetCompute(context.Background(), "machine-1", compute); !errors.Is(err, ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}

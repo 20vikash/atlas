@@ -44,7 +44,7 @@ func (dependencies *testHostDependencies) Capacity(context.Context) (storage.Cap
 
 func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 	dependencies := &testHostDependencies{
-		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, VirtualCPUCount: 2}},
+		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, CPUMillicores: 1500}},
 	}
 	service, err := NewService(Dependencies{
 		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,
@@ -72,7 +72,7 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 		t.Fatalf("wake count = %d, want 1", dependencies.wakeCount)
 	}
 	capacity := result.Capacity
-	if capacity.AvailableCPUCount != max(runtime.NumCPU()-2, 0) || capacity.TotalStorageMiB != 4096 || capacity.AvailableStorageMiB != 3072 {
+	if capacity.AvailableCPUMillicores != max(runtime.NumCPU()*1000-1500, 0) || capacity.TotalStorageMiB != 4096 || capacity.AvailableStorageMiB != 3072 {
 		t.Fatalf("capacity = %+v", capacity)
 	}
 	if result.VirtualMachineStates["vm-00001"] != vm.StateRunning {
@@ -82,10 +82,10 @@ func TestSynchronizeAppliesControllerStateAndReportsCapacity(t *testing.T) {
 
 func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	dependencies := &testHostDependencies{
-		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, VirtualCPUCount: 2}},
+		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, CPUMillicores: 1500}},
 	}
 	reservations := func(context.Context) ([]vmmigration.TargetReservation, error) {
-		return []vmmigration.TargetReservation{{VirtualMachineID: "vm-00002", VirtualCPUCount: 3, MemoryMiB: 1024, DiskMiB: 2048}}, nil
+		return []vmmigration.TargetReservation{{VirtualMachineID: "vm-00002", CPUMillicores: 2500, MemoryMiB: 1024, DiskMiB: 2048}}, nil
 	}
 	service, err := NewService(Dependencies{
 		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,
@@ -100,8 +100,8 @@ func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if capacity.AvailableCPUCount != max(runtime.NumCPU()-2-3, 0) {
-		t.Fatalf("available CPU = %d", capacity.AvailableCPUCount)
+	if capacity.AvailableCPUMillicores != max(runtime.NumCPU()*1000-1500-2500, 0) {
+		t.Fatalf("available CPU = %d", capacity.AvailableCPUMillicores)
 	}
 	if capacity.AvailableStorageMiB != 3072-2048 {
 		t.Fatalf("available storage = %d, want 1024", capacity.AvailableStorageMiB)

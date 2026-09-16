@@ -16,6 +16,8 @@ const (
 	// maximumResourceIDLength keeps an ID usable as a path, ZFS dataset, and
 	// systemd unit instance name.
 	maximumResourceIDLength = 64
+	minimumCPUMillicores    = 100
+	maximumCPUMillicores    = 32_000
 
 	// maximumMemoryMiB prevents unit memory overflow. The unit limit is twice the
 	// guest size plus fixed overhead.
@@ -45,7 +47,7 @@ type createRequest struct {
 
 // computeRequest is the complete compute configuration.
 type computeRequest struct {
-	VirtualCPUCount       int `json:"virtual_cpu_count" minimum:"1"`
+	CPUMillicores         int `json:"cpu_millicores" minimum:"100" maximum:"32000"`
 	MemoryMiB             int `json:"memory_mib" minimum:"1"`
 	SleepAfterIdleSeconds int `json:"sleep_after_idle_seconds" minimum:"0"`
 }
@@ -143,7 +145,7 @@ func (request createRequest) validate() error {
 // specification converts the request into the domain VM specification.
 func (request createRequest) specification() vm.Specification {
 	return vm.Specification{
-		VirtualCPUCount:       request.Compute.VirtualCPUCount,
+		CPUMillicores:         request.Compute.CPUMillicores,
 		MemoryMiB:             request.Compute.MemoryMiB,
 		SleepAfterIdleSeconds: request.Compute.SleepAfterIdleSeconds,
 		DiskMiB:               request.Disk.SizeMiB,
@@ -159,8 +161,14 @@ func (request createRequest) specification() vm.Specification {
 
 // validate rejects a compute shape the host cannot represent.
 func (request computeRequest) validate() error {
-	if request.VirtualCPUCount <= 0 || request.MemoryMiB <= 0 {
-		return fmt.Errorf("compute values must be positive")
+	if request.CPUMillicores < minimumCPUMillicores {
+		return fmt.Errorf("compute.cpu_millicores must be at least %d", minimumCPUMillicores)
+	}
+	if request.CPUMillicores > maximumCPUMillicores {
+		return fmt.Errorf("compute.cpu_millicores must not exceed %d", maximumCPUMillicores)
+	}
+	if request.MemoryMiB <= 0 {
+		return fmt.Errorf("compute.memory_mib must be positive")
 	}
 	if request.MemoryMiB > maximumMemoryMiB {
 		return fmt.Errorf("compute.memory_mib is too large")
@@ -205,8 +213,12 @@ func (request imageRequest) validate() error {
 	}
 	if request.MemorySnapshot {
 		configuration := request.MemorySnapshotConfiguration
-		if configuration == nil || configuration.VirtualCPUCount <= 0 || configuration.MemoryMiB <= 0 || configuration.DiskMiB <= 0 {
-			return fmt.Errorf("image.memory_snapshot_configuration must contain positive values")
+		if configuration == nil ||
+			configuration.VirtualCPUCount <= 0 ||
+			configuration.VirtualCPUCount > maximumCPUMillicores/1000 ||
+			configuration.MemoryMiB <= 0 ||
+			configuration.DiskMiB <= 0 {
+			return fmt.Errorf("image.memory_snapshot_configuration has invalid values")
 		}
 	}
 

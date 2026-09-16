@@ -39,7 +39,11 @@ class VirtualMachineImageTransferService:
 	) -> str:
 		"""Create a snapshot record and enqueue its transfer."""
 		memory_snapshot_configuration = (
-			(virtual_machine.vcpus, virtual_machine.memory_mib, virtual_machine.disk_mib)
+			(
+				(virtual_machine.cpu_millicores + 999) // 1000,
+				virtual_machine.memory_mib,
+				virtual_machine.disk_mib,
+			)
 			if memory_snapshot
 			else (0, 0, 0)
 		)

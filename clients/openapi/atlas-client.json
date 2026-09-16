@@ -5,6 +5,20 @@
         "additionalProperties": false,
         "description": "New compute configuration.",
         "properties": {
+          "cpu_millicores": {
+            "anyOf": [
+              {
+                "maximum": 32000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu Millicores"
+          },
           "memory_mib": {
             "anyOf": [
               {
@@ -31,19 +45,6 @@
             ],
             "default": null,
             "title": "Sleep After Idle Seconds"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Vcpus"
           }
         },
         "title": "ComputeUpdatePayload",
@@ -105,6 +106,12 @@
         "additionalProperties": false,
         "description": "Values that create one virtual machine.",
         "properties": {
+          "cpu_millicores": {
+            "maximum": 32000,
+            "minimum": 100,
+            "title": "Cpu Millicores",
+            "type": "integer"
+          },
           "disk_iops": {
             "default": 0,
             "minimum": 0,
@@ -201,16 +208,11 @@
             "default": "",
             "title": "User Data",
             "type": "string"
-          },
-          "vcpus": {
-            "exclusiveMinimum": 0,
-            "title": "Vcpus",
-            "type": "integer"
           }
         },
         "required": [
           "image_id",
-          "vcpus",
+          "cpu_millicores",
           "memory_mib",
           "disk_mib"
         ],
@@ -850,6 +852,10 @@
       "VirtualMachineCompute": {
         "description": "The compute shape of one virtual machine.",
         "properties": {
+          "cpu_millicores": {
+            "title": "Cpu Millicores",
+            "type": "integer"
+          },
           "memory_mib": {
             "title": "Memory Mib",
             "type": "integer"
@@ -857,14 +863,10 @@
           "sleep_after_idle_seconds": {
             "title": "Sleep After Idle Seconds",
             "type": "integer"
-          },
-          "vcpus": {
-            "title": "Vcpus",
-            "type": "integer"
           }
         },
         "required": [
-          "vcpus",
+          "cpu_millicores",
           "memory_mib",
           "sleep_after_idle_seconds"
         ],
@@ -876,9 +878,9 @@
         "examples": [
           {
             "compute": {
+              "cpu_millicores": 2000,
               "memory_mib": 2048,
-              "sleep_after_idle_seconds": 0,
-              "vcpus": 2
+              "sleep_after_idle_seconds": 0
             },
             "created_at": 1788834165,
             "current_state": "running",
@@ -1081,6 +1083,7 @@
         "examples": [
           {
             "architecture": "amd64",
+            "cpu_millicores": 2000,
             "created_at": 1788834165,
             "disk_mib": 20480,
             "id": "vm-00001",
@@ -1092,14 +1095,17 @@
             "tags": {
               "env": "prod"
             },
-            "tenant_id": 7,
-            "vcpus": 2
+            "tenant_id": 7
           }
         ],
         "properties": {
           "architecture": {
             "title": "Architecture",
             "type": "string"
+          },
+          "cpu_millicores": {
+            "title": "Cpu Millicores",
+            "type": "integer"
           },
           "created_at": {
             "title": "Created At",
@@ -1150,10 +1156,6 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "integer"
-          },
-          "vcpus": {
-            "title": "Vcpus",
-            "type": "integer"
           }
         },
         "required": [
@@ -1161,7 +1163,7 @@
           "tenant_id",
           "image_id",
           "architecture",
-          "vcpus",
+          "cpu_millicores",
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
@@ -1245,6 +1247,7 @@
         "examples": [
           {
             "architecture": "amd64",
+            "cpu_millicores": 2000,
             "created_at": 1788834165,
             "disk_mib": 20480,
             "id": "vm-00001",
@@ -1254,14 +1257,17 @@
             "tags": {
               "env": "prod"
             },
-            "tenant_id": 7,
-            "vcpus": 2
+            "tenant_id": 7
           }
         ],
         "properties": {
           "architecture": {
             "title": "Architecture",
             "type": "string"
+          },
+          "cpu_millicores": {
+            "title": "Cpu Millicores",
+            "type": "integer"
           },
           "created_at": {
             "title": "Created At",
@@ -1297,10 +1303,6 @@
           "tenant_id": {
             "title": "Tenant Id",
             "type": "integer"
-          },
-          "vcpus": {
-            "title": "Vcpus",
-            "type": "integer"
           }
         },
         "required": [
@@ -1308,7 +1310,7 @@
           "tenant_id",
           "image_id",
           "architecture",
-          "vcpus",
+          "cpu_millicores",
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
@@ -1908,14 +1910,14 @@
           "content": {
             "application/json": {
               "example": {
+                "cpu_millicores": 2000,
                 "disk_mib": 20480,
                 "hostname": "worker-1",
                 "image_id": "8f1c2d3e4b5a6978",
                 "memory_mib": 2048,
                 "ssh_keys": [
                   "ssh-ed25519 AAAA"
-                ],
-                "vcpus": 2
+                ]
               },
               "schema": {
                 "$ref": "#/components/schemas/CreateVirtualMachinePayload"
@@ -2361,7 +2363,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/compute": {
       "patch": {
-        "description": "Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs a stopped VM.\n\nA value of `0` disables automatic idle shutdown.",
+        "description": "Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change needs a stopped VM.\n\nA value of `0` disables automatic idle shutdown.",
         "operationId": "update_virtual_machine_compute",
         "parameters": [
           {
@@ -2388,8 +2390,8 @@
           "content": {
             "application/json": {
               "example": {
-                "sleep_after_idle_seconds": 1800,
-                "vcpus": 4
+                "cpu_millicores": 4000,
+                "sleep_after_idle_seconds": 1800
               },
               "schema": {
                 "$ref": "#/components/schemas/ComputeUpdatePayload"

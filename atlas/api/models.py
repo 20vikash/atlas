@@ -9,7 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
 from atlas.atlas.core.tags import read_tags
-from atlas.vm.core.models import VirtualMachineCreateRequest
+from atlas.vm.core.models import (
+	MAXIMUM_CPU_MILLICORES,
+	MINIMUM_CPU_MILLICORES,
+	VirtualMachineCreateRequest,
+)
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
@@ -219,7 +223,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	"""Values that create one virtual machine."""
 
 	image_id: str = Field(min_length=1)
-	vcpus: int = Field(gt=0)
+	cpu_millicores: int = Field(ge=MINIMUM_CPU_MILLICORES, le=MAXIMUM_CPU_MILLICORES)
 	memory_mib: int = Field(gt=0)
 	disk_mib: int = Field(gt=0)
 	hostname: str = ""
@@ -241,7 +245,7 @@ class CreateVirtualMachinePayload(StrictModel):
 		"""Build the domain request for this API payload."""
 		return VirtualMachineCreateRequest(
 			virtual_machine_image=image_name,
-			virtual_cpu_count=self.vcpus,
+			cpu_millicores=self.cpu_millicores,
 			memory_mib=self.memory_mib,
 			disk_mib=self.disk_mib,
 			tenant_id=tenant_id,
@@ -263,16 +267,13 @@ class CreateVirtualMachinePayload(StrictModel):
 class ComputeUpdatePayload(PatchPayload):
 	"""New compute configuration."""
 
-	vcpus: int | None = Field(default=None, gt=0)
+	cpu_millicores: int | None = Field(default=None, ge=MINIMUM_CPU_MILLICORES, le=MAXIMUM_CPU_MILLICORES)
 	memory_mib: int | None = Field(default=None, gt=0)
 	sleep_after_idle_seconds: int | None = Field(default=None, ge=0, le=9_223_372_036)
 
 	def to_domain_changes(self) -> dict[str, Any]:
 		"""Return the field names that the VM service accepts."""
-		changes = self.model_dump(exclude_none=True)
-		if "vcpus" in changes:
-			changes["virtual_cpu_count"] = changes.pop("vcpus")
-		return changes
+		return self.model_dump(exclude_none=True)
 
 
 class DiskUpdatePayload(PatchPayload):
@@ -352,7 +353,7 @@ class VirtualMachineResponse(BaseModel):
 					"tenant_id": 7,
 					"image_id": "8f1c2d3e4b5a6978",
 					"architecture": "amd64",
-					"vcpus": 2,
+					"cpu_millicores": 2000,
 					"memory_mib": 2048,
 					"disk_mib": 20480,
 					"sleep_after_idle_seconds": 0,
@@ -367,7 +368,7 @@ class VirtualMachineResponse(BaseModel):
 	tenant_id: int
 	image_id: str
 	architecture: str
-	vcpus: int
+	cpu_millicores: int
 	memory_mib: int
 	disk_mib: int
 	sleep_after_idle_seconds: int
@@ -384,7 +385,7 @@ class VirtualMachineResponse(BaseModel):
 			tenant_id=virtual_machine.tenant_id,
 			image_id=virtual_machine.virtual_machine_image,
 			architecture=virtual_machine.architecture,
-			vcpus=virtual_machine.vcpus,
+			cpu_millicores=virtual_machine.cpu_millicores,
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
@@ -427,7 +428,7 @@ class VirtualMachineListResponse(VirtualMachineResponse):
 class VirtualMachineCompute(BaseModel):
 	"""The compute shape of one virtual machine."""
 
-	vcpus: int
+	cpu_millicores: int
 	memory_mib: int
 	sleep_after_idle_seconds: int
 
@@ -475,7 +476,7 @@ class VirtualMachineDetailResponse(BaseModel):
 					"desired_state": "running",
 					"current_state": "running",
 					"error": None,
-					"compute": {"vcpus": 2, "memory_mib": 2048, "sleep_after_idle_seconds": 0},
+					"compute": {"cpu_millicores": 2000, "memory_mib": 2048, "sleep_after_idle_seconds": 0},
 					"disk": {"size_mib": 20480, "throughput_mibps": 0, "iops": 0, "used_mib": 8123},
 					"network": {
 						"egress": "uplink",
@@ -529,7 +530,7 @@ class VirtualMachineDetailResponse(BaseModel):
 			current_state=get_current_state(virtual_machine, observed.state if observed else None),
 			error=observed.error.message if observed and observed.error else None,
 			compute=VirtualMachineCompute(
-				vcpus=virtual_machine.vcpus,
+				cpu_millicores=virtual_machine.cpu_millicores,
 				memory_mib=virtual_machine.memory_mib,
 				sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
 			),

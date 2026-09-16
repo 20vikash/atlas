@@ -113,7 +113,7 @@ class TestLiveVirtualMachineLookup(IntegrationTestCase):
 				"server": "metal-test",
 				"virtual_machine_image": self.image_name,
 				"architecture": "amd64",
-				"vcpus": 1,
+				"cpu_millicores": 1000,
 				"memory_mib": 1024,
 				"disk_mib": 10240,
 				"tenant_id": 7,

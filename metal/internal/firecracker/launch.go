@@ -221,7 +221,7 @@ func (runtime *Runtime) hasMatchingMemorySnapshot(specification vm.Specification
 	return specification.Image.CacheImage &&
 		specification.Image.MemorySnapshot &&
 		configuration != nil &&
-		configuration.VirtualCPUCount == specification.VirtualCPUCount &&
+		configuration.VirtualCPUCount == specification.VirtualCPUCount() &&
 		configuration.MemoryMiB == specification.MemoryMiB &&
 		configuration.DiskMiB == specification.DiskMiB
 }

@@ -339,7 +339,7 @@ func informationFromRecords(desired DesiredRecord, observed ObservedRecord, usag
 		State:                         observed.State,
 		DesiredState:                  desired.State,
 		Error:                         errorDetail,
-		VirtualCPUCount:               desired.Specification.VirtualCPUCount,
+		CPUMillicores:                 desired.Specification.CPUMillicores,
 		MemoryMiB:                     desired.Specification.MemoryMiB,
 		DiskMiB:                       usage.SizeMiB,
 		DiskUsedMiB:                   usage.UsedMiB,

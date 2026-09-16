@@ -27,13 +27,13 @@ type SyncResult struct {
 
 // Capacity contains current host compute and storage capacity.
 type Capacity struct {
-	TotalCPUCount       int
-	AvailableCPUCount   int
-	VirtualMachineCount int
-	TotalMemoryMiB      int
-	AvailableMemoryMiB  int
-	TotalStorageMiB     int
-	AvailableStorageMiB int
+	TotalCPUMillicores     int
+	AvailableCPUMillicores int
+	VirtualMachineCount    int
+	TotalMemoryMiB         int
+	AvailableMemoryMiB     int
+	TotalStorageMiB        int
+	AvailableStorageMiB    int
 }
 
 // PrivilegedMesh replaces the privileged virtual machine address set.
@@ -157,9 +157,9 @@ func (service *Service) Capacity(ctx context.Context) (Capacity, error) {
 // capacityOf reports capacity against reservations the caller already listed.
 // Incoming targets reserve capacity before their data arrives.
 func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Information) (Capacity, error) {
-	reservedCPUCount := 0
+	reservedCPUMillicores := 0
 	for _, information := range virtualMachines {
-		reservedCPUCount += information.VirtualCPUCount
+		reservedCPUMillicores += information.CPUMillicores
 	}
 
 	reservedMemoryMiB, reservedStorageMiB := 0, 0
@@ -169,7 +169,7 @@ func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Inf
 			return Capacity{}, fmt.Errorf("list migration reservations: %w", err)
 		}
 		for _, reservation := range reservations {
-			reservedCPUCount += reservation.VirtualCPUCount
+			reservedCPUMillicores += reservation.CPUMillicores
 			reservedMemoryMiB += reservation.MemoryMiB
 			reservedStorageMiB += reservation.DiskMiB
 		}
@@ -185,15 +185,15 @@ func (service *Service) capacityOf(ctx context.Context, virtualMachines []vm.Inf
 		return Capacity{}, fmt.Errorf("read storage capacity: %w", err)
 	}
 
-	totalCPUCount := runtime.NumCPU()
+	totalCPUMillicores := runtime.NumCPU() * 1000
 
 	return Capacity{
-		TotalCPUCount:       totalCPUCount,
-		AvailableCPUCount:   max(totalCPUCount-reservedCPUCount, 0),
-		VirtualMachineCount: len(virtualMachines),
-		TotalMemoryMiB:      totalMemoryMiB,
-		AvailableMemoryMiB:  max(availableMemoryMiB-reservedMemoryMiB, 0),
-		TotalStorageMiB:     int(storageCapacity.TotalMiB),
-		AvailableStorageMiB: max(int(storageCapacity.AvailableMiB)-reservedStorageMiB, 0),
+		TotalCPUMillicores:     totalCPUMillicores,
+		AvailableCPUMillicores: max(totalCPUMillicores-reservedCPUMillicores, 0),
+		VirtualMachineCount:    len(virtualMachines),
+		TotalMemoryMiB:         totalMemoryMiB,
+		AvailableMemoryMiB:     max(availableMemoryMiB-reservedMemoryMiB, 0),
+		TotalStorageMiB:        int(storageCapacity.TotalMiB),
+		AvailableStorageMiB:    max(int(storageCapacity.AvailableMiB)-reservedStorageMiB, 0),
 	}, nil
 }

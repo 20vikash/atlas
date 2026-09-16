@@ -78,8 +78,8 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
-    a stopped VM.
+     Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change
+    needs a stopped VM.
 
     A value of `0` disables automatic idle shutdown.
 
@@ -120,8 +120,8 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
-    a stopped VM.
+     Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change
+    needs a stopped VM.
 
     A value of `0` disables automatic idle shutdown.
 
@@ -157,8 +157,8 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
-    a stopped VM.
+     Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change
+    needs a stopped VM.
 
     A value of `0` disables automatic idle shutdown.
 
@@ -199,8 +199,8 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """ Update compute
 
-     Changes the vCPU count, the memory size, and the idle shutdown delay. A vCPU or memory change needs
-    a stopped VM.
+     Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change
+    needs a stopped VM.
 
     A value of `0` disables automatic idle shutdown.
 

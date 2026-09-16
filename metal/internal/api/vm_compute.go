@@ -41,7 +41,7 @@ func (s *Server) setVirtualMachineCompute(c echo.Context) error {
 		return err
 	}
 	if err := s.virtualMachineManager.SetCompute(c.Request().Context(), virtualMachine.ID, vm.Compute{
-		VirtualCPUCount:       request.VirtualCPUCount,
+		CPUMillicores:         request.CPUMillicores,
 		MemoryMiB:             request.MemoryMiB,
 		SleepAfterIdleSeconds: request.SleepAfterIdleSeconds,
 	}); err != nil {
@@ -54,7 +54,7 @@ func (s *Server) setVirtualMachineCompute(c echo.Context) error {
 
 // validateComputeCapacity rejects a request the host cannot satisfy. Only the
 // increase is checked, because the VM already holds what it reserves. Virtual
-// CPUs are oversubscribed and never limit a request.
+// CPU entitlement is oversubscribed and never limits a request.
 func (s *Server) validateComputeCapacity(c echo.Context, request computeRequest, current vm.Information) error {
 	capacity, err := s.hostService.Capacity(c.Request().Context())
 	if err != nil {

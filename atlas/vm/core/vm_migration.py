@@ -104,7 +104,7 @@ class MigrationService:
 		"""Return the placement shape for the migrating VM."""
 		return VirtualMachineCreateRequest(
 			virtual_machine_image=virtual_machine.virtual_machine_image,
-			virtual_cpu_count=virtual_machine.vcpus,
+			cpu_millicores=virtual_machine.cpu_millicores,
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			tenant_id=virtual_machine.tenant_id,

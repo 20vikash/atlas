@@ -144,7 +144,7 @@ class TestVirtualMachineCreation(UnitTestCase):
 	def request() -> dict[str, int | str]:
 		return {
 			"virtual_machine_image": "image-1",
-			"vcpus": 2,
+			"cpu_millicores": 2000,
 			"memory_mib": 2048,
 			"disk_mib": 10240,
 			"tenant_id": 7,
@@ -232,7 +232,7 @@ class TestVirtualMachineCompute(UnitTestCase):
 		information = SimpleNamespace(
 			desired=SimpleNamespace(
 				compute=SimpleNamespace(
-					virtual_cpu_count=2,
+					cpu_millicores=2000,
 					memory_mib=2048,
 					sleep_after_idle_seconds=0,
 				)
@@ -252,7 +252,7 @@ class TestVirtualMachineCompute(UnitTestCase):
 
 		set_compute.assert_called_once_with(
 			{
-				"virtual_cpu_count": 2,
+				"cpu_millicores": 2000,
 				"memory_mib": 2048,
 				"sleep_after_idle_seconds": 1800,
 			}
@@ -269,16 +269,16 @@ class TestVirtualMachineCompute(UnitTestCase):
 			patch.object(service, "require_information", return_value=information),
 			patch.object(service, "set_compute", return_value={}) as set_compute,
 		):
-			service.update_compute({"virtual_cpu_count": 4})
+			service.update_compute({"cpu_millicores": 4000})
 
 		set_compute.assert_called_once_with(
 			{
-				"virtual_cpu_count": 4,
+				"cpu_millicores": 4000,
 				"memory_mib": 2048,
 				"sleep_after_idle_seconds": 1800,
 			}
 		)
-		service.virtual_machine.db_set.assert_called_once_with({"vcpus": 4, "memory_mib": 2048})
+		service.virtual_machine.db_set.assert_called_once_with({"cpu_millicores": 4000, "memory_mib": 2048})
 
 	def test_a_shape_change_needs_a_stopped_virtual_machine(self) -> None:
 		service, information = self.build_service("running")
@@ -291,6 +291,17 @@ class TestVirtualMachineCompute(UnitTestCase):
 			service.update_compute({"memory_mib": 4096})
 
 		set_compute.assert_not_called()
+
+	def test_cpu_below_the_minimum_is_rejected_before_a_host_read(self) -> None:
+		service, _information = self.build_service("stopped")
+
+		with (
+			patch.object(service, "require_information") as require_information,
+			self.assertRaises(frappe.ValidationError),
+		):
+			service.update_compute({"cpu_millicores": 99})
+
+		require_information.assert_not_called()
 
 
 class TestVirtualMachineNetworkChanges(UnitTestCase):

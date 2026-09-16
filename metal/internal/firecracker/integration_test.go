@@ -109,7 +109,7 @@ func newManager(t *testing.T) *vm.Manager {
 
 func spec(image, pub string) vm.Specification {
 	return vm.Specification{
-		VirtualCPUCount: 1, MemoryMiB: 256, DiskMiB: 1024,
+		CPUMillicores: 1000, MemoryMiB: 256, DiskMiB: 1024,
 		Image: vm.Image{
 			Name:         image,
 			RootfsURL:    os.Getenv("METAL_IMAGE_URL"),

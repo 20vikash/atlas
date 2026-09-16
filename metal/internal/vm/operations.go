@@ -35,7 +35,7 @@ func (manager *Manager) SetCompute(ctx context.Context, identifier string, compu
 			return false, ErrConflict
 		}
 
-		shapeChanged := record.Specification.VirtualCPUCount != compute.VirtualCPUCount ||
+		shapeChanged := record.Specification.CPUMillicores != compute.CPUMillicores ||
 			record.Specification.MemoryMiB != compute.MemoryMiB
 		timeoutChanged := record.Specification.SleepAfterIdleSeconds != compute.SleepAfterIdleSeconds
 		if !shapeChanged && !timeoutChanged && record.State == StateRunning {
@@ -50,7 +50,7 @@ func (manager *Manager) SetCompute(ctx context.Context, identifier string, compu
 			if observed.State != StateStopped {
 				return false, ErrConflict
 			}
-			record.Specification.VirtualCPUCount = compute.VirtualCPUCount
+			record.Specification.CPUMillicores = compute.CPUMillicores
 			record.Specification.MemoryMiB = compute.MemoryMiB
 			record.SpecificationGeneration++
 			record.State = StateRunning

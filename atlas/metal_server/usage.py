@@ -144,8 +144,8 @@ def get_usage_values(usage: object) -> dict[str, int]:
 	if not isinstance(usage, dict):
 		raise ValueError("Metal capacity response must be an object")
 	fields = (
-		"total_cpu_count",
-		"available_cpu_count",
+		"total_cpu_millicores",
+		"available_cpu_millicores",
 		"virtual_machine_count",
 		"total_memory_mib",
 		"available_memory_mib",

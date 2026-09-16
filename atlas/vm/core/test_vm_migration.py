@@ -65,7 +65,7 @@ class TestMigrationCreation(UnitTestCase):
 	def test_create_reserves_a_target_and_locks_the_vm(self) -> None:
 		locked = source_vm(
 			server="metal-1",
-			vcpus=2,
+			cpu_millicores=2000,
 			memory_mib=2048,
 			disk_mib=10240,
 			tenant_id=7,
@@ -104,7 +104,7 @@ class TestMigrationCreation(UnitTestCase):
 	def test_create_uses_a_chosen_target(self) -> None:
 		locked = source_vm(
 			server="metal-1",
-			vcpus=2,
+			cpu_millicores=2000,
 			memory_mib=2048,
 			disk_mib=10240,
 			tenant_id=7,
@@ -142,7 +142,7 @@ class TestMigrationCreation(UnitTestCase):
 	def test_create_rejects_the_source_as_the_target(self) -> None:
 		locked = source_vm(
 			server="metal-1",
-			vcpus=2,
+			cpu_millicores=2000,
 			memory_mib=2048,
 			disk_mib=10240,
 			tenant_id=7,

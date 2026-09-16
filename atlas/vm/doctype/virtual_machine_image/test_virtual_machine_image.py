@@ -221,12 +221,14 @@ class TestVirtualMachineImage(UnitTestCase):
 
 
 class TestVirtualMachineImageTransfer(UnitTestCase):
-	def test_snapshot_uuid_becomes_machine_image_name(self) -> None:
+	def test_snapshot_uses_the_rounded_up_guest_cpu_count(self) -> None:
 		virtual_machine = SimpleNamespace(
 			name="VM-00001",
 			server="server-1",
 			virtual_machine_image="system-image",
 			architecture="amd64",
+			cpu_millicores=1500,
+			memory_mib=2048,
 			disk_mib=1024,
 			tenant_id=7,
 		)
@@ -235,6 +237,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		)
 		server = SimpleNamespace(name="server-1")
 		image = Mock()
+		image_values = {}
 		metal_client = Mock()
 		metal_client.create_snapshot.return_value = {
 			"id": "01900000-0000-7000-8000-000000000001",
@@ -245,6 +248,7 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 		def get_doc(doctype, name=None):
 			if isinstance(doctype, dict):
+				image_values.update(doctype)
 				return image
 			if doctype == "Virtual Machine Image":
 				return original_image
@@ -255,12 +259,16 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
 			patch.object(service, "enqueue") as enqueue_transfer,
 		):
-			image_name = service.create_from_virtual_machine(virtual_machine, "Machine image")
+			image_name = service.create_from_virtual_machine(
+				virtual_machine, "Machine image", memory_snapshot=True
+			)
 
 		self.assertEqual(image_name, "01900000-0000-7000-8000-000000000001")
 		image.insert.assert_called_once_with(
 			set_name="01900000-0000-7000-8000-000000000001",
 		)
+		self.assertEqual(image_values["memory_snapshot_virtual_cpu_count"], 2)
+		self.assertEqual(image_values["memory_snapshot_memory_mib"], 2048)
 		enqueue_transfer.assert_called_once_with("01900000-0000-7000-8000-000000000001")
 
 	def test_requested_tags_reach_the_new_image(self) -> None:

@@ -12,7 +12,19 @@ function showCreateVirtualMachineDialog() {
 				reqd: 1,
 				filters: { enabled: 1, status: "Available" },
 			},
-			{ fieldname: "vcpus", fieldtype: "Int", label: __("vCPUs"), reqd: 1, default: 1 },
+			{
+				fieldname: "cpu_millicores",
+				fieldtype: "Int",
+				label: __("CPU (millicores)"),
+				reqd: 1,
+				min: 100,
+				max: 32000,
+				default: 1000,
+				description: __(
+					"The valid range is 100 to 32000 millicores. 1000 millicores equals one CPU core."
+				),
+				show_description_on_click: 1,
+			},
 			{
 				fieldname: "disk_throughput_mibps",
 				fieldtype: "Int",

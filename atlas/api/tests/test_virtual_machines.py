@@ -21,7 +21,7 @@ from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request
 
 CREATE_BODY = {
 	"image_id": "system-image",
-	"vcpus": 2,
+	"cpu_millicores": 2000,
 	"memory_mib": 2048,
 	"disk_mib": 20480,
 }
@@ -34,7 +34,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"tenant_id": tenant_id,
 		"virtual_machine_image": "system-image",
 		"architecture": "amd64",
-		"vcpus": 2,
+		"cpu_millicores": 2000,
 		"memory_mib": 2048,
 		"disk_mib": 20480,
 		"sleep_after_idle_seconds": 0,
@@ -194,8 +194,8 @@ class TestCreateVirtualMachine(UnitTestCase):
 			self.assertEqual(status, 400)
 			self.assertIn(field, [item["name"] for item in body["error"]["fields"]])
 
-	def test_create_rejects_values_that_are_not_positive(self) -> None:
-		status, _, _ = self.create({**CREATE_BODY, "vcpus": 0})
+	def test_create_rejects_cpu_below_the_minimum(self) -> None:
+		status, _, _ = self.create({**CREATE_BODY, "cpu_millicores": 99})
 
 		self.assertEqual(status, 400)
 
@@ -319,13 +319,28 @@ class TestVirtualMachineActions(UnitTestCase):
 
 
 class TestVirtualMachineConfiguration(UnitTestCase):
+	def test_compute_change_rejects_cpu_below_the_minimum(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/compute",
+				tenant_id=TENANT_ID,
+				json={"cpu_millicores": 99},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 400)
+		virtual_machine.update_compute.assert_not_called()
+
 	def test_compute_change_calls_the_virtual_machine_method(self) -> None:
 		with (
 			api_request(
 				"PATCH",
 				"/api/atlas/virtual-machines/vm-00001/compute",
 				tenant_id=TENANT_ID,
-				json={"vcpus": 4},
+				json={"cpu_millicores": 4000},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
 		):
@@ -333,7 +348,7 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		self.assertEqual(body["id"], "vm-00001")
-		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
+		virtual_machine.update_compute.assert_called_once_with({"cpu_millicores": 4000})
 
 	def test_compute_change_keeps_the_value_that_is_absent(self) -> None:
 		with (
@@ -341,14 +356,14 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 				"PATCH",
 				"/api/atlas/virtual-machines/vm-00001/compute",
 				tenant_id=TENANT_ID,
-				json={"vcpus": 4},
+				json={"cpu_millicores": 4000},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
 		):
 			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
 
 		self.assertEqual(status, 202)
-		virtual_machine.update_compute.assert_called_once_with({"virtual_cpu_count": 4})
+		virtual_machine.update_compute.assert_called_once_with({"cpu_millicores": 4000})
 
 	def test_an_idle_timeout_change_reaches_the_virtual_machine_method(self) -> None:
 		with (
