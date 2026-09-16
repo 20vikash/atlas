@@ -143,7 +143,7 @@ func upgradeBPF(force bool) error {
 		}
 	}
 
-	if err := attachNUDHooks(); err != nil {
+	if err := attachNUDHooksFromRelease(release); err != nil {
 		return err
 	}
 
@@ -155,10 +155,14 @@ func upgradeBPF(force bool) error {
 		return err
 	}
 
+	// The new release owns these programs, so remove the top level pins
+	// of a previous install.
 	for _, program := range []string{
 		vmBPFProgram,
 		ndpProgram,
 		wireguardProgram,
+		nudFailureProgram,
+		nudReachableProgram,
 	} {
 		_ = os.Remove(filepath.Join(pinDirectory, program))
 	}

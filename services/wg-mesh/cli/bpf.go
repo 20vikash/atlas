@@ -103,8 +103,8 @@ func nudHookLinkPinPath(program string) string {
 //
 // A pinned link keeps the hook attached after this process exits.
 //
-// An existing link is replaced with a new link running the program at the
-// given path.
+// An existing link is replaced with a new link running the pinned program
+// that programPath finds for the given program name.
 func attachNUDHook(
 	programName string,
 	tracepointName string,
@@ -114,6 +114,24 @@ func attachNUDHook(
 		return err
 	}
 
+	return attachNUDHookPath(
+		programName,
+		tracepointName,
+		bpfProgramPath,
+	)
+}
+
+// attachNUDHookPath attaches the NUD tracepoint program at the given path
+// and pins its link.
+//
+// A pinned link keeps the hook attached after this process exits.
+//
+// An existing link is replaced with a new link running that program.
+func attachNUDHookPath(
+	programName string,
+	tracepointName string,
+	bpfProgramPath string,
+) error {
 	program, err := ebpf.LoadPinnedProgram(
 		bpfProgramPath,
 		nil,
@@ -218,6 +236,32 @@ func attachNUDHooks() error {
 	if err := attachNUDHook(
 		nudReachableProgram,
 		nudReachableTracepointName,
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// attachNUDHooksFromRelease attaches both NUD tracepoint programs from a
+// release pin directory.
+//
+// An upgrade must attach the programs of its own release. The pins of the
+// previous install may not contain these programs, and may hold an older
+// program version.
+func attachNUDHooksFromRelease(release string) error {
+	if err := attachNUDHookPath(
+		nudFailureProgram,
+		nudFailureTracepointName,
+		filepath.Join(release, nudFailureProgram),
+	); err != nil {
+		return err
+	}
+
+	if err := attachNUDHookPath(
+		nudReachableProgram,
+		nudReachableTracepointName,
+		filepath.Join(release, nudReachableProgram),
 	); err != nil {
 		return err
 	}
