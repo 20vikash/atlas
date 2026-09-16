@@ -58,6 +58,7 @@ request_body=$(jq -n \
 			wireguard_mesh_ipv6: "fdaa::2",
 			private_network_throughput_mibps: 0,
 			public_network_throughput_mibps: 0,
+			firewall: {enabled: false, inbound: [], outbound: []},
 			egress: "uplink"
 		},
 		guest: {

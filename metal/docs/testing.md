@@ -48,6 +48,14 @@ sudo -E go test -tags integration -v ./internal/network/traffic/
 
 The tests attach the eBPF program to `tap0` in a temporary namespace. They verify host-to-guest IP traffic and operation when no process reads `tap0`.
 
+## Firewall test
+
+This test needs root, network namespaces, `iptables`, and `ip6tables`. It verifies IPv4 and IPv6 rule application and drift repair.
+
+```sh
+sudo -E go test -tags integration -run TestEnsureFirewallReplacesDrift ./internal/network/
+```
+
 ## Idle shutdown test
 
 This test needs Linux 6.6 or newer. Start metald, then run the test with a short per-VM timeout:

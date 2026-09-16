@@ -83,7 +83,8 @@ Secure Shell key and metadata updates use an immediate operation with a 2-second
     "public_ipv4": "203.0.113.10",
     "wireguard_mesh_ipv6": "fdaa:1:1::1",
     "private_network_throughput_mibps": 100,
-    "public_network_throughput_mibps": 50
+    "public_network_throughput_mibps": 50,
+    "firewall": {"enabled": false, "inbound": [], "outbound": []}
   },
   "guest": {
     "hostname": "worker-1",
@@ -130,7 +131,12 @@ Create, read, and mutation routes return the same nested resource shape.
       "public_ipv4": "203.0.113.10",
       "wireguard_mesh_ipv6": "fdaa:1:1::1",
       "private_network_throughput_mibps": 100,
-      "public_network_throughput_mibps": 50
+      "public_network_throughput_mibps": 50,
+      "firewall": {
+        "enabled": true,
+        "inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+        "outbound": [{"protocol": "any", "cidrs": ["0.0.0.0/0", "::/0"]}]
+      }
     },
     "guest": {
       "hostname": "worker-1",
@@ -189,9 +195,18 @@ Network replaces the complete network object:
   "public_ipv4": "",
   "wireguard_mesh_ipv6": "fdaa:1:1::1",
   "private_network_throughput_mibps": 100,
-  "public_network_throughput_mibps": 0
+  "public_network_throughput_mibps": 0,
+  "firewall": {
+    "enabled": true,
+    "inbound": [{"protocol": "tcp", "ports": "22", "cidrs": ["203.0.113.0/24"]}],
+    "outbound": [{"protocol": "any", "cidrs": ["0.0.0.0/0", "::/0"]}]
+  }
 }
 ```
+
+The firewall supports `any`, `tcp`, `udp`, and `icmp`. An empty `ports` value selects all ports. Other port values select one port or one inclusive range from 1 through 65535.
+
+Each rule needs one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries across both directions. An enabled firewall blocks unmatched new traffic. A disabled firewall permits traffic and keeps its rules.
 
 Secure Shell keys and metadata also use complete replacement.
 

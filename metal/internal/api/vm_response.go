@@ -81,11 +81,26 @@ type imageArtifactResponse struct {
 
 // networkResponse is the desired VM network.
 type networkResponse struct {
-	PublicIPv4                    string `json:"public_ipv4,omitempty"`
-	WireGuardMeshIPv6             string `json:"wireguard_mesh_ipv6"`
-	PrivateNetworkThroughputMiBps int    `json:"private_network_throughput_mibps"`
-	PublicNetworkThroughputMiBps  int    `json:"public_network_throughput_mibps"`
-	Egress                        string `json:"egress"`
+	PublicIPv4                    string           `json:"public_ipv4,omitempty"`
+	WireGuardMeshIPv6             string           `json:"wireguard_mesh_ipv6"`
+	PrivateNetworkThroughputMiBps int              `json:"private_network_throughput_mibps"`
+	PublicNetworkThroughputMiBps  int              `json:"public_network_throughput_mibps"`
+	Egress                        string           `json:"egress"`
+	Firewall                      firewallResponse `json:"firewall"`
+}
+
+// firewallResponse is the complete desired firewall configuration.
+type firewallResponse struct {
+	Enabled  bool                   `json:"enabled"`
+	Inbound  []firewallRuleResponse `json:"inbound"`
+	Outbound []firewallRuleResponse `json:"outbound"`
+}
+
+// firewallRuleResponse permits traffic from or to a set of IP prefixes.
+type firewallRuleResponse struct {
+	Protocol string   `json:"protocol"`
+	Ports    string   `json:"ports,omitempty"`
+	CIDRs    []string `json:"cidrs"`
 }
 
 // diskResponse is the desired disk size and rate limits.
@@ -138,6 +153,7 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 				PrivateNetworkThroughputMiBps: information.PrivateNetworkThroughputMiBps,
 				PublicNetworkThroughputMiBps:  information.PublicNetworkThroughputMiBps,
 				Egress:                        string(information.Egress),
+				Firewall:                      toFirewall(information.Firewall),
 			},
 			Guest: guestResponse{
 				Hostname: information.Hostname,
@@ -158,6 +174,26 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			Error:             toOperationError(information.Error),
 		},
 	}
+}
+
+func toFirewall(configuration vm.FirewallConfiguration) firewallResponse {
+	return firewallResponse{
+		Enabled:  configuration.Enabled,
+		Inbound:  toFirewallRules(configuration.Inbound),
+		Outbound: toFirewallRules(configuration.Outbound),
+	}
+}
+
+func toFirewallRules(rules []vm.FirewallRule) []firewallRuleResponse {
+	responses := make([]firewallRuleResponse, len(rules))
+	for index, rule := range rules {
+		responses[index] = firewallRuleResponse{
+			Protocol: string(rule.Protocol),
+			Ports:    rule.Ports,
+			CIDRs:    append([]string{}, rule.CIDRs...),
+		}
+	}
+	return responses
 }
 
 // cloneMetadata copies the map, so a response cannot alias stored state.

@@ -19,6 +19,18 @@ func Run(ctx context.Context, name string, args ...string) error {
 	return nil
 }
 
+// RunWithInput executes a host command with standard input and includes its output on failure.
+func RunWithInput(ctx context.Context, input, name string, args ...string) error {
+	command := exec.CommandContext(ctx, name, args...)
+	command.Stdin = strings.NewReader(input)
+
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+
+	return nil
+}
+
 // RunInNetworkNamespace executes a command in a named network namespace.
 func RunInNetworkNamespace(ctx context.Context, namespace, name string, args ...string) (string, error) {
 	arguments := append([]string{"netns", "exec", namespace, name}, args...)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	traffic "github.com/frappe/atlas/metal/internal/network/traffic"
 	platform "github.com/frappe/atlas/metal/internal/platform"
@@ -13,12 +15,18 @@ import (
 // VMs reuse private addresses across isolated namespaces. The fixed guest MAC
 // encodes 172.16.0.2 and keeps a stopped guest reachable.
 const (
-	tapName             = "tap0"
-	gatewayIPAddress    = "172.16.0.1"
-	guestIPAddress      = "172.16.0.2"
-	networkPrefixLength = 24
-	guestMACAddress     = "06:00:ac:10:00:02"
+	tapName               = "tap0"
+	gatewayIPAddress      = "172.16.0.1"
+	guestIPAddress        = "172.16.0.2"
+	networkPrefixLength   = 24
+	guestMACAddress       = "06:00:ac:10:00:02"
+	firewallAuditInterval = time.Minute
 )
+
+type firewallAudit struct {
+	fingerprint string
+	inspectedAt time.Time
+}
 
 // meshRegistrar registers and unregisters guest mesh addresses.
 type meshRegistrar interface {
@@ -36,6 +44,9 @@ type trafficMonitor interface {
 type LinuxAllocator struct {
 	mesh           meshRegistrar
 	trafficMonitor trafficMonitor
+	firewallMutex  sync.Mutex
+	firewallAudits map[string]firewallAudit
+	now            func() time.Time
 }
 
 // NewLinuxAllocator returns a Linux network allocator.
@@ -53,7 +64,12 @@ func NewLinuxAllocator(mesh *Mesh, monitor *traffic.Monitor) *LinuxAllocator {
 
 // newLinuxAllocator returns an allocator with test dependencies.
 func newLinuxAllocator(mesh meshRegistrar, trafficMonitor trafficMonitor) *LinuxAllocator {
-	return &LinuxAllocator{mesh: mesh, trafficMonitor: trafficMonitor}
+	return &LinuxAllocator{
+		mesh:           mesh,
+		trafficMonitor: trafficMonitor,
+		firewallAudits: make(map[string]firewallAudit),
+		now:            time.Now,
+	}
 }
 
 // Ensure converges all host network resources to the requested state.
@@ -65,13 +81,15 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 		WireGuardMeshIPv6:             desired.Configuration.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: desired.Configuration.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  desired.Configuration.PublicNetworkThroughputMiBps,
+		Firewall:                      desired.Configuration.Firewall,
 		UserID:                        desired.UserID,
 		GroupID:                       desired.GroupID,
 	}
-	if err := ensureNamespace(ctx, request.VirtualMachineID); err != nil {
+	namespaceCreated, err := ensureNamespace(ctx, request.VirtualMachineID)
+	if err != nil {
 		return vm.NetworkInterface{}, err
 	}
-	if err := allocator.converge(ctx, request); err != nil {
+	if err := allocator.converge(ctx, request, namespaceCreated); err != nil {
 		return vm.NetworkInterface{}, err
 	}
 	if err := allocator.convergeTrafficMonitoring(desired.TrackTraffic, request); err != nil {
@@ -85,6 +103,7 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 // before deleting the namespace, which also deletes its veth pair.
 func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseRequest) error {
 	virtualMachineID := request.VirtualMachineID
+	allocator.forgetFirewallAudit(virtualMachineID)
 	// Release TCX links before tap0 is removed.
 	var trafficError error
 	if allocator.trafficMonitor != nil {
@@ -130,23 +149,29 @@ func (allocator *LinuxAllocator) convergeTrafficMonitoring(enabled bool, request
 }
 
 // ensureNamespace creates the VM network namespace when it is absent.
-func ensureNamespace(ctx context.Context, virtualMachineID string) error {
+func ensureNamespace(ctx context.Context, virtualMachineID string) (bool, error) {
 	exists, err := networkNamespaceExists(ctx, virtualMachineID)
 	if err != nil || exists {
-		return err
+		return false, err
 	}
 
-	return platform.Run(ctx, "ip", "netns", "add", namespaceName(virtualMachineID))
+	if err := platform.Run(ctx, "ip", "netns", "add", namespaceName(virtualMachineID)); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // converge removes dropped resources before adding requested ones, so an egress
 // mode change never leaves both network shapes in place.
-func (allocator *LinuxAllocator) converge(ctx context.Context, request request) error {
+func (allocator *LinuxAllocator) converge(ctx context.Context, request request, namespaceCreated bool) error {
 	if request.PublicIPv4 != "" && !request.Egress.HasInternetPath() {
 		return fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
 	}
 
 	if err := ensureNamespaceBase(ctx, request); err != nil {
+		return err
+	}
+	if err := allocator.convergeFirewall(ctx, request, namespaceCreated); err != nil {
 		return err
 	}
 	if err := allocator.removeUnwanted(ctx, request); err != nil {
@@ -157,6 +182,79 @@ func (allocator *LinuxAllocator) converge(ctx context.Context, request request) 
 	}
 
 	return configureTrafficControl(ctx, request.trafficControl())
+}
+
+func (allocator *LinuxAllocator) convergeFirewall(
+	ctx context.Context,
+	request request,
+	force bool,
+) error {
+	fingerprint, err := firewallFingerprint(request.Firewall)
+	if err != nil {
+		return err
+	}
+	if !allocator.isFirewallAuditDue(request.VirtualMachineID, fingerprint, force) {
+		return nil
+	}
+	if err := ensureFirewall(ctx, namespaceName(request.VirtualMachineID), request.Firewall); err != nil {
+		return err
+	}
+	allocator.recordFirewallAudit(request.VirtualMachineID, fingerprint)
+	return nil
+}
+
+func firewallFingerprint(configuration vm.FirewallConfiguration) (string, error) {
+	ipv4Table, err := renderFirewallTable(configuration, false)
+	if err != nil {
+		return "", err
+	}
+	ipv6Table, err := renderFirewallTable(configuration, true)
+	if err != nil {
+		return "", err
+	}
+
+	return ipv4Table + "\x00" + ipv6Table, nil
+}
+
+func (allocator *LinuxAllocator) isFirewallAuditDue(
+	virtualMachineID string,
+	fingerprint string,
+	force bool,
+) bool {
+	if force {
+		return true
+	}
+	now := allocator.currentTime()
+	allocator.firewallMutex.Lock()
+	defer allocator.firewallMutex.Unlock()
+
+	audit, found := allocator.firewallAudits[virtualMachineID]
+	return !found || audit.fingerprint != fingerprint || now.Sub(audit.inspectedAt) >= firewallAuditInterval
+}
+
+func (allocator *LinuxAllocator) recordFirewallAudit(virtualMachineID, fingerprint string) {
+	allocator.firewallMutex.Lock()
+	defer allocator.firewallMutex.Unlock()
+	if allocator.firewallAudits == nil {
+		allocator.firewallAudits = make(map[string]firewallAudit)
+	}
+	allocator.firewallAudits[virtualMachineID] = firewallAudit{
+		fingerprint: fingerprint,
+		inspectedAt: allocator.currentTime(),
+	}
+}
+
+func (allocator *LinuxAllocator) forgetFirewallAudit(virtualMachineID string) {
+	allocator.firewallMutex.Lock()
+	defer allocator.firewallMutex.Unlock()
+	delete(allocator.firewallAudits, virtualMachineID)
+}
+
+func (allocator *LinuxAllocator) currentTime() time.Time {
+	if allocator.now != nil {
+		return allocator.now()
+	}
+	return time.Now()
 }
 
 // removeUnwanted tears down what this request no longer asks for.

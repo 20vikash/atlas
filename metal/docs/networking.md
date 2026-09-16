@@ -44,6 +44,16 @@ Private traffic uses the private IPv4 ranges and the mesh IPv6 range. Public tra
 
 A `mesh` VM has no internet path, so Metal keeps a public limit and does not apply it. A `none` VM has no veth pair and receives no limits. The requested values are kept and applied when the veth pair returns.
 
+## Firewall
+
+The VM firewall filters public and mesh traffic in the VM network namespace. A disabled firewall permits all traffic. Rules stay stored while the firewall is disabled.
+
+An enabled firewall permits established and related connections. Allow rules then permit new inbound or outbound traffic. An empty rule list blocks new traffic in that direction.
+
+Rules support `any`, `tcp`, `udp`, and `icmp`. TCP and UDP rules can select one destination port or one inclusive range. Each rule has one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries across both directions.
+
+Metal inspects changed firewalls on the next reconcile pass. It also audits unchanged filter tables once per minute and replaces external changes.
+
 ## Atlas WG Mesh
 
 Each VM has a private IPv6 address in `fdaa::/16`. Atlas WG Mesh routes it between hosts. Metal registers the address when it creates the veth pair and unregisters it when it removes the pair.

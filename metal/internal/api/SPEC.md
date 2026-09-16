@@ -79,6 +79,8 @@ The finish route records the target finish request and returns `202`. Atlas call
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 
+The network PUT requires the complete network object, including `firewall`. Firewall rules are allow rules. The API validates protocols, ports, canonical IP prefixes, and the limit of 50 prefix entries.
+
 ## Capacity
 
 Compute and disk updates are checked against host memory and storage before they are stored, and an increase the host cannot satisfy is refused with `409`. Only the increase is checked, because the VM already holds what it reserves. CPU entitlement is oversubscribed, so a CPU increase is always accepted when `cpu_millicores` is in the valid range from 100 through 32000.
