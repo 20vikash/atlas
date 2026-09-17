@@ -86,41 +86,49 @@ func installHost(uplinkName, wireGuardName string) error {
 	}
 
 	if err := pinCollection(collection, config); err != nil {
-		return rollbackInstall(err, uplinkName)
+		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 
 	if err := attachHook(uplinkName, ndpProgram, "ingress"); err != nil {
-		return rollbackInstall(err, uplinkName)
+		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 
 	if err := attachHook(uplinkName, ndpProgram, "egress"); err != nil {
-		return rollbackInstall(err, uplinkName)
+		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 
 	if err := attachHook(wireGuardName, wireguardProgram, "ingress"); err != nil {
-		return rollbackInstall(err, uplinkName)
+		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 
 	if err := attachNUDHooks(); err != nil {
-		return rollbackInstall(err, uplinkName)
+		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 
 	fmt.Printf("Atlas WG Mesh is installed on %s and %s\n", uplinkName, wireGuardName)
 	return nil
 }
 
-// rollbackInstall removes the VLAN route, detaches the hooks that were attached
-// before the failure, and removes the pinned BPF state.
-func rollbackInstall(cause error, uplinkName string) error {
+// rollbackInstall removes the VLAN route, detaches the hooks on the uplink and
+// the WireGuard interface, and removes the pinned BPF state. A hook that was
+// not attached yet is not an error.
+func rollbackInstall(cause error, uplinkName, wireGuardName string) error {
 	if err := removeMeshRoute(uplinkName); err != nil {
 		return errors.Join(cause, fmt.Errorf("remove VLAN route: %w", err))
 	}
+
 	if err := detachHook(uplinkName); err != nil {
 		return errors.Join(cause, fmt.Errorf("detach %s hook: %w", uplinkName, err))
 	}
+
+	if err := detachHook(wireGuardName); err != nil {
+		return errors.Join(cause, fmt.Errorf("detach %s hook: %w", wireGuardName, err))
+	}
+
 	if err := clearPinDirectory(); err != nil {
 		return errors.Join(cause, fmt.Errorf("remove partial BPF state: %w", err))
 	}
+
 	return cause
 }
 
