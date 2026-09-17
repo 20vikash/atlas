@@ -23,7 +23,12 @@ from atlas.api.core.errors import (
 	describe_exception,
 )
 from atlas.atlas.core.tags import find_names_with_tags
-from atlas.auth.identity import MAXIMUM_TENANT_ID, TENANT_HEADER, get_current_tenant_id
+from atlas.auth.identity import (
+	MAXIMUM_TENANT_ID,
+	TENANT_HEADER,
+	get_current_tenant_id,
+	require_central_identity,
+)
 from atlas.auth.overrides import is_document_visible
 
 DEFAULT_LIST_LIMIT = 20
@@ -222,27 +227,33 @@ class Router:
 		path = path.strip("/")
 		return f"{self.prefix}/{path}" if path else self.prefix
 
-	def request(self, method: str, path: str = ""):
+	def request(self, method: str, path: str = "", *, central_only: bool = False):
 		"""Register a route for one HTTP method."""
-		return register_route(self, self.join(path), [method.upper()])
+		return register_route(self, self.join(path), [method.upper()], central_only=central_only)
 
 	def head(self, path: str = ""):
 		return self.request("HEAD", path)
 
-	def get(self, path: str = "", *, public: bool = False):
-		return register_route(self, self.join(path), ["GET"], public=public)
+	def get(self, path: str = "", *, public: bool = False, central_only: bool = False):
+		return register_route(
+			self,
+			self.join(path),
+			["GET"],
+			public=public,
+			central_only=central_only,
+		)
 
-	def post(self, path: str = ""):
-		return self.request("POST", path)
+	def post(self, path: str = "", *, central_only: bool = False):
+		return self.request("POST", path, central_only=central_only)
 
-	def put(self, path: str = ""):
-		return self.request("PUT", path)
+	def put(self, path: str = "", *, central_only: bool = False):
+		return self.request("PUT", path, central_only=central_only)
 
-	def patch(self, path: str = ""):
-		return self.request("PATCH", path)
+	def patch(self, path: str = "", *, central_only: bool = False):
+		return self.request("PATCH", path, central_only=central_only)
 
-	def delete(self, path: str = ""):
-		return self.request("DELETE", path)
+	def delete(self, path: str = "", *, central_only: bool = False):
+		return self.request("DELETE", path, central_only=central_only)
 
 	def subrouter(
 		self,
@@ -330,10 +341,11 @@ class Router:
 class RouteHandler:
 	"""Runs one route function for an HTTP request and turns its result into a response."""
 
-	def __init__(self, router: Router, function: Callable):
+	def __init__(self, router: Router, function: Callable, central_only: bool = False):
 		functools.update_wrapper(self, function)
 		self.router = router
 		self.function = function
+		self.central_only = central_only
 		self.shape = CallShape.of(function)
 		self.payload = resolve_binding(function, "payload")
 		self.query = resolve_binding(function, "query")
@@ -344,6 +356,9 @@ class RouteHandler:
 			return self.function(*args, **kwargs)
 
 		try:
+			if self.central_only:
+				require_central_identity()
+
 			kwargs.update(self.read_parameters(request, args, kwargs))
 			result = self.function(*args, **self.shape.accepted_keywords(kwargs))
 			if frappe.flags.in_test:
@@ -396,6 +411,7 @@ def register_route(
 	methods: list[str],
 	*,
 	public: bool = False,
+	central_only: bool = False,
 ):
 	"""Return a decorator that adds one route to the Frappe API URL map."""
 	from frappe.api import API_URL_MAP
@@ -406,9 +422,11 @@ def register_route(
 	unsupported = sorted(set(methods) - {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"})
 	if unsupported:
 		raise ValueError(f"Route {path} uses unsupported HTTP methods: {unsupported}")
+	if public and central_only:
+		raise ValueError(f"Route {path} cannot be both public and Central-only")
 
 	def decorator(function: Callable) -> RouteHandler:
-		handler = RouteHandler(router, function)
+		handler = RouteHandler(router, function, central_only=central_only)
 		if handler.payload and set(methods) <= {"HEAD", "GET"}:
 			raise TypeError(f"{function.__name__} cannot accept a payload on {methods}")
 
@@ -422,7 +440,7 @@ def register_route(
 				query=handler.query,
 				tag=router.name,
 				public=public,
-				parameters=() if public else TENANT_PARAMETERS,
+				parameters=() if public or central_only else TENANT_PARAMETERS,
 			)
 		)
 		return handler

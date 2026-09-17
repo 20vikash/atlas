@@ -27,6 +27,7 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 | `vm_image_storage_migration` | Moving a bootstrap System image from site files into object storage. |
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
 | `vm_state` | The only writer of Virtual Machine State. The host sync job calls it. |
+| `state_webhook` | The Webhook records that deliver each stored state report to a Central. |
 
 ## Create
 
@@ -58,6 +59,22 @@ A Virtual Machine property calls Metal once per request and caches the result. A
 
 The list route does not call Metal. It returns `last_known_state` from Virtual Machine State, which holds the last status each host reported. `POST /v1/sync` carries that status for every VM on the host, so one exchange per host refreshes every record. The status is as fresh as the last host reconcile pass, and `state_synced_at` records when Atlas last stored it.
 
+## State delivery
+
+`PUT /api/atlas/webhooks` points the event deliveries of one Central at its receiver. It takes the URL, a shared secret, `central_id` (default 1), and `enabled`. Only a Central token, which carries tenant `*`, can use it. Atlas creates one state Webhook for `on_update` and one for `on_trash`. Their names use `Virtual Machine State - <Event> - Central - <central_id>`. A repeated call refreshes the Webhooks. `central_id` must be `1` unless developer mode is active or site configuration sets `allow_multiple_central_webhooks` to `1`.
+
+Each delivery is a signed JSON POST with `Content-Type` and `X-Atlas-Region`:
+
+```json
+{
+  "event": "vm.state",
+  "virtual_machine": "vm-0000001",
+  "status": "running",
+  "observed_at": "2026-09-17 08:25:52"
+}
+```
+
+A removal sends the same fields with the event `vm.state.deleted`.
 
 ## Reconciliation
 

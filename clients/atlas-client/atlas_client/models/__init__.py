@@ -1,6 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
 from .compute_update_payload import ComputeUpdatePayload
+from .configure_webhooks_payload import ConfigureWebhooksPayload
 from .console_token_payload import ConsoleTokenPayload
 from .console_token_payload_mode import ConsoleTokenPayloadMode
 from .console_token_response import ConsoleTokenResponse
@@ -50,9 +51,11 @@ from .virtual_machine_list_response_tags import VirtualMachineListResponseTags
 from .virtual_machine_network import VirtualMachineNetwork
 from .virtual_machine_response import VirtualMachineResponse
 from .virtual_machine_response_tags import VirtualMachineResponseTags
+from .webhook_configuration_response import WebhookConfigurationResponse
 
 __all__ = (
     "ComputeUpdatePayload",
+    "ConfigureWebhooksPayload",
     "ConsoleTokenPayload",
     "ConsoleTokenPayloadMode",
     "ConsoleTokenResponse",
@@ -102,4 +105,5 @@ __all__ = (
     "VirtualMachineNetwork",
     "VirtualMachineResponse",
     "VirtualMachineResponseTags",
+    "WebhookConfigurationResponse",
 )

@@ -65,3 +65,4 @@ def register_atlas_api() -> None:
 	import atlas.api.routes.ip_addresses
 	import atlas.api.routes.jwks
 	import atlas.api.routes.virtual_machines
+	import atlas.api.routes.webhooks

@@ -62,6 +62,8 @@ Send `X-Tenant-ID` on every request with an unsigned 32-bit integer from 0 throu
 | Central token (`tenant=*`) | Required. It names the tenant of the request, and a missing or invalid value returns `400`. |
 | System Manager session | Required, and the request is limited to that tenant. |
 
+A Central route serves every tenant and needs no `X-Tenant-ID`. A regional token that calls one receives `403`. `PUT /api/atlas/webhooks` is a Central route. See [state delivery](../vm/SPEC.md#state-delivery).
+
 Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token with `X-Tenant-ID: 0`, uses every route and can create a privileged virtual machine and a System image. An unallocated IP address carries tenant `-1` and stays outside every tenant. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
 
 A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snapshot` only from tenant `0`. Any other tenant that sends one receives `400`, and its snapshot becomes a `machine` image. These values cannot change after the image exists.

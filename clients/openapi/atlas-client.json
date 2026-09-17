@@ -50,6 +50,43 @@
         "title": "ComputeUpdatePayload",
         "type": "object"
       },
+      "ConfigureWebhooksPayload": {
+        "additionalProperties": false,
+        "description": "The destination of the event deliveries of one Central.",
+        "properties": {
+          "central_id": {
+            "default": 1,
+            "description": "Receiving Central.",
+            "minimum": 1,
+            "title": "Central Id",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "request_url": {
+            "description": "HTTP or HTTPS URL that receives every delivery.",
+            "format": "uri",
+            "minLength": 1,
+            "title": "Request Url",
+            "type": "string"
+          },
+          "webhook_secret": {
+            "description": "Shared secret that signs every delivery.",
+            "minLength": 1,
+            "title": "Webhook Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_url",
+          "webhook_secret"
+        ],
+        "title": "ConfigureWebhooksPayload",
+        "type": "object"
+      },
       "ConsoleTokenPayload": {
         "additionalProperties": false,
         "description": "The console mode that the token opens.",
@@ -1527,6 +1564,43 @@
         ],
         "title": "VirtualMachineResponse",
         "type": "object"
+      },
+      "WebhookConfigurationResponse": {
+        "description": "The configured event deliveries of one Central.",
+        "examples": [
+          {
+            "central_id": 1,
+            "enabled": true,
+            "webhooks": [
+              "Virtual Machine State - On Update - Central - 1",
+              "Virtual Machine State - On Trash - Central - 1"
+            ]
+          }
+        ],
+        "properties": {
+          "central_id": {
+            "title": "Central Id",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "webhooks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Webhooks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "central_id",
+          "enabled",
+          "webhooks"
+        ],
+        "title": "WebhookConfigurationResponse",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2973,6 +3047,47 @@
         "summary": "Replace SSH keys",
         "tags": [
           "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/webhooks": {
+      "put": {
+        "description": "Point all Atlas event deliveries for one Central at its receiver. Atlas chooses the events and their content. A repeated call refreshes the configuration. Only a Central token, which carries tenant `*`, can use this route.",
+        "operationId": "configure_webhooks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "central_id": 1,
+                "enabled": true,
+                "request_url": "https://central.example.com/api/method/central.api.state_delivery.receive",
+                "webhook_secret": "a-shared-secret"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureWebhooksPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookConfigurationResponse"
+                }
+              }
+            },
+            "description": "The deliveries point at the receiver."
+          },
+          "403": {
+            "description": "The token does not act for every tenant."
+          }
+        },
+        "summary": "Configure webhooks",
+        "tags": [
+          "Atlas"
         ]
       }
     }

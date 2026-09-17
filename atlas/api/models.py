@@ -4,8 +4,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
+import frappe
 from frappe.utils import get_datetime, get_system_timezone
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
 from atlas.atlas.core.tags import read_tags
@@ -57,6 +58,52 @@ class JSONWebKeySetResponse(BaseModel):
 	"""The public keys that this Atlas region trusts."""
 
 	keys: list[JSONWebKey]
+
+
+class ConfigureWebhooksPayload(StrictModel):
+	"""The destination of the event deliveries of one Central."""
+
+	request_url: AnyHttpUrl = Field(description="HTTP or HTTPS URL that receives every delivery.")
+	webhook_secret: str = Field(min_length=1, description="Shared secret that signs every delivery.")
+	central_id: int = Field(default=1, ge=1, description="Receiving Central.")
+	enabled: bool = True
+
+	@model_validator(mode="after")
+	def validate_central_id(self) -> ConfigureWebhooksPayload:
+		"""Restrict extra Central deliveries to development or an explicit site setting."""
+		if self.central_id == 1:
+			return self
+
+		allows_multiple = (
+			frappe.conf.get("developer_mode") == 1 or frappe.conf.get("allow_multiple_central_webhooks") == 1
+		)
+		if not allows_multiple:
+			raise ValueError("central_id must be 1 unless multiple Central webhooks are enabled.")
+
+		return self
+
+
+class WebhookConfigurationResponse(BaseModel):
+	"""The configured event deliveries of one Central."""
+
+	model_config = ConfigDict(
+		json_schema_extra={
+			"examples": [
+				{
+					"central_id": 1,
+					"enabled": True,
+					"webhooks": [
+						"Virtual Machine State - On Update - Central - 1",
+						"Virtual Machine State - On Trash - Central - 1",
+					],
+				}
+			]
+		}
+	)
+
+	central_id: int
+	enabled: bool
+	webhooks: list[str]
 
 
 class ReserveIPAddressPayload(StrictModel):
