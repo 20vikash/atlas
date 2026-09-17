@@ -19,7 +19,8 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 | `Virtual Machine State` (DocType) | The last status a host reported for one VM. The name is the VM name. It also answers whether a live VM still needs an image. |
 | `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Metal Server IP Address. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
-| `PlacementService` | Choosing and locking the host for a new VM. |
+| `PlacementService` | Running the selected placement strategy. |
+| `PlacementAPI` | Fleet usage, placement rate, and checked host selection. |
 | `MetalClient` | `/v1` HTTP transport and error classification. |
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
@@ -44,13 +45,22 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
 ## Placement
 
-Capacity comes from a Metal Server Usage sample, which Metal produced at some earlier moment. Placement subtracts every VM created after that sample and every uncertain draft, so a burst of requests cannot spend the same reported capacity twice.
+`PlacementService` runs the strategy selected in Atlas Settings for VM creation and automatic migration. The built-in `Default` strategy tries hosts in descending order of free memory, CPU, storage, and name. An explicit migration target calls `PlacementAPI.select` directly.
 
-Only memory and storage limit placement. CPU entitlement is oversubscribed: a host accepts a VM when memory and storage are free, whatever the sum of `cpu_millicores` it already hosts. Available CPU stays in the ranking key, so placement still prefers the host with the most available millicores.
+Add a strategy in `core/placement/strategies/` and register its name and function in `strategies/__init__.py`. The function receives only a `PlacementAPI`. It reads `api.request` for the VM shape, architecture, tenant ID, and sleepy status. It reads `api.sleepy_vm_overcommit_factor`, `api.usage`, and `api.placement_rate(host_name=None)`. The rate counts VM records created in the last five minutes, including drafts, and returns placements per minute for one host or the fleet.
 
-The chosen Metal Server row is locked and its capacity rechecked before the draft is inserted. The lock is released by the commit, before Atlas calls Metal, so a slow host never holds a row.
+```python
+def select_host(api: PlacementAPI) -> None:
+    for host in api.usage.hosts:
+        if host.architecture == api.request.architecture and api.select(host.name):
+            return
+```
 
-A sample older than the freshness limit is not used. Placement reports a synchronization fault instead of guessing.
+`api.usage` is one immutable view of ready hosts with capacity samples no more than two minutes old. It holds each host's `is_sleepy` flag, total resources, free resources after local reservations, this tenant's VM count, and memory reserved by sleepy VMs. It also holds fleet totals. The flag and overcommit factor are strategy inputs; they do not change the capacity check.
+
+Capacity comes from Metal Server Usage samples. The API subtracts VMs created after each sample, uncertain drafts, and migration reservations. `api.select(host_name)` locks the Metal Server row and rechecks readiness, architecture, the sleepy flag, sample freshness, memory, and storage. It returns `True` on selection or `False` when a host changed or lacks capacity. CPU is oversubscribed and is not a capacity limit. A stale sample reports a synchronization fault.
+
+The lock is released by the commit after the draft or migration is inserted, before Atlas calls Metal.
 
 ## Reading state
 

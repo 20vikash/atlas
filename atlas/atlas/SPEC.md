@@ -10,7 +10,7 @@ Atlas talks to an infrastructure provider only through one interface. Everything
 
 This module also holds site settings, the regional token key, the wildcard TLS certificate, and the host binaries.
 
-The Placement tab stores `new_host_type`, a Metal Server Size, and `sleepy_vm_overcommit_factor`, which defaults to `1.0` and must be finite and at least `1.0`. A sleepy VM has `sleep_after_idle_seconds` greater than zero. Placement does not use these settings yet.
+The Placement tab selects a registered placement strategy. Its choices come from the strategy registry, and unknown names are rejected. The tab also stores `sleepy_vm_overcommit_factor`, which defaults to `1.0` and must be finite and at least `1.0`. A sleepy VM has `sleep_after_idle_seconds` greater than zero. The factor is available to strategies. `new_host_type` stores a Metal Server Size; placement does not yet create hosts. See the [VM placement specification](../vm/SPEC.md#placement).
 
 ## Types
 
