@@ -78,19 +78,21 @@ The `Default` strategy requests a host when fleet memory or CPU use reaches 80%,
 
 ### Simulate strategies
 
-Run the offline simulator from the repository root:
+Run every registered strategy against the same seeded tenant demand from the repository root:
 
 ```sh
 python -m scripts.simulate_placement --days 30 --seed 1
 ```
 
-The command runs every registered strategy against one seeded workload. Use `--strategy Default` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--scenario path/to/scenario.json` to change the [example scenario](../../scripts/placement-scenario.json), or `--json` to get all metrics. Register a strategy in `strategies/__init__.py` before selecting it.
+Use `--strategy Default` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--json` for all metrics. Change the [example scenario](../../scripts/placement-scenario.json) with `--scenario path/to/scenario.json`. The scenario contains prices, host types, shapes, demand, traffic, incidents, and timing values. Use `--cpu-oversubscription` and `--max-host-count` to override two common capacity settings.
 
-The example uses a 30 minute host provisioning assumption and a 10 second host sync delay. The cached VM boot time is 2.5 seconds, idle save is 5.5 seconds, and wake is 1.2 seconds. These are rounded Metal measurements from test VMs on `atlas.localhost`. Guest readiness was not measured. Earlier first starts took 77.9 and 141.4 seconds; the example models cached boots only. Change the scenario timings to test other assumptions.
+The example starts with 30 hosts of 128 vCPU, 512 GiB memory, and 6.5 TiB storage. Each host costs 50,000 rupees per 30 days. New hosts take 25 to 35 minutes to start and count against the maximum as soon as they are requested. CPU oversubscription scales the simulator's admission ceiling. This CPU ceiling is a simulation rule; live `PlacementAPI.select` treats CPU as strategy data.
 
-The simulator calls each strategy through the same request, fleet usage, placement rate, `select`, and `spawn_host` surface as `PlacementAPI`. Host creation is pending until the configured delay ends. A request retries every 15 seconds while a host is pending. P95 wait is time to placement; P95 run also includes the simulated boot. Sleeping VMs release simulated memory, but keep CPU and storage reservations. CPU is advisory for selection. The report counts wake memory shortfall when a VM wakes after its memory was reused; it does not predict a real wake failure. Host hours include provisioning time.
+The event clock uses integer half-second ticks and skips idle time. The workload fixes tenant arrivals, actions, traffic waves, and random seeds before a strategy runs. Incidents can change later tenant behavior. A strategy receives only the simulated placement API. For start, resize, and wake, it also sees `api.action` and `api.current_host_name`. Selecting the current host accepts an in-place change when its resource delta fits. `api.spawn_host` can prepare future capacity, but an action with no ready host fails now.
 
-The workload has synthetic arrivals, lifetimes, tenants, shapes, and traffic. Traffic events reset the idle timer or wake a sleeping VM. The simulator does not model guest readiness, image fetch, migrations, provider failures, or the DNS and ICMP traffic that kept the initial test VMs awake.
+A sleepy VM becomes idle after 30 minutes without traffic, never before 30 minutes after creation. It then frees CPU and memory, but keeps storage and revenue. A stopped VM keeps storage and pays no revenue. A wake uses the current host immediately when it fits. Otherwise the strategy selects another ready host for a 2 to 10 second migration. A wake with no room fails. The `sleepy_vm_overcommit_factor` is passed to the strategy for its placement estimate; it does not change hard capacity checks. The report includes host cost, VM revenue, margin, incidents, failures, migrations, and utilization.
+
+VM revenue is the configured multiplier times the initial host type's monthly price per GiB of host memory. The example multiplier is 3. Initial hosts bill from tick zero. New hosts bill from their start request until the horizon. The simulator uses a configurable cached boot time of 2.5 seconds and idle save time of 5.5 seconds. It does not model guest readiness, image fetch, provider failures, or the DNS and ICMP traffic that kept the initial test VMs awake.
 
 ## Reading state
 
