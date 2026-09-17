@@ -138,7 +138,9 @@ class TestServer(UnitTestCase):
 		seen_users: list[str] = []
 		frappe.set_user("Guest")
 		try:
-			with patch("atlas.metal_server.doctype.metal_server.metal_server.ServerProvisioner") as provisioner:
+			with patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.ServerProvisioner"
+			) as provisioner:
 				provisioner.return_value.run.side_effect = lambda: seen_users.append(frappe.session.user)
 				MetalServer._setup_server(SimpleNamespace())
 		finally:
