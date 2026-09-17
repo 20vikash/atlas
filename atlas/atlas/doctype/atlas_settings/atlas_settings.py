@@ -49,6 +49,18 @@ class AtlasSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		aws_access_key_id: DF.Data | None
+		aws_availability_zone: DF.Data | None
+		aws_key_pair_name: DF.Data | None
+		aws_multicast_domain_id: DF.Data | None
+		aws_region: DF.Data | None
+		aws_secret_access_key: DF.Password | None
+		aws_security_group_id: DF.Data | None
+		aws_storage_pool_device: DF.Data | None
+		aws_subnet_id: DF.Data | None
+		aws_transit_gateway_attachment_id: DF.Data | None
+		aws_transit_gateway_id: DF.Data | None
+		aws_vpc_id: DF.Data | None
 		central_jwks: DF.JSON | None
 		central_jwks_url: DF.Data | None
 		dns_provider: DF.Literal["Route53"]
@@ -101,7 +113,7 @@ class AtlasSettings(Document):
 			"pl-waw-2",
 			"pl-waw-3",
 		]
-		server_provider: DF.Literal["Scaleway"]
+		server_provider: DF.Literal["Scaleway", "AWS"]
 		wg_mesh_binary_x86_64_file: DF.Link | None
 		wg_mesh_source_hash: DF.Data | None
 		wildcard_domain: DF.Data
