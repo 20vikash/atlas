@@ -12,7 +12,7 @@ from itertools import count
 from math import log
 
 from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementRequest, Resources
-from atlas.vm.core.placement.workload import (
+from atlas.vm.core.placement.simulation.workload import (
 	TICKS_PER_DAY,
 	TICKS_PER_SECOND,
 	ExternalEvent,

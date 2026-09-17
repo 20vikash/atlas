@@ -1,0 +1,1 @@
+"""Offline placement strategy simulation."""

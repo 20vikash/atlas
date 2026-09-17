@@ -7,9 +7,8 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from atlas.vm.core.placement.simulation import Simulation
-from atlas.vm.core.placement.strategies import STRATEGIES
-from atlas.vm.core.placement.workload import (
+from atlas.vm.core.placement.simulation.engine import Simulation
+from atlas.vm.core.placement.simulation.workload import (
 	Demand,
 	HostType,
 	Incidents,
@@ -18,8 +17,9 @@ from atlas.vm.core.placement.workload import (
 	VMShape,
 	generate_workload,
 )
+from atlas.vm.core.placement.strategies import STRATEGIES
 
-DEFAULT_SCENARIO = Path(__file__).with_name("placement-scenario.json")
+DEFAULT_SCENARIO = Path(__file__).with_name("scenario.json")
 
 
 def load_scenario(path: Path) -> Scenario:
