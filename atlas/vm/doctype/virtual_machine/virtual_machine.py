@@ -90,7 +90,10 @@ class VirtualMachine(Document):
 		"""Delete only after Metal confirms that the VM is absent."""
 		VirtualMachineService(self).validate_deletion()
 		delete_tasks_for_target(self.doctype, self.name)
-		frappe.db.delete("Virtual Machine State", {"name": self.name})
+		if frappe.db.exists("Virtual Machine State", self.name):
+			frappe.delete_doc(
+				"Virtual Machine State", self.name, ignore_permissions=True, delete_permanently=True
+			)
 
 	@property
 	def current_state(self) -> str:

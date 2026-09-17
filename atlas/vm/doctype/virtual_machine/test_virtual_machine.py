@@ -987,21 +987,33 @@ class TestVirtualMachineNetwork(UnitTestCase):
 class TestVirtualMachineTrash(UnitTestCase):
 	"""Cover the cleanup that lets a terminated VM record be deleted."""
 
-	def test_trash_removes_dependent_records(self) -> None:
-		"""Dependent records must not prevent the virtual machine deletion."""
+	def _trash(self, state_exists: bool) -> Mock:
 		virtual_machine = Mock(doctype="Virtual Machine")
 		virtual_machine.name = "vm-00003"
 
 		with (
 			patch.object(virtual_machine_module, "VirtualMachineService") as service,
 			patch.object(virtual_machine_module, "delete_tasks_for_target") as delete_tasks,
-			patch.object(virtual_machine_module.frappe.db, "delete") as delete,
+			patch.object(virtual_machine_module.frappe.db, "exists", return_value=state_exists),
+			patch.object(virtual_machine_module.frappe, "delete_doc") as delete_doc,
 		):
 			virtual_machine_module.VirtualMachine.on_trash(virtual_machine)
 
 		service.return_value.validate_deletion.assert_called_once()
 		delete_tasks.assert_called_once_with("Virtual Machine", "vm-00003")
-		delete.assert_called_once_with("Virtual Machine State", {"name": "vm-00003"})
+		return delete_doc
+
+	def test_trash_removes_dependent_records(self) -> None:
+		"""Dependent records must not prevent the virtual machine deletion."""
+		delete_doc = self._trash(state_exists=True)
+
+		delete_doc.assert_called_once_with(
+			"Virtual Machine State", "vm-00003", ignore_permissions=True, delete_permanently=True
+		)
+
+	def test_trash_skips_a_missing_state(self) -> None:
+		"""A virtual machine that never reported a state still deletes."""
+		self._trash(state_exists=False).assert_not_called()
 
 
 class TestReconcileTerminating(UnitTestCase):
