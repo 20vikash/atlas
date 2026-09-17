@@ -76,6 +76,22 @@ The lock is released by the commit after the draft or migration is inserted, bef
 
 The `Default` strategy requests a host when fleet memory or CPU use reaches 80%, or when no ready host can fit the VM. It can still select a ready host after requesting expansion. A stale sample reports a synchronization error and stops expansion. If no host is selected, Atlas commits the pending host records and returns `503 capacity_pending` with `Retry-After: 15`. It creates no VM draft. The client retries after a host is Running and has a fresh capacity sample. A failed host setup reports the failed Metal Server name and requires an operator retry or removal before another automatic request for that type.
 
+### Simulate strategies
+
+Run the offline simulator from the repository root:
+
+```sh
+python -m scripts.simulate_placement --days 30 --seed 1
+```
+
+The command runs every registered strategy against one seeded workload. Use `--strategy Default` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--scenario path/to/scenario.json` to change the [example scenario](../../scripts/placement-scenario.json), or `--json` to get all metrics. Register a strategy in `strategies/__init__.py` before selecting it.
+
+The example uses a 30 minute host provisioning assumption and a 10 second host sync delay. The cached VM boot time is 2.5 seconds, idle save is 5.5 seconds, and wake is 1.2 seconds. These are rounded Metal measurements from test VMs on `atlas.localhost`. Guest readiness was not measured. Earlier first starts took 77.9 and 141.4 seconds; the example models cached boots only. Change the scenario timings to test other assumptions.
+
+The simulator calls each strategy through the same request, fleet usage, placement rate, `select`, and `spawn_host` surface as `PlacementAPI`. Host creation is pending until the configured delay ends. A request retries every 15 seconds while a host is pending. Sleeping VMs release simulated memory, but keep CPU and storage reservations. CPU is advisory for selection. The report counts wake memory shortfall when a VM wakes after its memory was reused; it does not predict a real wake failure. Host hours include provisioning time.
+
+The workload has synthetic arrivals, lifetimes, tenants, shapes, and traffic. Traffic events reset the idle timer or wake a sleeping VM. The simulator does not model guest readiness, image fetch, migrations, provider failures, or the DNS and ICMP traffic that kept the initial test VMs awake.
+
 ## Reading state
 
 A Virtual Machine property calls Metal once per request and caches the result. A draft reads as `pending`, and a VM that Metal reports as absent reads as `unknown`. Any other Metal failure is raised, so a read fault is never shown as a state.
