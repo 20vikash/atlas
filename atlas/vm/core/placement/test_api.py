@@ -187,6 +187,38 @@ class TestPlacementAPI(UnitTestCase):
 		get_doc.assert_called_once_with("Metal Server", "a", for_update=True)
 		self.assertIsNone(api._selected_server)
 
+	def test_select_accepts_memory_and_storage_fit_with_oversubscribed_cpu(self) -> None:
+		now = datetime(2026, 9, 17, 12)
+		sample = SimpleNamespace(
+			server="a",
+			creation=now,
+			total_cpu_millicores=1000,
+			available_cpu_millicores=0,
+			total_memory_mib=4096,
+			available_memory_mib=4096,
+			total_storage_mib=20480,
+			available_storage_mib=20480,
+		)
+		locked = SimpleNamespace(
+			name="a", architecture="amd64", is_sleepy=0, status="Running", is_provisioning_completed=1
+		)
+
+		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
+			if doctype == "Metal Server":
+				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
+			if doctype == "Metal Server Usage":
+				return [sample]
+			return []
+
+		with (
+			patch("atlas.vm.core.placement.api.now_datetime", return_value=now),
+			patch("atlas.vm.core.placement.api.frappe.get_all", side_effect=rows),
+			patch("atlas.vm.core.placement.api.frappe.get_doc", return_value=locked),
+		):
+			api = PlacementAPI(VirtualMachineCreateRequest("image", 32000, 1024, 10240, 7), "amd64", 1.0)
+			self.assertTrue(api.select("a"))
+			self.assertIs(api._selected_server, locked)
+
 	def test_stale_samples_report_a_sync_fault(self) -> None:
 		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
 			if doctype == "Metal Server":
@@ -196,3 +228,65 @@ class TestPlacementAPI(UnitTestCase):
 		with patch("atlas.vm.core.placement.api.frappe.get_all", side_effect=rows):
 			with self.assertRaisesRegex(frappe.ValidationError, "capacity sample"):
 				PlacementAPI(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
+
+	def test_a_target_with_a_stale_sample_reports_a_sync_fault(self) -> None:
+		now = datetime(2026, 9, 17, 12)
+		sample = SimpleNamespace(
+			server="fresh",
+			creation=now,
+			total_cpu_millicores=1000,
+			available_cpu_millicores=1000,
+			total_memory_mib=4096,
+			available_memory_mib=4096,
+			total_storage_mib=20480,
+			available_storage_mib=20480,
+		)
+
+		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
+			if doctype == "Metal Server":
+				return [
+					SimpleNamespace(name="fresh", architecture="amd64", is_sleepy=0),
+					SimpleNamespace(name="stale", architecture="amd64", is_sleepy=0),
+				]
+			if doctype == "Metal Server Usage":
+				return [sample]
+			return []
+
+		with (
+			patch("atlas.vm.core.placement.api.now_datetime", return_value=now),
+			patch("atlas.vm.core.placement.api.frappe.get_all", side_effect=rows),
+		):
+			api = PlacementAPI(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
+			with self.assertRaisesRegex(frappe.ValidationError, "Metal Server stale"):
+				api.select("stale")
+
+	def test_select_retries_when_the_sleepy_host_flag_changes(self) -> None:
+		now = datetime(2026, 9, 17, 12)
+		sample = SimpleNamespace(
+			server="a",
+			creation=now,
+			total_cpu_millicores=1000,
+			available_cpu_millicores=1000,
+			total_memory_mib=4096,
+			available_memory_mib=4096,
+			total_storage_mib=20480,
+			available_storage_mib=20480,
+		)
+
+		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
+			if doctype == "Metal Server":
+				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
+			if doctype == "Metal Server Usage":
+				return [sample]
+			return []
+
+		locked = SimpleNamespace(
+			name="a", architecture="amd64", is_sleepy=1, status="Running", is_provisioning_completed=1
+		)
+		with (
+			patch("atlas.vm.core.placement.api.now_datetime", return_value=now),
+			patch("atlas.vm.core.placement.api.frappe.get_all", side_effect=rows),
+			patch("atlas.vm.core.placement.api.frappe.get_doc", return_value=locked),
+		):
+			api = PlacementAPI(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
+			self.assertFalse(api.select("a"))
