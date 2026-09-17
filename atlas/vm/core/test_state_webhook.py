@@ -51,7 +51,7 @@ class TestStateWebhookConfiguration(UnitTestCase):
 		self.assertEqual([document.name for document in saved], names)
 		self.assertEqual([document.webhook_docevent for document in saved], ["on_update", "on_trash"])
 		configuration_lock.assert_called_once_with("configure_state_webhooks")
-		commit.assert_called_once_with()
+		commit.assert_not_called()
 		for document in saved:
 			document.save.assert_called_once_with(ignore_permissions=True)
 			self.assertEqual(document.webhook_doctype, "Virtual Machine State")
@@ -82,7 +82,7 @@ class TestStateWebhookConfiguration(UnitTestCase):
 		self.assertEqual([document.background_jobs_queue for document in saved], [None, None])
 		self.assertEqual([document.enabled for document in saved], [0, 0])
 		configuration_lock.assert_called_once_with("configure_state_webhooks")
-		commit.assert_called_once_with()
+		commit.assert_not_called()
 
 	def test_the_trash_body_reports_the_removal(self) -> None:
 		_, saved, _, _, _ = self._configure(existing=False)
