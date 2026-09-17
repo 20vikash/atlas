@@ -207,3 +207,12 @@ class TestDefaultStrategy(UnitTestCase):
 
 			api.spawn_host.assert_called_once_with()
 			api.select.assert_not_called()
+
+	def test_selection_miss_does_not_request_host_after_locking(self) -> None:
+		api = self._api((self._host("changed"),))
+		api.select.return_value = False
+
+		select_host(api)
+
+		api.select.assert_called_once_with("changed")
+		api.spawn_host.assert_not_called()
