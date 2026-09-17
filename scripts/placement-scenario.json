@@ -1,0 +1,39 @@
+{
+  "host_types": [
+    {
+      "name": "standard",
+      "architecture": "amd64",
+      "is_sleepy": false,
+      "cpu_millicores": 8000,
+      "memory_mib": 32768,
+      "storage_mib": 204800
+    },
+    {
+      "name": "sleepy",
+      "architecture": "amd64",
+      "is_sleepy": true,
+      "cpu_millicores": 8000,
+      "memory_mib": 32768,
+      "storage_mib": 204800
+    }
+  ],
+  "initial_hosts": ["standard", "sleepy"],
+  "new_host_type": "standard",
+  "shapes": [
+    {"cpu_millicores": 1000, "memory_mib": 1024, "disk_mib": 10240, "weight": 4},
+    {"cpu_millicores": 2000, "memory_mib": 2048, "disk_mib": 20480, "weight": 3},
+    {"cpu_millicores": 4000, "memory_mib": 4096, "disk_mib": 40960, "weight": 1}
+  ],
+  "arrivals_per_day": 50,
+  "mean_lifetime_hours": 48,
+  "mean_activity_minutes": 120,
+  "sleepy_fraction": 0.5,
+  "sleep_after_idle_seconds": 1800,
+  "tenant_count": 8,
+  "sleepy_vm_overcommit_factor": 1.5,
+  "host_provision_seconds": 1800,
+  "host_sync_seconds": 10,
+  "boot_seconds": 2.5,
+  "save_seconds": 5.5,
+  "wake_seconds": 1.2
+}
