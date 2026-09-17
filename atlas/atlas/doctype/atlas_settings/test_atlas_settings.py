@@ -1,6 +1,7 @@
 # Copyright (c) 2026, Frappe and Contributors
 # See license.txt
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import frappe
@@ -87,6 +88,26 @@ class TestRegionID(UnitTestCase):
 			self.atlas_settings.validate(self.settings)
 
 		self.settings.server_provider_controller.validate_settings.assert_called_once()
+
+
+class TestSleepyVMOvercommitFactor(UnitTestCase):
+	def test_valid_factors_are_stored_as_numbers(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		for value in (1, 1.5, "2.5"):
+			with self.subTest(value=value):
+				settings = SimpleNamespace(sleepy_vm_overcommit_factor=value)
+				AtlasSettings._validate_sleepy_vm_overcommit_factor(settings)
+				self.assertEqual(settings.sleepy_vm_overcommit_factor, float(value))
+
+	def test_invalid_factors_are_rejected(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		for value in (None, 0, 0.5, -1, float("nan"), float("inf"), float("-inf"), "invalid"):
+			with self.subTest(value=value):
+				settings = SimpleNamespace(sleepy_vm_overcommit_factor=value)
+				with self.assertRaises(frappe.ValidationError):
+					AtlasSettings._validate_sleepy_vm_overcommit_factor(settings)
 
 
 class IntegrationTestAtlasSettings(IntegrationTestCase):
