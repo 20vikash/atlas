@@ -12,6 +12,7 @@ from frappe.model.document import Document
 from frappe.model.naming import make_autoname
 from frappe.utils.background_jobs import is_job_enqueued
 
+from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.server_providers.base import ServerCreateRequest, ServerPowerAction
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.metal_server.core.disk_inventory import DiskInventory
@@ -330,11 +331,12 @@ class MetalServer(Document):
 		server.server_image = image.name
 		server.status = "Pending"
 		server.flags.defer_provider_creation = defer_provider_creation
-		server.insert()
+		server.insert(ignore_permissions=defer_provider_creation)
 		return server
 
 	# Internal methods
 
+	@run_as_admin
 	def _setup_server(self) -> None:
 		ServerProvisioner(self).run()
 
