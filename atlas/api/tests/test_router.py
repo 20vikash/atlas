@@ -145,6 +145,30 @@ class TestRouteRegistration(unittest.TestCase):
 		self.assertEqual(operation["security"], [])
 		self.assertNotIn("parameters", operation)
 
+	def test_a_central_only_route_rejects_a_tenant_token_and_needs_no_tenant_header(self):
+		router = make_router(docs=DocsConfig())
+
+		@router.put("configuration", central_only=True)
+		def configure():
+			return {"configured": True}
+
+		with http_request("PUT"):
+			self.assertEqual(call_route(configure), (200, {"configured": True}))
+
+		with http_request("PUT", tenant_id=7):
+			status, body = error_body(configure)
+
+		operation = router.openapi_specification["paths"][f"{router.prefix}/configuration"]["put"]
+		self.assertEqual(status, 403)
+		self.assertEqual(body["error"]["code"], "permission_denied")
+		self.assertNotIn("parameters", operation)
+
+	def test_a_route_cannot_be_public_and_central_only(self):
+		router = make_router()
+
+		with self.assertRaisesRegex(ValueError, "both public and Central-only"):
+			router.get("configuration", public=True, central_only=True)
+
 
 class TestRequestDecoding(unittest.TestCase):
 	def test_payload_is_validated_into_the_model(self):
