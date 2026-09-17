@@ -10,6 +10,54 @@ from atlas.atlas.core.server_providers.scaleway.client import ScalewayError
 
 
 class TestScalewayCatalog(UnitTestCase):
+	def test_size_architecture_comes_from_cpu_names(self) -> None:
+		for cpu_name, architecture in (
+			("AMD EPYC 8434P", "amd64"),
+			("Intel Xeon Gold", "amd64"),
+			("Ampere Altra", "arm64"),
+		):
+			with self.subTest(cpu_name=cpu_name):
+				sizes = ScalewayCatalog().get_server_sizes(
+					[
+						{
+							"name": "size",
+							"subscription_period": "hourly",
+							"cpus": [{"name": cpu_name, "core_count": 4}],
+						}
+					]
+				)
+				self.assertEqual(sizes[0].architecture, architecture)
+
+	def test_size_architecture_rejects_unknown_or_mixed_cpus(self) -> None:
+		for cpu_names in ([], ["Unknown"], ["AMD EPYC", "Ampere Altra"]):
+			with self.subTest(cpu_names=cpu_names), self.assertRaises(ScalewayError):
+				ScalewayCatalog().get_server_sizes(
+					[
+						{
+							"name": "size",
+							"subscription_period": "hourly",
+							"cpus": [{"name": name, "core_count": 4} for name in cpu_names],
+						}
+					]
+				)
+
+	def test_size_architecture_rejects_conflicting_offers(self) -> None:
+		with self.assertRaises(ScalewayError):
+			ScalewayCatalog().get_server_sizes(
+				[
+					{
+						"name": "size",
+						"subscription_period": "hourly",
+						"cpus": [{"name": "AMD EPYC", "core_count": 4}],
+					},
+					{
+						"name": "size",
+						"subscription_period": "monthly",
+						"cpus": [{"name": "Ampere Altra", "core_count": 4}],
+					},
+				]
+			)
+
 	def test_get_server_images_keeps_supported_os_versions(self) -> None:
 		images = ScalewayCatalog().get_server_images([{"name": "Ubuntu", "version": "24.04 LTS"}])
 
