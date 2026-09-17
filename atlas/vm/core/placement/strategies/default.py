@@ -10,6 +10,20 @@ def select_host(api: PlacementAPI) -> None:
 	"""Spread tenants and bursts while keeping memory and storage within capacity."""
 	request = api.request
 	factor = api.sleepy_vm_overcommit_factor if request.is_sleepy else 1.0
+	usage = api.usage
+	should_expand = (
+		not usage.hosts
+		or (
+			usage.total.memory_mib > 0
+			and (usage.total.memory_mib - usage.free.memory_mib) * 5 >= usage.total.memory_mib * 4
+		)
+		or (
+			usage.total.cpu_millicores > 0
+			and (usage.total.cpu_millicores - usage.free.cpu_millicores) * 5 >= usage.total.cpu_millicores * 4
+		)
+	)
+	if should_expand:
+		api.spawn_host()
 
 	def priority(host: HostUsage) -> tuple[bool, int, float, int, float, str]:
 		used_memory_mib = host.total.memory_mib - host.free.memory_mib
@@ -44,3 +58,6 @@ def select_host(api: PlacementAPI) -> None:
 	for host in hosts:
 		if api.select(host.name):
 			return
+
+	if not should_expand:
+		api.spawn_host()
