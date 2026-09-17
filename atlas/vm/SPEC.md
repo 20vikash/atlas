@@ -8,7 +8,7 @@ For the control-plane overview, see [docs/vm-control-plane.md](../docs/vm-contro
 
 Atlas stores what was requested. Metal stores what is running. This module keeps that line: a Virtual Machine record holds the reservation and the request, and every runtime value is read through to Metal instead of copied into a field.
 
-The record name is the Metal VM ID. That single choice makes create idempotent, because a retry addresses the same resource.
+The record name is the Metal VM ID. Atlas assigns each name from the `vm-.#######` series. Deleting a record does not release its number. The stable name makes create idempotent, because a retry addresses the same resource.
 
 ## Types
 

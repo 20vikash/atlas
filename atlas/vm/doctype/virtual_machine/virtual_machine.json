@@ -1,6 +1,5 @@
 {
  "actions": [],
- "autoname": "vm-.#####",
  "creation": "2026-09-03 03:25:50.873793",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -321,7 +320,7 @@
  "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine",
- "naming_rule": "Expression",
+ "naming_rule": "By script",
  "owner": "Administrator",
  "permissions": [
   {

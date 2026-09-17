@@ -6,6 +6,7 @@ from typing import Any
 import frappe
 from frappe import _, request_cache
 from frappe.model.document import Document
+from frappe.model.naming import make_autoname
 from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.background_jobs import run_as_admin
@@ -53,6 +54,10 @@ class VirtualMachine(Document):
 		tenant_id: DF.Int
 		virtual_machine_image: DF.Data
 	# end: auto-generated types
+
+	def autoname(self) -> None:
+		"""Assign a permanent virtual machine ID."""
+		self.name = make_autoname("vm-.#######", doc=self)
 
 	@request_cache
 	def get_metal_vm_info(self) -> MetalVirtualMachine | None:

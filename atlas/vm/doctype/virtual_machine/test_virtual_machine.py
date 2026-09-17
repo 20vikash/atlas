@@ -318,6 +318,17 @@ class TestVirtualMachineRequest(UnitTestCase):
 
 
 class TestVirtualMachineDocument(UnitTestCase):
+	def test_autoname_assigns_permanent_virtual_machine_id(self) -> None:
+		virtual_machine = frappe.new_doc("Virtual Machine")
+
+		with patch.object(
+			virtual_machine_module, "make_autoname", return_value="vm-0000042"
+		) as make_autoname:
+			virtual_machine.autoname()
+
+		self.assertEqual(virtual_machine.name, "vm-0000042")
+		make_autoname.assert_called_once_with("vm-.#######", doc=virtual_machine)
+
 	# New records have no Server, so virtual-field reads must skip Metal lookup.
 	def test_new_document_reads_virtual_fields_without_a_server(self) -> None:
 		virtual_machine = frappe.new_doc("Virtual Machine")
