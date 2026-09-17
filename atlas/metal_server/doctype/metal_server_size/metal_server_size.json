@@ -8,6 +8,7 @@
   "enabled",
   "provider_type",
   "size",
+  "architecture",
   "column_break_header",
   "cpu_count",
   "memory_mib",
@@ -92,6 +93,13 @@
    "label": "Size",
    "reqd": 1,
    "set_only_once": 1
+  },
+  {
+   "fieldname": "architecture",
+   "fieldtype": "Select",
+   "label": "Architecture",
+   "options": "amd64\narm64",
+   "reqd": 1
   },
   {
    "fieldname": "section_break_hzyb",

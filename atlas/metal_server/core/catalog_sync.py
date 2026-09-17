@@ -25,6 +25,7 @@ class CatalogSynchronizer:
 		"""Create or update one Metal Server Size record."""
 		name = f"{self.provider.provider_type}/{size.size}"
 		values = {
+			"architecture": size.architecture,
 			"cpu_count": size.cpu_count,
 			"memory_mib": size.memory_mib,
 			"disk_gib": size.disk_gib,

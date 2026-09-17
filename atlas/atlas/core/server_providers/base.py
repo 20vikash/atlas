@@ -19,6 +19,7 @@ class ServerSizeData:
 	"""Store one server size from a provider."""
 
 	size: str
+	architecture: str
 	cpu_count: int
 	memory_mib: int
 	disk_gib: int
