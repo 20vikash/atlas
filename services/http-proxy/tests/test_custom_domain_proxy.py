@@ -243,6 +243,7 @@ def test_custom_acme_challenge_reaches_the_vm():
 	body, _, status = res.stdout.rpartition("\n")
 	assert status == "200", res.stdout
 	assert value in body, body
+	assert f"host={CUSTOM_DOMAIN}" in body, body
 
 
 def test_wildcard_acme_challenge_is_served_locally_not_proxied():

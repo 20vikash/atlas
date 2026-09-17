@@ -6,6 +6,7 @@ from typing import Any
 import frappe
 from frappe import _, request_cache
 from frappe.model.document import Document
+from frappe.model.naming import make_autoname
 from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.background_jobs import run_as_admin
@@ -54,6 +55,10 @@ class VirtualMachine(Document):
 		virtual_machine_image: DF.Data
 	# end: auto-generated types
 
+	def autoname(self) -> None:
+		"""Assign a permanent virtual machine ID."""
+		self.name = make_autoname("vm-.#######", doc=self)
+
 	@request_cache
 	def get_metal_vm_info(self) -> MetalVirtualMachine | None:
 		"""Return the Metal record for this VM, cached for one request.
@@ -85,7 +90,10 @@ class VirtualMachine(Document):
 		"""Delete only after Metal confirms that the VM is absent."""
 		VirtualMachineService(self).validate_deletion()
 		delete_tasks_for_target(self.doctype, self.name)
-		frappe.db.delete("Virtual Machine State", {"name": self.name})
+		if frappe.db.exists("Virtual Machine State", self.name):
+			frappe.delete_doc(
+				"Virtual Machine State", self.name, ignore_permissions=True, delete_permanently=True
+			)
 
 	@property
 	def current_state(self) -> str:
