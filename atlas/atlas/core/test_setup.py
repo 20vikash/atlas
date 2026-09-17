@@ -36,6 +36,25 @@ def configuration(**changes: object) -> AtlasSetupConfiguration:
 	return AtlasSetupConfiguration.from_dict(values)
 
 
+def aws_configuration(**changes: object) -> AtlasSetupConfiguration:
+	values = configuration().settings_values()
+	for field in tuple(values):
+		if field.startswith("scaleway_"):
+			values.pop(field)
+	values.update(
+		{
+			"server_provider": "AWS",
+			"aws_region": "eu-west-1",
+			"aws_availability_zone": "eu-west-1a",
+			"aws_access_key_id": "key-id",
+			"aws_secret_access_key": "key-secret",
+			"aws_storage_pool_device": "/dev/nvme1n1",
+		}
+	)
+	values.update(changes)
+	return AtlasSetupConfiguration.from_dict(values)
+
+
 class TestAtlasSetupConfiguration(UnitTestCase):
 	def test_input_needs_every_field(self) -> None:
 		values = configuration().settings_values()
@@ -53,6 +72,27 @@ class TestAtlasSetupConfiguration(UnitTestCase):
 
 	def test_region_name_is_normalized(self) -> None:
 		self.assertEqual(configuration(region_name=" PAR-1 ").region_name, "par-1")
+
+	def test_aws_input_carries_only_the_aws_fields(self) -> None:
+		values = aws_configuration().settings_values()
+
+		self.assertEqual(values["aws_availability_zone"], "eu-west-1a")
+		self.assertNotIn("scaleway_zone", values)
+		self.assertEqual(AtlasSetupConfiguration.from_dict(values).server_provider, "AWS")
+
+	def test_a_provider_cannot_carry_the_fields_of_another_provider(self) -> None:
+		values = aws_configuration().settings_values()
+		values["scaleway_zone"] = "fr-par-1"
+
+		with self.assertRaisesRegex(ValueError, "unknown fields: scaleway_zone"):
+			AtlasSetupConfiguration.from_dict(values)
+
+	def test_an_unknown_server_provider_is_rejected(self) -> None:
+		values = configuration().settings_values()
+		values["server_provider"] = "GCP"
+
+		with self.assertRaisesRegex(ValueError, "server_provider must be one of"):
+			AtlasSetupConfiguration.from_dict(values)
 
 
 class TestAtlasSetup(UnitTestCase):

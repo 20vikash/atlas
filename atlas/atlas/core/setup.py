@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
+from types import MappingProxyType
 from typing import Any
 
 import frappe
@@ -10,6 +12,37 @@ from frappe.utils import add_days, get_datetime, now_datetime
 from atlas.atlas.doctype.atlas_settings.atlas_settings import WILDCARD_TLS_RENEWAL_WINDOW_DAYS
 from atlas.auth.jwks import sync_central_jwks
 from atlas.metal_server.core.catalog_sync import CatalogSynchronizer
+
+# The setup input carries the fields of the selected server provider only.
+PROVIDER_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+	{
+		"Scaleway": (
+			"scaleway_organization_id",
+			"scaleway_project_id",
+			"scaleway_zone",
+			"scaleway_machine_billing_cycle",
+			"scaleway_access_key",
+			"scaleway_secret_key",
+		),
+		"AWS": (
+			"aws_region",
+			"aws_availability_zone",
+			"aws_access_key_id",
+			"aws_secret_access_key",
+			"aws_storage_pool_device",
+		),
+	}
+)
+
+# A provider resource carries these values, so a completed region cannot change them.
+PROVIDER_IMMUTABLE_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+	{
+		"Scaleway": ("scaleway_organization_id", "scaleway_project_id", "scaleway_zone"),
+		"AWS": ("aws_region", "aws_availability_zone"),
+	}
+)
+
+OPTIONAL_STRING_FIELDS = frozenset({"central_jwks_url"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,17 +58,22 @@ class AtlasSetupConfiguration:
 	private_network_mtu: int
 	central_jwks_url: str
 	public_ssh_key: str
-	scaleway_organization_id: str
-	scaleway_project_id: str
-	scaleway_zone: str
-	scaleway_machine_billing_cycle: str
-	scaleway_access_key: str
-	scaleway_secret_key: str
 	route53_access_key_id: str
 	route53_access_key_secret: str
 	letsencrypt_email: str
 	is_letsencrypt_staging: bool
 	is_wildcard_tls_auto_renew_enabled: bool
+	scaleway_organization_id: str = ""
+	scaleway_project_id: str = ""
+	scaleway_zone: str = ""
+	scaleway_machine_billing_cycle: str = ""
+	scaleway_access_key: str = ""
+	scaleway_secret_key: str = ""
+	aws_region: str = ""
+	aws_availability_zone: str = ""
+	aws_access_key_id: str = ""
+	aws_secret_access_key: str = ""
+	aws_storage_pool_device: str = ""
 
 	@classmethod
 	def from_dict(cls, values: Any) -> "AtlasSetupConfiguration":
@@ -43,7 +81,13 @@ class AtlasSetupConfiguration:
 		if not isinstance(values, dict):
 			raise ValueError("Atlas setup configuration must be a JSON object")
 
-		expected_fields = {field.name for field in fields(cls)}
+		provider = values.get("server_provider")
+		if provider not in PROVIDER_FIELDS:
+			raise ValueError(
+				f"Atlas setup field server_provider must be one of {', '.join(sorted(PROVIDER_FIELDS))}"
+			)
+
+		expected_fields = cls.expected_fields(provider)
 		if set(values) != expected_fields:
 			missing = sorted(expected_fields - set(values))
 			unknown = sorted(set(values) - expected_fields)
@@ -62,7 +106,7 @@ class AtlasSetupConfiguration:
 		}
 		for field in string_fields:
 			value = values[field]
-			if not isinstance(value, str) or (field != "central_jwks_url" and not value.strip()):
+			if not isinstance(value, str) or (field not in OPTIONAL_STRING_FIELDS and not value.strip()):
 				raise ValueError(f"Atlas setup field {field} must be a string")
 		for field in ("region_id", "private_network_mtu"):
 			value = values[field]
@@ -81,7 +125,14 @@ class AtlasSetupConfiguration:
 
 	def settings_values(self) -> dict[str, object]:
 		"""Return the values that belong to Atlas Settings."""
-		return {field.name: getattr(self, field.name) for field in fields(self)}
+		return {field: getattr(self, field) for field in self.expected_fields(self.server_provider)}
+
+	@classmethod
+	def expected_fields(cls, provider: str) -> set[str]:
+		"""Return the field names that one server provider needs."""
+		provider_specific = set().union(*PROVIDER_FIELDS.values())
+		common = {field.name for field in fields(cls)} - provider_specific
+		return common | set(PROVIDER_FIELDS[provider])
 
 
 class AtlasSetup:
@@ -93,9 +144,6 @@ class AtlasSetup:
 		"region_id",
 		"private_network_cidr",
 		"public_ssh_key",
-		"scaleway_organization_id",
-		"scaleway_project_id",
-		"scaleway_zone",
 	)
 	DNS_IMMUTABLE_FIELDS = ("dns_provider", "wildcard_domain")
 
@@ -122,6 +170,7 @@ class AtlasSetup:
 	def _validate_immutable_values(self) -> None:
 		if self.settings.is_server_provider_setup_completed:
 			self._validate_fields(self.SERVER_IMMUTABLE_FIELDS)
+			self._validate_fields(PROVIDER_IMMUTABLE_FIELDS[self.configuration.server_provider])
 		if self.settings.is_dns_setup_completed:
 			self._validate_fields(self.DNS_IMMUTABLE_FIELDS)
 
