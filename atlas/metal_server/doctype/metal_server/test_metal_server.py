@@ -96,7 +96,7 @@ class TestServer(UnitTestCase):
 
 		MetalServer._cleanup_provider_server_after_failed_insert(server)
 
-		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id")
+		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id", {})
 		self.assertFalse(server.flags.provider_server_created)
 
 	def test_failed_insert_cleanup_keeps_a_reused_provider_server(self) -> None:
@@ -790,7 +790,7 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.archive_server(server)
 
-		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id")
+		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id", {})
 		server.db_set.assert_called_once_with({"status": "Deleted", "is_provisioning_completed": 0})
 
 	def test_archive_server_skips_a_deleted_server(self) -> None:
@@ -822,6 +822,7 @@ class TestServer(UnitTestCase):
 			name="node-test-00007",
 			status=status,
 			provider_server_id="server-id",
+			provider_metadata="{}",
 			flags=SimpleNamespace(provider_server_created=False),
 			is_provisioning_completed=False,
 			setup_job_id="atlas||server-provision||node-test-00007",
@@ -845,6 +846,7 @@ class TestServer(UnitTestCase):
 			set=Mock(),
 			save=Mock(),
 			_enqueue_setup_server=Mock(),
+			_provider_metadata=MetalServer._provider_metadata,
 		)
 
 		def db_set(fieldname, value=None, **_options) -> None:

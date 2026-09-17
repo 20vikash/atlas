@@ -172,8 +172,8 @@ class ServerProvider(ABC):
 		...
 
 	@abstractmethod
-	def delete_server(self, provider_server_id: str) -> None:
-		"""Delete a provider server if it exists."""
+	def delete_server(self, provider_server_id: str, provider_metadata: Mapping[str, Any]) -> None:
+		"""Delete a provider server and its owned resources if they exist."""
 		...
 
 	def reserve_public_ipv4_address(self) -> ReservedIPAddress:

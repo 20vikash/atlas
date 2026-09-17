@@ -151,7 +151,7 @@ class ScalewayProvider(ServerProvider):
 		self.servers.set_power_state(provider_server_id, action)
 
 	@override
-	def delete_server(self, provider_server_id: str) -> None:
+	def delete_server(self, provider_server_id: str, _provider_metadata: Mapping[str, object]) -> None:
 		"""Delete one Scaleway server if it exists."""
 		self.servers.delete(provider_server_id)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, ClassVar, override
 
 import frappe
@@ -141,8 +142,13 @@ class AwsProvider(ServerProvider):
 
 	@override
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the named AWS instance, and create it when necessary."""
-		return self.servers.ensure(request)
+		"""Return the named AWS instance and its mesh interface."""
+		server = self.servers.ensure(request)
+		interface = self.servers.ensure_mesh_interface(server.provider_server_id, request.name)
+		return replace(
+			server,
+			provider_metadata={**server.provider_metadata, "mesh_interface": dict(interface)},
+		)
 
 	@override
 	def prepare_server(self, server: "MetalServer") -> None:
@@ -181,9 +187,14 @@ class AwsProvider(ServerProvider):
 		self.servers.set_power_state(provider_server_id, action)
 
 	@override
-	def delete_server(self, provider_server_id: str) -> None:
-		"""Delete one AWS instance if it exists."""
-		self.servers.delete(provider_server_id)
+	def delete_server(self, provider_server_id: str, provider_metadata: Mapping[str, object]) -> None:
+		"""Delete one AWS instance and its owned resources if they exist."""
+		interface = provider_metadata.get("mesh_interface")
+		interface_id = interface.get("NetworkInterfaceId") if isinstance(interface, Mapping) else None
+		self.servers.delete(
+			provider_server_id,
+			interface_id if isinstance(interface_id, str) else None,
+		)
 
 	@override
 	def reserve_public_ipv4_address(self) -> ReservedIPAddress:
@@ -219,10 +230,8 @@ class AwsProvider(ServerProvider):
 		if not server.provider_server_id:
 			raise AwsError("Atlas server has no AWS instance ID")
 
-		interface = self.servers.ensure_mesh_interface(server.provider_server_id, server.name)
-		interface_id = interface.get("NetworkInterfaceId")
-		if not isinstance(interface_id, str):
-			raise AwsError("AWS did not return a mesh network interface ID")
+		interface_id = self.mesh_interface_id(server)
+		self.servers.attach_mesh_interface(interface_id, server.provider_server_id)
 
 		def attached_interface() -> Mapping | None:
 			current = self.servers.fetch_mesh_interface(interface_id)
@@ -302,3 +311,13 @@ class AwsProvider(ServerProvider):
 		if not isinstance(mac_address, str):
 			raise AwsError("Atlas server has no AWS mesh interface MAC address")
 		return mac_address
+
+	@staticmethod
+	def mesh_interface_id(server: "MetalServer") -> str:
+		"""Return the stored AWS mesh network interface ID."""
+		metadata = frappe.parse_json(server.provider_metadata or "{}")
+		interface = metadata.get("mesh_interface") if isinstance(metadata, Mapping) else None
+		interface_id = interface.get("NetworkInterfaceId") if isinstance(interface, Mapping) else None
+		if not isinstance(interface_id, str):
+			raise AwsError("Atlas server has no AWS mesh network interface ID")
+		return interface_id

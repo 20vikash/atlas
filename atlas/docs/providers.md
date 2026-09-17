@@ -87,6 +87,8 @@ AWS gives no stable guest device name, so `aws/configure-private-network.sh` fin
 
 The script sends the IPv4 multicast range through `atlas-mesh`. It writes persistent configuration for Netplan or `systemd-networkd`.
 
+Atlas stores the mesh network interface ID before it starts the attachment. AWS deletion uses only this stored ID. It verifies the interface attachment before it deletes the interface or the instance.
+
 ### Network exposure
 
 The Atlas security group opens Secure Shell, the Metal API port, and the WireGuard port to the internet, because Atlas reaches a host through its public address. The Metal API uses a bearer token. Every other port is open only inside the Atlas private network.

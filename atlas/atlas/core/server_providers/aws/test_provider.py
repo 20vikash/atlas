@@ -12,7 +12,7 @@ from atlas.atlas.core.server_providers.aws.infrastructure import AwsInfrastructu
 from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses
 from atlas.atlas.core.server_providers.aws.provider import AwsProvider
 from atlas.atlas.core.server_providers.aws.servers import MESH_MULTICAST_GROUP, AwsServers
-from atlas.atlas.core.server_providers.base import ServerCreateRequest, ServerPowerAction
+from atlas.atlas.core.server_providers.base import ProviderServer, ServerCreateRequest, ServerPowerAction
 from atlas.atlas.core.server_providers.registry import get_server_provider
 from atlas.vm.core.metal_client import MetalClient
 
@@ -165,14 +165,47 @@ class TestAwsProvider(UnitTestCase):
 
 		self.assertEqual([call.args[0] for call in order.call_args_list], ["ready", "mesh"])
 
+	def test_ensure_server_stores_the_mesh_interface_id(self) -> None:
+		provider = self.provider()
+		provider.servers = Mock()
+		provider.servers.ensure.return_value = ProviderServer(
+			provider_server_id="i-1",
+			status="Installing",
+			public_ipv4_address="203.0.113.1",
+			provider_metadata={"instance": {"InstanceId": "i-1"}},
+		)
+		provider.servers.ensure_mesh_interface.return_value = {"NetworkInterfaceId": "eni-1"}
+
+		request = ServerCreateRequest(
+			name="server-1",
+			server_size="c6i.metal",
+			server_image="Ubuntu_24.04",
+			size_provider_metadata={"BareMetal": True},
+			image_provider_metadata={"ImageId": "ami-1"},
+		)
+
+		server = provider.ensure_server(request)
+
+		self.assertEqual(server.provider_metadata["mesh_interface"], {"NetworkInterfaceId": "eni-1"})
+		provider.servers.ensure_mesh_interface.assert_called_once_with("i-1", "server-1")
+
+	def test_delete_server_uses_only_the_stored_mesh_interface_id(self) -> None:
+		provider = self.provider()
+
+		provider.delete_server("i-1", {"mesh_interface": {"NetworkInterfaceId": "eni-1"}})
+
+		provider.servers.delete.assert_called_once_with("i-1", "eni-1")
+
+	def test_delete_server_uses_no_interface_without_a_stored_id(self) -> None:
+		provider = self.provider()
+
+		provider.delete_server("i-1", {"mesh_interface": {"Name": "server-1"}})
+
+		provider.servers.delete.assert_called_once_with("i-1", None)
+
 	def test_attach_mesh_interface_registers_multicast_and_stores_the_address(self) -> None:
 		provider = self.provider()
 		provider.servers = Mock()
-		provider.servers.ensure_mesh_interface.return_value = {
-			"NetworkInterfaceId": "eni-1",
-			"PrivateIpAddress": "10.1.0.11",
-			"MacAddress": "02:aa:bb:cc:dd:ee",
-		}
 		provider.servers.fetch_mesh_interface.return_value = {
 			"NetworkInterfaceId": "eni-1",
 			"PrivateIpAddress": "10.1.0.11",
@@ -180,9 +213,11 @@ class TestAwsProvider(UnitTestCase):
 			"Attachment": {"InstanceId": "i-1", "Status": "attached"},
 		}
 		server = self.server(provider_server_id="i-1")
+		server.provider_metadata = json.dumps({"mesh_interface": {"NetworkInterfaceId": "eni-1"}})
 
 		provider.attach_mesh_interface(server)
 
+		provider.servers.attach_mesh_interface.assert_called_once_with("eni-1", "i-1")
 		provider.servers.register_multicast_interface.assert_called_once_with("eni-1")
 		self.assertEqual(server.private_ipv4_address, "10.1.0.11")
 		self.assertEqual(server.private_network_interface, "atlas-mesh")
@@ -365,26 +400,38 @@ class TestAwsServers(UnitTestCase):
 		with self.assertRaises(AwsError):
 			servers.ensure(self.request())
 
-	def test_ensure_mesh_interface_reuses_an_unattached_interface(self) -> None:
+	def test_ensure_mesh_interface_uses_the_instance_id_for_idempotency(self) -> None:
 		servers = self.servers()
-		servers.client.paginate.return_value = [
-			{"NetworkInterfaceId": "eni-1", "PrivateIpAddress": "10.1.0.11"}
-		]
+		servers.client.call.return_value = {
+			"NetworkInterface": {"NetworkInterfaceId": "eni-1", "PrivateIpAddress": "10.1.0.11"}
+		}
 
 		interface = servers.ensure_mesh_interface("i-1", "server-1")
 
 		self.assertEqual(interface["NetworkInterfaceId"], "eni-1")
-		operations = [call.args[1] for call in servers.client.call.call_args_list]
-		self.assertEqual(operations, ["attach_network_interface"])
+		servers.client.call.assert_called_once_with(
+			"ec2",
+			"create_network_interface",
+			ClientToken=AwsServers.client_token("mesh-interface", "i-1"),
+			SubnetId="subnet-1",
+			Groups=["sg-1"],
+			Description="Atlas mesh interface for server-1",
+			TagSpecifications=[
+				{
+					"ResourceType": "network-interface",
+					"Tags": [{"Key": "atlas-server", "Value": "server-1"}],
+				}
+			],
+		)
 
-	def test_ensure_mesh_interface_refuses_an_interface_on_another_instance(self) -> None:
+	def test_attach_mesh_interface_refuses_an_interface_on_another_instance(self) -> None:
 		servers = self.servers()
-		servers.client.paginate.return_value = [
-			{"NetworkInterfaceId": "eni-1", "Attachment": {"InstanceId": "i-2"}}
-		]
+		servers.client.call.return_value = {
+			"NetworkInterfaces": [{"NetworkInterfaceId": "eni-1", "Attachment": {"InstanceId": "i-2"}}]
+		}
 
 		with self.assertRaises(AwsError):
-			servers.ensure_mesh_interface("i-1", "server-1")
+			servers.attach_mesh_interface("eni-1", "i-1")
 
 	def test_mesh_interface_is_deleted_with_the_instance(self) -> None:
 		servers = self.servers()
@@ -427,21 +474,90 @@ class TestAwsServers(UnitTestCase):
 		self.assertEqual(servers.client.call.call_args.args[1], "stop_instances")
 		self.assertEqual(servers.client.call.call_args.kwargs["InstanceIds"], ["i-1"])
 
-	def test_delete_releases_multicast_and_is_idempotent(self) -> None:
+	def test_delete_releases_multicast_and_deletes_attached_interface_with_instance(self) -> None:
 		servers = self.servers()
 		servers.client.call.return_value = {
 			"NetworkInterfaces": [
-				{"NetworkInterfaceId": "eni-1", "Attachment": {"DeviceIndex": 1}},
+				{
+					"NetworkInterfaceId": "eni-1",
+					"Attachment": {
+						"AttachmentId": "eni-attach-1",
+						"InstanceId": "i-1",
+					},
+				}
 			]
 		}
 
-		servers.delete("i-1")
+		servers.delete("i-1", "eni-1")
 
 		operations = [call.args[1] for call in servers.client.call.call_args_list]
 		self.assertIn("deregister_transit_gateway_multicast_group_members", operations)
 		self.assertIn("deregister_transit_gateway_multicast_group_sources", operations)
+		self.assertIn("modify_network_interface_attribute", operations)
+		modify_call = servers.client.call.call_args_list[-2]
+		self.assertEqual(
+			modify_call.kwargs["Attachment"],
+			{"AttachmentId": "eni-attach-1", "DeleteOnTermination": True},
+		)
 		self.assertEqual(operations[-1], "terminate_instances")
 		self.assertTrue(servers.client.call.call_args.kwargs["allow_missing"])
+
+	def test_delete_removes_an_unattached_mesh_interface(self) -> None:
+		servers = self.servers()
+		servers.client.call.return_value = {"NetworkInterfaces": [{"NetworkInterfaceId": "eni-1"}]}
+
+		servers.delete("i-1", "eni-1")
+
+		operations = [call.args[1] for call in servers.client.call.call_args_list]
+		self.assertEqual(
+			operations,
+			[
+				"describe_network_interfaces",
+				"deregister_transit_gateway_multicast_group_members",
+				"deregister_transit_gateway_multicast_group_sources",
+				"delete_network_interface",
+				"terminate_instances",
+			],
+		)
+		delete_call = servers.client.call.call_args_list[-2]
+		self.assertEqual(delete_call.kwargs["NetworkInterfaceId"], "eni-1")
+		self.assertTrue(delete_call.kwargs["allow_missing"])
+
+	def test_delete_uses_no_interface_when_atlas_has_no_interface_id(self) -> None:
+		servers = self.servers()
+
+		servers.delete("i-1", None)
+
+		servers.client.call.assert_called_once_with(
+			"ec2", "terminate_instances", InstanceIds=["i-1"], allow_missing=True
+		)
+
+	def test_delete_refuses_a_mesh_interface_on_another_instance(self) -> None:
+		servers = self.servers()
+		servers.client.call.return_value = {
+			"NetworkInterfaces": [
+				{
+					"NetworkInterfaceId": "eni-1",
+					"Attachment": {"AttachmentId": "eni-attach-1", "InstanceId": "i-2"},
+				}
+			]
+		}
+
+		with self.assertRaisesRegex(AwsError, "belongs to instance i-2"):
+			servers.delete("i-1", "eni-1")
+
+		operations = [call.args[1] for call in servers.client.call.call_args_list]
+		self.assertEqual(operations, ["describe_network_interfaces"])
+
+	def test_delete_refuses_a_different_interface_than_the_stored_id(self) -> None:
+		servers = self.servers()
+		servers.client.call.return_value = {"NetworkInterfaces": [{"NetworkInterfaceId": "eni-2"}]}
+
+		with self.assertRaisesRegex(AwsError, "for requested ID eni-1"):
+			servers.delete("i-1", "eni-1")
+
+		operations = [call.args[1] for call in servers.client.call.call_args_list]
+		self.assertEqual(operations, ["describe_network_interfaces"])
 
 	@staticmethod
 	def servers(*, multicast_domain_id: str | None = "tgw-mcast-1") -> AwsServers:
