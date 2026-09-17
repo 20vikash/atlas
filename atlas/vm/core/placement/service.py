@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 import frappe
 from frappe import _
 
-from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.models import VirtualMachineCreateRequest
 from atlas.vm.core.placement.api import PlacementAPI
 from atlas.vm.core.placement.strategies import STRATEGIES
@@ -30,9 +29,4 @@ class PlacementService:
 
 		api = PlacementAPI(request, architecture, settings.sleepy_vm_overcommit_factor, exclude_servers)
 		strategy(api)
-		if api._selected_server is None:
-			frappe.throw(
-				_("No Metal Server has current capacity for this Virtual Machine."), exc=AtlasUserError
-			)
-
-		return api._selected_server
+		return api._finish()
