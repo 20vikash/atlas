@@ -10,6 +10,8 @@ Atlas talks to an infrastructure provider only through one interface. Everything
 
 This module also holds site settings, the regional token key, the wildcard TLS certificate, and the host binaries.
 
+The Placement tab stores `new_host_type`, a Metal Server Size. Placement does not use this setting yet.
+
 ## Types
 
 | Type | Owns |

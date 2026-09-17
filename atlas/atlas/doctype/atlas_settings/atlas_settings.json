@@ -85,7 +85,9 @@
   "object_storage_column_break",
   "object_storage_access_key_id",
   "object_storage_secret_access_key",
-  "object_storage_signed_url_expiry"
+  "object_storage_signed_url_expiry",
+  "placement_tab",
+  "new_host_type"
  ],
  "fields": [
   {
@@ -540,6 +542,18 @@
   {
    "fieldname": "column_break_abbx",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "placement_tab",
+   "fieldtype": "Tab Break",
+   "label": "Placement"
+  },
+  {
+   "description": "Metal Server Size used when placement requests a new host.",
+   "fieldname": "new_host_type",
+   "fieldtype": "Link",
+   "label": "New Host Type",
+   "options": "Metal Server Size"
   }
  ],
  "grid_page_length": 50,

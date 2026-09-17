@@ -65,6 +65,7 @@ class AtlasSettings(Document):
 		letsencrypt_email: DF.Data
 		metald_binary_x86_64_file: DF.Link | None
 		metald_source_hash: DF.Data | None
+		new_host_type: DF.Link | None
 		object_storage_access_key_id: DF.Data | None
 		object_storage_bucket: DF.Data | None
 		object_storage_endpoint_url: DF.Data | None
