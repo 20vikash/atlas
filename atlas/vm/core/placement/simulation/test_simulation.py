@@ -1,9 +1,9 @@
 from dataclasses import replace
 from unittest import TestCase
 
-from atlas.vm.core.placement.simulation import Simulation
-from atlas.vm.core.placement.strategies import STRATEGIES
-from atlas.vm.core.placement.workload import (
+from atlas.vm.core.placement.simulation.__main__ import DEFAULT_SCENARIO, load_scenario
+from atlas.vm.core.placement.simulation.engine import Simulation
+from atlas.vm.core.placement.simulation.workload import (
 	ExternalEvent,
 	HostType,
 	Scenario,
@@ -12,7 +12,7 @@ from atlas.vm.core.placement.workload import (
 	Workload,
 	generate_workload,
 )
-from scripts.simulate_placement import DEFAULT_SCENARIO, load_scenario
+from atlas.vm.core.placement.strategies import STRATEGIES
 
 
 class TestPlacementSimulation(TestCase):
