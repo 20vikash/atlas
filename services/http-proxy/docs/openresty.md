@@ -55,6 +55,8 @@ OpenResty computes the address. The control daemon reserves every site key that 
 
 OpenResty does not decrypt custom-domain TLS traffic. It connects to the site VM on port `443` and sends a PROXY protocol v2 header before the TLS data. The site VM must accept PROXY protocol v2 and hold the certificate for the requested domain.
 
+OpenResty sends an HTTP-01 challenge for a custom domain to the site VM on port `80` with the requested host. A challenge for a name in the wildcard zone stays local and reads `/var/lib/nginx/acme`.
+
 The HTTP and stream workers use separate maps. A custom-domain mutation passes through the private SNI bridge so both workers receive the same state.
 
 ## Route state

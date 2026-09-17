@@ -76,7 +76,7 @@ class _Handler(BaseHTTPRequestHandler):
 			if value is None:
 				self._send(404, b"no such challenge\n")
 				return
-			self._send(200, value.encode())
+			self._send(200, f"{value} host={self.headers.get('Host', '')}\n".encode())
 			return
 		# A control endpoint that a test uses to add a challenge. It takes the place
 		# of certbot, which writes the webroot.
