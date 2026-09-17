@@ -98,6 +98,18 @@ class MetalServer(Document):
 			return
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
+		self.architecture = size.architecture
+		if getattr(self.flags, "defer_provider_creation", False):
+			return
+
+		self.ensure_provider_server()
+
+	def ensure_provider_server(self) -> None:
+		"""Create the named provider host once, including after a worker retry."""
+		if self.provider_server_id:
+			return
+
+		size = frappe.get_doc("Metal Server Size", self.server_size)
 		image = frappe.get_doc("Metal Server Image", self.server_image)
 		request = ServerCreateRequest(
 			name=self.name,
@@ -302,7 +314,13 @@ class MetalServer(Document):
 	# Static methods
 
 	@staticmethod
-	def provision(os_name: str = "Ubuntu", version: str = "26.04", size: str | None = None) -> MetalServer:
+	def provision(
+		os_name: str = "Ubuntu",
+		version: str = "26.04",
+		size: str | None = None,
+		*,
+		defer_provider_creation: bool = False,
+	) -> MetalServer:
 		"""Create and provision a Server with the selected image and size."""
 		settings: AtlasSettings = frappe.get_single("Atlas Settings")
 		image = frappe.get_doc("Metal Server Image", f"{settings.server_provider}/{os_name}_{version}")
@@ -311,6 +329,7 @@ class MetalServer(Document):
 		server.server_size = size or MetalServer._find_default_server_size(settings.server_provider)
 		server.server_image = image.name
 		server.status = "Pending"
+		server.flags.defer_provider_creation = defer_provider_creation
 		server.insert()
 		return server
 
