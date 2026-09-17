@@ -5,7 +5,7 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.placement import PlacementService
+from atlas.vm.core.placement.service import PlacementService
 from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
