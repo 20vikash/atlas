@@ -16,6 +16,7 @@ letsencrypt_email = "ops@example.com"
 [atlas]
 repository = "https://github.com/frappe/atlas"
 branch = "develop"
+# Atlas uses the provider table that matches this value.
 server_provider = "Scaleway"
 dns_provider = "Route53"
 region_name = "par-1"
@@ -34,6 +35,15 @@ zone = "fr-par-1"
 machine_billing_cycle = "Hourly"
 access_key = "change-me"
 secret_key = "change-me"
+
+# Atlas puts every host in one subnet in this zone, because WG Mesh discovery
+# uses a multicast time to live of 1.
+[atlas.aws]
+region = "eu-west-1"
+availability_zone = "eu-west-1a"
+access_key_id = "change-me"
+secret_access_key = "change-me"
+storage_pool_device = "/dev/nvme1n1"
 
 [atlas.route53]
 access_key_id = "change-me"

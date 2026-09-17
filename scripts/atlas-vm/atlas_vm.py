@@ -8,6 +8,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -52,6 +53,13 @@ SCALEWAY_ZONES = {
 	"pl-waw-2",
 	"pl-waw-3",
 }
+SERVER_PROVIDERS = ("Scaleway", "AWS")
+# Scaleway private networks accept /20 through /29. An AWS VPC accepts /16 through /28.
+PRIVATE_NETWORK_PREFIXES = {"Scaleway": (20, 29), "AWS": (16, 28)}
+PROVIDER_TABLES = {"Scaleway": "scaleway", "AWS": "aws"}
+PRIVATE_IPV4_NETWORKS = tuple(
+	ipaddress.ip_network(cidr) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 REQUIRED_COMMANDS = (
 	"curl",
 	"ip",
@@ -206,6 +214,7 @@ def _validate_atlas_configuration(atlas: dict, path: Path) -> None:
 			"private_network_mtu",
 			"central_jwks_url",
 			"scaleway",
+			"aws",
 			"route53",
 			"letsencrypt",
 		},
@@ -220,19 +229,30 @@ def _validate_atlas_configuration(atlas: dict, path: Path) -> None:
 	for key in ("repository", "branch", "base_url", "central_jwks_url"):
 		if key in atlas and not isinstance(atlas[key], str):
 			raise AtlasVmError(f"{path}: atlas.{key} must be a string")
-	if atlas["server_provider"] != "Scaleway":
-		raise AtlasVmError(f"{path}: atlas.server_provider must be Scaleway")
+	provider = atlas["server_provider"]
+	if provider not in SERVER_PROVIDERS:
+		raise AtlasVmError(f"{path}: atlas.server_provider must be one of {', '.join(SERVER_PROVIDERS)}")
 	if atlas["dns_provider"] != "Route53":
 		raise AtlasVmError(f"{path}: atlas.dns_provider must be Route53")
 	if atlas["wildcard_domain"].startswith("*.") or "." not in atlas["wildcard_domain"]:
 		raise AtlasVmError(f"{path}: atlas.wildcard_domain must be a domain without '*.'")
-	_validate_network_configuration(atlas, path)
-	_validate_scaleway_configuration(_required_table(atlas, "scaleway", path, "atlas"), path)
+	_validate_network_configuration(atlas, path, provider)
+	_validate_provider_configuration(atlas, path, provider)
 	_validate_route53_configuration(_required_table(atlas, "route53", path, "atlas"), path)
 	_validate_letsencrypt_configuration(_required_table(atlas, "letsencrypt", path, "atlas"), path)
 
 
-def _validate_network_configuration(atlas: dict, path: Path) -> None:
+def _validate_provider_configuration(atlas: dict, path: Path, provider: str) -> None:
+	"""Validate the table of the selected provider."""
+	table = PROVIDER_TABLES[provider]
+	values = _required_table(atlas, table, path, "atlas")
+	if provider == "Scaleway":
+		_validate_scaleway_configuration(values, path)
+	else:
+		_validate_aws_configuration(values, path)
+
+
+def _validate_network_configuration(atlas: dict, path: Path, provider: str) -> None:
 	region_id = _required_integer(atlas, "region_id", path, "atlas")
 	if not 0 <= region_id <= 65_535:
 		raise AtlasVmError(f"{path}: atlas.region_id must be from 0 through 65535")
@@ -243,8 +263,16 @@ def _validate_network_configuration(atlas: dict, path: Path) -> None:
 		network = ipaddress.ip_network(atlas.get("private_network_cidr", "10.1.0.0/20"), strict=False)
 	except ValueError as error:
 		raise AtlasVmError(f"{path}: atlas.private_network_cidr is invalid: {error}") from error
-	if network.version != 4 or not 20 <= network.prefixlen <= 29:
-		raise AtlasVmError(f"{path}: atlas.private_network_cidr must be an IPv4 network from /20 through /29")
+	minimum, maximum = PRIVATE_NETWORK_PREFIXES[provider]
+	if (
+		network.version != 4
+		or not any(network.subnet_of(item) for item in PRIVATE_IPV4_NETWORKS)
+		or not minimum <= network.prefixlen <= maximum
+	):
+		raise AtlasVmError(
+			f"{path}: atlas.private_network_cidr must be an IPv4 network from "
+			f"/{minimum} through /{maximum} for {provider}"
+		)
 
 
 def _validate_scaleway_configuration(scaleway: dict, path: Path) -> None:
@@ -260,6 +288,33 @@ def _validate_scaleway_configuration(scaleway: dict, path: Path) -> None:
 		raise AtlasVmError(f"{path}: atlas.scaleway.zone is not supported")
 	if scaleway["machine_billing_cycle"] not in {"Hourly", "Monthly"}:
 		raise AtlasVmError(f"{path}: atlas.scaleway.machine_billing_cycle must be Hourly or Monthly")
+
+
+def _validate_aws_configuration(aws: dict, path: Path) -> None:
+	_validate_keys(
+		aws,
+		{
+			"region",
+			"availability_zone",
+			"access_key_id",
+			"secret_access_key",
+			"storage_pool_device",
+		},
+		path,
+		"atlas.aws",
+	)
+	for key in ("region", "availability_zone", "access_key_id", "secret_access_key", "storage_pool_device"):
+		_required_string(aws, key, path, "atlas.aws")
+	if not re.fullmatch(rf"{re.escape(aws['region'])}[a-z]", aws["availability_zone"]):
+		raise AtlasVmError(f"{path}: atlas.aws.availability_zone is not in atlas.aws.region")
+	storage_device = Path(aws["storage_pool_device"])
+	if (
+		not storage_device.is_absolute()
+		or not storage_device.is_relative_to("/dev")
+		or len(storage_device.parts) < 3
+		or ".." in storage_device.parts
+	):
+		raise AtlasVmError(f"{path}: atlas.aws.storage_pool_device must be a /dev path")
 
 
 def _validate_route53_configuration(route53: dict, path: Path) -> None:
