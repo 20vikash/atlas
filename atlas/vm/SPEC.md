@@ -45,7 +45,17 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
 ## Placement
 
-`PlacementService` runs the strategy selected in Atlas Settings for VM creation and automatic migration. The built-in `Default` strategy tries hosts in descending order of free memory, CPU, storage, and name. An explicit migration target calls `PlacementAPI.select` directly.
+`PlacementService` builds a `PlacementAPI` and runs the strategy selected in Atlas Settings for VM creation and automatic migration. The strategy reads the snapshot, chooses hosts, and calls `api.select(host_name)`. The API locks and rechecks each chosen host. A selection miss lets the strategy try the next host. An explicit migration target calls `api.select` directly.
+
+The built-in `Default` strategy first filters hosts by architecture, memory, and storage. It then tries eligible hosts in this order:
+
+1. A host whose `is_sleepy` flag matches the VM's sleepy status.
+2. Fewer VMs from the same tenant.
+3. A lower five-minute placement rate.
+4. Less CPU shortfall, measured as requested millicores above reported free millicores.
+5. Lower maximum projected utilization across memory and storage, then host name.
+
+For a sleepy VM, the pressure estimate discounts sleepy memory by `sleepy_vm_overcommit_factor`. It discounts no more memory than the sample reports as used. The factor does not change the memory and storage checks in `api.select`. CPU shortfall is a preference, not a capacity limit.
 
 Add a strategy in `core/placement/strategies/` and register its name and function in `strategies/__init__.py`. The function receives only a `PlacementAPI`. It reads `api.request` for the VM shape, architecture, tenant ID, and sleepy status. It reads `api.sleepy_vm_overcommit_factor`, `api.usage`, and `api.placement_rate(host_name=None)`. The rate counts VM records created in the last five minutes, including drafts, and returns placements per minute for one host or the fleet.
 
