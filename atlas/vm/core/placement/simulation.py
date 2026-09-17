@@ -39,6 +39,7 @@ class Result:
 	strategy: str
 	requested: int
 	placed: int
+	running: int
 	delayed_placements: int
 	rejected: int
 	expired_unplaced: int
@@ -46,6 +47,7 @@ class Result:
 	wait_p50_seconds: float
 	wait_p95_seconds: float
 	wait_max_seconds: float
+	running_p95_seconds: float
 	hosts_at_end: int
 	new_hosts: int
 	host_hours: float
@@ -126,6 +128,7 @@ class Simulation:
 		self._event_sequence = count()
 		self._placements: deque[tuple[int, str]] = deque()
 		self._wait_ms: list[int] = []
+		self._running_ms: list[int] = []
 		self._rejected = 0
 		self._expired_unplaced = 0
 		self._sleeps = 0
@@ -324,6 +327,7 @@ class Simulation:
 				self._activity(virtual_machine)
 			elif kind == "boot" and virtual_machine.state == "booting":
 				virtual_machine.state = "active"
+				self._running_ms.append(self._now_ms - virtual_machine.workload.arrive_ms)
 				if virtual_machine.workload.request.is_sleepy:
 					self._sleep(virtual_machine)
 			elif (
@@ -350,6 +354,7 @@ class Simulation:
 			strategy=name,
 			requested=len(self._virtual_machines),
 			placed=len(self._wait_ms),
+			running=len(self._running_ms),
 			delayed_placements=sum(wait_ms > 0 for wait_ms in self._wait_ms),
 			rejected=self._rejected,
 			expired_unplaced=self._expired_unplaced,
@@ -357,6 +362,7 @@ class Simulation:
 			wait_p50_seconds=_percentile(self._wait_ms, 50) / 1000,
 			wait_p95_seconds=_percentile(self._wait_ms, 95) / 1000,
 			wait_max_seconds=max(self._wait_ms, default=0) / 1000,
+			running_p95_seconds=_percentile(self._running_ms, 95) / 1000,
 			hosts_at_end=len(self._hosts),
 			new_hosts=len(self._hosts) - len(self.scenario.initial_hosts),
 			host_hours=self._host_milliseconds / 3_600_000,

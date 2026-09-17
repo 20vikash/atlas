@@ -73,13 +73,14 @@ def main() -> None:
 		return
 	print(f"{len(workload)} VM requests, {arguments.days} days, seed {arguments.seed}")
 	print(
-		"Strategy         Placed  Reject  Expired  Pending  Delayed  P95 wait  Hosts  Host hours  Memory  Wake risk"
+		"Strategy         Placed  Reject  Expired  Pending  Delayed  P95 wait  P95 run  Hosts  Host hours  Memory  Wake risk"
 	)
 	for result in results:
 		print(
 			f"{result.strategy:<16} {result.placed:>6}  {result.rejected:>6}  "
 			f"{result.expired_unplaced:>7}  {result.pending_at_end:>7}  "
 			f"{result.delayed_placements:>7}  {result.wait_p95_seconds:>7.0f}s  "
+			f"{result.running_p95_seconds:>6.1f}s  "
 			f"{result.hosts_at_end:>5}  {result.host_hours:>10.0f}  "
 			f"{result.ready_memory_utilization:>6.1%}  {result.wake_memory_shortfalls:>9}"
 		)
