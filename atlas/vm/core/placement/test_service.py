@@ -7,7 +7,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.placement.api import HostUsage, PlacementRequest, Resources
+from atlas.vm.core.placement.api import FleetUsage, HostUsage, PlacementRequest, Resources
 from atlas.vm.core.placement.service import PlacementService
 from atlas.vm.core.placement.strategies.default import select_host
 
@@ -16,7 +16,7 @@ class TestPlacementService(UnitTestCase):
 	def test_configured_strategy_receives_the_api(self) -> None:
 		request = VirtualMachineCreateRequest("image", 2000, 2048, 10240, 7)
 		server = SimpleNamespace(name="metal-1")
-		api = SimpleNamespace(_selected_server=server)
+		api = SimpleNamespace(_finish=Mock(return_value=server))
 		strategy = Mock()
 
 		with (
@@ -32,6 +32,7 @@ class TestPlacementService(UnitTestCase):
 		self.assertIs(selected, server)
 		placement_api.assert_called_once_with(request, "amd64", 1.5, {"source"})
 		strategy.assert_called_once_with(api)
+		api._finish.assert_called_once_with()
 
 	def test_strategy_without_a_selection_reports_no_capacity(self) -> None:
 		with (
@@ -39,10 +40,7 @@ class TestPlacementService(UnitTestCase):
 				"atlas.vm.core.placement.service.frappe.get_single",
 				return_value=SimpleNamespace(placement_strategy="Default", sleepy_vm_overcommit_factor=1.0),
 			),
-			patch(
-				"atlas.vm.core.placement.service.PlacementAPI",
-				return_value=SimpleNamespace(_selected_server=None),
-			),
+			patch("atlas.vm.core.placement.api.frappe.get_all", return_value=[]),
 			patch("atlas.vm.core.placement.service.STRATEGIES", {"Default": Mock()}),
 			self.assertRaisesRegex(AtlasUserError, "current capacity"),
 		):
@@ -97,11 +95,26 @@ class TestDefaultStrategy(UnitTestCase):
 	) -> SimpleNamespace:
 		rates = rates or {}
 		return SimpleNamespace(
-			usage=SimpleNamespace(hosts=hosts),
+			usage=FleetUsage(
+				hosts=hosts,
+				total=Resources(
+					sum(host.total.cpu_millicores for host in hosts),
+					sum(host.total.memory_mib for host in hosts),
+					sum(host.total.storage_mib for host in hosts),
+				),
+				free=Resources(
+					sum(host.free.cpu_millicores for host in hosts),
+					sum(host.free.memory_mib for host in hosts),
+					sum(host.free.storage_mib for host in hosts),
+				),
+				tenant_vm_count=0,
+				sleepy_reserved_memory_mib=0,
+			),
 			request=PlacementRequest(2000, 1024, 1000, "amd64", 7, is_sleepy),
 			sleepy_vm_overcommit_factor=factor,
 			placement_rate=Mock(side_effect=lambda host_name: rates.get(host_name, 0.0)),
 			select=Mock(return_value=True),
+			spawn_host=Mock(),
 		)
 
 	def test_prefers_sleepy_host_and_retries_after_a_miss(self) -> None:
@@ -170,3 +183,27 @@ class TestDefaultStrategy(UnitTestCase):
 		without_discount.select.assert_called_once_with("roomier")
 		with_discount.select.assert_called_once_with("sleepy-loaded")
 		awake_request.select.assert_called_once_with("roomier")
+
+	def test_expands_at_eighty_percent_memory_or_cpu_usage(self) -> None:
+		for free_memory_mib, free_cpu_millicores in ((1638, 4000), (4096, 1600)):
+			api = self._api(
+				(
+					self._host(
+						"busy", free_memory_mib=free_memory_mib, free_cpu_millicores=free_cpu_millicores
+					),
+				)
+			)
+
+			select_host(api)
+
+			api.spawn_host.assert_called_once_with()
+			api.select.assert_called_once_with("busy")
+
+	def test_expands_when_no_host_fits_or_no_host_is_ready(self) -> None:
+		for hosts in ((self._host("full", free_memory_mib=512),), ()):
+			api = self._api(hosts)
+
+			select_host(api)
+
+			api.spawn_host.assert_called_once_with()
+			api.select.assert_not_called()
