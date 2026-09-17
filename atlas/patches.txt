@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 atlas.patches.set_sleepy_vm_overcommit_factor
 atlas.patches.set_placement_strategy
+atlas.patches.set_metal_server_size_architecture
