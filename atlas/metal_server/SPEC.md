@@ -28,7 +28,8 @@ The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/README.md) f
 ## Provisioning
 
 ```text
-create provider host     one stable provider identity across retries
+insert pending host       one durable placement intent
+  -> create provider host in a job
   -> wait for ready
   -> attach addresses
   -> install Metal
@@ -36,7 +37,7 @@ create provider host     one stable provider identity across retries
   -> mark provisioning complete
 ```
 
-Every phase is safe to repeat. A creation retry reuses the provider identity from the first attempt, so a lost response cannot create a second host. Compensation deletes only a host that the current request created.
+Placement inserts the Pending Metal Server before its provider job starts. Manual creation can still create the provider host during insertion. Every setup phase is safe to repeat. A creation retry reuses the provider identity from the first attempt, so a lost response cannot create a second host. A failed job sets the record to Failed. Compensation deletes only a host that the current insert request created.
 
 ## Capacity
 
