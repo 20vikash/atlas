@@ -20,7 +20,7 @@ The record name is the Metal VM ID. That single choice makes create idempotent, 
 | `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Metal Server IP Address. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
 | `PlacementService` | Running the selected placement strategy. |
-| `PlacementAPI` | Fleet usage, placement rate, and checked host selection. |
+| `PlacementAPI` | Fleet usage, placement rate, checked host selection, and host expansion. |
 | `MetalClient` | `/v1` HTTP transport and error classification. |
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
@@ -71,6 +71,10 @@ def select_host(api: PlacementAPI) -> None:
 Capacity comes from Metal Server Usage samples. The API subtracts VMs created after each sample, uncertain drafts, and migration reservations. `api.select(host_name)` locks the Metal Server row and rechecks readiness, architecture, the sleepy flag, sample freshness, memory, and storage. It returns `True` on selection or `False` when a host changed or lacks capacity. CPU is oversubscribed and is not a capacity limit. A stale sample reports a synchronization fault.
 
 The lock is released by the commit after the draft or migration is inserted, before Atlas calls Metal.
+
+`api.spawn_host(host_type=None, count=1)` checks the selected Metal Server Size, the provider image, the VM architecture, and its memory and disk shape. It uses New Host Type from Atlas Settings unless the strategy passes a size name. The API reuses suitable Pending or Installing hosts. A larger `count` asks for more hosts of the same type. It creates only the missing hosts under a settings lock, so concurrent calls with the same count share the same pending hosts.
+
+The `Default` strategy requests a host when fleet memory or CPU use reaches 80%, or when no ready host can fit the VM. It can still select a ready host after requesting expansion. A stale sample reports a synchronization error and stops expansion. If no host is selected, Atlas commits the pending host records and returns `503 capacity_pending` with `Retry-After: 15`. It creates no VM draft. The client retries after a host is Running and has a fresh capacity sample. A failed host setup reports the failed Metal Server name and requires an operator retry or removal before another automatic request for that type.
 
 ## Reading state
 
