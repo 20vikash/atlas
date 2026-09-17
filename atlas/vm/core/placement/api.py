@@ -73,6 +73,12 @@ class FleetUsage:
 	sleepy_reserved_memory_mib: int
 
 
+class CapacityPending(AtlasUserError):
+	"""A host is provisioning for this VM shape."""
+
+	http_status_code = 503
+
+
 class PlacementAPI:
 	"""Give one strategy a fleet snapshot and a checked host selection."""
 
@@ -96,6 +102,7 @@ class PlacementAPI:
 		self._created_at = now_datetime()
 		self._placement_counts: Counter[str] | None = None
 		self._selected_server: MetalServer | None = None
+		self._pending_hosts: set[str] = set()
 		self.usage = self._load_usage()
 
 	def placement_rate(self, host_name: str | None = None) -> float:
@@ -160,6 +167,123 @@ class PlacementAPI:
 		self._selected_server = server
 		return True
 
+	def spawn_host(self, host_type: str | None = None, *, count: int = 1) -> tuple[str, ...]:
+		"""Keep the requested number of suitable hosts provisioning."""
+		if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+			raise ValueError("count must be a positive integer")
+		if self._stale_ready_servers:
+			frappe.throw(
+				_("Metal Server {0} has no current capacity sample. Check Server synchronization.").format(
+					", ".join(sorted(self._stale_ready_servers))
+				),
+				exc=AtlasUserError,
+			)
+
+		settings = frappe.get_doc("Atlas Settings", for_update=True)
+		selected_type = host_type or settings.new_host_type
+		if not selected_type:
+			frappe.throw(
+				_("Set New Host Type in Atlas Settings before expanding capacity."), exc=AtlasUserError
+			)
+
+		size = frappe.get_doc("Metal Server Size", selected_type)
+		image = frappe.get_doc("Metal Server Image", f"{settings.server_provider}/Ubuntu_26.04")
+		self._validate_host_catalog(size, image, settings.server_provider)
+
+		# A locking read sees host intents committed while this request waited for Settings.
+		servers = frappe.db.sql(
+			"""select name, status, architecture from `tabMetal Server`
+			where server_size = %(server_size)s order by creation desc for update""",
+			{"server_size": selected_type},
+			as_dict=True,
+		)
+		pending = [
+			server
+			for server in servers
+			if server.status in ("Pending", "Installing") and server.architecture == self.request.architecture
+		]
+		names = [row.name for row in pending]
+		if len(names) >= count:
+			self._pending_hosts.update(names)
+			return tuple(names)
+
+		if not names and servers and servers[0].status == "Failed":
+			frappe.throw(
+				_(
+					"Metal Server {0} failed to provision. Retry or remove it before expanding capacity."
+				).format(servers[0].name),
+				exc=AtlasUserError,
+			)
+
+		from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
+
+		for _host_index in range(count - len(names)):
+			server = MetalServer.provision(size=selected_type, defer_provider_creation=True)
+			names.append(server.name)
+		self._pending_hosts.update(names)
+		return tuple(names)
+
+	def _validate_host_catalog(self, size: frappe._dict, image: frappe._dict, provider: str) -> None:
+		"""Reject a host catalog entry that cannot hold this VM."""
+		if not size.enabled or size.provider_type != provider or size.architecture not in ("amd64", "arm64"):
+			frappe.throw(
+				_("Metal Server Size {0} has invalid provider or architecture data.").format(size.name),
+				exc=AtlasUserError,
+			)
+		if size.architecture != self.request.architecture:
+			frappe.throw(
+				_("Metal Server Size {0} does not support {1} VMs.").format(
+					size.name, self.request.architecture
+				),
+				exc=AtlasUserError,
+			)
+		if any(
+			not isinstance(value, int) or value <= 0
+			for value in (size.cpu_count, size.memory_mib, size.disk_gib)
+		):
+			frappe.throw(
+				_("Metal Server Size {0} has invalid capacity data.").format(size.name), exc=AtlasUserError
+			)
+		if size.memory_mib < self.request.memory_mib or size.disk_gib * 1024 < self.request.disk_mib:
+			frappe.throw(
+				_("Metal Server Size {0} cannot hold this VM shape.").format(size.name), exc=AtlasUserError
+			)
+		if not image.enabled or image.provider_type != provider:
+			frappe.throw(
+				_("Metal Server Image {0} is disabled or belongs to another provider.").format(image.name),
+				exc=AtlasUserError,
+			)
+		for document in (size, image):
+			try:
+				metadata = frappe.parse_json(document.provider_metadata or "{}")
+			except (TypeError, ValueError) as error:
+				raise AtlasUserError(
+					_("{0} {1} has invalid provider metadata.").format(document.doctype, document.name)
+				) from error
+			if not isinstance(metadata, dict) or not metadata:
+				frappe.throw(
+					_("{0} {1} has invalid provider metadata.").format(document.doctype, document.name),
+					exc=AtlasUserError,
+				)
+			if document is image and (not isinstance(metadata.get("id"), str) or not metadata["id"]):
+				frappe.throw(
+					_("Metal Server Image {0} has no provider image ID.").format(image.name),
+					exc=AtlasUserError,
+				)
+
+	def _finish(self) -> MetalServer:
+		"""Return the selection or commit pending host intent for a retry."""
+		if self._selected_server is not None:
+			return self._selected_server
+		if self._pending_hosts:
+			frappe.db.commit()  # nosemgrep
+			raise CapacityPending(
+				_(
+					"Capacity is pending on Metal Server {0}. Retry after it is ready and synchronized."
+				).format(", ".join(sorted(self._pending_hosts)))
+			)
+		frappe.throw(_("No Metal Server has current capacity for this Virtual Machine."), exc=AtlasUserError)
+
 	def _load_usage(self) -> FleetUsage:
 		servers = frappe.get_all(
 			"Metal Server",
@@ -167,13 +291,11 @@ class PlacementAPI:
 			fields=["name", "architecture", "is_sleepy"],
 			order_by="name",
 		)
-		if not servers:
-			frappe.throw(_("No running Metal Server is ready for Virtual Machines."), exc=AtlasUserError)
-
 		server_names = [server.name for server in servers]
 		self._ready_server_names = frozenset(server_names)
-		samples = self._latest_samples(server_names)
-		if not samples:
+		samples = self._latest_samples(server_names) if server_names else {}
+		self._stale_ready_servers = self._ready_server_names - samples.keys()
+		if servers and not samples:
 			frappe.throw(
 				_("No current Metal Server capacity sample is available. Check Server synchronization."),
 				exc=AtlasUserError,
