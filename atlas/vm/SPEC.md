@@ -78,13 +78,13 @@ The `Default` strategy requests a host when fleet memory or CPU use reaches 80%,
 
 ### Simulate strategies
 
-Run every registered strategy against the same seeded tenant demand from the repository root:
+Run every registered strategy against the same seeded tenant demand from the repository root. The simulator lives in `core/placement/simulation/`:
 
 ```sh
-python -m scripts.simulate_placement --days 30 --seed 1
+python -m atlas.vm.core.placement.simulation --days 30 --seed 1
 ```
 
-Use `--strategy Default` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--json` for all metrics. Change the [example scenario](../../scripts/placement-scenario.json) with `--scenario path/to/scenario.json`. The scenario contains prices, host types, shapes, demand, traffic, incidents, and timing values. Use `--cpu-oversubscription` and `--max-host-count` to override two common capacity settings.
+Use `--strategy Default` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--json` for all metrics. Change the [example scenario](core/placement/simulation/scenario.json) with `--scenario path/to/scenario.json`. The scenario contains prices, host types, shapes, demand, traffic, incidents, and timing values. Use `--cpu-oversubscription` and `--max-host-count` to override two common capacity settings.
 
 The example starts with 30 hosts of 128 vCPU, 512 GiB memory, and 6.5 TiB storage. Each host costs 50,000 rupees per 30 days. New hosts take 25 to 35 minutes to start and count against the maximum as soon as they are requested. CPU oversubscription scales the simulator's admission ceiling. This CPU ceiling is a simulation rule; live `PlacementAPI.select` treats CPU as strategy data.
 
