@@ -1,155 +1,255 @@
 from dataclasses import replace
 from unittest import TestCase
 
-from atlas.vm.core.placement.models import PlacementRequest, Resources
 from atlas.vm.core.placement.simulation import Simulation
 from atlas.vm.core.placement.strategies import STRATEGIES
-from atlas.vm.core.placement.workload import HostType, Scenario, VMShape, VMWorkload, generate_workload
+from atlas.vm.core.placement.workload import (
+	ExternalEvent,
+	HostType,
+	Scenario,
+	TenantProfile,
+	VMShape,
+	Workload,
+	generate_workload,
+)
+from scripts.simulate_placement import DEFAULT_SCENARIO, load_scenario
 
 
 class TestPlacementSimulation(TestCase):
 	def setUp(self) -> None:
-		self.host_type = HostType("small", "amd64", True, Resources(1000, 2048, 2000))
-		self.scenario = Scenario(
-			host_types={"small": self.host_type},
-			initial_hosts=("small",),
+		base = load_scenario(DEFAULT_SCENARIO)
+		self.shapes = tuple(shape for shape in base.shapes if shape.name in ("sleepy", "a1", "a2"))
+		self.scenario = replace(
+			base,
+			host_types=(HostType("small", 2000, 4096, 100000, 50000),),
+			initial_host_type="small",
 			new_host_type="small",
-			shapes=(VMShape(1000, 1024, 100, 1),),
-			arrivals_per_day=10,
-			mean_lifetime_hours=2,
-			mean_activity_minutes=2,
-			sleepy_fraction=0.5,
-			sleep_after_idle_seconds=10,
-			tenant_count=2,
-			sleepy_vm_overcommit_factor=1.5,
+			initial_host_count=1,
+			max_host_count=2,
+			shapes=self.shapes,
+			traffic=replace(
+				base.traffic,
+				visits_per_day=0.0001,
+				waves_per_day=0,
+				boot_seconds=0.5,
+				save_seconds=0.5,
+			),
 		)
 
-	def _vm(
-		self, identifier: int, arrive_ms: int, *, is_sleepy: bool = False, activity_ms: tuple[int, ...] = ()
-	) -> VMWorkload:
-		return VMWorkload(
-			identifier,
-			PlacementRequest(1000, 2048 if is_sleepy else 1024, 100, "amd64", 1, is_sleepy),
-			arrive_ms,
-			4_000_000,
-			activity_ms,
-		)
+	def _tenant(self, identifier: int, shape: str, target_size: int = 1) -> TenantProfile:
+		weights = tuple(1.0 if item.name == shape else 0.0 for item in self.shapes)
+		return TenantProfile(identifier, 0, target_size, weights, 1.0, 0.0, False)
 
-	def test_workload_is_repeatable_and_independent_of_strategy(self) -> None:
-		workload = generate_workload(self.scenario, 2, 17)
-		self.assertEqual(workload, generate_workload(self.scenario, 2, 17))
-		self.assertNotEqual(workload, generate_workload(self.scenario, 2, 18))
+	def _workload(
+		self, tenants: tuple[TenantProfile, ...], events: tuple[ExternalEvent, ...], seed: int = 1
+	) -> Workload:
+		return Workload(seed, tenants, events)
 
-		def first_host(api):
-			for host in api.usage.hosts:
-				if api.select(host.name):
-					return
-
-		first = Simulation(self.scenario, workload, 2).run("first", first_host)
-		second = Simulation(self.scenario, workload, 2).run("second", first_host)
-		self.assertEqual(replace(first, strategy="second"), second)
-
-	def test_registered_default_strategy_runs_against_simulated_api(self) -> None:
-		workload = generate_workload(self.scenario, 1, 7)
-		result = Simulation(self.scenario, workload, 1).run("Default", STRATEGIES["Default"])
-		self.assertEqual(
-			result.placed + result.rejected + result.expired_unplaced + result.pending_at_end,
-			result.requested,
-		)
-		self.assertGreater(result.placed, 0)
-
-	def test_pending_host_reuse_and_explicit_extra_count(self) -> None:
-		scenario = replace(self.scenario, initial_hosts=())
-		workload = (self._vm(0, 0), self._vm(1, 1000))
-
-		def expand(api):
-			if api.usage.hosts and api.select(api.usage.hosts[0].name):
+	@staticmethod
+	def _first_host(api) -> None:
+		for host in api.usage.hosts:
+			if api.select(host.name):
 				return
-			api.spawn_host(count=2)
 
-		result = Simulation(scenario, workload, 1).run("expand", expand)
-		self.assertEqual(result.new_hosts, 2)
-		self.assertEqual(result.placed, 2)
-		self.assertEqual(result.rejected, 0)
-		self.assertEqual(result.delayed_placements, 2)
-		self.assertEqual(result.wait_max_seconds, 1815)
-		self.assertEqual(result.running_p95_seconds, 1817.5)
+	def test_scenario_keeps_supplied_fleet_shapes_and_price(self) -> None:
+		scenario = load_scenario(DEFAULT_SCENARIO)
+		self.assertEqual(scenario.initial_host_count, 30)
+		self.assertEqual(scenario.max_host_count, 60)
+		self.assertEqual(scenario.host_type("atlas").cpu_millicores, 128000)
+		self.assertEqual(scenario.host_type("atlas").memory_mib, 512 * 1024)
+		self.assertEqual(scenario.host_type("atlas").storage_mib, round(6.5 * 1024 * 1024))
+		self.assertEqual(scenario.host_type("atlas").monthly_rupees, 50000)
+		self.assertEqual([shape.weight for shape in scenario.shapes], [45, 18, 15, 10, 7, 5])
+		self.assertEqual(scenario.shape("sleepy").disk_mib, 12800)
 
-	def test_usage_and_rate_keep_cpu_advisory(self) -> None:
-		workload = (self._vm(0, 0), self._vm(1, 60_000))
-		observed = []
+	def test_host_cap_must_be_at_least_the_initial_fleet(self) -> None:
+		with self.assertRaisesRegex(ValueError, "host counts"):
+			replace(self.scenario, max_host_count=0).validate()
+		with self.assertRaisesRegex(ValueError, "host counts"):
+			replace(self.scenario, max_host_count=1.5).validate()
 
-		def record(api):
-			observed.append((api.placement_rate(), api.placement_rate("host-0001"), api.usage.hosts[0]))
-			self.assertTrue(api.select("host-0001"))
+	def test_workload_replays_the_same_external_events(self) -> None:
+		base = load_scenario(DEFAULT_SCENARIO)
+		first = generate_workload(base, 2, 7)
+		self.assertEqual(first, generate_workload(base, 2, 7))
+		self.assertNotEqual(first, generate_workload(base, 2, 8))
+		self.assertTrue(all(isinstance(event.at_tick, int) for event in first.events))
+		self.assertTrue(all(event.count <= 40 for event in first.events))
 
-		result = Simulation(self.scenario, workload, 1).run("record", record)
-		self.assertEqual(result.placed, 2)
-		self.assertEqual(result.running, 2)
-		self.assertEqual(result.running_p95_seconds, 2.5)
-		self.assertEqual(observed[1][0], 0.2)
-		self.assertEqual(observed[1][1], 0.2)
-		self.assertEqual(observed[1][2].tenant_vm_count, 1)
-		self.assertEqual(observed[1][2].free.cpu_millicores, 0)
-		self.assertEqual(observed[1][2].free.memory_mib, 1024)
+	def test_stopped_vm_keeps_storage_and_stops_revenue(self) -> None:
+		scenario = replace(self.scenario, max_host_count=1)
+		half_day = 12 * 60 * 60 * 2
+		workload = self._workload(
+			(self._tenant(1, "a1"),),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(half_day, 2, "night_stop", tenant_id=1, fraction=1),
+			),
+		)
+		result = Simulation(scenario, workload, 1).run("first", self._first_host)
+		expected = 2 * 3 * 50000 / 4 * (half_day - 1) / (30 * 172800)
+		self.assertAlmostEqual(result.vm_revenue_rupees, expected)
+		self.assertAlmostEqual(result.host_cost_rupees, 50000 / 30)
+		self.assertEqual(result.stopped_at_end, 1)
+		self.assertGreater(result.storage_utilization, 0)
+		doubled = Simulation(replace(scenario, revenue_multiplier=6), workload, 1).run(
+			"first", self._first_host
+		)
+		self.assertAlmostEqual(doubled.vm_revenue_rupees, 2 * result.vm_revenue_rupees)
+		self.assertAlmostEqual(doubled.host_cost_rupees, result.host_cost_rupees)
 
-	def test_strategy_can_override_host_type(self) -> None:
-		large = HostType("large", "amd64", False, Resources(2000, 4096, 4000))
+	def test_host_cap_counts_pending_hosts(self) -> None:
+		scenario = replace(self.scenario, initial_host_count=0, max_host_count=1)
+		workload = self._workload(
+			(self._tenant(1, "a1"), self._tenant(2, "a1")),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(1, 2, "tenant_arrival", tenant_id=2),
+			),
+		)
+		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		self.assertEqual(result.hosts_at_end, 1)
+		self.assertEqual(result.create_failures, 2)
+		self.assertEqual(result.incidents, 2)
+		self.assertAlmostEqual(result.host_cost_rupees, 50000 / 30)
+
+	def test_host_becomes_ready_after_configured_start_time(self) -> None:
 		scenario = replace(
 			self.scenario,
-			host_types={"small": self.host_type, "large": large},
-			initial_hosts=(),
+			initial_host_count=0,
+			max_host_count=1,
+			host_start_minutes_min=25,
+			host_start_minutes_max=25,
 		)
-		virtual_machine = replace(
-			self._vm(0, 0),
-			request=PlacementRequest(2000, 3072, 100, "amd64", 1, False),
+		workload = self._workload(
+			(self._tenant(1, "a1"), self._tenant(2, "a1"), self._tenant(3, "a1")),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(24 * 120, 2, "tenant_arrival", tenant_id=2),
+				ExternalEvent(26 * 120, 3, "tenant_arrival", tenant_id=3),
+			),
+		)
+		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		self.assertEqual(result.create_failures, 2)
+		self.assertEqual(result.vms_created, 1)
+
+	def test_cpu_oversubscription_changes_simulated_admission(self) -> None:
+		host = HostType("small", 500, 4096, 100000, 50000)
+		scenario = replace(self.scenario, host_types=(host,), max_host_count=1)
+		workload = self._workload(
+			(self._tenant(1, "a1"), self._tenant(2, "a1")),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(2, 2, "tenant_arrival", tenant_id=2),
+			),
+		)
+		one = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		two = Simulation(replace(scenario, cpu_oversubscription=2), workload, 1).run(
+			"Default", STRATEGIES["Default"]
+		)
+		self.assertEqual((one.vms_created, one.create_failures), (1, 1))
+		self.assertEqual((two.vms_created, two.create_failures), (2, 0))
+
+	def test_sleep_releases_resources_and_wake_can_migrate(self) -> None:
+		host = HostType("small", 2000, 2048, 100000, 50000)
+		scenario = replace(self.scenario, host_types=(host,), initial_host_count=2, max_host_count=2)
+		workload = self._workload(
+			(self._tenant(1, "sleepy"), self._tenant(2, "a1")),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(3602, 2, "tenant_arrival", tenant_id=2),
+				ExternalEvent(3604, 3, "traffic_wave", fraction=1, span_ticks=1),
+			),
 		)
 
-		def choose_large(api):
-			for host in api.usage.hosts:
-				if api.select(host.name):
-					return
-			api.spawn_host("large")
+		def pack_then_move(api):
+			name = "host-0002" if api.action == "wake" else "host-0001"
+			api.select(name)
 
-		result = Simulation(scenario, (virtual_machine,), 1).run("large", choose_large)
-		self.assertEqual(result.placed, 1)
-		self.assertEqual(result.new_hosts, 1)
-		self.assertEqual(result.rejected, 0)
-
-	def test_pending_request_can_expire_before_host_is_ready(self) -> None:
-		scenario = replace(self.scenario, initial_hosts=())
-		virtual_machine = replace(self._vm(0, 0), depart_ms=60_000)
-		result = Simulation(scenario, (virtual_machine,), 1).run("pending", lambda api: api.spawn_host())
-		self.assertEqual(result.expired_unplaced, 1)
-		self.assertEqual(result.placed, 0)
-		self.assertEqual(result.new_hosts, 1)
-
-	def test_sleep_releases_memory_and_wake_reports_shortfall(self) -> None:
-		workload = (self._vm(0, 0, is_sleepy=True, activity_ms=(30_000,)), self._vm(1, 20_000))
-
-		def first_host(api):
-			self.assertTrue(api.select("host-0001"))
-
-		result = Simulation(self.scenario, workload, 1).run("first", first_host)
-		self.assertEqual(result.placed, 2)
+		result = Simulation(scenario, workload, 1).run("pack", pack_then_move)
+		self.assertEqual(result.vms_created, 2)
 		self.assertGreaterEqual(result.sleeps, 1)
-		self.assertEqual(result.wakes, 1)
-		self.assertEqual(result.wake_memory_shortfalls, 1)
-		self.assertEqual(result.peak_wake_shortfall_mib, 1024)
+		self.assertEqual(result.wake_migrations, 1)
+		self.assertEqual(result.wake_failures, 0)
 
-	def test_activity_cancels_stale_idle_and_save_events(self) -> None:
-		virtual_machine = replace(
-			self._vm(0, 0, is_sleepy=True, activity_ms=(9_000, 20_000)), depart_ms=34_000
+	def test_wake_without_room_is_a_failure_and_incident(self) -> None:
+		host = HostType("small", 2000, 2048, 100000, 50000)
+		scenario = replace(self.scenario, host_types=(host,), initial_host_count=1, max_host_count=1)
+		workload = self._workload(
+			(self._tenant(1, "sleepy"), self._tenant(2, "a1")),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(3602, 2, "tenant_arrival", tenant_id=2),
+				ExternalEvent(3604, 3, "traffic_wave", fraction=1, span_ticks=1),
+			),
+		)
+		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		self.assertEqual(result.wake_failures, 1)
+		self.assertEqual(result.incidents, 1)
+		self.assertEqual(result.vms_terminated, 1)
+
+	def test_incidents_group_failures_and_can_make_tenant_leave(self) -> None:
+		scenario = replace(
+			self.scenario,
+			initial_host_count=0,
+			max_host_count=0,
+			incidents=replace(self.scenario.incidents, allocation_multiplier=1, leave_probability_step=1),
+		)
+		workload = self._workload(
+			(self._tenant(1, "a1", 3),),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(100, 2, "tenant_action", tenant_id=1, action="allocate"),
+				ExternalEvent(130, 3, "tenant_action", tenant_id=1, action="allocate"),
+			),
+		)
+		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		self.assertEqual(result.create_failures, 3)
+		self.assertEqual(result.incidents, 2)
+		self.assertEqual(result.tenants_left, 1)
+
+	def test_strategy_sees_sleepy_factor_and_current_host(self) -> None:
+		workload = self._workload(
+			(self._tenant(1, "a1"),),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(10, 2, "night_stop", tenant_id=1, fraction=1),
+				ExternalEvent(20, 3, "night_start", tenant_id=1, fraction=1),
+			),
+		)
+		seen = []
+
+		def stay(api):
+			seen.append((api.action, api.current_host_name, api.sleepy_vm_overcommit_factor))
+			api.select(api.current_host_name or api.usage.hosts[0].name)
+
+		result = Simulation(self.scenario, workload, 1).run("stay", stay)
+		self.assertEqual(result.start_migrations, 0)
+		self.assertEqual(seen, [("create", None, 1.5), ("start", "host-0001", 1.5)])
+
+	def test_resize_target_reserves_new_shape_during_migration(self) -> None:
+		host = HostType("small", 2000, 2048, 100000, 50000)
+		scenario = replace(self.scenario, host_types=(host,), initial_host_count=2, max_host_count=2)
+		resizing_tenant = replace(self._tenant(1, "a1"), shape_weights=(0, 100, 1))
+		workload = self._workload(
+			(resizing_tenant, self._tenant(2, "a1")),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(10, 2, "tenant_action", tenant_id=1, action="resize"),
+				ExternalEvent(11, 3, "tenant_arrival", tenant_id=2),
+			),
 		)
 
-		def first_host(api):
-			self.assertTrue(api.select("host-0001"))
+		def move(api):
+			api.select("host-0002" if api.action == "resize" or api.request.tenant_id == 2 else "host-0001")
 
-		result = Simulation(self.scenario, (virtual_machine,), 1).run("first", first_host)
-		self.assertEqual(result.sleeps, 0)
+		result = Simulation(scenario, workload, 1).run("move", move)
+		self.assertEqual(result.resize_migrations, 1)
+		self.assertEqual(result.create_failures, 1)
 
-	def test_no_selection_or_host_request_is_rejected(self) -> None:
-		scenario = replace(self.scenario, initial_hosts=())
-		result = Simulation(scenario, (self._vm(0, 0),), 1).run("none", lambda api: None)
-		self.assertEqual(result.rejected, 1)
-		self.assertEqual(result.placed, 0)
+	def test_same_workload_and_strategy_replays_identically(self) -> None:
+		workload = generate_workload(load_scenario(DEFAULT_SCENARIO), 1, 17)
+		scenario = load_scenario(DEFAULT_SCENARIO)
+		first = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		second = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		self.assertEqual(first, second)
