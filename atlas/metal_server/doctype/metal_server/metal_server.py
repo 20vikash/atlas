@@ -43,6 +43,7 @@ class MetalServer(Document):
 		architecture: DF.Literal["amd64", "arm64"]
 		disks: DF.Table[MetalServerDisk]
 		is_provisioning_completed: DF.Check
+		is_sleepy: DF.Check
 		metald_api_token: DF.Password | None
 		port: DF.Int
 		private_ipv4_address: DF.Data | None

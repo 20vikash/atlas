@@ -8,6 +8,7 @@
  "field_order": [
   "status",
   "is_provisioning_completed",
+  "is_sleepy",
   "column_break_qbap",
   "provider_server_id",
   "metald_api_token",
@@ -41,6 +42,13 @@
    "fieldtype": "Check",
    "label": "Provisioning Completed",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Placement strategies can use this flag when they select a host.",
+   "fieldname": "is_sleepy",
+   "fieldtype": "Check",
+   "label": "Sleepy Host"
   },
   {
    "default": "Pending",
