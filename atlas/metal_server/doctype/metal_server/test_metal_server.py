@@ -131,7 +131,20 @@ class TestServer(UnitTestCase):
 
 		self.assertEqual(server.server_size, "Scaleway/size")
 		self.assertTrue(server.flags.defer_provider_creation)
-		server.insert.assert_called_once()
+		server.insert.assert_called_once_with(ignore_permissions=True)
+
+	def test_provisioning_worker_runs_as_administrator(self) -> None:
+		previous_user = frappe.session.user
+		seen_users: list[str] = []
+		frappe.set_user("Guest")
+		try:
+			with patch("atlas.metal_server.doctype.metal_server.metal_server.ServerProvisioner") as provisioner:
+				provisioner.return_value.run.side_effect = lambda: seen_users.append(frappe.session.user)
+				MetalServer._setup_server(SimpleNamespace())
+		finally:
+			frappe.set_user(previous_user)
+
+		self.assertEqual(seen_users, ["Administrator"])
 
 	def test_failed_insert_cleanup_deletes_only_a_new_provider_server(self) -> None:
 		server = self._server(status="Pending")
