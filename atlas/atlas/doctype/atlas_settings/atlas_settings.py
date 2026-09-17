@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 from functools import cached_property
+from math import isfinite
 from typing import TYPE_CHECKING
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, convert_utc_to_system_timezone, get_datetime, now_datetime
+from frappe.utils import add_days, convert_utc_to_system_timezone, flt, get_datetime, now_datetime
 
 from atlas.service.core.proxy.configuration import push_configuration_to_active_proxies
 
@@ -103,6 +104,7 @@ class AtlasSettings(Document):
 			"pl-waw-3",
 		]
 		server_provider: DF.Literal["Scaleway"]
+		sleepy_vm_overcommit_factor: DF.Float
 		wg_mesh_binary_x86_64_file: DF.Link | None
 		wg_mesh_source_hash: DF.Data | None
 		wildcard_domain: DF.Data
@@ -188,7 +190,9 @@ class AtlasSettings(Document):
 		)
 
 	def validate(self) -> None:
-		"""Reject settings that would leave Atlas unable to reach a provider."""
+		"""Reject invalid site settings."""
+		self._validate_sleepy_vm_overcommit_factor()
+
 		if not self.is_new() and self.has_value_changed("region_id"):
 			if frappe.db.exists("Virtual Machine") or frappe.db.exists(
 				"Proxy Server", {"status": ["!=", "Archived"]}
@@ -217,6 +221,13 @@ class AtlasSettings(Document):
 		self.region_name = self.region_name.strip().lower()
 
 		self.validate_wildcard_certificate()
+
+	def _validate_sleepy_vm_overcommit_factor(self) -> None:
+		factor = flt(self.sleepy_vm_overcommit_factor)
+		if not isfinite(factor) or factor < 1.0:
+			frappe.throw(_("Sleepy VM overcommit factor must be a finite number of at least 1."))
+
+		self.sleepy_vm_overcommit_factor = factor
 
 	def on_update(self) -> None:
 		"""Skip provider checks when the empty settings document is created."""

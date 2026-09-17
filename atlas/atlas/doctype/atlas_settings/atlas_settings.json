@@ -87,7 +87,8 @@
   "object_storage_secret_access_key",
   "object_storage_signed_url_expiry",
   "placement_tab",
-  "new_host_type"
+  "new_host_type",
+  "sleepy_vm_overcommit_factor"
  ],
  "fields": [
   {
@@ -554,6 +555,13 @@
    "fieldtype": "Link",
    "label": "New Host Type",
    "options": "Metal Server Size"
+  },
+  {
+   "default": "1.0",
+   "description": "Multiplier available to placement strategies for VMs that sleep after idle time.",
+   "fieldname": "sleepy_vm_overcommit_factor",
+   "fieldtype": "Float",
+   "label": "Sleepy VM Overcommit Factor"
   }
  ],
  "grid_page_length": 50,
