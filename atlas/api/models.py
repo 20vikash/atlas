@@ -17,7 +17,6 @@ from atlas.vm.core.models import (
 	FirewallRule,
 	VirtualMachineCreateRequest,
 )
-from atlas.vm.core.state_webhook import DEFAULT_CENTRAL_ID
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
@@ -65,7 +64,7 @@ class ConfigureWebhooksPayload(StrictModel):
 
 	request_url: AnyHttpUrl = Field(description="HTTP or HTTPS URL that receives every delivery.")
 	webhook_secret: str = Field(min_length=1, description="Shared secret that signs every delivery.")
-	central_id: int = Field(default=DEFAULT_CENTRAL_ID, ge=1, description="Receiving Central.")
+	central_id: int = Field(default=1, ge=1, description="Receiving Central.")
 	enabled: bool = True
 
 

@@ -61,7 +61,7 @@ The list route does not call Metal. It returns `last_known_state` from Virtual M
 
 ## State delivery
 
-`PUT /api/atlas/webhooks` points the event deliveries of one Central at its receiver. It takes the URL, a shared secret, `central_id` (default 1), and `enabled`. Only a Central token, which carries tenant `*`, can use it. Atlas creates one state Webhook for `on_update` and one for `on_trash`. Their names use `Virtual Machine State - <Event> - Central - <central_id>`. A repeated call refreshes the Webhooks. More than one Central registers only in development.
+`PUT /api/atlas/webhooks` points the event deliveries of one Central at its receiver. It takes the URL, a shared secret, `central_id` (default 1), and `enabled`. Only a Central token, which carries tenant `*`, can use it. Atlas creates one state Webhook for `on_update` and one for `on_trash`. Their names use `Virtual Machine State - <Event> - Central - <central_id>`. A repeated call refreshes the Webhooks. Each Central uses a different `central_id`.
 
 Each delivery is a signed JSON POST with `Content-Type` and `X-Atlas-Region`:
 
