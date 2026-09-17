@@ -116,8 +116,18 @@ class PlacementAPI:
 		if self._selected_server is not None:
 			raise RuntimeError("A placement host is already selected.")
 
+		if host_name in self._excluded_servers:
+			return False
+
 		host = next((host for host in self.usage.hosts if host.name == host_name), None)
-		if host is None or host_name in self._excluded_servers:
+		if host is None:
+			if host_name in self._ready_server_names:
+				frappe.throw(
+					_(
+						"No current capacity sample for Metal Server {0}. Check Server synchronization."
+					).format(host_name),
+					exc=AtlasUserError,
+				)
 			return False
 
 		server = cast("MetalServer", frappe.get_doc("Metal Server", host_name, for_update=True))
@@ -161,6 +171,7 @@ class PlacementAPI:
 			frappe.throw(_("No running Metal Server is ready for Virtual Machines."), exc=AtlasUserError)
 
 		server_names = [server.name for server in servers]
+		self._ready_server_names = frozenset(server_names)
 		samples = self._latest_samples(server_names)
 		if not samples:
 			frappe.throw(
