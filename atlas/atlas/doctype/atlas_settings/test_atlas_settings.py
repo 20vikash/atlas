@@ -66,6 +66,7 @@ class TestRegionID(UnitTestCase):
 		self.settings.is_new.return_value = False
 		self.settings.has_value_changed.return_value = True
 		self.settings.is_setup_completed = False
+		self.settings.placement_strategy = "Default"
 		self.settings.wildcard_domain = "example.com"
 		self.settings.region_name = "test"
 
@@ -108,6 +109,26 @@ class TestSleepyVMOvercommitFactor(UnitTestCase):
 				settings = SimpleNamespace(sleepy_vm_overcommit_factor=value)
 				with self.assertRaises(frappe.ValidationError):
 					AtlasSettings._validate_sleepy_vm_overcommit_factor(settings)
+
+
+class TestPlacementStrategy(UnitTestCase):
+	def test_unknown_strategy_is_rejected(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		settings = MagicMock(placement_strategy="Missing")
+		with self.assertRaisesRegex(frappe.ValidationError, "Unknown placement strategy"):
+			AtlasSettings.validate(settings)
+
+	def test_options_come_from_the_registry(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		with (
+			patch("atlas.vm.core.placement.strategies.STRATEGIES", {"Custom": lambda api: None}),
+			patch("frappe.only_for") as only_for,
+		):
+			self.assertEqual(AtlasSettings.available_placement_strategies(MagicMock()), ["Custom"])
+
+		only_for.assert_called_once_with("System Manager")
 
 
 class IntegrationTestAtlasSettings(IntegrationTestCase):
