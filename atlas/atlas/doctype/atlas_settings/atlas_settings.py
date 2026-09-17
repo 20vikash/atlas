@@ -73,6 +73,7 @@ class AtlasSettings(Document):
 		object_storage_region: DF.Data | None
 		object_storage_secret_access_key: DF.Password | None
 		object_storage_signed_url_expiry: DF.Int
+		placement_strategy: DF.Literal[None]
 		previous_proxy_cluster_password: DF.Password | None
 		private_network_cidr: DF.Data
 		private_network_mtu: DF.Int
@@ -191,6 +192,11 @@ class AtlasSettings(Document):
 
 	def validate(self) -> None:
 		"""Reject invalid site settings."""
+		from atlas.vm.core.placement.strategies import STRATEGIES
+
+		if self.placement_strategy not in STRATEGIES:
+			frappe.throw(_("Unknown placement strategy: {0}.").format(self.placement_strategy))
+
 		self._validate_sleepy_vm_overcommit_factor()
 
 		if not self.is_new() and self.has_value_changed("region_id"):
@@ -228,6 +234,14 @@ class AtlasSettings(Document):
 			frappe.throw(_("Sleepy VM overcommit factor must be a finite number of at least 1."))
 
 		self.sleepy_vm_overcommit_factor = factor
+
+	@frappe.whitelist()
+	def available_placement_strategies(self) -> list[str]:
+		"""Return the names that the Placement tab can select."""
+		from atlas.vm.core.placement.strategies import STRATEGIES
+
+		frappe.only_for("System Manager")
+		return list(STRATEGIES)
 
 	def on_update(self) -> None:
 		"""Skip provider checks when the empty settings document is created."""
