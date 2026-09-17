@@ -15,6 +15,7 @@ class TestServerProvisioner(UnitTestCase):
 		provisioner = ServerProvisioner(server, provider)
 		provisioner.host_installation = Mock()
 		operations = Mock()
+		server.ensure_provider_server.side_effect = lambda: operations("provider-create")
 		provider.prepare_server.side_effect = lambda _server: operations("provider-preparation")
 		provisioner.wait_for_root_ssh = Mock(side_effect=lambda: operations("secure-shell"))
 		provider.configure_server_network.side_effect = lambda _server: operations("provider-network")
@@ -26,7 +27,14 @@ class TestServerProvisioner(UnitTestCase):
 
 		self.assertEqual(
 			[call.args[0] for call in operations.call_args_list],
-			["provider-preparation", "secure-shell", "provider-network", "wireguard", "metal"],
+			[
+				"provider-create",
+				"provider-preparation",
+				"secure-shell",
+				"provider-network",
+				"wireguard",
+				"metal",
+			],
 		)
 		self.assertEqual(server.status, "Running")
 		self.assertEqual(server.is_provisioning_completed, 1)
@@ -63,8 +71,25 @@ class TestServerProvisioner(UnitTestCase):
 			provisioner.run()
 
 		self.assertEqual(provider.prepare_server.call_count, 2)
+		self.assertEqual(server.ensure_provider_server.call_count, 2)
 		self.assertEqual(provider.configure_server_network.call_count, 2)
 		self.assertEqual(provisioner.host_installation.install_metal.call_count, 2)
+
+	def test_provider_creation_failure_marks_the_pending_host_failed(self) -> None:
+		server = self.server()
+		server.provider_server_id = None
+		server.ensure_provider_server.side_effect = RuntimeError("provider failed")
+		provisioner = ServerProvisioner(server, Mock())
+
+		with (
+			patch("atlas.metal_server.core.provisioning.frappe.db", SimpleNamespace(commit=Mock())),
+			patch("atlas.metal_server.core.provisioning.frappe.log_error") as log_error,
+			self.assertRaisesRegex(RuntimeError, "provider failed"),
+		):
+			provisioner.run()
+
+		self.assertEqual(server.status, "Failed")
+		self.assertIn("provider-create", log_error.call_args.kwargs["title"])
 
 	@staticmethod
 	def server() -> SimpleNamespace:
@@ -73,6 +98,7 @@ class TestServerProvisioner(UnitTestCase):
 			status="Pending",
 			is_provisioning_completed=0,
 			provider_server_id="server-id",
+			ensure_provider_server=Mock(),
 			provider_metadata="{}",
 			public_ipv4_address="203.0.113.1",
 			private_ipv4_address="10.1.0.2",

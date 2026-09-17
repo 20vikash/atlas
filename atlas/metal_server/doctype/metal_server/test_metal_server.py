@@ -70,6 +70,7 @@ class TestServer(UnitTestCase):
 		server = SimpleNamespace(
 			name="node-test-00007",
 			provider_server_id=None,
+			architecture=None,
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
 			status="Pending",
@@ -78,17 +79,59 @@ class TestServer(UnitTestCase):
 			_validate_provider_catalog=Mock(),
 			_provider_metadata=MetalServer._provider_metadata,
 		)
+		server.ensure_provider_server = MethodType(MetalServer.ensure_provider_server, server)
 
 		with patch(
 			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
-			return_value=SimpleNamespace(provider_metadata="{}"),
+			return_value=SimpleNamespace(provider_metadata="{}", architecture="amd64"),
 		):
 			MetalServer.before_validate(server)
 
 		self.assertEqual(provider.ensure_server.call_args.args[0].name, "node-test-00007")
 		provider.validate_settings.assert_called_once_with()
 		self.assertEqual(server.provider_server_id, "server-id")
+		self.assertEqual(server.architecture, "amd64")
 		self.assertTrue(server.flags.provider_server_created)
+
+	def test_before_validate_defers_provider_creation(self) -> None:
+		provider = SimpleNamespace(validate_settings=Mock())
+		server = SimpleNamespace(
+			provider_server_id=None,
+			server_size="Scaleway/arm-size",
+			architecture=None,
+			flags=SimpleNamespace(defer_provider_creation=True),
+			settings=SimpleNamespace(server_provider_controller=provider),
+			_validate_provider_catalog=Mock(),
+			ensure_provider_server=Mock(),
+		)
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
+			return_value=SimpleNamespace(architecture="arm64"),
+		):
+			MetalServer.before_validate(server)
+
+		self.assertEqual(server.architecture, "arm64")
+		server.ensure_provider_server.assert_not_called()
+
+	def test_provision_can_defer_provider_creation(self) -> None:
+		server = SimpleNamespace(flags=SimpleNamespace(), insert=Mock())
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_single",
+				return_value=SimpleNamespace(server_provider="Scaleway"),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
+				return_value=SimpleNamespace(name="Scaleway/Ubuntu_26.04"),
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.new_doc", return_value=server),
+		):
+			MetalServer.provision(size="Scaleway/size", defer_provider_creation=True)
+
+		self.assertEqual(server.server_size, "Scaleway/size")
+		self.assertTrue(server.flags.defer_provider_creation)
+		server.insert.assert_called_once()
 
 	def test_failed_insert_cleanup_deletes_only_a_new_provider_server(self) -> None:
 		server = self._server(status="Pending")
