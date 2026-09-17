@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
+import frappe
 from frappe.utils import get_datetime, get_system_timezone
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
@@ -66,6 +67,20 @@ class ConfigureWebhooksPayload(StrictModel):
 	webhook_secret: str = Field(min_length=1, description="Shared secret that signs every delivery.")
 	central_id: int = Field(default=1, ge=1, description="Receiving Central.")
 	enabled: bool = True
+
+	@model_validator(mode="after")
+	def validate_central_id(self) -> ConfigureWebhooksPayload:
+		"""Restrict extra Central deliveries to development or an explicit site setting."""
+		if self.central_id == 1:
+			return self
+
+		allows_multiple = (
+			frappe.conf.get("developer_mode") == 1 or frappe.conf.get("allow_multiple_central_webhooks") == 1
+		)
+		if not allows_multiple:
+			raise ValueError("central_id must be 1 unless multiple Central webhooks are enabled.")
+
+		return self
 
 
 class WebhookConfigurationResponse(BaseModel):
