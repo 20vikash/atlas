@@ -73,6 +73,7 @@ class TestPlacementSimulation(TestCase):
 		self.assertEqual(result.rejected, 0)
 		self.assertEqual(result.delayed_placements, 2)
 		self.assertEqual(result.wait_max_seconds, 1815)
+		self.assertEqual(result.running_p95_seconds, 1817.5)
 
 	def test_usage_and_rate_keep_cpu_advisory(self) -> None:
 		workload = (self._vm(0, 0), self._vm(1, 60_000))
@@ -84,6 +85,8 @@ class TestPlacementSimulation(TestCase):
 
 		result = Simulation(self.scenario, workload, 1).run("record", record)
 		self.assertEqual(result.placed, 2)
+		self.assertEqual(result.running, 2)
+		self.assertEqual(result.running_p95_seconds, 2.5)
 		self.assertEqual(observed[1][0], 0.2)
 		self.assertEqual(observed[1][1], 0.2)
 		self.assertEqual(observed[1][2].tenant_vm_count, 1)
