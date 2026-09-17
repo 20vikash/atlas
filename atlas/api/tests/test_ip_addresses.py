@@ -20,6 +20,7 @@ def build_ip_address(tenant_id: int = TENANT_ID, **overrides) -> SimpleNamespace
 		"tenant_id": tenant_id,
 		"address": "203.0.113.10",
 		"status": "Allocated",
+		"reserved": 1,
 		"virtual_machine": None,
 		"creation": "2026-09-08 10:00:00",
 		"provider_resource_id": "provider-1",
@@ -39,6 +40,7 @@ class TestIPAddressView(UnitTestCase):
 		view = IPAddressResponse.from_document(build_ip_address(status="Attached", virtual_machine="vm-1"))
 
 		self.assertEqual(view.state, "attached")
+		self.assertTrue(view.reserved)
 		self.assertEqual(view.virtual_machine_id, "vm-1")
 		self.assertIsInstance(view.created_at, int)
 		self.assertNotIn("provider_resource_id", view.model_fields)
@@ -58,23 +60,38 @@ class TestReserveIPAddress(UnitTestCase):
 		):
 			return (*call_route(reserve_ip_address), reserve)
 
-	def test_pool_is_the_default_source(self) -> None:
+	def test_an_empty_body_claims_one_pool_address(self) -> None:
 		status, body, reserve = self.reserve({})
 
 		self.assertEqual(status, 201)
 		self.assertEqual(body["state"], "reserved")
-		reserve.assert_called_once_with(TENANT_ID, "pool")
+		reserve.assert_called_once_with(TENANT_ID)
 
-	def test_provider_source_is_accepted(self) -> None:
-		_, _, reserve = self.reserve({"source": "provider"})
+	def test_a_named_address_is_reserved_where_it_is(self) -> None:
+		ip_address = build_ip_address(status="Attached", virtual_machine="vm-1", reserved=0)
+		ip_address.reserve = Mock()
 
-		reserve.assert_called_once_with(TENANT_ID, "provider")
+		with (
+			api_request(
+				"POST",
+				"/api/atlas/ip-addresses",
+				tenant_id=TENANT_ID,
+				json={"ip_address_id": "203.0.113.10"},
+			),
+			owned_document(ip_address),
+			patch("atlas.api.routes.ip_addresses.reserve_for_tenant") as reserve,
+		):
+			status, body = call_route(reserve_ip_address)
 
-	def test_an_unknown_source_is_rejected(self) -> None:
-		status, body, _ = self.reserve({"source": "somewhere"})
+		self.assertEqual(status, 200)
+		self.assertEqual(body["virtual_machine_id"], "vm-1")
+		ip_address.reserve.assert_called_once()
+		reserve.assert_not_called()
+
+	def test_an_unknown_field_is_rejected(self) -> None:
+		status, _, _ = self.reserve({"source": "provider"})
 
 		self.assertEqual(status, 400)
-		self.assertEqual([item["name"] for item in body["error"]["fields"]], ["source"])
 
 
 class TestReadIPAddresses(UnitTestCase):

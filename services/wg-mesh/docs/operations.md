@@ -48,7 +48,7 @@ Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 | WireGuard address range    | `fdab::/16`                  |
 | Shared VLAN route          | `fdaa::/16 dev <uplink>`     |
 | Uplink MTU                 | 1500 or greater              |
-| WireGuard MTU              | 1420                         |
+| WireGuard MTU              | Uplink MTU minus 60          |
 | VM interface and guest MTU | 1380                         |
 
 Discovery uses IPv6 NDP on the shared VLAN. Neighbour advertisements are not authenticated, so restrict the VLAN to trusted participating hosts. Cross-tenant traffic is permitted only when one endpoint is a controller-whitelisted privileged tenant-`0` VM address, so reserve those addresses for trusted platform services.

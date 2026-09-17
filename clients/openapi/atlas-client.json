@@ -271,6 +271,7 @@
         "description": "The public IPv4 address to attach.",
         "properties": {
           "ip_address_id": {
+            "description": "A reserved address, or auto to borrow one from the shared pool.",
             "minLength": 1,
             "title": "Ip Address Id",
             "type": "string"
@@ -289,6 +290,7 @@
             "address": "203.0.113.10",
             "created_at": 1788834165,
             "id": "203.0.113.10",
+            "reserved": true,
             "state": "reserved",
             "tags": {
               "pool": "edge"
@@ -309,6 +311,10 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "reserved": {
+            "title": "Reserved",
+            "type": "boolean"
           },
           "state": {
             "title": "State",
@@ -342,6 +348,7 @@
           "tenant_id",
           "address",
           "state",
+          "reserved",
           "virtual_machine_id",
           "tags",
           "created_at"
@@ -774,16 +781,19 @@
       },
       "ReserveIPAddressPayload": {
         "additionalProperties": false,
-        "description": "Select the source of an IP address reservation.",
+        "description": "Optionally reserve an address the tenant already holds.",
         "properties": {
-          "source": {
-            "default": "pool",
-            "enum": [
-              "pool",
-              "provider"
+          "ip_address_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Source",
-            "type": "string"
+            "default": null,
+            "title": "Ip Address Id"
           }
         },
         "title": "ReserveIPAddressPayload",
@@ -1664,7 +1674,7 @@
         ]
       },
       "post": {
-        "description": "Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the provider source creates a provider reservation.",
+        "description": "Reserves a shared-pool address, or keeps an address the tenant already holds by naming its ip_address_id.",
         "operationId": "reserve_ip_address",
         "parameters": [
           {
@@ -1683,7 +1693,7 @@
           "content": {
             "application/json": {
               "example": {
-                "source": "pool"
+                "ip_address_id": "203.0.113.10"
               },
               "schema": {
                 "$ref": "#/components/schemas/ReserveIPAddressPayload"
@@ -1693,6 +1703,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IPAddressResponse"
+                }
+              }
+            },
+            "description": "The held address stays with the tenant."
+          },
           "201": {
             "content": {
               "application/json": {
@@ -1704,7 +1724,7 @@
             "description": "The address is reserved for the tenant."
           },
           "409": {
-            "description": "The shared pool holds no free address."
+            "description": "The pool is empty or the address is detaching."
           }
         },
         "summary": "Reserve IP address",
@@ -2477,7 +2497,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/ip-address": {
       "delete": {
-        "description": "Detaches the public IP address from the VM and keeps its tenant reservation.",
+        "description": "Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared pool.",
         "operationId": "detach_virtual_machine_ip_address",
         "parameters": [
           {
@@ -2518,7 +2538,7 @@
         ]
       },
       "put": {
-        "description": "Attaches one available IP address that the tenant reserved. Detach the current address before you attach a different one.",
+        "description": "Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which returns it on detach. Detach the current address first.",
         "operationId": "attach_virtual_machine_ip_address",
         "parameters": [
           {
@@ -2564,6 +2584,9 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "409": {
+            "description": "A different address is attached, or the shared pool is empty."
           }
         },
         "summary": "Attach IP address",

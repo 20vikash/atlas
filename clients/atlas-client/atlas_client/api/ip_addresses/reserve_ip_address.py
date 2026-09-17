@@ -45,6 +45,13 @@ def _get_kwargs(
 
 
 def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | IPAddressResponse | None:
+    if response.status_code == 200:
+        response_200 = IPAddressResponse.from_dict(response.json())
+
+
+
+        return response_200
+
     if response.status_code == 201:
         response_201 = IPAddressResponse.from_dict(response.json())
 
@@ -80,12 +87,12 @@ def sync_detailed(
 ) -> Response[Any | IPAddressResponse]:
     """ Reserve IP address
 
-     Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the
-    provider source creates a provider reservation.
+     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
+    ip_address_id.
 
     Args:
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Select the source of an IP address reservation.
+        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -117,12 +124,12 @@ def sync(
 ) -> Any | IPAddressResponse | None:
     """ Reserve IP address
 
-     Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the
-    provider source creates a provider reservation.
+     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
+    ip_address_id.
 
     Args:
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Select the source of an IP address reservation.
+        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -149,12 +156,12 @@ async def asyncio_detailed(
 ) -> Response[Any | IPAddressResponse]:
     """ Reserve IP address
 
-     Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the
-    provider source creates a provider reservation.
+     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
+    ip_address_id.
 
     Args:
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Select the source of an IP address reservation.
+        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -186,12 +193,12 @@ async def asyncio(
 ) -> Any | IPAddressResponse | None:
     """ Reserve IP address
 
-     Reserves an IP address for the tenant. The pool source claims an unowned Atlas address, and the
-    provider source creates a provider reservation.
+     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
+    ip_address_id.
 
     Args:
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Select the source of an IP address reservation.
+        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

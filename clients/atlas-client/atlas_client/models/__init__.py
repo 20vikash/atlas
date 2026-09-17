@@ -28,7 +28,6 @@ from .page_image_response import PageImageResponse
 from .page_ip_address_response import PageIPAddressResponse
 from .page_virtual_machine_list_response import PageVirtualMachineListResponse
 from .reserve_ip_address_payload import ReserveIPAddressPayload
-from .reserve_ip_address_payload_source import ReserveIPAddressPayloadSource
 from .snapshot_payload import SnapshotPayload
 from .snapshot_payload_image_type import SnapshotPayloadImageType
 from .snapshot_payload_tags import SnapshotPayloadTags
@@ -74,7 +73,6 @@ __all__ = (
     "PageIPAddressResponse",
     "PageVirtualMachineListResponse",
     "ReserveIPAddressPayload",
-    "ReserveIPAddressPayloadSource",
     "SnapshotPayload",
     "SnapshotPayloadImageType",
     "SnapshotPayloadTags",

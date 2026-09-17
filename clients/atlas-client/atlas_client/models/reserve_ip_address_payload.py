@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.reserve_ip_address_payload_source import ReserveIPAddressPayloadSource
 from ..types import UNSET, Unset
+from typing import cast
 
 
 
@@ -22,31 +22,32 @@ T = TypeVar("T", bound="ReserveIPAddressPayload")
 
 @_attrs_define
 class ReserveIPAddressPayload:
-    """ Select the source of an IP address reservation.
+    """ Optionally reserve an address the tenant already holds.
 
         Attributes:
-            source (ReserveIPAddressPayloadSource | Unset):  Default: ReserveIPAddressPayloadSource.POOL.
+            ip_address_id (None | str | Unset):
      """
 
-    source: ReserveIPAddressPayloadSource | Unset = ReserveIPAddressPayloadSource.POOL
+    ip_address_id: None | str | Unset = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        source: str | Unset = UNSET
-        if not isinstance(self.source, Unset):
-            source = self.source.value
-
+        ip_address_id: None | str | Unset
+        if isinstance(self.ip_address_id, Unset):
+            ip_address_id = UNSET
+        else:
+            ip_address_id = self.ip_address_id
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
         })
-        if source is not UNSET:
-            field_dict["source"] = source
+        if ip_address_id is not UNSET:
+            field_dict["ip_address_id"] = ip_address_id
 
         return field_dict
 
@@ -55,18 +56,18 @@ class ReserveIPAddressPayload:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        _source = d.pop("source", UNSET)
-        source: ReserveIPAddressPayloadSource | Unset
-        if isinstance(_source,  Unset):
-            source = UNSET
-        else:
-            source = ReserveIPAddressPayloadSource(_source)
+        def _parse_ip_address_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
 
-
+        ip_address_id = _parse_ip_address_id(d.pop("ip_address_id", UNSET))
 
 
         reserve_ip_address_payload = cls(
-            source=source,
+            ip_address_id=ip_address_id,
         )
 
         return reserve_ip_address_payload
