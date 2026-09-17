@@ -73,7 +73,7 @@ class AtlasSettings(Document):
 		object_storage_region: DF.Data | None
 		object_storage_secret_access_key: DF.Password | None
 		object_storage_signed_url_expiry: DF.Int
-		placement_strategy: DF.Literal[None]
+		placement_strategy: DF.Autocomplete
 		previous_proxy_cluster_password: DF.Password | None
 		private_network_cidr: DF.Data
 		private_network_mtu: DF.Int

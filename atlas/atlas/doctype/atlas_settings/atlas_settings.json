@@ -554,9 +554,8 @@
    "default": "Default",
    "description": "Strategy used to select hosts for new VMs and automatic migrations.",
    "fieldname": "placement_strategy",
-   "fieldtype": "Select",
+   "fieldtype": "Autocomplete",
    "label": "Placement Strategy",
-   "options": "",
    "reqd": 1
   },
   {
