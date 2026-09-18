@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os/exec"
 	"strconv"
@@ -30,13 +31,16 @@ type MeshConfig struct {
 	CommandPath   string
 	UplinkName    string
 	WireGuardName string
+	// PeersStatePath holds the managed WireGuard peer state on this host.
+	PeersStatePath string
 }
 
 // Mesh registers virtual machine addresses with the Atlas WG Mesh CLI.
 type Mesh struct {
-	commandPath   string
-	uplinkName    string
-	wireGuardName string
+	commandPath    string
+	uplinkName     string
+	wireGuardName  string
+	peersStatePath string
 }
 
 // NewMesh returns a mesh registrar for one host.
@@ -50,19 +54,40 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	if configuration.UplinkName == "" {
 		return nil, errors.New("Atlas WG Mesh uplink interface name is required")
 	}
+	if configuration.PeersStatePath == "" {
+		return nil, errors.New("Atlas WG Mesh peer state path is required")
+	}
 	if _, err := exec.LookPath(configuration.CommandPath); err != nil {
 		return nil, fmt.Errorf("Atlas WG Mesh CLI %s: %w", configuration.CommandPath, err)
 	}
 
 	return &Mesh{
-		commandPath:   configuration.CommandPath,
-		uplinkName:    configuration.UplinkName,
-		wireGuardName: configuration.WireGuardName,
+		commandPath:    configuration.CommandPath,
+		uplinkName:     configuration.UplinkName,
+		wireGuardName:  configuration.WireGuardName,
+		peersStatePath: configuration.PeersStatePath,
 	}, nil
 }
 
 // Check the mesh registrar interface at compile time.
 var _ meshRegistrar = (*Mesh)(nil)
+
+// SyncPeerState reloads the BPF peer maps after the WireGuard peer state changed.
+func (mesh *Mesh) SyncPeerState(ctx context.Context) error {
+	return platform.Run(ctx, mesh.commandPath, "peers", "sync", mesh.peersStatePath)
+}
+
+// UplinkMAC returns the MAC address of the discovery uplink.
+func (mesh *Mesh) UplinkMAC() (string, error) {
+	uplink, err := net.InterfaceByName(mesh.uplinkName)
+	if err != nil {
+		return "", fmt.Errorf("read uplink %s: %w", mesh.uplinkName, err)
+	}
+	if len(uplink.HardwareAddr) != 6 {
+		return "", fmt.Errorf("uplink %s has no Ethernet MAC address", mesh.uplinkName)
+	}
+	return uplink.HardwareAddr.String(), nil
+}
 
 // EnsureHost configures an unconfigured host and verifies its discovery
 // interface.

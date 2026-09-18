@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 
@@ -20,8 +21,8 @@ type syncRequest struct {
 	WireGuardPeers        []wireGuardPeerRequest `json:"wireguard_peers"`
 	Images                []imageRequest         `json:"images"`
 	PrivilegedVMAddresses []string               `json:"privileged_vm_addresses"`
-	// UnicastPeers is absent in multicast mode and complete in unicast mode.
-	UnicastPeers *[]string `json:"unicast_peers"`
+	// Unicast selects the unicast NDP transport. The transport builds its peer set from the WireGuard peers.
+	Unicast bool `json:"unicast"`
 }
 
 // wireGuardPeerRequest is one desired WireGuard peer.
@@ -30,6 +31,7 @@ type wireGuardPeerRequest struct {
 	NodeID    uint32 `json:"node_id"`
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
+	MAC       string `json:"mac"`
 }
 
 // syncResponse returns host capacity and virtual machine state in the same
@@ -38,6 +40,8 @@ type syncResponse struct {
 	Capacity capacityResponse `json:"capacity"`
 	// VirtualMachines maps a VM identifier to its last observed state.
 	VirtualMachines map[string]virtualMachineStateResponse `json:"virtual_machines"`
+	// UplinkMAC is the discovery uplink MAC of this host. It is empty when the mesh is disabled.
+	UplinkMAC string `json:"uplink_mac,omitempty"`
 }
 
 // virtualMachineStateResponse is the state of one virtual machine on this host.
@@ -92,15 +96,16 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 			return badRequest(err.Error())
 		}
 	}
-	unicastPeers, err := request.unicastPeers()
-	if err != nil {
-		return badRequest(err.Error())
+	if request.Unicast {
+		if err := request.validateUnicastEndpoints(); err != nil {
+			return badRequest(err.Error())
+		}
 	}
 
 	result, err := s.hostService.Synchronize(c.Request().Context(), host.DesiredState{
 		WireGuardPeers: request.wireGuardPeers(), Images: request.imagePolicies(),
 		PrivilegedVirtualMachineAddresses: request.PrivilegedVMAddresses,
-		UnicastPeers:                      unicastPeers,
+		UnicastEnabled:                    request.Unicast,
 	})
 	if err != nil {
 		return synchronizationFailure(err)
@@ -109,6 +114,7 @@ func (s *Server) exchangeControllerState(c echo.Context) error {
 	return c.JSON(http.StatusOK, syncResponse{
 		Capacity:        capacityResponseFromHost(result.Capacity),
 		VirtualMachines: virtualMachineStateResponses(result.VirtualMachineStates),
+		UplinkMAC:       result.UplinkMAC,
 	})
 }
 
@@ -132,28 +138,20 @@ func (request syncRequest) imagePolicies() []vm.Image {
 	return images
 }
 
-// unicastPeers converts the requested peer addresses. An absent field means
-// multicast mode and returns nil. A present field must hold strict IPv4
-// addresses without duplicates.
-func (request syncRequest) unicastPeers() ([]netip.Addr, error) {
-	if request.UnicastPeers == nil {
-		return nil, nil
-	}
+// validateUnicastEndpoints rejects a peer endpoint that the unicast transport cannot use: it must carry an IPv4 host address.
+func (request syncRequest) validateUnicastEndpoints() error {
+	for _, peer := range request.WireGuardPeers {
+		host, _, err := net.SplitHostPort(peer.Address)
+		if err != nil {
+			return fmt.Errorf("unicast peer %q has an invalid address", peer.Node)
+		}
 
-	peers := make([]netip.Addr, 0, len(*request.UnicastPeers))
-	seen := make(map[netip.Addr]struct{}, len(*request.UnicastPeers))
-	for _, value := range *request.UnicastPeers {
-		peer, parseErr := netip.ParseAddr(value)
-		if parseErr != nil || !peer.Is4() {
-			return nil, fmt.Errorf("unicast peer %q is not an IPv4 address", value)
+		address, parseErr := netip.ParseAddr(host)
+		if parseErr != nil || !address.Is4() {
+			return fmt.Errorf("unicast peer %q has no IPv4 endpoint", peer.Node)
 		}
-		if _, found := seen[peer]; found {
-			return nil, fmt.Errorf("unicast peer %s is repeated", peer)
-		}
-		seen[peer] = struct{}{}
-		peers = append(peers, peer)
 	}
-	return peers, nil
+	return nil
 }
 
 // wireGuardPeers converts the requested peers into the network form.
@@ -165,6 +163,7 @@ func (request syncRequest) wireGuardPeers() []network.WireGuardPeer {
 			NodeID:    peer.NodeID,
 			PublicKey: peer.PublicKey,
 			Address:   peer.Address,
+			MAC:       peer.MAC,
 		})
 	}
 	return peers

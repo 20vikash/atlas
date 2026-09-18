@@ -36,8 +36,6 @@ type meshOptions struct {
 	enabled    bool
 	binaryPath string
 	uplinkName string
-	// unicastPeersFile is empty when the config file sets no path.
-	unicastPeersFile string
 }
 
 // trafficMonitorOptions configures VM traffic monitoring.
@@ -65,20 +63,10 @@ func defaultOptions() options {
 	return resolvedOptions
 }
 
-// deriveDirs places all metald directories under baseDir, so one base_dir moves
-// the complete metald state tree.
+// deriveDirs places all metald directories under baseDir, so one base_dir moves the complete metald state tree.
 func (resolvedOptions *options) deriveDirs() {
 	resolvedOptions.cfg.MachinesDir = filepath.Join(resolvedOptions.baseDir, "machines")
 	resolvedOptions.imagesDir = filepath.Join(resolvedOptions.baseDir, "images")
-}
-
-// unicastPeersFilePath places the unicast peer file under baseDir when the
-// config file sets no path.
-func (resolvedOptions options) unicastPeersFilePath() string {
-	if resolvedOptions.mesh.unicastPeersFile != "" {
-		return resolvedOptions.mesh.unicastPeersFile
-	}
-	return filepath.Join(resolvedOptions.baseDir, "unicast-peers")
 }
 
 type fileConfig struct {
@@ -134,7 +122,6 @@ type wgMeshFile struct {
 	Enabled    *bool  `toml:"enabled"`
 	BinaryPath string `toml:"binary_path"`
 	Uplink     string `toml:"uplink"`
-	PeersFile  string `toml:"peers_file"`
 }
 
 type trafficFile struct {
@@ -180,7 +167,6 @@ func applyFile(resolvedOptions *options, path string) error {
 	overlayBool(&resolvedOptions.mesh.enabled, fc.WGMesh.Enabled)
 	overlay(&resolvedOptions.mesh.binaryPath, fc.WGMesh.BinaryPath)
 	overlay(&resolvedOptions.mesh.uplinkName, fc.WGMesh.Uplink)
-	overlay(&resolvedOptions.mesh.unicastPeersFile, fc.WGMesh.PeersFile)
 	overlayBool(&resolvedOptions.trafficMonitor.enabled, fc.Traffic.Enabled)
 	overlayInt(&resolvedOptions.migration.finalDeltaMiB, fc.Migration.FinalDeltaMiB)
 	overlayInt(&resolvedOptions.migration.transferPort, fc.Migration.TransferPort)

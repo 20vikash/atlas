@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"strings"
 	"testing"
 
@@ -210,7 +209,7 @@ func (manager *fakeVirtualMachineManager) ConnectSSH(context.Context, string) (v
 type fakeRuntimeServices struct {
 	policies        []vm.Image
 	privileged      []string
-	unicastPeers    []netip.Addr
+	unicastEnabled  bool
 	unicastDisabled bool
 	snapshots       map[string]storage.StagedSnapshot
 }
@@ -223,8 +222,8 @@ func (services *fakeRuntimeServices) ApplyPrivilegedAddresses(
 	return nil
 }
 
-func (services *fakeRuntimeServices) Apply(_ context.Context, peers []netip.Addr) error {
-	services.unicastPeers = append([]netip.Addr(nil), peers...)
+func (services *fakeRuntimeServices) Enable(context.Context) error {
+	services.unicastEnabled = true
 	return nil
 }
 
@@ -925,21 +924,23 @@ func TestSyncRequiresControllerCollections(t *testing.T) {
 	)
 }
 
-func TestSyncAppliesTheUnicastPeerSetInUnicastMode(t *testing.T) {
+func TestSyncEnablesTheUnicastTransportInUnicastMode(t *testing.T) {
 	services := newFakeRuntimeServices()
 	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
 	server := newServerWithServices(t, driver, services, &fakeWireGuardManager{})
 
 	request := `{
-		"wireguard_peers":[],
+		"wireguard_peers":[
+			{"node":"server-11","node_id":11,"public_key":"key11","address":"10.20.0.11:7373","mac":"aa:bb:cc:dd:ee:11"}
+		],
 		"images":[],
 		"privileged_vm_addresses":[],
-		"unicast_peers":["10.20.0.11","10.20.0.12"]
+		"unicast":true
 	}`
 	do(t, server, http.MethodPost, "/v1/sync", request, http.StatusOK)
 
-	if len(services.unicastPeers) != 2 || services.unicastPeers[0] != netip.MustParseAddr("10.20.0.11") {
-		t.Fatalf("unicast peers = %v", services.unicastPeers)
+	if !services.unicastEnabled {
+		t.Fatal("unicast transport was not enabled in unicast mode")
 	}
 	if services.unicastDisabled {
 		t.Fatal("unicast transport was disabled in unicast mode")
@@ -957,17 +958,17 @@ func TestSyncDisablesTheUnicastTransportInMulticastMode(t *testing.T) {
 		http.StatusOK,
 	)
 
-	if !services.unicastDisabled || services.unicastPeers != nil {
-		t.Fatalf("unicast transport = peers %v disabled %t, want a disabled transport", services.unicastPeers, services.unicastDisabled)
+	if !services.unicastDisabled || services.unicastEnabled {
+		t.Fatalf("unicast transport = enabled %t disabled %t, want a disabled transport", services.unicastEnabled, services.unicastDisabled)
 	}
 }
 
-func TestSyncRejectsAnInvalidUnicastPeerSet(t *testing.T) {
+func TestSyncRejectsUnicastWithoutAnIPv4Endpoint(t *testing.T) {
 	server := newTestServer(t)
 
 	cases := map[string]string{
-		"not an IPv4 address": `{"wireguard_peers":[],"images":[],"privileged_vm_addresses":[],"unicast_peers":["fdab::1"]}`,
-		"repeated peer":       `{"wireguard_peers":[],"images":[],"privileged_vm_addresses":[],"unicast_peers":["10.20.0.11","10.20.0.11"]}`,
+		"not an IPv4 address": `{"wireguard_peers":[{"node":"server-11","node_id":11,"public_key":"k","address":"fdab::1:7373","mac":"aa:bb:cc:dd:ee:11"}],"images":[],"privileged_vm_addresses":[],"unicast":true}`,
+		"invalid address":     `{"wireguard_peers":[{"node":"server-11","node_id":11,"public_key":"k","address":"10.20.0.11","mac":"aa:bb:cc:dd:ee:11"}],"images":[],"privileged_vm_addresses":[],"unicast":true}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

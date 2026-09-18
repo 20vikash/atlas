@@ -25,7 +25,7 @@ This package makes one virtual machine network agree with its desired state, and
 | `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network`. |
 | `Mesh` | Registration of VM addresses through the Atlas WG Mesh CLI. |
 | `WireGuardManager` | The managed peer set of one WireGuard interface. |
-| `UnicastManager` | The controller-driven unicast peer set and the unicast daemon state. |
+| `UnicastManager` | The supervised unicast NDP transport daemon of this host. |
 | [`traffic.Monitor`](traffic/SPEC.md) | Traffic samples and packet events for monitored VMs. |
 
 ## Convergence
@@ -96,11 +96,9 @@ When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interf
 
 ## Unicast transport
 
-`UnicastManager` applies the controller's unicast peer set. The controller sends every running host of the region, so the manager drops the uplink IPv4 address of this host before it decides: a host without a remote peer keeps the multicast NDP filters, because unicast transport has no destination.
+`UnicastManager` runs the unicast NDP transport daemon as a supervised child process. `Enable` starts the daemon when the managed WireGuard peer state holds a peer, and leaves a running daemon alone. A host without a peer stays in multicast mode, because unicast transport has no destination. `Disable` stops the daemon cleanly, which restores the multicast NDP filters. The child runs with a parent-death signal, so a metald crash also stops the daemon, and the next synchronization restarts a crashed daemon.
 
-The peer file is the interface to the unicast daemon. The manager writes the complete set, one IPv4 address per line, only when the contents changed, because the daemon watches the file modification time. The daemon then rewrites the pinned peer list map.
-
-The systemd unit `atlas-wg-mesh-unicast.service` owns the daemon process. The host installer writes the unit and leaves it disabled. `Apply` enables and starts it, which attaches the unicast hooks and removes the multicast NDP filters. `Disable` stops it, which restores the multicast filters. Both directions are idempotent, and a missing unit file reads as multicast mode, so a host that never received the unit still syncs.
+The WireGuard peer state file is the single source of truth for the peer set. `Mesh.SyncPeerState` reloads the BPF peer maps from it after every WireGuard peer change, and the daemon reads it to decide whether a peer exists.
 
 See the [WG Mesh unicast network guide](../../../services/wg-mesh/docs/unicast-network.md) for the transport itself.
 

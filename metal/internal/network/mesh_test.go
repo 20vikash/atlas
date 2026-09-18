@@ -21,15 +21,17 @@ func stubMeshCommand(t *testing.T) string {
 
 func TestNewMeshNeedsACommandAndBothInterfaces(t *testing.T) {
 	complete := MeshConfig{
-		CommandPath:   stubMeshCommand(t),
-		WireGuardName: "wg0",
-		UplinkName:    "eno1.1878",
+		CommandPath:    stubMeshCommand(t),
+		WireGuardName:  "wg0",
+		UplinkName:     "eno1.1878",
+		PeersStatePath: "/var/lib/metal/wireguard-peers.json",
 	}
 
 	for name, incomplete := range map[string]MeshConfig{
-		"no command path": {WireGuardName: complete.WireGuardName, UplinkName: complete.UplinkName},
-		"no WireGuard":    {CommandPath: complete.CommandPath, UplinkName: complete.UplinkName},
-		"no uplink":       {CommandPath: complete.CommandPath, WireGuardName: complete.WireGuardName},
+		"no command path": {WireGuardName: complete.WireGuardName, UplinkName: complete.UplinkName, PeersStatePath: complete.PeersStatePath},
+		"no WireGuard":    {CommandPath: complete.CommandPath, UplinkName: complete.UplinkName, PeersStatePath: complete.PeersStatePath},
+		"no uplink":       {CommandPath: complete.CommandPath, WireGuardName: complete.WireGuardName, PeersStatePath: complete.PeersStatePath},
+		"no peer state":   {CommandPath: complete.CommandPath, WireGuardName: complete.WireGuardName, UplinkName: complete.UplinkName},
 	} {
 		if _, err := NewMesh(incomplete); err == nil {
 			t.Errorf("accepted a configuration with %s", name)
@@ -78,9 +80,10 @@ func TestDiscoveryInterfaceReadsTheStatusLine(t *testing.T) {
 
 func TestVerifyDiscoveryInterfaceRejectsAnotherInterface(t *testing.T) {
 	mesh, err := NewMesh(MeshConfig{
-		CommandPath:   stubMeshCommand(t),
-		WireGuardName: "wg0",
-		UplinkName:    "eno1.1878",
+		CommandPath:    stubMeshCommand(t),
+		WireGuardName:  "wg0",
+		UplinkName:     "eno1.1878",
+		PeersStatePath: "/var/lib/metal/wireguard-peers.json",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,9 +117,10 @@ func TestParseMeshAddressesNormalisesTheSet(t *testing.T) {
 
 func TestNewMeshNeedsTheCommandOnTheHost(t *testing.T) {
 	if _, err := NewMesh(MeshConfig{
-		CommandPath:   "/nonexistent/atlas-wg-mesh",
-		WireGuardName: "wg0",
-		UplinkName:    "eno1.1878",
+		CommandPath:    "/nonexistent/atlas-wg-mesh",
+		WireGuardName:  "wg0",
+		UplinkName:     "eno1.1878",
+		PeersStatePath: "/var/lib/metal/wireguard-peers.json",
 	}); err == nil {
 		t.Error("accepted a command path that is not on the host")
 	}
@@ -139,7 +143,12 @@ exit 0
 		t.Fatal(err)
 	}
 
-	mesh, err := NewMesh(MeshConfig{CommandPath: command, WireGuardName: "wg0", UplinkName: "eno1"})
+	mesh, err := NewMesh(MeshConfig{
+		CommandPath:    command,
+		WireGuardName:  "wg0",
+		UplinkName:     "eno1",
+		PeersStatePath: "/var/lib/metal/wireguard-peers.json",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
