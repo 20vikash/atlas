@@ -43,7 +43,7 @@ Metal snapshot staging -> signed multipart parts -> object storage
 
 Atlas saves both multipart upload IDs before it asks Metal to start. A failed start or finalization marks the image Failed and keeps the source Metal Server, snapshot ID, object keys, and upload IDs.
 
-Retry Transfer uses these durable values. It does not create a second image record. Atlas does not log signed URLs.
+Retry Transfer uses these durable values for a Failed Machine or System image that came from a virtual machine. It does not create a second image record. Atlas does not log signed URLs.
 
 ## Listing
 

@@ -59,6 +59,28 @@ class TestVirtualMachineImage(UnitTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			image.validate_is_available()
 
+	def test_a_failed_transfer_retries_for_both_image_types(self) -> None:
+		for image_type in ("machine", "system"):
+			image = self.make_image(
+				name="image-1", image_type=image_type, status="Failed", source_server="server-1"
+			)
+			with (
+				patch.object(VirtualMachineImage, "check_permission"),
+				patch.object(VirtualMachineImageTransferService, "enqueue") as enqueue,
+			):
+				image.retry_transfer()
+
+			enqueue.assert_called_once_with("image-1", queue="long", timeout=7200)
+
+	def test_an_image_without_a_source_server_cannot_retry(self) -> None:
+		image = self.make_image(name="image-1", image_type="system", status="Failed", source_server=None)
+
+		with (
+			patch.object(VirtualMachineImage, "check_permission"),
+			self.assertRaises(frappe.ValidationError),
+		):
+			image.retry_transfer()
+
 	def test_download_returns_only_the_selected_artifact(self) -> None:
 		image = self.make_image()
 		with (

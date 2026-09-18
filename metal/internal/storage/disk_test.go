@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +78,73 @@ func TestParseCloneList(t *testing.T) {
 				t.Errorf("parseCloneList(%q) = %v, want %v", testCase.output, got, testCase.want)
 			}
 		})
+	}
+}
+
+// fakeZFS puts a recording zfs command first on PATH. Each invocation appends
+// its arguments to a log file, `zfs get` prints the clones file, and a
+// subcommand named in failures exits non-zero.
+func fakeZFS(t *testing.T, clones string, failures ...string) string {
+	t.Helper()
+	directory := t.TempDir()
+	logFile := filepath.Join(directory, "commands.log")
+	clonesFile := filepath.Join(directory, "clones")
+	if err := os.WriteFile(clonesFile, []byte(clones), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >> %q
+case "$1" in
+get) cat %q ;;
+%s) exit 1 ;;
+esac
+`, logFile, clonesFile, strings.Join(failures, "|"))
+	if err := os.WriteFile(filepath.Join(directory, "zfs"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	return logFile
+}
+
+func commandLog(t *testing.T, logFile string) []string {
+	t.Helper()
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return strings.Split(strings.TrimSpace(string(content)), "\n")
+}
+
+func TestReleasePromotesStagingClonesBeforeDestroy(t *testing.T) {
+	logFile := fakeZFS(t, "metal/staging/snap-1\nmetal/vms/vm-2\n-\n", "none")
+	store := &VirtualMachineStore{pool: &ZFSPool{name: "metal"}}
+
+	if err := store.Release(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"get -Hp -r -t snapshot -o value clones metal/vms/vm-1",
+		"promote metal/staging/snap-1",
+		"destroy -r metal/vms/vm-1",
+	}
+	if got := commandLog(t, logFile); !slices.Equal(got, want) {
+		t.Errorf("commands = %v, want %v", got, want)
+	}
+}
+
+func TestReleaseFailsWhenPromoteFails(t *testing.T) {
+	logFile := fakeZFS(t, "metal/staging/snap-1\n", "promote")
+	store := &VirtualMachineStore{pool: &ZFSPool{name: "metal"}}
+
+	err := store.Release(context.Background(), "vm-1")
+	if err == nil || !strings.Contains(err.Error(), "promote dependent clone metal/staging/snap-1") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := commandLog(t, logFile); slices.Contains(got, "destroy -r metal/vms/vm-1") {
+		t.Error("the VM dataset was destroyed after a failed promotion")
 	}
 }
