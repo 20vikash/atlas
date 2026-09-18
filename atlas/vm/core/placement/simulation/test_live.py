@@ -92,10 +92,10 @@ class TestLiveTrial(TestCase):
 			with patch.object(MetalServer, "provision", provider):
 				with patch.object(trial, "save"):
 					provision = trial.guarded_provision()
-					provision(size="test", defer_provider_creation=True, is_sleepy=True)
+					provision(size="test", is_sleepy=True)
 					with self.assertRaises(HostLimitReached):
-						provision(size="test", defer_provider_creation=True, is_sleepy=True)
-		provider.assert_called_once_with(size="test", defer_provider_creation=True, is_sleepy=True)
+						provision(size="test", is_sleepy=True)
+		provider.assert_called_once_with(size="test", is_sleepy=True)
 		self.assertIn("new3", report["hosts"])
 
 	def test_best_fit_uses_preexisting_ready_host_without_provisioning(self) -> None:

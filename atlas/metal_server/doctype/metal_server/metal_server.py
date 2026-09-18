@@ -79,19 +79,11 @@ class MetalServer(Document):
 		return self._settings
 
 	def autoname(self) -> None:
-		"""Name the server from its provider and region."""
+		"""Name the server from its region."""
 		if not self.settings.region_name:
 			frappe.throw(_("Atlas Settings requires a region name before creating a Metal Server"))
 
 		self.name = make_autoname(f"node-{slug(self.settings.region_name)}-.#####", doc=self)
-
-	def insert(self, *args: object, **kwargs: object) -> MetalServer:
-		"""Insert this Server and remove only a new provider server after failure."""
-		try:
-			return super().insert(*args, **kwargs)
-		except Exception:
-			self._cleanup_provider_server_after_failed_insert()
-			raise
 
 	def before_validate(self) -> None:
 		"""Fill values that depend on the selected size and image."""
@@ -105,10 +97,6 @@ class MetalServer(Document):
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		self.architecture = size.architecture
-		if getattr(self.flags, "defer_provider_creation", False):
-			return
-
-		self.ensure_provider_server()
 
 	def ensure_provider_server(self) -> None:
 		"""Create the provider host once, including after a worker retry."""
@@ -133,7 +121,6 @@ class MetalServer(Document):
 			self.status = provider_server.status
 		self.public_ipv4_address = provider_server.public_ipv4_address
 		self.provider_metadata = frappe.as_json(provider_server.provider_metadata)
-		self.flags.provider_server_created = provider_server.was_created
 
 	def validate(self) -> None:
 		"""Reject a server whose size, image, or region do not agree."""
@@ -328,10 +315,9 @@ class MetalServer(Document):
 		version: str = "26.04",
 		size: str | None = None,
 		*,
-		defer_provider_creation: bool = False,
 		is_sleepy: bool = False,
 	) -> MetalServer:
-		"""Create and provision a Server with the selected image and size."""
+		"""Insert a Pending Server with the selected image and size."""
 		settings: AtlasSettings = frappe.get_single("Atlas Settings")
 		image = frappe.get_doc("Metal Server Image", f"{settings.server_provider}/{os_name}_{version}")
 
@@ -340,8 +326,7 @@ class MetalServer(Document):
 		server.server_image = image.name
 		server.is_sleepy = is_sleepy
 		server.status = "Pending"
-		server.flags.defer_provider_creation = defer_provider_creation
-		server.insert(ignore_permissions=defer_provider_creation)
+		server.insert(ignore_permissions=True)
 		return server
 
 	# Internal methods
@@ -425,16 +410,6 @@ class MetalServer(Document):
 		if not self.provider_server_id:
 			frappe.throw(_("Metal Server {0} has no provider server ID.").format(self.name))
 		return self.provider_server_id
-
-	def _cleanup_provider_server_after_failed_insert(self) -> None:
-		"""Delete the provider server that this insert request created."""
-		if not getattr(self.flags, "provider_server_created", False) or not self.provider_server_id:
-			return
-		try:
-			self.settings.server_provider_controller.delete_server(self.provider_server_id)
-			self.flags.provider_server_created = False
-		except Exception:
-			frappe.log_error(title=f"Could not clean up server {self.name}")
 
 	@staticmethod
 	def _provider_metadata(value: str | None) -> dict:

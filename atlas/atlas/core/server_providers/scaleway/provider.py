@@ -117,7 +117,7 @@ class ScalewayProvider(ServerProvider):
 
 	@override
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the named Scaleway server, and create it when necessary."""
+		"""Return the Scaleway server for the discovery key."""
 		return self.servers.ensure(request)
 
 	@override

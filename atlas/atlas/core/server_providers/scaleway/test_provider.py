@@ -201,7 +201,6 @@ class TestScalewayServers(UnitTestCase):
 		result = servers.ensure(SimpleNamespace(name="node-test-00001", discovery_key="unique-key"))
 
 		self.assertEqual(result.provider_server_id, "server-id")
-		self.assertFalse(result.was_created)
 		servers.create.assert_not_called()
 		servers.find.assert_called_once_with("unique-key")
 

@@ -67,7 +67,7 @@ class TestPlacementContext(UnitTestCase):
 			)
 			self.assertEqual(sql.call_args.args[1], {"server_size": size.name})
 			self.assertIn("for update", sql.call_args.args[0])
-			provision.assert_called_once_with(size=size.name, defer_provider_creation=True, is_sleepy=False)
+			provision.assert_called_once_with(size=size.name, is_sleepy=False)
 
 	def test_spawn_reuses_pending_hosts_without_creating_another(self) -> None:
 		api = self._spawn_api()
@@ -105,7 +105,7 @@ class TestPlacementContext(UnitTestCase):
 			self.assertEqual(api._ensure_pending_hosts(None, 1, True), ("sleepy",))
 			self.assertEqual(api._ensure_pending_hosts(None, 1, True), ("sleepy",))
 
-		provision.assert_called_once_with(size=size.name, defer_provider_creation=True, is_sleepy=True)
+		provision.assert_called_once_with(size=size.name, is_sleepy=True)
 
 	def test_explicit_count_creates_only_missing_hosts(self) -> None:
 		api = self._spawn_api()
@@ -180,7 +180,7 @@ class TestPlacementContext(UnitTestCase):
 		):
 			self.assertEqual(api._ensure_pending_hosts(None, 1, True), ("sleepy-new",))
 
-		provision.assert_called_once_with(size=size.name, defer_provider_creation=True, is_sleepy=True)
+		provision.assert_called_once_with(size=size.name, is_sleepy=True)
 
 	def test_pending_result_commits_host_intent_without_a_vm_draft(self) -> None:
 		api = self._spawn_api()

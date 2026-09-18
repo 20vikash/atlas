@@ -58,7 +58,6 @@ class ProviderServer:
 	status: str | None
 	public_ipv4_address: str | None
 	provider_metadata: Mapping[str, Any]
-	was_created: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +140,7 @@ class ServerProvider(ABC):
 
 	@abstractmethod
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the named server, and create it when it does not exist."""
+		"""Return the server for the discovery key, creating it when absent."""
 		...
 
 	@abstractmethod

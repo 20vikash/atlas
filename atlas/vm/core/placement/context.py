@@ -178,9 +178,7 @@ class PlacementContext:
 		from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 		for _host_index in range(count - len(names)):
-			server = MetalServer.provision(
-				size=selected_type, defer_provider_creation=True, is_sleepy=is_sleepy
-			)
+			server = MetalServer.provision(size=selected_type, is_sleepy=is_sleepy)
 			names.append(server.name)
 		return tuple(names)
 

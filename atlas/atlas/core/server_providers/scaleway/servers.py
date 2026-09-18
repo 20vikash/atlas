@@ -40,13 +40,12 @@ class ScalewayServers:
 		self.partitioning = partitioning
 
 	def ensure(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the named server, and create it when it does not exist."""
+		"""Return the server for the discovery key, creating it when absent."""
 		remote_server = self.find(request.discovery_key)
-		was_created = remote_server is None
 		if remote_server is None:
 			remote_server = self.create(request)
 
-		return self.to_provider_server(remote_server, was_created=was_created)
+		return self.to_provider_server(remote_server)
 
 	def create(self, request: ServerCreateRequest) -> Mapping:
 		"""Create one Scaleway server from an Atlas request."""
@@ -201,7 +200,7 @@ class ScalewayServers:
 		return self.configuration.billing_cycle.lower()
 
 	@classmethod
-	def to_provider_server(cls, remote_server: Mapping, *, was_created: bool = False) -> ProviderServer:
+	def to_provider_server(cls, remote_server: Mapping) -> ProviderServer:
 		"""Convert one Scaleway response to provider-neutral data."""
 		provider_server_id = remote_server.get("id")
 		if not isinstance(provider_server_id, str):
@@ -212,7 +211,6 @@ class ScalewayServers:
 			status=cls.server_status_map.get(remote_server.get("status")),
 			public_ipv4_address=cls.public_ipv4_address(remote_server.get("ips", [])),
 			provider_metadata={"server": dict(remote_server)},
-			was_created=was_created,
 		)
 
 	@staticmethod

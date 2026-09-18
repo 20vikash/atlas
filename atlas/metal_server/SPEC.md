@@ -37,7 +37,7 @@ insert pending host       one durable placement intent
   -> mark provisioning complete
 ```
 
-Placement inserts the Pending Metal Server before its provider job starts. Manual creation can still create the provider host during insertion. Every setup phase is safe to repeat. A creation retry reuses the provider identity from the first attempt, so a lost response cannot create a second host. A failed job sets the record to Failed. Compensation deletes only a host that the current insert request created.
+Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored discovery key, so a lost response cannot create a second host. A failed job sets the record to Failed.
 
 ## Capacity
 
