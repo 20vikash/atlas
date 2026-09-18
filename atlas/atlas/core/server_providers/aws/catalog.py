@@ -17,6 +17,7 @@ DEBIAN_IMAGE_NAME = re.compile(r"debian-(\d+)-amd64-")
 
 
 NESTED_VIRTUALIZATION_FEATURE = "nested-virtualization"
+ARCHITECTURES: Mapping[str, str] = {"x86_64": "amd64", "arm64": "arm64"}
 
 
 class AwsCatalog:
@@ -95,6 +96,7 @@ class AwsCatalog:
 
 		return ServerSizeData(
 			size=name,
+			architecture=self.instance_type_architecture(instance_type),
 			cpu_count=cpu_count,
 			memory_mib=memory_mib,
 			disk_gib=self._disk_gib(instance_type),
@@ -102,6 +104,22 @@ class AwsCatalog:
 			monthly_pricing_usd_cents=None,
 			provider_metadata=dict(instance_type),
 		)
+
+	@staticmethod
+	def instance_type_architecture(instance_type: Mapping) -> str:
+		"""Return the Atlas architecture reported by one AWS instance type.
+
+		AWS lists every architecture a type can boot, so a 64-bit type also reports i386."""
+		name = instance_type.get("InstanceType")
+		processor = instance_type.get("ProcessorInfo")
+		supported = processor.get("SupportedArchitectures") if isinstance(processor, Mapping) else None
+		if not isinstance(supported, list) or not supported:
+			raise AwsError(f"AWS instance type {name} has no supported architectures")
+
+		architectures = {ARCHITECTURES[value] for value in supported if value in ARCHITECTURES}
+		if len(architectures) != 1:
+			raise AwsError(f"AWS instance type {name} has no single Atlas architecture")
+		return architectures.pop()
 
 	@staticmethod
 	def _disk_gib(instance_type: Mapping) -> int:

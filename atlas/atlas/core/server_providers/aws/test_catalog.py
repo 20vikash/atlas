@@ -38,6 +38,23 @@ class TestAwsCatalog(UnitTestCase):
 		self.assertEqual(size.disk_gib, 7_600)
 		self.assertIsNone(size.hourly_pricing_usd_cents)
 
+	def test_the_atlas_architecture_comes_from_the_supported_architectures(self) -> None:
+		catalog = AwsCatalog()
+
+		amd64 = catalog.get_server_sizes([self.instance_type("c6i.metal", bare_metal=True)])[0]
+		arm64 = catalog.get_server_sizes(
+			[self.instance_type("c8g.metal", bare_metal=True, architectures=["arm64"])]
+		)[0]
+
+		self.assertEqual(amd64.architecture, "amd64")
+		self.assertEqual(arm64.architecture, "arm64")
+
+	def test_an_instance_type_without_an_atlas_architecture_fails_loudly(self) -> None:
+		with self.assertRaises(AwsError):
+			AwsCatalog().get_server_sizes(
+				[self.instance_type("mac1.metal", bare_metal=True, architectures=["x86_64_mac"])]
+			)
+
 	def test_invalid_instance_types_fail_loudly(self) -> None:
 		with self.assertRaises(AwsError):
 			AwsCatalog().get_server_sizes("not-a-list")
@@ -78,12 +95,19 @@ class TestAwsCatalog(UnitTestCase):
 			AwsCatalog.image_id({}, "Ubuntu_24.04")
 
 	@staticmethod
-	def instance_type(name: str, *, bare_metal: bool = False, nested_virtualization: bool = False) -> dict:
+	def instance_type(
+		name: str,
+		*,
+		bare_metal: bool = False,
+		nested_virtualization: bool = False,
+		architectures: list[str] | None = None,
+	) -> dict:
 		return {
 			"InstanceType": name,
 			"BareMetal": bare_metal,
 			"ProcessorInfo": {
-				"SupportedFeatures": ["nested-virtualization"] if nested_virtualization else []
+				"SupportedFeatures": ["nested-virtualization"] if nested_virtualization else [],
+				"SupportedArchitectures": ["i386", "x86_64"] if architectures is None else architectures,
 			},
 			"VCpuInfo": {"DefaultVCpus": 128},
 			"MemoryInfo": {"SizeInMiB": 262_144},
