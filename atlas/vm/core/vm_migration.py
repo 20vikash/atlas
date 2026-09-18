@@ -12,7 +12,8 @@ from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.placement import PlacementService
+from atlas.vm.core.placement.context import PlacementContext
+from atlas.vm.core.placement.service import PlacementService
 from atlas.vm.core.vm_state import LIVE_STATES
 
 if TYPE_CHECKING:
@@ -51,16 +52,26 @@ class MigrationService:
 
 		shape = cls.get_shape(locked)
 		architecture = cast(str, locked.architecture)
-		placement = PlacementService()
 		if target_server:
 			if target_server == locked.server:
 				frappe.throw(
 					_("Choose a target host other than {0}.").format(locked.server),
 					exc=AtlasUserError,
 				)
-			target = placement.select_target_server(shape, architecture, target_server)
+			settings = frappe.get_single("Atlas Settings")
+			api = PlacementContext(
+				shape, architecture, settings.sleepy_vm_overcommit_factor, exclude_servers={locked.server}
+			)
+			if not api.select(target_server):
+				frappe.throw(
+					_(
+						"Metal Server {0} is not ready or has no current capacity for this Virtual Machine."
+					).format(target_server),
+					exc=AtlasUserError,
+				)
+			target = cast("MetalServer", api._selected_server)
 		else:
-			target = placement.select_server(shape, architecture, exclude_servers={locked.server})
+			target = PlacementService().select_server(shape, architecture, exclude_servers={locked.server})
 		migration = frappe.get_doc(
 			{
 				"doctype": "Virtual Machine Migration",
@@ -108,6 +119,7 @@ class MigrationService:
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			tenant_id=virtual_machine.tenant_id,
+			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
 		)
 
 	def run(self) -> None:

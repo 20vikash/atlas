@@ -34,6 +34,7 @@ def source_vm(**overrides: object) -> SimpleNamespace:
 		"active_migration": None,
 		"is_draft": 0,
 		"is_terminating": 0,
+		"sleep_after_idle_seconds": 0,
 		"current_state": "running",
 	}
 	values.update(overrides)
@@ -85,7 +86,6 @@ class TestMigrationCreation(UnitTestCase):
 				"atlas.vm.core.vm_migration.PlacementService.select_server",
 				return_value=SimpleNamespace(name="metal-2"),
 			) as select_server,
-			patch("atlas.vm.core.vm_migration.frappe.db.get_value", return_value="amd64"),
 			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
 			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-10 00:00:00"),
 		):
@@ -114,18 +114,21 @@ class TestMigrationCreation(UnitTestCase):
 		)
 		inserted = Mock()
 		inserted.insert.return_value = SimpleNamespace(name="mig-00001")
+		api = Mock()
+		api.select.return_value = True
+		api._selected_server = SimpleNamespace(name="metal-3")
 
 		def fake_get_doc(*args: object, **kwargs: object) -> object:
 			return locked if args and args[0] == "Virtual Machine" else inserted
 
 		with (
 			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc) as get_doc,
+			patch("atlas.vm.core.vm_migration.PlacementContext", return_value=api) as placement_api,
 			patch(
-				"atlas.vm.core.vm_migration.PlacementService.select_target_server",
-				return_value=SimpleNamespace(name="metal-3"),
-			) as select_target,
+				"atlas.vm.core.vm_migration.frappe.get_single",
+				return_value=SimpleNamespace(sleepy_vm_overcommit_factor=1.5),
+			),
 			patch("atlas.vm.core.vm_migration.PlacementService.select_server") as select_server,
-			patch("atlas.vm.core.vm_migration.frappe.db.get_value", return_value="amd64"),
 			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
 			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-10 00:00:00"),
 		):
@@ -133,11 +136,53 @@ class TestMigrationCreation(UnitTestCase):
 
 		self.assertEqual(migration_id, "mig-00001")
 		select_server.assert_not_called()
-		self.assertEqual(select_target.call_args.args[2], "metal-3")
+		self.assertEqual(placement_api.call_args.args[1:], ("amd64", 1.5))
+		self.assertEqual(placement_api.call_args.kwargs["exclude_servers"], {"metal-1"})
+		api.select.assert_called_once_with("metal-3")
 		inserted_fields = next(
 			call.args[0] for call in get_doc.call_args_list if call.args and isinstance(call.args[0], dict)
 		)
 		self.assertEqual(inserted_fields["target_server"], "metal-3")
+
+	def test_create_rejects_a_chosen_target_after_a_selection_miss(self) -> None:
+		locked = source_vm(
+			server="metal-1",
+			cpu_millicores=2000,
+			memory_mib=2048,
+			disk_mib=10240,
+			tenant_id=7,
+			virtual_machine_image="Ubuntu",
+			architecture="amd64",
+		)
+		api = Mock()
+		api.select.return_value = False
+
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=locked),
+			patch(
+				"atlas.vm.core.vm_migration.frappe.get_single",
+				return_value=SimpleNamespace(sleepy_vm_overcommit_factor=1.0),
+			),
+			patch("atlas.vm.core.vm_migration.PlacementContext", return_value=api),
+			self.assertRaisesRegex(AtlasUserError, "not ready or has no current capacity"),
+		):
+			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-3")
+
+		api.select.assert_called_once_with("metal-3")
+
+	def test_migration_shape_keeps_the_idle_timeout(self) -> None:
+		shape = MigrationService.get_shape(
+			source_vm(
+				virtual_machine_image="Ubuntu",
+				cpu_millicores=2000,
+				memory_mib=2048,
+				disk_mib=10240,
+				tenant_id=7,
+				sleep_after_idle_seconds=60,
+			)
+		)
+
+		self.assertEqual(shape.sleep_after_idle_seconds, 60)
 
 	def test_create_rejects_the_source_as_the_target(self) -> None:
 		locked = source_vm(
@@ -152,7 +197,6 @@ class TestMigrationCreation(UnitTestCase):
 		)
 		with (
 			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=locked),
-			patch("atlas.vm.core.vm_migration.frappe.db.get_value", return_value="amd64"),
 			self.assertRaisesRegex(AtlasUserError, "other than metal-1"),
 		):
 			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-1")

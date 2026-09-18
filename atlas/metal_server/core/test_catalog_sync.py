@@ -18,6 +18,7 @@ class TestCatalogSynchronizer(UnitTestCase):
 				return_value=(
 					ServerSizeData(
 						size="large",
+						architecture="amd64",
 						cpu_count=4,
 						memory_mib=8192,
 						disk_gib=100,
@@ -41,6 +42,7 @@ class TestCatalogSynchronizer(UnitTestCase):
 
 		values = get_doc.call_args.args[0]
 		self.assertEqual(values["provider_type"], "Test")
+		self.assertEqual(values["architecture"], "amd64")
 		self.assertEqual(values["memory_mib"], 8192)
 		document.insert.assert_called_once_with(ignore_permissions=True)
 

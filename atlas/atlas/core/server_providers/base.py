@@ -19,6 +19,7 @@ class ServerSizeData:
 	"""Store one server size from a provider."""
 
 	size: str
+	architecture: str
 	cpu_count: int
 	memory_mib: int
 	disk_gib: int
@@ -42,6 +43,7 @@ class ServerCreateRequest:
 	"""Store the data for one idempotent provider server request."""
 
 	name: str
+	discovery_key: str
 	server_size: str
 	server_image: str
 	size_provider_metadata: Mapping[str, Any]
@@ -56,7 +58,6 @@ class ProviderServer:
 	status: str | None
 	public_ipv4_address: str | None
 	provider_metadata: Mapping[str, Any]
-	was_created: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +140,7 @@ class ServerProvider(ABC):
 
 	@abstractmethod
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the named server, and create it when it does not exist."""
+		"""Return the server for the discovery key, creating it when absent."""
 		...
 
 	@abstractmethod

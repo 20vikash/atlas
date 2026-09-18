@@ -63,6 +63,7 @@ class ServerProvisioner:
 	def steps(self) -> tuple[tuple[str, Callable[[], None]], ...]:
 		"""Return the server setup steps in execution order."""
 		return (
+			("provider-create", self.server.ensure_provider_server),
 			("provider-preparation", lambda: self.provider.prepare_server(self.server)),
 			("secure-shell", self.wait_for_root_ssh),
 			("provider-network", lambda: self.provider.configure_server_network(self.server)),

@@ -3,6 +3,10 @@
 
 frappe.ui.form.on("Atlas Settings", {
 	refresh(frm) {
+		frm.call("available_placement_strategies").then(({ message }) => {
+			frm.fields_dict.placement_strategy.set_data(message);
+		});
+
 		if (frm.is_new()) {
 			return;
 		}

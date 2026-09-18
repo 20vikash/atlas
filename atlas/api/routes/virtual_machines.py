@@ -100,7 +100,10 @@ def get_attachable_ip_address_name(ip_address_id: str) -> str:
 		"hostname": "worker-1",
 		"ssh_keys": ["ssh-ed25519 AAAA"],
 	},
-	responses={201: {"description": "The virtual machine request is stored."}},
+	responses={
+		201: {"description": "The virtual machine request is stored."},
+		503: {"description": "Host capacity is pending. Retry after the reported interval."},
+	},
 )
 def create_virtual_machine(
 	payload: CreateVirtualMachinePayload,

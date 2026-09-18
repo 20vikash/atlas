@@ -1,0 +1,83 @@
+{
+  "host_types": [
+    {
+      "name": "atlas",
+      "architecture": "amd64",
+      "is_sleepy": false,
+      "cpu_millicores": 128000,
+      "memory_mib": 524288,
+      "storage_mib": 6815744,
+      "monthly_rupees": 50000
+    }
+  ],
+  "initial_host_count": 30,
+  "max_host_count": 60,
+  "initial_host_type": "atlas",
+  "new_host_type": "atlas",
+  "host_start_minutes_min": 25,
+  "host_start_minutes_max": 35,
+  "cpu_oversubscription": 1.0,
+  "sleepy_vm_overcommit_factor": 1.5,
+  "revenue_multiplier": 3.0,
+  "billing_month_days": 30,
+  "shapes": [
+    {"name": "sleepy", "cpu_millicores": 250, "memory_mib": 1024, "disk_mib": 12800, "weight": 45},
+    {"name": "a1", "cpu_millicores": 500, "memory_mib": 2048, "disk_mib": 25600, "weight": 18},
+    {"name": "a2", "cpu_millicores": 1000, "memory_mib": 2048, "disk_mib": 25600, "weight": 15},
+    {"name": "a3", "cpu_millicores": 2000, "memory_mib": 4096, "disk_mib": 51200, "weight": 10},
+    {"name": "a4", "cpu_millicores": 4000, "memory_mib": 8192, "disk_mib": 102400, "weight": 7},
+    {"name": "a5", "cpu_millicores": 8000, "memory_mib": 16384, "disk_mib": 409600, "weight": 5}
+  ],
+  "demand": {
+    "tenants_per_day": 8,
+    "hour_weights": [0.35, 0.30, 0.30, 0.30, 0.35, 0.45, 0.65, 0.90, 1.30, 1.55, 1.55, 1.45, 1.35, 1.40, 1.50, 1.60, 1.60, 1.50, 1.35, 1.15, 0.95, 0.75, 0.55, 0.40],
+    "weekday_weights": [1.0, 1.0, 1.0, 1.0, 1.0, 0.75, 0.65],
+    "growth_start": 1.0,
+    "growth_end": 1.5,
+    "target_size_median": 12,
+    "target_size_sigma": 0.7,
+    "shape_concentration": 0.5,
+    "actions_per_day_median": 0.8,
+    "action_rate_sigma": 0.5,
+    "burst_probability": 0.08,
+    "burst_max_vms": 40,
+    "action_weights": [0.50, 0.13, 0.13, 0.14, 0.10],
+    "global_spikes_per_day": 0.25,
+    "global_tenant_fraction_min": 0.05,
+    "global_tenant_fraction_max": 0.20,
+    "night_tenant_fraction": 0.20,
+    "night_stop_fraction": 0.80,
+    "night_stop_hour": 22,
+    "night_start_hour": 8
+  },
+  "traffic": {
+    "visits_per_day": 3,
+    "session_median_minutes": 8,
+    "session_sigma": 0.6,
+    "waves_per_day": 6,
+    "wave_fraction_min": 0.03,
+    "wave_fraction_max": 0.25,
+    "wave_span_seconds_min": 5,
+    "wave_span_seconds_max": 90,
+    "morning_wave_fraction": 0.70,
+    "idle_minutes": 30,
+    "save_seconds": 5.5,
+    "boot_seconds": 2.5,
+    "sleepy_lifetime_median_days": 4,
+    "regular_lifetime_median_days": 25,
+    "lifetime_sigma": 0.7,
+    "sleepy_upgrade_probability": 0.3,
+    "wake_migration_seconds_min": 2,
+    "wake_migration_seconds_max": 10,
+    "migration_seconds_per_gib": 30,
+    "thin_storage_fraction_min": 0.10,
+    "thin_storage_fraction_max": 0.50
+  },
+  "incidents": {
+    "group_seconds": 60,
+    "terminate_fraction_min": 0.25,
+    "terminate_fraction_max": 0.50,
+    "allocation_multiplier": 0.90,
+    "leave_probability_step": 0.40
+  }
+}

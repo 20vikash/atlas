@@ -5,7 +5,8 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.placement import PlacementService
+from atlas.vm.core.placement.context import CapacityPending
+from atlas.vm.core.placement.service import PlacementService
 from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
@@ -22,6 +23,18 @@ def build_image(tenant_id: int, image_type: str = "machine") -> VirtualMachineIm
 
 
 class TestVirtualMachineCreation(UnitTestCase):
+	def test_pending_capacity_does_not_create_a_vm_draft(self) -> None:
+		image = SimpleNamespace(architecture="amd64", validate_compatibility=Mock())
+		with (
+			patch.object(VirtualMachineService, "get_image", return_value=image),
+			patch.object(PlacementService, "select_server", side_effect=CapacityPending("node-a")),
+			patch.object(VirtualMachineService, "insert_draft") as insert_draft,
+			self.assertRaises(CapacityPending),
+		):
+			VirtualMachineService.create(self.request())
+
+		insert_draft.assert_not_called()
+
 	def test_creation_commits_the_draft_before_the_metal_request(self) -> None:
 		operations: list[str] = []
 		image = SimpleNamespace(

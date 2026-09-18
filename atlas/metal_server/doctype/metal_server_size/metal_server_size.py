@@ -19,6 +19,7 @@ class MetalServerSize(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		architecture: DF.Literal["amd64", "arm64"]
 		cpu_count: DF.Int
 		disk_gib: DF.Int
 		enabled: DF.Check

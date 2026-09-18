@@ -5,11 +5,12 @@ from pydantic import ValidationError as PydanticValidationError
 
 from atlas.atlas.core.exceptions import AtlasUserError
 
-CODE_BY_STATUS = {400: "invalid_request", 404: "not_found", 409: "conflict"}
+CODE_BY_STATUS = {400: "invalid_request", 404: "not_found", 409: "conflict", 503: "capacity_pending"}
 MESSAGE_BY_STATUS = {
 	400: "The request is not valid.",
 	404: "The resource does not exist.",
 	409: "The resource state does not allow this request.",
+	503: "Capacity is pending.",
 }
 
 
@@ -78,7 +79,7 @@ class ResourceConflict(ApiError):
 def describe_exception(exception: Exception) -> tuple[int, dict[str, Any]]:
 	"""Return the status code and the JSON error body for one exception."""
 	error = as_api_error(exception)
-	if error.http_status_code >= 500:
+	if error.http_status_code >= 500 and error.code != "capacity_pending":
 		frappe.log_error(
 			title=f"Unhandled API error: {type(exception).__name__}",
 			message=frappe.get_traceback(),

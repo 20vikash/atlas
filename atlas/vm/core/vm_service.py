@@ -18,7 +18,7 @@ from atlas.vm.core.models import (
 	FirewallConfiguration,
 	VirtualMachineCreateRequest,
 )
-from atlas.vm.core.placement import PlacementService
+from atlas.vm.core.placement.service import PlacementService
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer

@@ -8,8 +8,10 @@
  "field_order": [
   "status",
   "is_provisioning_completed",
+  "is_sleepy",
   "column_break_qbap",
   "provider_server_id",
+  "provider_discovery_key",
   "metald_api_token",
   "section_break_configuration",
   "server_image",
@@ -43,6 +45,13 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "description": "Placement strategies can use this flag when they select a host.",
+   "fieldname": "is_sleepy",
+   "fieldtype": "Check",
+   "label": "Sleepy Host"
+  },
+  {
    "default": "Pending",
    "fieldname": "status",
    "fieldtype": "Select",
@@ -56,7 +65,17 @@
    "fieldname": "provider_server_id",
    "fieldtype": "Data",
    "label": "Provider Host ID",
+   "no_copy": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "provider_discovery_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Provider Discovery Key",
+   "no_copy": 1,
+   "read_only": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "metald_api_token",

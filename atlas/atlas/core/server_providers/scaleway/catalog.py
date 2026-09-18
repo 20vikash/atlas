@@ -81,6 +81,10 @@ class ScalewayCatalog:
 		raise ScalewayError(f"Metal Server Size {size_name} has no Private Network option")
 
 	def _merge_offer(self, size: ServerSizeData | None, offer: Mapping) -> ServerSizeData:
+		architecture = self.offer_architecture(offer)
+		if size and size.architecture != architecture:
+			raise ScalewayError(f"Scaleway offers for {offer['name']} disagree on architecture")
+
 		metadata = dict(size.provider_metadata) if size else {}
 		metadata[offer.get("subscription_period")] = dict(offer)
 
@@ -95,6 +99,7 @@ class ScalewayCatalog:
 
 		return ServerSizeData(
 			size=offer["name"],
+			architecture=architecture,
 			cpu_count=sum(cpu["core_count"] for cpu in offer.get("cpus", [])),
 			memory_mib=sum(memory["capacity"] for memory in offer.get("memories", [])) // 1_048_576,
 			disk_gib=sum(disk["capacity"] for disk in offer.get("disks", [])) // 1_073_741_824,
@@ -102,6 +107,29 @@ class ScalewayCatalog:
 			monthly_pricing_usd_cents=monthly_amount,
 			provider_metadata=metadata,
 		)
+
+	@staticmethod
+	def offer_architecture(offer: Mapping) -> str:
+		"""Return the CPU architecture reported by one Scaleway offer."""
+		cpus = offer.get("cpus")
+		if not isinstance(cpus, list) or not cpus:
+			raise ScalewayError(f"Scaleway offer {offer.get('name')} has no CPUs")
+
+		architectures: set[str] = set()
+		for cpu in cpus:
+			name = cpu.get("name") if isinstance(cpu, Mapping) else None
+			if not isinstance(name, str):
+				raise ScalewayError(f"Scaleway offer {offer.get('name')} has an unnamed CPU")
+			if name.startswith("Ampere"):
+				architectures.add("arm64")
+			elif name.startswith(("AMD", "Intel")):
+				architectures.add("amd64")
+			else:
+				raise ScalewayError(f"Scaleway offer {offer.get('name')} has an unknown CPU: {name}")
+
+		if len(architectures) != 1:
+			raise ScalewayError(f"Scaleway offer {offer.get('name')} has mixed CPU architectures")
+		return architectures.pop()
 
 	@staticmethod
 	def offer(metadata: object, size_name: str, subscription_period: str) -> Mapping:
