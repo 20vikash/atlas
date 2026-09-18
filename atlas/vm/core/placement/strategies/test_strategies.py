@@ -55,6 +55,7 @@ class TestComparisonStrategies(TestCase):
 			usage=FleetUsage(hosts, total, free, 0, 0),
 			action=action,
 			current_host_name=current_host_name,
+			sleepy_vm_overcommit_factor=1.0,
 			placement_rate=Mock(return_value=0.0),
 			select=Mock(return_value=True),
 			spawn_host=Mock(),
@@ -136,7 +137,7 @@ class TestComparisonStrategies(TestCase):
 
 		select_balanced(api)
 
-		api.spawn_host.assert_called_once_with()
+		api.spawn_host.assert_called_once_with(is_sleepy=False)
 		api.select.assert_called_once_with("busy")
 
 	def test_balanced_uses_existing_capacity_below_expansion_threshold(self) -> None:
@@ -157,4 +158,55 @@ class TestComparisonStrategies(TestCase):
 		select_balanced(api)
 
 		api.select.assert_called_once_with("current")
+		api.spawn_host.assert_not_called()
+
+	def test_balanced_requests_sleepy_host_instead_of_regular_host(self) -> None:
+		api = self._api((self._host("regular"),), is_sleepy=True)
+
+		select_balanced(api)
+
+		api.spawn_host.assert_called_once_with(is_sleepy=True)
+		api.select.assert_not_called()
+
+	def test_balanced_requests_regular_host_instead_of_sleepy_host(self) -> None:
+		api = self._api((self._host("sleepy", is_sleepy=True),))
+
+		select_balanced(api)
+
+		api.spawn_host.assert_called_once_with(is_sleepy=False)
+		api.select.assert_not_called()
+
+	def test_balanced_expands_only_for_matching_pool_pressure(self) -> None:
+		api = self._api(
+			(self._host("regular", used_storage_mib=9000), self._host("sleepy", is_sleepy=True)),
+			is_sleepy=True,
+		)
+
+		select_balanced(api)
+
+		api.spawn_host.assert_not_called()
+		api.select.assert_called_once_with("sleepy")
+
+	def test_balanced_expands_sleepy_pool_at_eighty_percent(self) -> None:
+		api = self._api(
+			(self._host("regular"), self._host("sleepy", is_sleepy=True, used_storage_mib=8000)),
+			is_sleepy=True,
+		)
+
+		select_balanced(api)
+
+		api.spawn_host.assert_called_once_with(is_sleepy=True)
+		api.select.assert_called_once_with("sleepy")
+
+	def test_balanced_does_not_keep_current_host_from_other_pool(self) -> None:
+		api = self._api(
+			(self._host("regular"), self._host("sleepy", is_sleepy=True)),
+			is_sleepy=True,
+			action="start",
+			current_host_name="regular",
+		)
+
+		select_balanced(api)
+
+		api.select.assert_called_once_with("sleepy")
 		api.spawn_host.assert_not_called()
