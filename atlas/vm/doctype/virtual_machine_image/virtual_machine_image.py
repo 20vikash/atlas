@@ -266,8 +266,8 @@ class VirtualMachineImage(Document):
 	def retry_transfer(self) -> None:
 		"""Start the image transfer again, keeping the existing identifiers."""
 		self.check_permission("write")
-		if self.image_type != "machine" or self.status != "Failed":
-			frappe.throw(_("Only a failed Machine image transfer can be retried."))
+		if self.status != "Failed" or not self.source_server:
+			frappe.throw(_("Only a failed image transfer from a virtual machine can be retried."))
 
 		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 

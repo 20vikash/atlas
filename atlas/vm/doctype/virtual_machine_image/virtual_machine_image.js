@@ -17,7 +17,7 @@ function downloadArtifact(frm, artifact) {
 
 frappe.ui.form.on("Virtual Machine Image", {
 	refresh(frm) {
-		if (frm.doc.image_type === "machine" && frm.doc.status === "Failed") {
+		if (frm.doc.status === "Failed" && frm.doc.source_server) {
 			frm.add_custom_button(__("Retry Transfer"), () => {
 				frm.call("retry_transfer").then(() => frm.reload_doc());
 			});
