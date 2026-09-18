@@ -96,7 +96,7 @@ def api_docs(
 	tags: list[str] | None = None,
 	parameters: list[dict[str, Any]] | None = None,
 ):
-	"""Attach request and response examples to a route function."""
+	"""Attach request examples and response contracts to a route function."""
 
 	def decorator(function: Callable) -> Callable:
 		function.__api_docs__ = RouteDocs(
@@ -215,8 +215,15 @@ def build_responses(
 	for status, declared in (docs.responses if docs else {}).items():
 		response = responses.setdefault(status, {"description": ""})
 		response["description"] = declared.get("description", response["description"])
+		if "model" in declared:
+			reference = register_model(declared["model"], schemas)
+			response["content"] = {"application/json": {"schema": {"$ref": reference}}}
 		if "example" in declared:
-			response["content"] = {"application/json": {"example": declared["example"]}}
+			response.setdefault("content", {}).setdefault("application/json", {})["example"] = declared[
+				"example"
+			]
+		if "headers" in declared:
+			response["headers"] = declared["headers"]
 
 	model = get_response_model(function)
 	if model:

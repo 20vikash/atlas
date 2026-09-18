@@ -178,6 +178,7 @@ class TestAwsProvider(UnitTestCase):
 
 		request = ServerCreateRequest(
 			name="server-1",
+			discovery_key="discovery-1",
 			server_size="c6i.metal",
 			server_image="Ubuntu_24.04",
 			size_provider_metadata={"BareMetal": True},
@@ -371,7 +372,6 @@ class TestAwsServers(UnitTestCase):
 		result = servers.ensure(self.request())
 
 		self.assertEqual(result.provider_server_id, "i-1")
-		self.assertFalse(result.was_created)
 		servers.create.assert_not_called()
 
 	def test_ensure_creates_an_instance_when_none_is_tagged(self) -> None:
@@ -381,12 +381,12 @@ class TestAwsServers(UnitTestCase):
 
 		result = servers.ensure(self.request())
 
-		self.assertTrue(result.was_created)
+		self.assertEqual(result.provider_server_id, "i-1")
 		self.assertEqual(servers.client.call.call_args.args[1], "run_instances")
 		self.assertEqual(servers.client.call.call_args.kwargs["ImageId"], "ami-1")
 		self.assertEqual(
 			servers.client.call.call_args.kwargs["ClientToken"],
-			AwsServers.client_token("instance", "server-1"),
+			AwsServers.client_token("instance", "discovery-1"),
 		)
 
 	def test_a_virtual_instance_asks_for_nested_virtualization(self) -> None:
@@ -593,6 +593,7 @@ class TestAwsServers(UnitTestCase):
 	def request(size_provider_metadata: dict | None = None) -> ServerCreateRequest:
 		return ServerCreateRequest(
 			name="server-1",
+			discovery_key="discovery-1",
 			server_size="c6i.metal",
 			server_image="Ubuntu_24.04",
 			size_provider_metadata=size_provider_metadata or {"BareMetal": True},

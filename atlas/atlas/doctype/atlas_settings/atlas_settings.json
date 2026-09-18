@@ -100,7 +100,11 @@
   "object_storage_column_break",
   "object_storage_access_key_id",
   "object_storage_secret_access_key",
-  "object_storage_signed_url_expiry"
+  "object_storage_signed_url_expiry",
+  "placement_tab",
+  "placement_strategy",
+  "new_host_type",
+  "sleepy_vm_overcommit_factor"
  ],
  "fields": [
   {
@@ -645,6 +649,35 @@
    "fieldtype": "Data",
    "label": "Multicast Domain ID",
    "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
+  },
+  {
+   "fieldname": "placement_tab",
+   "fieldtype": "Tab Break",
+   "label": "Placement"
+  },
+  {
+   "default": "balanced",
+   "description": "Strategy used to select hosts for new VMs and automatic migrations.",
+   "fieldname": "placement_strategy",
+   "fieldtype": "Autocomplete",
+   "label": "Placement Strategy",
+   "reqd": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "description": "Metal Server Size used when placement requests a new host.",
+   "fieldname": "new_host_type",
+   "fieldtype": "Link",
+   "label": "New Host Type",
+   "options": "Metal Server Size"
+  },
+  {
+   "default": "1.0",
+   "description": "Multiplier available to placement strategies for VMs that sleep after idle time.",
+   "fieldname": "sleepy_vm_overcommit_factor",
+   "fieldtype": "Float",
+   "label": "Sleepy VM Overcommit Factor",
+   "show_description_on_click": 1
   }
  ],
  "grid_page_length": 50,

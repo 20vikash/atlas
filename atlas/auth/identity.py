@@ -56,6 +56,15 @@ def current_identity() -> AtlasIdentity | None:
 	return getattr(frappe.local, "atlas_identity", None)
 
 
+def require_central_identity() -> AtlasIdentity:
+	"""Return the identity of a caller that acts for every tenant."""
+	identity = current_identity()
+	if identity is None or not identity.is_central:
+		raise frappe.PermissionError
+
+	return identity
+
+
 def get_current_tenant_id() -> int:
 	"""Return the tenant that the current request acts for."""
 	identity = current_identity()

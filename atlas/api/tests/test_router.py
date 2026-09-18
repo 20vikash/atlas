@@ -145,6 +145,30 @@ class TestRouteRegistration(unittest.TestCase):
 		self.assertEqual(operation["security"], [])
 		self.assertNotIn("parameters", operation)
 
+	def test_a_central_only_route_rejects_a_tenant_token_and_needs_no_tenant_header(self):
+		router = make_router(docs=DocsConfig())
+
+		@router.put("configuration", central_only=True)
+		def configure():
+			return {"configured": True}
+
+		with http_request("PUT"):
+			self.assertEqual(call_route(configure), (200, {"configured": True}))
+
+		with http_request("PUT", tenant_id=7):
+			status, body = error_body(configure)
+
+		operation = router.openapi_specification["paths"][f"{router.prefix}/configuration"]["put"]
+		self.assertEqual(status, 403)
+		self.assertEqual(body["error"]["code"], "permission_denied")
+		self.assertNotIn("parameters", operation)
+
+	def test_a_route_cannot_be_public_and_central_only(self):
+		router = make_router()
+
+		with self.assertRaisesRegex(ValueError, "both public and Central-only"):
+			router.get("configuration", public=True, central_only=True)
+
 
 class TestRequestDecoding(unittest.TestCase):
 	def test_payload_is_validated_into_the_model(self):
@@ -333,6 +357,30 @@ class TestSpecification(unittest.TestCase):
 		responses = next(iter(paths.values()))["post"]["responses"]
 		for status in ("200", "201"):
 			self.assertIn("content", responses[status], f"{status} has no response body")
+
+	def test_declared_error_model_and_header_are_in_specification(self):
+		router = make_router(name="Machines", docs=DocsConfig(title="Atlas API", version="2.0.0"))
+
+		@router.post("machines")
+		@api_docs(
+			responses={
+				503: {
+					"description": "Capacity pending.",
+					"model": Machine,
+					"headers": {"Retry-After": {"schema": {"type": "integer"}}},
+				}
+			}
+		)
+		def create_machine(payload: Machine) -> Machine:
+			return payload
+
+		specification = router.openapi_specification
+		response = specification["paths"][f"{router.prefix}/machines"]["post"]["responses"]["503"]
+		self.assertEqual(
+			response["content"]["application/json"]["schema"],
+			{"$ref": "#/components/schemas/Machine"},
+		)
+		self.assertEqual(response["headers"]["Retry-After"]["schema"], {"type": "integer"})
 
 	def test_only_declared_responses_are_included(self):
 		responses = self.operation("machines", "post")["responses"]

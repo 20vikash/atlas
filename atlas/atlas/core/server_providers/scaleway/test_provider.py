@@ -177,6 +177,7 @@ class TestScalewayServers(UnitTestCase):
 		servers.client.request.side_effect = [{}, {"id": "server-id"}]
 		request = ServerCreateRequest(
 			name="node-test-00001",
+			discovery_key="site-specific-key",
 			server_size="Scaleway/large",
 			server_image="Scaleway/Ubuntu_26.04",
 			size_provider_metadata={"hourly": {}, "monthly": {}},
@@ -188,6 +189,7 @@ class TestScalewayServers(UnitTestCase):
 		create_request = servers.client.request.call_args_list[-1]
 		self.assertEqual(create_request.args[1], "/baremetal/v1/zones/fr-par-1/servers")
 		self.assertEqual(create_request.kwargs["json"]["name"], "node-test-00001")
+		self.assertEqual(create_request.kwargs["json"]["tags"], ["atlas-server:site-specific-key"])
 		self.assertEqual(create_request.kwargs["json"]["option_ids"], ["network-option"])
 		self.assertEqual(create_request.kwargs["json"]["install"]["os_id"], "image-id")
 
@@ -196,11 +198,20 @@ class TestScalewayServers(UnitTestCase):
 		servers.find = Mock(return_value={"id": "server-id", "status": "ready", "ips": []})
 		servers.create = Mock()
 
-		result = servers.ensure(SimpleNamespace(name="node-test-00001"))
+		result = servers.ensure(SimpleNamespace(name="node-test-00001", discovery_key="unique-key"))
 
 		self.assertEqual(result.provider_server_id, "server-id")
-		self.assertFalse(result.was_created)
 		servers.create.assert_not_called()
+		servers.find.assert_called_once_with("unique-key")
+
+	def test_find_uses_discovery_key_instead_of_display_name(self) -> None:
+		servers = self.servers()
+		servers.client.request.return_value = {"servers": []}
+
+		self.assertIsNone(servers.find("unique-key"))
+		self.assertEqual(
+			servers.client.request.call_args.kwargs["params"]["tags"], ["atlas-server:unique-key"]
+		)
 
 	def test_set_power_state_uses_the_explicit_action(self) -> None:
 		servers = self.servers()

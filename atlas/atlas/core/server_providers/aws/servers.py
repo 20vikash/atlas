@@ -42,12 +42,11 @@ class AwsServers:
 
 	def ensure(self, request: ServerCreateRequest) -> ProviderServer:
 		"""Return the named instance, and create it when it does not exist."""
-		instance = self.find(request.name)
-		was_created = instance is None
+		instance = self.find(request.discovery_key)
 		if instance is None:
 			instance = self.create(request)
 
-		return self.to_provider_server(instance, was_created=was_created)
+		return self.to_provider_server(instance)
 
 	def create(self, request: ServerCreateRequest) -> Mapping:
 		"""Create one AWS instance from an Atlas request."""
@@ -61,7 +60,7 @@ class AwsServers:
 		response = self.client.call(
 			"ec2",
 			"run_instances",
-			ClientToken=self.client_token("instance", request.name),
+			ClientToken=self.client_token("instance", request.discovery_key),
 			ImageId=self.catalog.image_id(request.image_provider_metadata, request.server_image),
 			InstanceType=request.server_size,
 			MinCount=1,
@@ -74,7 +73,7 @@ class AwsServers:
 					"ResourceType": "instance",
 					"Tags": [
 						{"Key": "Name", "Value": request.name},
-						{"Key": self.identity_tag_key, "Value": request.name},
+						{"Key": self.identity_tag_key, "Value": request.discovery_key},
 					],
 				}
 			],
@@ -97,20 +96,20 @@ class AwsServers:
 			return {}
 		return {"CpuOptions": {"NestedVirtualization": "enabled"}}
 
-	def find(self, server_name: str) -> Mapping | None:
+	def find(self, discovery_key: str) -> Mapping | None:
 		"""Return the instance with the Atlas identity tag."""
 		reservations = self.client.paginate(
 			"ec2",
 			"describe_instances",
 			"Reservations",
 			Filters=[
-				{"Name": f"tag:{self.identity_tag_key}", "Values": [server_name]},
+				{"Name": f"tag:{self.identity_tag_key}", "Values": [discovery_key]},
 				{"Name": "instance-state-name", "Values": sorted(self.live_states)},
 			],
 		)
 		instances = [instance for reservation in reservations for instance in reservation["Instances"]]
 		if len(instances) > 1:
-			raise AwsError(f"AWS returned multiple instances for Atlas server {server_name}")
+			raise AwsError(f"AWS returned multiple instances for discovery key {discovery_key}")
 		return instances[0] if instances else None
 
 	def fetch(self, provider_server_id: str) -> Mapping:
@@ -304,7 +303,7 @@ class AwsServers:
 		self.client.call("ec2", "terminate_instances", InstanceIds=[provider_server_id], allow_missing=True)
 
 	@classmethod
-	def to_provider_server(cls, instance: Mapping, *, was_created: bool = False) -> ProviderServer:
+	def to_provider_server(cls, instance: Mapping) -> ProviderServer:
 		"""Convert one AWS instance to provider-neutral data."""
 		provider_server_id = instance.get("InstanceId")
 		if not isinstance(provider_server_id, str):
@@ -316,5 +315,4 @@ class AwsServers:
 			status=cls.server_status_map.get(instance.get("State", {}).get("Name")),
 			public_ipv4_address=public_address if isinstance(public_address, str) else None,
 			provider_metadata={"instance": dict(instance)},
-			was_created=was_created,
 		)

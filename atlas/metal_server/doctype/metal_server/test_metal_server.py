@@ -54,28 +54,72 @@ _LSBLK_OUTPUT = json.dumps({"blockdevices": [_disk("sda"), _disk("sdb")]})
 
 
 class TestServer(UnitTestCase):
-	def test_before_validate_creates_the_named_server(self) -> None:
+	def test_before_validate_sets_key_without_provider_creation(self) -> None:
+		provider = SimpleNamespace(validate_settings=Mock(), ensure_server=Mock())
+		server = SimpleNamespace(
+			name="node-test-00007",
+			provider_server_id=None,
+			provider_discovery_key=None,
+			architecture=None,
+			server_size="Scaleway/size",
+			server_image="Scaleway/image",
+			status="Pending",
+			settings=SimpleNamespace(server_provider_controller=provider),
+			_validate_provider_catalog=Mock(),
+		)
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
+			return_value=SimpleNamespace(architecture="amd64"),
+		):
+			MetalServer.before_validate(server)
+
+		self.assertEqual(len(server.provider_discovery_key), 32)
+		provider.validate_settings.assert_called_once_with()
+		self.assertEqual(server.architecture, "amd64")
+		provider.ensure_server.assert_not_called()
+
+	def test_before_validate_keeps_existing_discovery_key(self) -> None:
+		provider = SimpleNamespace(validate_settings=Mock())
+		server = SimpleNamespace(
+			provider_server_id=None,
+			provider_discovery_key=None,
+			server_size="Scaleway/arm-size",
+			architecture=None,
+			settings=SimpleNamespace(server_provider_controller=provider),
+			_validate_provider_catalog=Mock(),
+		)
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
+			return_value=SimpleNamespace(architecture="arm64"),
+		):
+			MetalServer.before_validate(server)
+			key = server.provider_discovery_key
+			MetalServer.before_validate(server)
+
+		self.assertEqual(server.architecture, "arm64")
+		self.assertEqual(server.provider_discovery_key, key)
+
+	def test_ensure_provider_server_uses_stored_discovery_key(self) -> None:
 		provider = SimpleNamespace(
-			validate_settings=Mock(),
 			ensure_server=Mock(
 				return_value=ProviderServer(
 					provider_server_id="server-id",
 					status="Installing",
 					public_ipv4_address="203.0.113.1",
 					provider_metadata={"server": {"id": "server-id"}},
-					was_created=True,
 				)
-			),
+			)
 		)
 		server = SimpleNamespace(
 			name="node-test-00007",
 			provider_server_id=None,
+			provider_discovery_key="stored-key",
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
 			status="Pending",
-			flags=SimpleNamespace(),
 			settings=SimpleNamespace(server_provider_controller=provider),
-			_validate_provider_catalog=Mock(),
 			_provider_metadata=MetalServer._provider_metadata,
 		)
 
@@ -83,28 +127,44 @@ class TestServer(UnitTestCase):
 			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
 			return_value=SimpleNamespace(provider_metadata="{}"),
 		):
-			MetalServer.before_validate(server)
+			MetalServer.ensure_provider_server(server)
 
-		self.assertEqual(provider.ensure_server.call_args.args[0].name, "node-test-00007")
-		provider.validate_settings.assert_called_once_with()
+		self.assertEqual(provider.ensure_server.call_args.args[0].discovery_key, "stored-key")
 		self.assertEqual(server.provider_server_id, "server-id")
-		self.assertTrue(server.flags.provider_server_created)
 
-	def test_failed_insert_cleanup_deletes_only_a_new_provider_server(self) -> None:
-		server = self._server(status="Pending")
-		server.flags.provider_server_created = True
+	def test_provision_inserts_pending_host_for_setup_job(self) -> None:
+		server = SimpleNamespace(insert=Mock())
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_single",
+				return_value=SimpleNamespace(server_provider="Scaleway"),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
+				return_value=SimpleNamespace(name="Scaleway/Ubuntu_26.04"),
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.new_doc", return_value=server),
+		):
+			MetalServer.provision(size="Scaleway/size", is_sleepy=True)
 
-		MetalServer._cleanup_provider_server_after_failed_insert(server)
+		self.assertEqual(server.server_size, "Scaleway/size")
+		self.assertTrue(server.is_sleepy)
+		server.insert.assert_called_once_with(ignore_permissions=True)
 
-		server.settings.server_provider_controller.delete_server.assert_called_once_with("server-id", {})
-		self.assertFalse(server.flags.provider_server_created)
+	def test_provisioning_worker_runs_as_administrator(self) -> None:
+		previous_user = frappe.session.user
+		seen_users: list[str] = []
+		frappe.set_user("Guest")
+		try:
+			with patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.ServerProvisioner"
+			) as provisioner:
+				provisioner.return_value.run.side_effect = lambda: seen_users.append(frappe.session.user)
+				MetalServer._setup_server(SimpleNamespace())
+		finally:
+			frappe.set_user(previous_user)
 
-	def test_failed_insert_cleanup_keeps_a_reused_provider_server(self) -> None:
-		server = self._server(status="Pending")
-
-		MetalServer._cleanup_provider_server_after_failed_insert(server)
-
-		server.settings.server_provider_controller.delete_server.assert_not_called()
+		self.assertEqual(seen_users, ["Administrator"])
 
 	def test_validate_checks_the_provider_catalog(self) -> None:
 		server = self._server(status="Pending")
@@ -823,7 +883,6 @@ class TestServer(UnitTestCase):
 			status=status,
 			provider_server_id="server-id",
 			provider_metadata="{}",
-			flags=SimpleNamespace(provider_server_created=False),
 			is_provisioning_completed=False,
 			setup_job_id="atlas||server-provision||node-test-00007",
 			wireguard_job_id="atlas||server-wireguard||node-test-00007",

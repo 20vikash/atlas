@@ -11,6 +11,9 @@ from atlas.api.core.errors import (
 	ResourceNotFound,
 	describe_exception,
 )
+from atlas.api.models import CapacityPendingResponse
+from atlas.api.routes.virtual_machines import create_virtual_machine
+from atlas.vm.core.placement.context import CapacityPending
 
 
 class Machine(BaseModel):
@@ -93,3 +96,21 @@ class TestErrorBody(UnitTestCase):
 			describe_exception(frappe.PermissionError())
 
 		log_error.assert_not_called()
+
+	def test_pending_capacity_is_retryable_and_visible(self) -> None:
+		with patch("atlas.api.core.errors.frappe.log_error") as log_error:
+			response = create_virtual_machine.build_error_response(CapacityPending("Host node-a is starting"))
+
+		self.assertEqual(response.status_code, 503)
+		self.assertEqual(response.json["error"]["code"], "capacity_pending")
+		self.assertIn("node-a", response.json["error"]["message"])
+		self.assertEqual(response.headers["Retry-After"], "15")
+		self.assertEqual(CapacityPendingResponse.model_validate(response.json).error.code, "capacity_pending")
+		log_error.assert_not_called()
+
+	def test_null_error_body_does_not_add_retry_header(self) -> None:
+		with patch("atlas.api.core.base.describe_exception", return_value=(400, {"error": None})):
+			response = create_virtual_machine.build_error_response(ValueError("bad"))
+
+		self.assertEqual(response.status_code, 400)
+		self.assertNotIn("Retry-After", response.headers)

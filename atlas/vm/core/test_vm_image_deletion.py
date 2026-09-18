@@ -59,9 +59,17 @@ class TestMachineImageDeletionRequest(UnitTestCase):
 	def test_an_incomplete_image_cannot_be_deleted(self) -> None:
 		service = VirtualMachineImageDeletionService()
 
-		for status in ("Pending", "Uploading", "Deleting", "Archived"):
+		for status in ("Pending", "Snapshotting", "Uploading", "Completing", "Cleaning"):
 			with self.subTest(status=status), self.assertRaises(frappe.ValidationError):
 				service.request(build_image(status=status))
+
+	def test_an_image_already_retired_accepts_the_delete_again(self) -> None:
+		service = VirtualMachineImageDeletionService()
+
+		for status in ("Deleting", "Archived"):
+			with self.subTest(status=status), patch.object(service, "enqueue") as enqueue:
+				self.assertEqual(service.request(build_image(status=status)), status)
+				enqueue.assert_not_called()
 
 	def test_a_failed_image_can_be_retired(self) -> None:
 		service = VirtualMachineImageDeletionService()

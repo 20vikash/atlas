@@ -1,6 +1,7 @@
 # Copyright (c) 2026, Frappe and Contributors
 # See license.txt
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import frappe
@@ -65,6 +66,7 @@ class TestRegionID(UnitTestCase):
 		self.settings.is_new.return_value = False
 		self.settings.has_value_changed.return_value = True
 		self.settings.is_setup_completed = False
+		self.settings.placement_strategy = "balanced"
 		self.settings.wildcard_domain = "example.com"
 		self.settings.region_name = "test"
 
@@ -87,6 +89,62 @@ class TestRegionID(UnitTestCase):
 			self.atlas_settings.validate(self.settings)
 
 		self.settings.server_provider_controller.validate_settings.assert_called_once()
+
+
+class TestSleepyVMOvercommitFactor(UnitTestCase):
+	def test_valid_factors_are_stored_as_numbers(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		for value in (1, 1.5, "2.5"):
+			with self.subTest(value=value):
+				settings = SimpleNamespace(sleepy_vm_overcommit_factor=value)
+				AtlasSettings._validate_sleepy_vm_overcommit_factor(settings)
+				self.assertEqual(settings.sleepy_vm_overcommit_factor, float(value))
+
+	def test_invalid_factors_are_rejected(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		for value in (None, 0, 0.5, -1, float("nan"), float("inf"), float("-inf"), "invalid"):
+			with self.subTest(value=value):
+				settings = SimpleNamespace(sleepy_vm_overcommit_factor=value)
+				with self.assertRaises(frappe.ValidationError):
+					AtlasSettings._validate_sleepy_vm_overcommit_factor(settings)
+
+
+class TestPlacementStrategy(UnitTestCase):
+	def test_migration_replaces_only_removed_strategy(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import migrate_placement_strategy
+
+		for stored in ("Default", "balanced", "best-fit"):
+			with (
+				self.subTest(stored=stored),
+				patch("frappe.db.get_single_value", return_value=stored),
+				patch("frappe.db.set_single_value") as set_value,
+			):
+				migrate_placement_strategy()
+
+			if stored == "Default":
+				set_value.assert_called_once_with("Atlas Settings", "placement_strategy", "balanced")
+			else:
+				set_value.assert_not_called()
+
+	def test_unknown_strategy_is_rejected(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		settings = MagicMock(placement_strategy="Missing")
+		with self.assertRaisesRegex(frappe.ValidationError, "Unknown placement strategy"):
+			AtlasSettings.validate(settings)
+
+	def test_options_come_from_the_registry(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+		with (
+			patch("atlas.vm.core.placement.strategies.STRATEGIES", {"Custom": lambda api: None}),
+			patch("frappe.only_for") as only_for,
+		):
+			self.assertEqual(AtlasSettings.available_placement_strategies(MagicMock()), ["Custom"])
+
+		only_for.assert_called_once_with("System Manager")
 
 
 class IntegrationTestAtlasSettings(IntegrationTestCase):
