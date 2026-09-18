@@ -6,8 +6,8 @@ REQUEST_TIMEOUT_SECONDS = 10
 MAXIMUM_RETRIES = 3
 
 DELIVERIES = {
-	"on_update": "vm.state",
-	"on_trash": "vm.state.deleted",
+	"on_update": ("vm.state", 'doc.is_new() or doc.has_value_changed("status")'),
+	"on_trash": ("vm.state.deleted", None),
 }
 
 
@@ -21,7 +21,7 @@ def configure_state_webhooks(
 	with frappe.db.advisory_lock("configure_state_webhooks"):
 		region_name = frappe.get_cached_value("Atlas Settings", "Atlas Settings", "region_name")
 		names = []
-		for document_event, event_name in DELIVERIES.items():
+		for document_event, (event_name, condition) in DELIVERIES.items():
 			event_label = document_event.replace("_", " ").title()
 			name = f"Virtual Machine State - {event_label} - Central - {central_id}"
 			if frappe.db.exists("Webhook", name):
@@ -32,7 +32,7 @@ def configure_state_webhooks(
 			webhook.name = name
 			webhook.webhook_doctype = "Virtual Machine State"
 			webhook.webhook_docevent = document_event
-			webhook.condition = None
+			webhook.condition = condition
 			webhook.request_url = request_url
 			webhook.is_dynamic_url = 0
 			webhook.background_jobs_queue = None

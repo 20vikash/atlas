@@ -2,7 +2,9 @@ from contextlib import nullcontext
 from unittest.mock import Mock, patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.integrations.doctype.webhook.webhook import get_context
+from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.utils import add_to_date, now_datetime
 
 from atlas.vm.core import state_webhook
 
@@ -77,7 +79,10 @@ class TestStateWebhookConfiguration(UnitTestCase):
 		self.assertEqual(get_doc.call_count, 2)
 		self.assertEqual([document.webhook_doctype for document in saved], ["Virtual Machine State"] * 2)
 		self.assertEqual([document.webhook_docevent for document in saved], ["on_update", "on_trash"])
-		self.assertEqual([document.condition for document in saved], [None, None])
+		self.assertEqual(
+			[document.condition for document in saved],
+			['doc.is_new() or doc.has_value_changed("status")', None],
+		)
 		self.assertEqual([document.is_dynamic_url for document in saved], [0, 0])
 		self.assertEqual([document.background_jobs_queue for document in saved], [None, None])
 		self.assertEqual([document.enabled for document in saved], [0, 0])
@@ -99,3 +104,45 @@ class TestStateWebhookConfiguration(UnitTestCase):
 				"webhook_headers",
 				[{"key": "Content-Type", "value": "application/json"}],
 			)
+
+
+class TestStateWebhookCondition(IntegrationTestCase):
+	"""The on_update condition decides which saves reach Central."""
+
+	def setUp(self) -> None:
+		self.name = frappe.generate_hash(length=10)
+		state = frappe.new_doc("Virtual Machine State")
+		state.update(
+			{
+				"name": self.name,
+				"virtual_machine": self.name,
+				"status": "running",
+				"synced_at": now_datetime(),
+			}
+		)
+		state.db_insert()
+
+	def meets_condition(self, state) -> bool:
+		"""Evaluate the configured condition the way Frappe evaluates it."""
+		_, condition = state_webhook.DELIVERIES["on_update"]
+		return bool(frappe.safe_eval(condition, eval_locals=get_context(state)))
+
+	def load_saved_state(self):
+		state = frappe.get_doc("Virtual Machine State", self.name)
+		state.load_doc_before_save()
+		return state
+
+	def test_an_insert_sends_a_delivery(self) -> None:
+		self.assertTrue(self.meets_condition(frappe.new_doc("Virtual Machine State")))
+
+	def test_a_status_change_sends_a_delivery(self) -> None:
+		state = self.load_saved_state()
+		state.status = "stopped"
+
+		self.assertTrue(self.meets_condition(state))
+
+	def test_a_sync_without_a_status_change_sends_nothing(self) -> None:
+		state = self.load_saved_state()
+		state.synced_at = add_to_date(state.synced_at, minutes=5)
+
+		self.assertFalse(self.meets_condition(state))
