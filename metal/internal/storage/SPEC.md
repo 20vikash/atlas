@@ -62,7 +62,7 @@ Metal downloads with bounded retries, creates a ZFS volume, copies the root file
 
 `PrepareBoot` ensures the image, links the kernel, clones the VM disk when absent, grows it when required, and creates the block node in the jailer chroot.
 
-`PrepareRootFileSystem` performs disk preparation without the kernel link. `Release` removes the VM dataset and its snapshots.
+`PrepareRootFileSystem` performs disk preparation without the kernel link. `Release` removes the VM dataset and its snapshots. It promotes each dependent staging clone first, so a snapshot upload keeps its source when the VM goes away.
 
 ## Image policy
 
