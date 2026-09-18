@@ -66,7 +66,7 @@ class TestRegionID(UnitTestCase):
 		self.settings.is_new.return_value = False
 		self.settings.has_value_changed.return_value = True
 		self.settings.is_setup_completed = False
-		self.settings.placement_strategy = "Default"
+		self.settings.placement_strategy = "balanced"
 		self.settings.wildcard_domain = "example.com"
 		self.settings.region_name = "test"
 

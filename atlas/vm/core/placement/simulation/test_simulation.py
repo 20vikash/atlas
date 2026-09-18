@@ -107,7 +107,7 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(1, 2, "tenant_arrival", tenant_id=2),
 			),
 		)
-		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		result = Simulation(scenario, workload, 1).run("balanced", STRATEGIES["balanced"])
 		self.assertEqual(result.hosts_at_end, 1)
 		self.assertEqual(result.vms_created, 2)
 		self.assertEqual(result.create_failures, 0)
@@ -131,7 +131,7 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(26 * 120, 3, "tenant_arrival", tenant_id=3),
 			),
 		)
-		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		result = Simulation(scenario, workload, 1).run("balanced", STRATEGIES["balanced"])
 		self.assertEqual(result.create_failures, 1)
 		self.assertEqual(result.vms_created, 2)
 
@@ -198,9 +198,9 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(2, 2, "tenant_arrival", tenant_id=2),
 			),
 		)
-		one = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		one = Simulation(scenario, workload, 1).run("balanced", STRATEGIES["balanced"])
 		two = Simulation(replace(scenario, cpu_oversubscription=2), workload, 1).run(
-			"Default", STRATEGIES["Default"]
+			"balanced", STRATEGIES["balanced"]
 		)
 		self.assertEqual((one.vms_created, one.create_failures), (1, 1))
 		self.assertEqual((two.vms_created, two.create_failures), (2, 0))
@@ -238,7 +238,7 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(3604, 3, "traffic_wave", fraction=1, span_ticks=1),
 			),
 		)
-		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		result = Simulation(scenario, workload, 1).run("first", self._first_host)
 		self.assertEqual(result.wake_failures, 1)
 		self.assertEqual(result.incidents, 1)
 		self.assertEqual(result.vms_terminated, 1)
@@ -258,7 +258,7 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(130, 3, "tenant_action", tenant_id=1, action="allocate"),
 			),
 		)
-		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		result = Simulation(scenario, workload, 1).run("balanced", STRATEGIES["balanced"])
 		self.assertEqual(result.create_failures, 3)
 		self.assertEqual(result.incidents, 2)
 		self.assertEqual(result.tenants_left, 1)
@@ -305,6 +305,6 @@ class TestPlacementSimulation(TestCase):
 	def test_same_workload_and_strategy_replays_identically(self) -> None:
 		workload = generate_workload(load_scenario(DEFAULT_SCENARIO), 1, 17)
 		scenario = load_scenario(DEFAULT_SCENARIO)
-		first = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
-		second = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
+		first = Simulation(scenario, workload, 1).run("balanced", STRATEGIES["balanced"])
+		second = Simulation(scenario, workload, 1).run("balanced", STRATEGIES["balanced"])
 		self.assertEqual(first, second)
