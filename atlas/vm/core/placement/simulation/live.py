@@ -486,6 +486,8 @@ def cleanup(arguments: argparse.Namespace) -> None:
 
 def main() -> None:
 	"""Parse arguments and run a guarded live trial or its cleanup."""
+	from atlas.vm.core.placement.strategies import STRATEGIES
+
 	parser = argparse.ArgumentParser(description=__doc__)
 	commands = parser.add_subparsers(dest="command", required=True)
 	run_parser = commands.add_parser("run", help="Run real VM placement on a site")
@@ -496,7 +498,7 @@ def main() -> None:
 		command.add_argument("--output", required=True, type=Path, help="JSON report path")
 		command.add_argument("--poll-seconds", type=positive_integer, default=10)
 		command.add_argument("--timeout-seconds", type=positive_integer, default=7200)
-	run_parser.add_argument("--strategy", choices=("spread-3", "best-fit"), required=True)
+	run_parser.add_argument("--strategy", choices=tuple(STRATEGIES), default="balanced")
 	run_parser.add_argument("--host-type", required=True, help="Metal Server Size name")
 	run_parser.add_argument("--image", required=True, help="Virtual Machine Image name")
 	run_parser.add_argument(

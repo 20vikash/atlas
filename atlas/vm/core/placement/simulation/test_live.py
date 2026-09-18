@@ -47,6 +47,28 @@ class TestLiveTrial(TestCase):
 			live.main()
 		self.assertEqual(run.call_args.args[0].tenant_ids, [7, 8])
 
+	def test_cli_uses_balanced_when_strategy_is_omitted(self) -> None:
+		arguments = [
+			"live",
+			"run",
+			"--site",
+			"trial.localhost",
+			"--output",
+			"/tmp/trial.json",
+			"--host-type",
+			"size",
+			"--image",
+			"image",
+			"--tenant-id",
+			"7",
+			"--tenant-id",
+			"8",
+			"--apply",
+		]
+		with patch.object(sys, "argv", arguments), patch.object(live, "run") as run:
+			live.main()
+		self.assertEqual(run.call_args.args[0].strategy, "balanced")
+
 	def test_request_sequence_interleaves_both_pools(self) -> None:
 		self.assertEqual(
 			request_sequence(3, 2, [11, 22]),
