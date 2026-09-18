@@ -44,6 +44,8 @@ class PlacementAPI:
 			tenant_id=request.tenant_id,
 			is_sleepy=request.sleep_after_idle_seconds > 0,
 		)
+		self.action = "migration" if exclude_servers else "create"
+		self.current_host_name: str | None = None
 		self.sleepy_vm_overcommit_factor = sleepy_vm_overcommit_factor
 		self._excluded_servers = frozenset(exclude_servers or ())
 		self._created_at = now_datetime()
@@ -114,14 +116,21 @@ class PlacementAPI:
 		self._selected_server = server
 		return True
 
-	def spawn_host(self, host_type: str | None = None, *, count: int = 1) -> tuple[str, ...]:
-		"""Keep the requested number of suitable hosts provisioning."""
+	def spawn_host(
+		self, host_type: str | None = None, *, count: int = 1, is_sleepy: bool = False
+	) -> tuple[str, ...]:
+		"""Keep the requested number of suitable hosts provisioning in one pool."""
 		if isinstance(count, bool) or not isinstance(count, int) or count < 1:
 			raise ValueError("count must be a positive integer")
-		if self._stale_ready_servers:
+		stale_hosts = sorted(
+			name
+			for name, (architecture, sleepy) in self._stale_ready_servers.items()
+			if architecture == self.request.architecture and sleepy == is_sleepy
+		)
+		if stale_hosts:
 			frappe.throw(
 				_("Metal Server {0} has no current capacity sample. Check Server synchronization.").format(
-					", ".join(sorted(self._stale_ready_servers))
+					", ".join(stale_hosts)
 				),
 				exc=AtlasUserError,
 			)
@@ -139,33 +148,36 @@ class PlacementAPI:
 
 		# A locking read sees host intents committed while this request waited for Settings.
 		servers = frappe.db.sql(
-			"""select name, status, architecture from `tabMetal Server`
+			"""select name, status, architecture, is_sleepy from `tabMetal Server`
 			where server_size = %(server_size)s order by creation desc for update""",
 			{"server_size": selected_type},
 			as_dict=True,
 		)
-		pending = [
+		matching = [
 			server
 			for server in servers
-			if server.status in ("Pending", "Installing") and server.architecture == self.request.architecture
+			if server.architecture == self.request.architecture and bool(server.is_sleepy) == is_sleepy
 		]
+		pending = [server for server in matching if server.status in ("Pending", "Installing")]
 		names = [row.name for row in pending]
 		if len(names) >= count:
 			self._pending_hosts.update(names)
 			return tuple(names)
 
-		if not names and servers and servers[0].status == "Failed":
+		if not names and matching and matching[0].status == "Failed":
 			frappe.throw(
 				_(
 					"Metal Server {0} failed to provision. Retry or remove it before expanding capacity."
-				).format(servers[0].name),
+				).format(matching[0].name),
 				exc=AtlasUserError,
 			)
 
 		from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 		for _host_index in range(count - len(names)):
-			server = MetalServer.provision(size=selected_type, defer_provider_creation=True)
+			server = MetalServer.provision(
+				size=selected_type, defer_provider_creation=True, is_sleepy=is_sleepy
+			)
 			names.append(server.name)
 		self._pending_hosts.update(names)
 		return tuple(names)
@@ -241,7 +253,11 @@ class PlacementAPI:
 		server_names = [server.name for server in servers]
 		self._ready_server_names = frozenset(server_names)
 		samples = self._latest_samples(server_names) if server_names else {}
-		self._stale_ready_servers = self._ready_server_names - samples.keys()
+		self._stale_ready_servers = {
+			server.name: (server.architecture, bool(server.is_sleepy))
+			for server in servers
+			if server.name not in samples
+		}
 		if servers and not samples:
 			frappe.throw(
 				_("No current Metal Server capacity sample is available. Check Server synchronization."),

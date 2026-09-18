@@ -14,7 +14,7 @@ class TestPlacementAPI(UnitTestCase):
 	def _spawn_api() -> PlacementAPI:
 		api = PlacementAPI.__new__(PlacementAPI)
 		api.request = PlacementRequest(2000, 2048, 10240, "amd64", 7, False)
-		api._stale_ready_servers = frozenset()
+		api._stale_ready_servers = {}
 		api._pending_hosts = set()
 		api._selected_server = None
 		return api
@@ -66,14 +66,14 @@ class TestPlacementAPI(UnitTestCase):
 			)
 			self.assertEqual(sql.call_args.args[1], {"server_size": size.name})
 			self.assertIn("for update", sql.call_args.args[0])
-			provision.assert_called_once_with(size=size.name, defer_provider_creation=True)
+			provision.assert_called_once_with(size=size.name, defer_provider_creation=True, is_sleepy=False)
 
 	def test_spawn_reuses_pending_hosts_without_creating_another(self) -> None:
 		api = self._spawn_api()
 		settings, size, image = self._catalog()
 		pending = [
-			SimpleNamespace(name="node-a", status="Pending", architecture="amd64"),
-			SimpleNamespace(name="node-b", status="Installing", architecture="amd64"),
+			SimpleNamespace(name="node-a", status="Pending", architecture="amd64", is_sleepy=0),
+			SimpleNamespace(name="node-b", status="Installing", architecture="amd64", is_sleepy=0),
 		]
 		with (
 			patch("atlas.vm.core.placement.api.frappe.get_doc", side_effect=[settings, size, image] * 2),
@@ -86,10 +86,29 @@ class TestPlacementAPI(UnitTestCase):
 		provision.assert_not_called()
 		self.assertEqual(api._pending_hosts, {"node-a", "node-b"})
 
+	def test_spawn_separates_pending_sleepy_and_regular_hosts(self) -> None:
+		api = self._spawn_api()
+		api.request = PlacementRequest(2000, 2048, 10240, "amd64", 7, True)
+		settings, size, image = self._catalog()
+		regular = SimpleNamespace(name="regular", status="Pending", architecture="amd64", is_sleepy=0)
+		sleepy = SimpleNamespace(name="sleepy", status="Pending", architecture="amd64", is_sleepy=1)
+		with (
+			patch("atlas.vm.core.placement.api.frappe.get_doc", side_effect=[settings, size, image] * 2),
+			patch("atlas.vm.core.placement.api.frappe.db.sql", side_effect=[[regular], [sleepy, regular]]),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision",
+				return_value=SimpleNamespace(name="sleepy"),
+			) as provision,
+		):
+			self.assertEqual(api.spawn_host(is_sleepy=True), ("sleepy",))
+			self.assertEqual(api.spawn_host(is_sleepy=True), ("sleepy",))
+
+		provision.assert_called_once_with(size=size.name, defer_provider_creation=True, is_sleepy=True)
+
 	def test_explicit_count_creates_only_missing_hosts(self) -> None:
 		api = self._spawn_api()
 		settings, size, image = self._catalog()
-		pending = [SimpleNamespace(name="node-a", status="Pending", architecture="amd64")]
+		pending = [SimpleNamespace(name="node-a", status="Pending", architecture="amd64", is_sleepy=0)]
 		with (
 			patch("atlas.vm.core.placement.api.frappe.get_doc", side_effect=[settings, size, image] * 2),
 			patch(
@@ -98,8 +117,8 @@ class TestPlacementAPI(UnitTestCase):
 					pending,
 					[
 						*pending,
-						SimpleNamespace(name="node-b", status="Pending", architecture="amd64"),
-						SimpleNamespace(name="node-c", status="Pending", architecture="amd64"),
+						SimpleNamespace(name="node-b", status="Pending", architecture="amd64", is_sleepy=0),
+						SimpleNamespace(name="node-c", status="Pending", architecture="amd64", is_sleepy=0),
 					],
 				],
 			),
@@ -135,7 +154,9 @@ class TestPlacementAPI(UnitTestCase):
 			patch("atlas.vm.core.placement.api.frappe.get_doc", side_effect=[settings, size, image]),
 			patch(
 				"atlas.vm.core.placement.api.frappe.db.sql",
-				return_value=[SimpleNamespace(name="node-failed", status="Failed")],
+				return_value=[
+					SimpleNamespace(name="node-failed", status="Failed", architecture="amd64", is_sleepy=0)
+				],
 			),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision") as provision,
 			self.assertRaisesRegex(frappe.ValidationError, "node-failed"),
@@ -143,6 +164,22 @@ class TestPlacementAPI(UnitTestCase):
 			api.spawn_host()
 
 		provision.assert_not_called()
+
+	def test_failed_regular_host_does_not_block_sleepy_provisioning(self) -> None:
+		api = self._spawn_api()
+		settings, size, image = self._catalog()
+		failed = SimpleNamespace(name="regular-failed", status="Failed", architecture="amd64", is_sleepy=0)
+		with (
+			patch("atlas.vm.core.placement.api.frappe.get_doc", side_effect=[settings, size, image]),
+			patch("atlas.vm.core.placement.api.frappe.db.sql", return_value=[failed]),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision",
+				return_value=SimpleNamespace(name="sleepy-new"),
+			) as provision,
+		):
+			self.assertEqual(api.spawn_host(is_sleepy=True), ("sleepy-new",))
+
+		provision.assert_called_once_with(size=size.name, defer_provider_creation=True, is_sleepy=True)
 
 	def test_pending_result_commits_host_intent_without_a_vm_draft(self) -> None:
 		api = self._spawn_api()
@@ -157,7 +194,7 @@ class TestPlacementAPI(UnitTestCase):
 
 	def test_stale_sample_does_not_trigger_host_creation(self) -> None:
 		api = self._spawn_api()
-		api._stale_ready_servers = frozenset({"node-stale"})
+		api._stale_ready_servers = {"node-stale": ("amd64", False)}
 		with (
 			patch("atlas.vm.core.placement.api.frappe.get_doc") as get_doc,
 			self.assertRaisesRegex(frappe.ValidationError, "node-stale"),
