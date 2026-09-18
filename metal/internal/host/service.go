@@ -4,7 +4,6 @@ package host
 import (
 	"context"
 	"fmt"
-	"net/netip"
 	"runtime"
 
 	"github.com/frappe/atlas/metal/internal/network"
@@ -18,15 +17,16 @@ type DesiredState struct {
 	WireGuardPeers                    []network.WireGuardPeer
 	Images                            []vm.Image
 	PrivilegedVirtualMachineAddresses []string
-	// UnicastPeers is nil in multicast mode. An empty set means unicast mode
-	// with no peer.
-	UnicastPeers []netip.Addr
+	// UnicastEnabled selects the unicast NDP transport. The transport reads its peer set from the WireGuard peer state.
+	UnicastEnabled bool
 }
 
 // SyncResult contains what the controller reads back from one sync exchange.
 type SyncResult struct {
 	Capacity             Capacity
 	VirtualMachineStates map[string]vm.State
+	// UplinkMAC is the discovery uplink MAC of this host. It is empty when the mesh is disabled.
+	UplinkMAC string
 }
 
 // Capacity contains current host compute and storage capacity.
@@ -50,11 +50,20 @@ type WireGuardManager interface {
 	Apply(context.Context, []network.WireGuardPeer) error
 }
 
-// UnicastTransport replaces the controller-owned unicast peer set and daemon
-// state.
+// UnicastTransport switches the unicast NDP transport on and off.
 type UnicastTransport interface {
-	Apply(context.Context, []netip.Addr) error
+	Enable(context.Context) error
 	Disable(context.Context) error
+}
+
+// PeerStateSyncer reloads the mesh peer state after the WireGuard peers change.
+type PeerStateSyncer interface {
+	SyncPeerState(context.Context) error
+}
+
+// UplinkReporter reports the discovery uplink MAC of this host.
+type UplinkReporter interface {
+	UplinkMAC() (string, error)
 }
 
 // ImagePolicyStore replaces controller-owned image policies.
@@ -81,6 +90,8 @@ type Dependencies struct {
 	Mesh                  PrivilegedMesh
 	WireGuard             WireGuardManager
 	Unicast               UnicastTransport
+	PeerState             PeerStateSyncer
+	Uplink                UplinkReporter
 	Images                ImagePolicyStore
 	VirtualMachines       VirtualMachineSource
 	Storage               StorageCapacitySource
@@ -95,6 +106,8 @@ type Service struct {
 	mesh                  PrivilegedMesh
 	wireGuard             WireGuardManager
 	unicast               UnicastTransport
+	peerState             PeerStateSyncer
+	uplink                UplinkReporter
 	images                ImagePolicyStore
 	virtualMachines       VirtualMachineSource
 	storage               StorageCapacitySource
@@ -113,6 +126,8 @@ func NewService(dependencies Dependencies) (*Service, error) {
 		mesh:                  dependencies.Mesh,
 		wireGuard:             dependencies.WireGuard,
 		unicast:               dependencies.Unicast,
+		peerState:             dependencies.PeerState,
+		uplink:                dependencies.Uplink,
 		images:                dependencies.Images,
 		virtualMachines:       dependencies.VirtualMachines,
 		storage:               dependencies.Storage,
@@ -133,7 +148,12 @@ func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (
 	if err := service.wireGuard.Apply(ctx, desired.WireGuardPeers); err != nil {
 		return SyncResult{}, fmt.Errorf("apply WireGuard peers: %w", err)
 	}
-	if err := service.applyUnicast(ctx, desired.UnicastPeers); err != nil {
+	if service.peerState != nil {
+		if err := service.peerState.SyncPeerState(ctx); err != nil {
+			return SyncResult{}, fmt.Errorf("sync mesh peer state: %w", err)
+		}
+	}
+	if err := service.applyUnicast(ctx, desired.UnicastEnabled); err != nil {
 		return SyncResult{}, err
 	}
 	if err := service.images.SetImagePolicies(ctx, desired.Images); err != nil {
@@ -157,27 +177,35 @@ func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (
 		states[information.ID] = information.State
 	}
 
-	return SyncResult{Capacity: capacity, VirtualMachineStates: states}, nil
+	result := SyncResult{Capacity: capacity, VirtualMachineStates: states}
+	if service.uplink != nil {
+		uplinkMAC, err := service.uplink.UplinkMAC()
+		if err != nil {
+			return SyncResult{}, fmt.Errorf("read uplink MAC: %w", err)
+		}
+		result.UplinkMAC = uplinkMAC
+	}
+
+	return result, nil
 }
 
-// applyUnicast applies the unicast transport state. A nil peer set means
-// multicast mode. A requested peer set without a transport is an error,
-// because the host must not silently stay in multicast mode.
-func (service *Service) applyUnicast(ctx context.Context, peers []netip.Addr) error {
-	if peers == nil {
-		if service.unicast != nil {
-			if err := service.unicast.Disable(ctx); err != nil {
-				return fmt.Errorf("disable unicast transport: %w", err)
-			}
+// applyUnicast switches the unicast NDP transport. An enabled transport without a manager is an error, because the host must not silently stay in multicast mode.
+func (service *Service) applyUnicast(ctx context.Context, enabled bool) error {
+	if service.unicast == nil {
+		if enabled {
+			return fmt.Errorf("enable unicast transport: Atlas WG Mesh is disabled")
 		}
 		return nil
 	}
 
-	if service.unicast == nil {
-		return fmt.Errorf("apply unicast peers: Atlas WG Mesh is disabled")
+	if enabled {
+		if err := service.unicast.Enable(ctx); err != nil {
+			return fmt.Errorf("enable unicast transport: %w", err)
+		}
+		return nil
 	}
-	if err := service.unicast.Apply(ctx, peers); err != nil {
-		return fmt.Errorf("apply unicast peers: %w", err)
+	if err := service.unicast.Disable(ctx); err != nil {
+		return fmt.Errorf("disable unicast transport: %w", err)
 	}
 	return nil
 }

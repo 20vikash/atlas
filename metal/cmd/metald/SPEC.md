@@ -72,7 +72,6 @@ The source migration listener binds the migration `transfer_port` (default 9001)
 | `wg_mesh.enabled` | `true` | Enables Atlas WG Mesh host setup and VM mesh registration. |
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
 | `wg_mesh.uplink` | none | Discovery uplink. Required. |
-| `wg_mesh.peers_file` | `base_dir/unicast-peers` | The unicast peer file that metald writes and the unicast daemon reads. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
 | `migration.final_delta_mib` | `512` | Incremental size at or below which the target stops the source and takes the final snapshot. |
 | `migration.transfer_port` | `9001` | TCP port the source listens on for the disk stream. Use the same value on every host in the region. |

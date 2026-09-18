@@ -57,9 +57,10 @@ func skipUnlessHost(t *testing.T) (image, pub string) {
 func integrationMesh(t *testing.T) *network.Mesh {
 	t.Helper()
 	mesh, err := network.NewMesh(network.MeshConfig{
-		CommandPath:   "atlas-wg-mesh",
-		UplinkName:    "eth0",
-		WireGuardName: "wg0",
+		CommandPath:    "atlas-wg-mesh",
+		UplinkName:     "eth0",
+		WireGuardName:  "wg0",
+		PeersStatePath: "/var/lib/metal/wireguard-peers.json",
 	})
 	if err != nil {
 		t.Skipf("Atlas WG Mesh is not installed: %v", err)
