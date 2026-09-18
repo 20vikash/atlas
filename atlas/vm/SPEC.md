@@ -47,21 +47,18 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
 `PlacementService` builds a `PlacementAPI` and runs the strategy selected in Atlas Settings for VM creation and automatic migration. The strategy reads the snapshot, chooses hosts, and calls `api.select(host_name)`. The API locks and rechecks each chosen host. A selection miss lets the strategy try the next host. An explicit migration target calls `api.select` directly.
 
-The built-in `Default` strategy first filters hosts by architecture, memory, and storage. It then tries eligible hosts in this order:
+`balanced` is the default strategy. It uses separate regular and sleepy host pools. It first keeps a start or resize on the current host when that host matches the VM pool and fits the request. Otherwise, it filters ready hosts by pool, architecture, memory, and storage, then tries them in this order:
 
-1. A host whose `is_sleepy` flag matches the VM's sleepy status.
-2. Fewer VMs from the same tenant.
-3. A lower five-minute placement rate.
-4. Less CPU shortfall, measured as requested millicores above reported free millicores.
-5. Lower maximum projected utilization across memory and storage, then host name.
+1. Fewer VMs from the same tenant.
+2. A lower five-minute placement rate.
+3. Less CPU shortfall, measured as requested millicores above reported free millicores.
+4. Lower maximum projected utilization across memory and storage, then host name.
 
-For a sleepy VM, the pressure estimate discounts sleepy memory by `sleepy_vm_overcommit_factor`. It discounts no more memory than the sample reports as used. The factor does not change the memory and storage checks in `api.select`. CPU shortfall is a preference, not a capacity limit.
+For a sleepy VM, `balanced` discounts sleepy memory by `sleepy_vm_overcommit_factor` when ranking hosts. It discounts no more memory than the sample reports as used. The factor does not change the memory and storage checks in `api.select`. CPU shortfall is a preference, not a capacity limit. `balanced` requests a host marked for the VM pool when no ready host fits or when pool memory or storage pressure reaches 80%. A wake already checks its current host before the strategy runs.
 
 `spread-3` uses only regular hosts for regular VMs and only sleepy hosts for sleepy VMs. It spreads regular VMs toward the least provisioned eligible host. It requests enough regular hosts to return to three ready hosts below 85% provisioning when the new hosts become ready. It packs sleepy VMs and requests one sleepy host when projected pool subscription reaches 90%.
 
 `best-fit` uses the same separate pools. It packs regular VMs on the most provisioned eligible host and sleepy VMs on the most subscribed eligible host. It requests one regular host when projected pool provisioning reaches 85%, and one sleepy host when projected sleepy subscription reaches 85%. Provisioning is the larger of the used memory and storage fractions. Sleepy subscription is the sum of assigned VM memory entitlements, including sleeping and stopped VMs, divided by ready sleepy host memory. CPU does not set these thresholds. Both strategies request a host when no ready host in the correct pool fits the VM.
-
-`balanced` uses separate regular and sleepy host pools. It keeps a start or resize on the current host when that host matches the VM pool and fits the request. It then uses the Default ranking within the matching pool. It requests a host marked for that pool when no ready host fits or when pool memory or storage pressure reaches 80%. A wake already checks its current host before the strategy runs, so this policy reduces migrations without changing that wake check.
 
 Add a strategy in `core/placement/strategies/` and register its name and function in `strategies/__init__.py`. The function receives only a `PlacementAPI`. It reads `api.request` for the VM shape, architecture, tenant ID, and sleepy status. It can read `api.action` for the operation and `api.current_host_name` for an existing VM in the simulator. It reads `api.sleepy_vm_overcommit_factor`, `api.usage`, and `api.placement_rate(host_name=None)`. The rate counts VM records created in the last five minutes, including drafts, and returns placements per minute for one host or the fleet.
 
@@ -80,7 +77,7 @@ The lock is released by the commit after the draft or migration is inserted, bef
 
 `api.spawn_host(host_type=None, count=1, is_sleepy=False)` checks the selected Metal Server Size, the provider image, the VM architecture, and its memory and disk shape. It uses New Host Type from Atlas Settings unless the strategy passes a size name. The API marks each new host with `is_sleepy` before it inserts the Pending record. It reuses Pending or Installing hosts only when size, architecture, and `is_sleepy` match. A larger `count` asks for more hosts of that pool. It creates only the missing hosts under a settings lock, so concurrent calls with the same count share the same pending hosts. When some capacity samples are fresh, a stale sample blocks expansion in its matching architecture and sleepy pool. Placement stops if every ready host has a stale sample.
 
-The `Default` strategy requests a host when fleet memory or CPU use reaches 80%, or when no ready host can fit the VM. It can still select a ready host after requesting expansion. A stale sample in the requested architecture and sleepy pool reports a synchronization error and stops expansion. If no host is selected, Atlas commits the pending host records and returns `503 capacity_pending` with `Retry-After: 15`. It creates no VM draft. The client retries after a host is Running and has a fresh capacity sample. A failed host setup reports the failed Metal Server name and requires an operator retry or removal before another automatic request for that type.
+A strategy can still select a ready host after requesting expansion. A stale sample in the requested architecture and sleepy pool reports a synchronization error and stops expansion. If no host is selected, Atlas commits the pending host records and returns `503 capacity_pending` with `Retry-After: 15`. It creates no VM draft. The client retries after a host is Running and has a fresh capacity sample. A failed host setup reports the failed Metal Server name and requires an operator retry or removal before another automatic request for that type.
 
 ### Simulate strategies
 
@@ -90,7 +87,7 @@ Run every registered strategy against the same seeded tenant demand from the rep
 python -m atlas.vm.core.placement.simulation --days 30 --seed 1
 ```
 
-Use `--strategy Default` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--json` for all metrics. Change the [example scenario](core/placement/simulation/scenario.json) with `--scenario path/to/scenario.json`. The scenario contains prices, host types, shapes, demand, traffic, incidents, and timing values. Use `--cpu-oversubscription` and `--max-host-count` to override two common capacity settings.
+Use `--strategy balanced` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--json` for all metrics. Change the [example scenario](core/placement/simulation/scenario.json) with `--scenario path/to/scenario.json`. The scenario contains prices, host types, shapes, demand, traffic, incidents, and timing values. Use `--cpu-oversubscription` and `--max-host-count` to override two common capacity settings.
 
 The example starts with 30 regular hosts of 128 vCPU, 512 GiB memory, and 6.5 TiB storage. Sleepy hosts are marked when a strategy provisions them. Each host costs 50,000 rupees per 30 days. New hosts take 25 to 35 minutes to start and count against the maximum as soon as they are requested. CPU oversubscription scales the simulator's admission ceiling. This CPU ceiling is a simulation rule; live `PlacementAPI.select` treats CPU as strategy data.
 
@@ -102,7 +99,7 @@ VM revenue is the configured multiplier times the initial host type's monthly pr
 
 ### Run a live trial
 
-Use `python -m atlas.vm.core.placement.simulation.live run --help` from the bench root to see the required site, image, host type, tenant IDs, and report options. The trial places real VMs on any ready site host with a fresh capacity sample and reuses compatible pending hosts. It queues synchronization for stale hosts and waits only when no ready host has a fresh sample. It creates a provider host when the strategy requests one. The host cap and cleanup apply only to resources created by the trial. The report lists baseline resources separately from trial resources. A failed trial keeps its resources for inspection and later cleanup.
+Use `python -m atlas.vm.core.placement.simulation.live run --help` from the bench root to see the required site, image, host type, tenant IDs, and report options. The trial defaults to `balanced`; pass `--strategy` to select another registered strategy. The selected strategy places real VMs on ready site hosts with fresh capacity samples and reuses compatible pending hosts. The trial queues synchronization for stale hosts and waits only when no ready host has a fresh sample. It creates a provider host when the strategy requests one. The host cap and cleanup apply only to resources created by the trial. The report lists baseline resources separately from trial resources. A failed trial keeps its resources for inspection and later cleanup.
 
 ## Reading state
 
