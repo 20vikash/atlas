@@ -556,7 +556,8 @@
    "fieldname": "placement_strategy",
    "fieldtype": "Autocomplete",
    "label": "Placement Strategy",
-   "reqd": 1
+   "reqd": 1,
+   "show_description_on_click": 1
   },
   {
    "description": "Metal Server Size used when placement requests a new host.",
@@ -570,7 +571,8 @@
    "description": "Multiplier available to placement strategies for VMs that sleep after idle time.",
    "fieldname": "sleepy_vm_overcommit_factor",
    "fieldtype": "Float",
-   "label": "Sleepy VM Overcommit Factor"
+   "label": "Sleepy VM Overcommit Factor",
+   "show_description_on_click": 1
   }
  ],
  "grid_page_length": 50,
