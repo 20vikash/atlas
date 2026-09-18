@@ -358,6 +358,30 @@ class TestSpecification(unittest.TestCase):
 		for status in ("200", "201"):
 			self.assertIn("content", responses[status], f"{status} has no response body")
 
+	def test_declared_error_model_and_header_are_in_specification(self):
+		router = make_router(name="Machines", docs=DocsConfig(title="Atlas API", version="2.0.0"))
+
+		@router.post("machines")
+		@api_docs(
+			responses={
+				503: {
+					"description": "Capacity pending.",
+					"model": Machine,
+					"headers": {"Retry-After": {"schema": {"type": "integer"}}},
+				}
+			}
+		)
+		def create_machine(payload: Machine) -> Machine:
+			return payload
+
+		specification = router.openapi_specification
+		response = specification["paths"][f"{router.prefix}/machines"]["post"]["responses"]["503"]
+		self.assertEqual(
+			response["content"]["application/json"]["schema"],
+			{"$ref": "#/components/schemas/Machine"},
+		)
+		self.assertEqual(response["headers"]["Retry-After"]["schema"], {"type": "integer"})
+
 	def test_only_declared_responses_are_included(self):
 		responses = self.operation("machines", "post")["responses"]
 		self.assertEqual(responses["201"]["description"], "Created")
