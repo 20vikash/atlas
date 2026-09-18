@@ -70,6 +70,7 @@ class TestServer(UnitTestCase):
 		server = SimpleNamespace(
 			name="node-test-00007",
 			provider_server_id=None,
+			provider_discovery_key=None,
 			architecture=None,
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
@@ -88,6 +89,10 @@ class TestServer(UnitTestCase):
 			MetalServer.before_validate(server)
 
 		self.assertEqual(provider.ensure_server.call_args.args[0].name, "node-test-00007")
+		self.assertEqual(
+			provider.ensure_server.call_args.args[0].discovery_key, server.provider_discovery_key
+		)
+		self.assertEqual(len(server.provider_discovery_key), 32)
 		provider.validate_settings.assert_called_once_with()
 		self.assertEqual(server.provider_server_id, "server-id")
 		self.assertEqual(server.architecture, "amd64")
@@ -97,6 +102,7 @@ class TestServer(UnitTestCase):
 		provider = SimpleNamespace(validate_settings=Mock())
 		server = SimpleNamespace(
 			provider_server_id=None,
+			provider_discovery_key=None,
 			server_size="Scaleway/arm-size",
 			architecture=None,
 			flags=SimpleNamespace(defer_provider_creation=True),
@@ -110,8 +116,11 @@ class TestServer(UnitTestCase):
 			return_value=SimpleNamespace(architecture="arm64"),
 		):
 			MetalServer.before_validate(server)
+			key = server.provider_discovery_key
+			MetalServer.before_validate(server)
 
 		self.assertEqual(server.architecture, "arm64")
+		self.assertEqual(server.provider_discovery_key, key)
 		server.ensure_provider_server.assert_not_called()
 
 	def test_provision_can_defer_provider_creation(self) -> None:

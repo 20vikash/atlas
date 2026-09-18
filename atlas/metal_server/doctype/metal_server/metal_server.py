@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import frappe
 from frappe import _
@@ -50,6 +51,7 @@ class MetalServer(Document):
 		private_ipv4_address: DF.Data | None
 		private_network_interface: DF.Data | None
 		provider_metadata: DF.Code | None
+		provider_discovery_key: DF.Data | None
 		provider_server_id: DF.Data | None
 		public_ipv4_address: DF.Data | None
 		public_network_interface: DF.Data | None
@@ -98,6 +100,9 @@ class MetalServer(Document):
 		if self.provider_server_id:
 			return
 
+		if not self.provider_discovery_key:
+			self.provider_discovery_key = uuid4().hex
+
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		self.architecture = size.architecture
 		if getattr(self.flags, "defer_provider_creation", False):
@@ -106,14 +111,17 @@ class MetalServer(Document):
 		self.ensure_provider_server()
 
 	def ensure_provider_server(self) -> None:
-		"""Create the named provider host once, including after a worker retry."""
+		"""Create the provider host once, including after a worker retry."""
 		if self.provider_server_id:
 			return
+		if not self.provider_discovery_key:
+			frappe.throw(_("Metal Server {0} has no provider discovery key.").format(self.name))
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		image = frappe.get_doc("Metal Server Image", self.server_image)
 		request = ServerCreateRequest(
 			name=self.name,
+			discovery_key=self.provider_discovery_key,
 			server_size=self.server_size,
 			server_image=self.server_image,
 			size_provider_metadata=self._provider_metadata(size.provider_metadata),

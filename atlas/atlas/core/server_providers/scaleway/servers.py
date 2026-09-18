@@ -41,7 +41,7 @@ class ScalewayServers:
 
 	def ensure(self, request: ServerCreateRequest) -> ProviderServer:
 		"""Return the named server, and create it when it does not exist."""
-		remote_server = self.find(request.name)
+		remote_server = self.find(request.discovery_key)
 		was_created = remote_server is None
 		if remote_server is None:
 			remote_server = self.create(request)
@@ -68,26 +68,26 @@ class ScalewayServers:
 				"project_id": self.configuration.project_id,
 				"name": request.name,
 				"description": f"Atlas server {request.name}",
-				"tags": [self.server_tag(request.name)],
+				"tags": [self.server_tag(request.discovery_key)],
 				"install": self.install_configuration(request, offer_id),
 			},
 		)
 
-	def find(self, server_name: str) -> Mapping | None:
+	def find(self, discovery_key: str) -> Mapping | None:
 		"""Return the server with the Atlas identity tag."""
 		response = self.client.request(
 			"GET",
 			f"/baremetal/v1/zones/{self.configuration.zone}/servers",
 			params={
 				"project_id": self.configuration.project_id,
-				"tags": [self.server_tag(server_name)],
+				"tags": [self.server_tag(discovery_key)],
 			},
 		)
 		servers = response.get("servers", [])
 		if not isinstance(servers, list) or not all(isinstance(item, Mapping) for item in servers):
 			raise ScalewayError("Scaleway response has invalid servers")
 		if len(servers) > 1:
-			raise ScalewayError(f"Scaleway returned multiple servers for Atlas server {server_name}")
+			raise ScalewayError(f"Scaleway returned multiple servers for discovery key {discovery_key}")
 		return servers[0] if servers else None
 
 	def fetch(self, provider_server_id: str) -> Mapping:
@@ -227,6 +227,6 @@ class ScalewayServers:
 		return None
 
 	@staticmethod
-	def server_tag(server_name: str) -> str:
+	def server_tag(discovery_key: str) -> str:
 		"""Return the stable Atlas identity tag for one provider server."""
-		return f"atlas-server:{server_name}"
+		return f"atlas-server:{discovery_key}"

@@ -38,7 +38,7 @@ Creation uses `ServerCreateRequest` and returns `ProviderServer`. Catalog operat
 7. Add the provider option and fields to Atlas Settings.
 8. Update this guide and the related specification.
 
-Use one stable remote identity for `ensure_server`. A retry must return the same provider host.
+Use the persisted `ServerCreateRequest.discovery_key` for provider discovery. It is unique to one Metal Server record across Atlas sites. Keep the provider host ID in `provider_server_id`; the Metal Server name is only a label. A retry must return the same provider host.
 
 Do not delete a reused provider host during local compensation. Delete only a provider host that the current request created.
 

@@ -9,7 +9,7 @@ Manual creation creates one provider host before it inserts the matching Metal S
 1. Validate Atlas Settings and the provider of each catalog record.
 2. Stop if the document already has `provider_server_id`.
 3. Set the architecture from Metal Server Size.
-4. For manual creation, call `ensure_server` with the stable Metal Server name. Apply its values and record whether this request created the provider host.
+4. For manual creation, generate a provider discovery key and call `ensure_server` with it. Apply the returned provider values and record whether this request created the provider host.
 5. For placement, insert the Pending document and let the setup job call `ensure_server`.
 
 If document insertion fails, Atlas deletes the provider host only when this request created it. A reused host remains available for retry.
@@ -18,7 +18,7 @@ If document insertion fails, Atlas deletes the provider host only when this requ
 
 `ServerProvisioner` uses this sequence:
 
-1. Create or reuse the provider host with its stable Metal Server name.
+1. Create or reuse the provider host by its discovery key. The key is unique to the Metal Server record and stays the same on retry. The provider host name is a label; `provider_server_id` is the provider's host identifier.
 2. Prepare the provider infrastructure and network attachment.
 3. Wait for root Secure Shell access.
 4. Configure the provider host network.
