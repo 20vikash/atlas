@@ -132,7 +132,7 @@ class TestComparisonStrategies(TestCase):
 		self.assertEqual(api.select.call_args_list, [call("b"), call("a")])
 
 	def test_balanced_expands_for_storage_pressure(self) -> None:
-		api = self._api((self._host("busy", used_storage_mib=7750),))
+		api = self._api((self._host("busy", used_storage_mib=8000),))
 
 		select_balanced(api)
 
@@ -140,7 +140,7 @@ class TestComparisonStrategies(TestCase):
 		api.select.assert_called_once_with("busy")
 
 	def test_balanced_uses_existing_capacity_below_expansion_threshold(self) -> None:
-		api = self._api((self._host("available", used_storage_mib=7749),))
+		api = self._api((self._host("available", used_storage_mib=7999),))
 
 		select_balanced(api)
 

@@ -8,11 +8,11 @@ if TYPE_CHECKING:
 	from atlas.vm.core.placement.api import HostUsage, PlacementAPI
 
 
-EXPANSION_PRESSURE_LIMIT = 0.775
+EXPANSION_PRESSURE_LIMIT = 0.8
 
 
 def select_host(api: PlacementAPI) -> None:
-	"""Prefer fitting lifecycle changes in place and expand at 77.5% pressure."""
+	"""Prefer fitting lifecycle changes in place and expand at 80% pressure."""
 	request = api.request
 	factor = api.sleepy_vm_overcommit_factor if request.is_sleepy else 1.0
 	usage = api.usage
