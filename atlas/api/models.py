@@ -32,6 +32,27 @@ FirewallProtocol = Literal["any", "tcp", "udp", "icmp"]
 AUTO_IP_ADDRESS = "auto"
 
 
+class ApiErrorField(BaseModel):
+	"""One field named in an Atlas API error."""
+
+	name: str
+	message: str
+
+
+class CapacityPendingError(BaseModel):
+	"""The error returned while Atlas starts host capacity."""
+
+	code: Literal["capacity_pending"]
+	message: str
+	fields: list[ApiErrorField]
+
+
+class CapacityPendingResponse(BaseModel):
+	"""The JSON body of a pending capacity response."""
+
+	error: CapacityPendingError
+
+
 def to_unix_timestamp(value: str | datetime) -> int:
 	"""Convert one API time value to Unix seconds."""
 	moment = get_datetime(value)

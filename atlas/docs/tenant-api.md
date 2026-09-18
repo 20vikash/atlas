@@ -72,6 +72,8 @@ A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snaps
 
 An error response has `error.code`, `error.message`, and `error.fields`. Validation errors use `400`; missing authentication uses `401`; denied access uses `403`; missing resources use `404`; and invalid resource state uses `409`.
 
+When VM creation needs a new host, it returns `503` with `error.code` set to `capacity_pending`. Read the `Retry-After` response header for the number of seconds to wait before retrying.
+
 A list response carries `items`, `offset`, `limit`, and `has_more`. The default limit is 20 and the maximum limit is 100.
 
 Every list route accepts `tag`, a comma separated list of `key:value` pairs. A resource must carry every pair, such as `?tag=os:Ubuntu,channel:lts`. A pair without `:` and a repeated key return `400`. Images, virtual machines, and IP addresses each carry a `tags` map in their response.

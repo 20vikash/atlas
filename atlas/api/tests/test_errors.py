@@ -11,6 +11,7 @@ from atlas.api.core.errors import (
 	ResourceNotFound,
 	describe_exception,
 )
+from atlas.api.models import CapacityPendingResponse
 from atlas.api.routes.virtual_machines import create_virtual_machine
 from atlas.vm.core.placement.context import CapacityPending
 
@@ -104,6 +105,7 @@ class TestErrorBody(UnitTestCase):
 		self.assertEqual(response.json["error"]["code"], "capacity_pending")
 		self.assertIn("node-a", response.json["error"]["message"])
 		self.assertEqual(response.headers["Retry-After"], "15")
+		self.assertEqual(CapacityPendingResponse.model_validate(response.json).error.code, "capacity_pending")
 		log_error.assert_not_called()
 
 	def test_null_error_body_does_not_add_retry_header(self) -> None:

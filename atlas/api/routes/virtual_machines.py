@@ -18,6 +18,7 @@ from atlas.api.core.errors import (
 )
 from atlas.api.models import (
 	AUTO_IP_ADDRESS,
+	CapacityPendingResponse,
 	ComputeUpdatePayload,
 	ConsoleTokenPayload,
 	ConsoleTokenResponse,
@@ -102,7 +103,17 @@ def get_attachable_ip_address_name(ip_address_id: str) -> str:
 	},
 	responses={
 		201: {"description": "The virtual machine request is stored."},
-		503: {"description": "Host capacity is pending. Retry after the reported interval."},
+		503: {
+			"description": "Host capacity is pending. Retry after the reported interval.",
+			"model": CapacityPendingResponse,
+			"headers": {
+				"Retry-After": {
+					"description": "Seconds to wait before another create request.",
+					"required": True,
+					"schema": {"type": "integer", "minimum": 0},
+				}
+			},
+		},
 	},
 )
 def create_virtual_machine(
