@@ -32,6 +32,9 @@ class VirtualMachineImageDeletionService:
 
 	def request(self, image: VirtualMachineImage) -> str:
 		"""Retire one image, and reclaim its artifacts when nothing needs them."""
+		if image.status in ("Deleting", "Archived"):
+			return cast(str, image.status)
+
 		if image.status not in ("Available", "Failed"):
 			frappe.throw(_("Only an Available or Failed image can be deleted."), exc=AtlasUserError)
 
