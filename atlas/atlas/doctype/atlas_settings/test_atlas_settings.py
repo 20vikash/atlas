@@ -112,6 +112,22 @@ class TestSleepyVMOvercommitFactor(UnitTestCase):
 
 
 class TestPlacementStrategy(UnitTestCase):
+	def test_migration_replaces_only_removed_strategy(self) -> None:
+		from atlas.atlas.doctype.atlas_settings.atlas_settings import migrate_placement_strategy
+
+		for stored in ("Default", "balanced", "best-fit"):
+			with (
+				self.subTest(stored=stored),
+				patch("frappe.db.get_single_value", return_value=stored),
+				patch("frappe.db.set_single_value") as set_value,
+			):
+				migrate_placement_strategy()
+
+			if stored == "Default":
+				set_value.assert_called_once_with("Atlas Settings", "placement_strategy", "balanced")
+			else:
+				set_value.assert_not_called()
+
 	def test_unknown_strategy_is_rejected(self) -> None:
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 

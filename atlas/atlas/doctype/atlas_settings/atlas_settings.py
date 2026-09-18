@@ -463,3 +463,9 @@ def renew_expiring_wildcard_certificate() -> None:
 def rotate_proxy_cluster_password() -> None:
 	"""Rotate the regional proxy password on schedule."""
 	frappe.get_single("Atlas Settings")._rotate_proxy_cluster_password()
+
+
+def migrate_placement_strategy() -> None:
+	"""Replace the removed strategy on sites that stored it before the new default."""
+	if frappe.db.get_single_value("Atlas Settings", "placement_strategy") == "Default":
+		frappe.db.set_single_value("Atlas Settings", "placement_strategy", "balanced")
