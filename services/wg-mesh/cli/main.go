@@ -46,20 +46,15 @@ func init() {
 	topCommand.Flags().StringVar(&topDestinationText, "dst", "", "destination IPv6 address")
 	topCommand.Flags().Uint32Var(&topTenant, "tenant", 0, "tenant ID")
 
-	remotePurgeCommand.Flags().StringVar(&remoteHostText, "host", "", "WireGuard IPv6 address")
-	remotePurgeCommand.MarkFlagRequired("host")
 	upgradeCommand.Flags().BoolVar(&upgradeForce, "force", false, "allow a state-breaking upgrade")
-
-	unicastStartCommand.Flags().BoolVar(&unicastVerbose, "verbose", false, "log every peer list update")
 
 	virtualMachineCommand.AddCommand(addVirtualMachineCommand, removeVirtualMachineCommand, listVirtualMachinesCommand)
 	privilegedVMCommand.AddCommand(addPrivilegedVMCommand, removePrivilegedVMCommand, listPrivilegedVMCommand)
 	debugCommand.AddCommand(debugStatusCommand, debugEnableCommand, debugDisableCommand, inspectCommand, dumpCommand, topCommand)
-	remoteCommand.AddCommand(remotePurgeCommand)
 	moduleCommand.AddCommand(moduleInstallCommand)
-	unicastCommand.AddCommand(unicastPeerCommand, unicastStartCommand)
-	unicastPeerCommand.AddCommand(unicastPeerAddCommand, unicastPeerRemoveCommand, unicastPeerListCommand)
-	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, remoteCommand, debugCommand, unicastCommand, moduleCommand, upgradeCommand, versionCommand, resetCommand)
+	peersCommand.AddCommand(peersSyncCommand)
+	unicastCommand.AddCommand(unicastStartCommand)
+	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, peersCommand, debugCommand, unicastCommand, moduleCommand, upgradeCommand, versionCommand, resetCommand)
 }
 
 func main() {

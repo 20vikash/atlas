@@ -67,6 +67,11 @@ func upgradeBPF(force bool) error {
 	}
 	defer collection.Close()
 
+	// This release changed the peer map layouts: drop their old pins, so the new maps pin cleanly. A peers sync refills them.
+	for _, name := range []string{"peer_list", "remote_vms"} {
+		_ = os.Remove(filepath.Join(pinDirectory, name))
+	}
+
 	for name, bpfMap := range collection.Maps {
 		if _, exists := replacements[name]; exists {
 			continue
@@ -102,10 +107,6 @@ func upgradeBPF(force bool) error {
 	}
 
 	if err := attachHookPath(interfaces.uplinkName, filepath.Join(release, ndpProgram), "ingress"); err != nil {
-		return err
-	}
-
-	if err := attachHookPath(interfaces.uplinkName, filepath.Join(release, ndpProgram), "egress"); err != nil {
 		return err
 	}
 
@@ -189,10 +190,6 @@ func forceUpgrade(config hostConfig) error {
 		return err
 	}
 
-	if err := attachHook(interfaces.uplinkName, ndpProgram, "egress"); err != nil {
-		return err
-	}
-
 	if err := attachHook(interfaces.wireGuardName, wireguardProgram, "ingress"); err != nil {
 		return err
 	}
@@ -219,7 +216,7 @@ func forceUpgrade(config hostConfig) error {
 
 	hash := bpfHash()
 
-	fmt.Printf("Atlas WG Mesh BPF force-upgraded to %x; learned remote locations were cleared\n", hash[:6])
+	fmt.Printf("Atlas WG Mesh BPF force-upgraded to %x; run peers sync to refill the peer state\n", hash[:6])
 
 	return nil
 }
@@ -264,11 +261,10 @@ func existingMaps() (map[string]*ebpf.Map, func(), error) {
 		"config",
 		"local_vms",
 		privilegedTenantAllowedAddressesMap,
-		"remote_vms",
 		"nud_failures",
-		"peer_list",
 		"vm_peer_map",
 		"ndp_requesters",
+		"peers_by_mac",
 		"debug_config",
 		"debug_stats",
 		"debug_events",

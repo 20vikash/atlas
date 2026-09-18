@@ -1,143 +1,128 @@
 package main
 
 import (
-	"net/netip"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 )
 
-func writeTestPeerFile(t *testing.T, contents string) string {
+func writeTestPeerState(t *testing.T, contents string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "peers")
+	path := filepath.Join(t.TempDir(), "wireguard-peers.json")
 	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
 		t.Fatal(err)
 	}
 	return path
 }
 
-func TestReadUnicastPeerEntries(t *testing.T) {
-	path := writeTestPeerFile(t, ""+"# participating hosts\n"+"10.20.0.11\n"+"\n"+"10.20.0.12 # inline comment\n"+"10.20.0.11\n")
+var testHostConfig = hostConfig{WireGuardIPv6: [16]byte{0xfd, 0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}}
 
-	entries, err := readUnicastPeerEntries(path)
+func TestReadMeshPeers(t *testing.T) {
+	path := writeTestPeerState(t, `[
+		{"node":"server-11","node_id":11,"public_key":"key11","address":"10.20.0.11:7373","mac":"aa:bb:cc:dd:ee:11"},
+		{"node":"server-12","node_id":12,"public_key":"key12","address":"10.20.0.12:7373","mac":"aa:bb:cc:dd:ee:12"}
+	]`)
+
+	peers, err := readMeshPeers(path, testHostConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("got %d entries, want 2", len(entries))
+	if len(peers) != 2 {
+		t.Fatalf("got %d peers, want 2", len(peers))
 	}
-	if entries[0].String() != "10.20.0.11" || entries[1].String() != "10.20.0.12" {
-		t.Fatalf("got entries %v", entries)
+	if peers[0].IPv4 != [4]byte{10, 20, 0, 11} {
+		t.Fatalf("got IPv4 %v for the first peer", peers[0].IPv4)
 	}
-}
-
-func TestReadUnicastPeerEntriesRejectsNonIPv4(t *testing.T) {
-	path := writeTestPeerFile(t, "10.20.0.11\nfdab::1\n")
-
-	if _, err := readUnicastPeerEntries(path); err == nil {
-		t.Fatal("expected an error for a non-IPv4 entry")
+	if peers[0].MAC != [6]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x11} {
+		t.Fatalf("got MAC %v for the first peer", peers[0].MAC)
+	}
+	if peers[0].WG != [16]byte{0xfd, 0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11} {
+		t.Fatalf("got WireGuard address %v for the first peer", peers[0].WG)
 	}
 }
 
-func TestReadUnicastPeerEntriesRejectsOverflow(t *testing.T) {
-	contents := ""
+func TestReadMeshPeersSkipsUnusableEntries(t *testing.T) {
+	path := writeTestPeerState(t, `[
+		{"node":"no-mac","node_id":21,"public_key":"k","address":"10.20.0.21:7373"},
+		{"node":"bad-address","node_id":22,"public_key":"k","address":"fdab::1:7373","mac":"aa:bb:cc:dd:ee:22"},
+		{"node":"no-port","node_id":23,"public_key":"k","address":"10.20.0.23","mac":"aa:bb:cc:dd:ee:23"},
+		{"node":"bad-mac","node_id":24,"public_key":"k","address":"10.20.0.24:7373","mac":"not-a-mac"},
+		{"node":"usable","node_id":25,"public_key":"k","address":"10.20.0.25:7373","mac":"aa:bb:cc:dd:ee:25"}
+	]`)
+
+	peers, err := readMeshPeers(path, testHostConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 1 || peers[0].IPv4 != [4]byte{10, 20, 0, 25} {
+		t.Fatalf("got peers %v, want only 10.20.0.25", peers)
+	}
+}
+
+func TestReadMeshPeersTreatsAbsentFileAsEmpty(t *testing.T) {
+	peers, err := readMeshPeers(filepath.Join(t.TempDir(), "absent.json"), testHostConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(peers) != 0 {
+		t.Fatalf("got %d peers, want 0", len(peers))
+	}
+}
+
+func TestReadMeshPeersRejectsOverflow(t *testing.T) {
+	contents := "["
 	for index := 0; index <= unicastPeerLimit; index++ {
-		address := netip.AddrFrom4([4]byte{10, byte(index >> 8), byte(index), 1})
-		contents += address.String() + "\n"
+		if index > 0 {
+			contents += ","
+		}
+		// The entry is usable only with a MAC and an IPv4 endpoint.
+		contents += `{"node":"server","node_id":` + itoa(index) + `,"public_key":"k","address":"10.0.0.1:7373","mac":"aa:bb:cc:dd:ee:01"}`
 	}
-	path := writeTestPeerFile(t, contents)
+	contents += "]"
+	path := writeTestPeerState(t, contents)
 
-	if _, err := readUnicastPeerEntries(path); err == nil {
+	if _, err := readMeshPeers(path, testHostConfig); err == nil {
 		t.Fatal("expected an error for more peers than the map holds")
 	}
 }
 
-func TestUpdateUnicastPeerFile(t *testing.T) {
-	path := writeTestPeerFile(t, "10.20.0.11\n")
+func TestReadMeshPeersRejectsInvalidJSON(t *testing.T) {
+	path := writeTestPeerState(t, "not json")
 
-	if err := updateUnicastPeerFile(path, "10.20.0.12", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := updateUnicastPeerFile(path, "10.20.0.11", true); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := readUnicastPeerEntries(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("got %d entries after add, want 2", len(entries))
-	}
-
-	if err := updateUnicastPeerFile(path, "10.20.0.11", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := updateUnicastPeerFile(path, "10.20.0.11", false); err != nil {
-		t.Fatal(err)
-	}
-	entries, err = readUnicastPeerEntries(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].String() != "10.20.0.12" {
-		t.Fatalf("got entries %v after remove, want 10.20.0.12", entries)
+	if _, err := readMeshPeers(path, testHostConfig); err == nil {
+		t.Fatal("expected an error for invalid JSON")
 	}
 }
 
-func TestUpdateUnicastPeerFileCreatesMissingFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "peers")
+func TestPeerWireGuardAddress(t *testing.T) {
+	local := [16]byte{0xfd, 0xab, 0x10, 0x20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
 
-	if err := updateUnicastPeerFile(path, "10.20.0.11", true); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := readUnicastPeerEntries(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].String() != "10.20.0.11" {
-		t.Fatalf("got entries %v, want 10.20.0.11", entries)
+	address := peerWireGuardAddress(local, 0x11223344)
+
+	want := [16]byte{0xfd, 0xab, 0x10, 0x20, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x22, 0x33, 0x44}
+	if address != want {
+		t.Fatalf("got address %v, want %v", address, want)
 	}
 }
 
-func TestUpdateUnicastPeerFileRejectsNonIPv4(t *testing.T) {
-	path := writeTestPeerFile(t, "10.20.0.11\n")
+func TestPackPeerMAC(t *testing.T) {
+	packed := packPeerMAC([6]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
 
-	if err := updateUnicastPeerFile(path, "fdab::1", true); err == nil {
-		t.Fatal("expected an error for a non-IPv4 address")
+	// The MAC occupies the low 6 bytes of the little-endian u64 key.
+	var want uint64 = 0xffeeddccbbaa
+	if packed != want {
+		t.Fatalf("got key %#x, want %#x", packed, want)
 	}
 }
 
-func TestUnicastTransportPeersDropsSelf(t *testing.T) {
-	self := [4]byte{10, 20, 0, 10}
-	entries := []netip.Addr{
-		netip.MustParseAddr("10.20.0.10"),
-		netip.MustParseAddr("10.20.0.11"),
+func itoa(value int) string {
+	if value == 0 {
+		return "0"
 	}
-
-	peers := unicastTransportPeers(entries, self)
-	if len(peers) != 1 || peers[0].String() != "10.20.0.11" {
-		t.Fatalf("got peers %v, want 10.20.0.11", peers)
+	digits := ""
+	for value > 0 {
+		digits = string(rune('0'+value%10)) + digits
+		value /= 10
 	}
-}
-
-func TestUnicastPeerMapValuesPacksDensely(t *testing.T) {
-	peers := []netip.Addr{
-		netip.MustParseAddr("10.20.0.11"),
-		netip.MustParseAddr("10.20.0.12"),
-	}
-
-	values := unicastPeerMapValues(peers)
-	if len(values) != unicastPeerLimit {
-		t.Fatalf("got %d values, want %d", len(values), unicastPeerLimit)
-	}
-	if values[0] != [4]byte{10, 20, 0, 11} {
-		t.Fatalf("got value %v at index 0", values[0])
-	}
-	if values[1] != [4]byte{10, 20, 0, 12} {
-		t.Fatalf("got value %v at index 1", values[1])
-	}
-	if !slices.Equal(values[2:], make([][4]byte, unicastPeerLimit-2)) {
-		t.Fatal("the slots after the peers must hold zero")
-	}
+	return digits
 }
