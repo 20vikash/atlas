@@ -165,16 +165,16 @@ class TestAwsProvider(UnitTestCase):
 
 		self.assertEqual([call.args[0] for call in order.call_args_list], ["ready", "mesh"])
 
-	def test_ensure_server_stores_the_mesh_interface_id(self) -> None:
+	def test_ensure_server_returns_before_it_creates_the_mesh_interface(self) -> None:
 		provider = self.provider()
 		provider.servers = Mock()
-		provider.servers.ensure.return_value = ProviderServer(
+		expected = ProviderServer(
 			provider_server_id="i-1",
 			status="Installing",
 			public_ipv4_address="203.0.113.1",
 			provider_metadata={"instance": {"InstanceId": "i-1"}},
 		)
-		provider.servers.ensure_mesh_interface.return_value = {"NetworkInterfaceId": "eni-1"}
+		provider.servers.ensure.return_value = expected
 
 		request = ServerCreateRequest(
 			name="server-1",
@@ -186,8 +186,8 @@ class TestAwsProvider(UnitTestCase):
 
 		server = provider.ensure_server(request)
 
-		self.assertEqual(server.provider_metadata["mesh_interface"], {"NetworkInterfaceId": "eni-1"})
-		provider.servers.ensure_mesh_interface.assert_called_once_with("i-1", "server-1")
+		self.assertIs(server, expected)
+		provider.servers.ensure_mesh_interface.assert_not_called()
 
 	def test_delete_server_uses_only_the_stored_mesh_interface_id(self) -> None:
 		provider = self.provider()
@@ -206,6 +206,7 @@ class TestAwsProvider(UnitTestCase):
 	def test_attach_mesh_interface_registers_multicast_and_stores_the_address(self) -> None:
 		provider = self.provider()
 		provider.servers = Mock()
+		provider.servers.ensure_mesh_interface.return_value = {"NetworkInterfaceId": "eni-1"}
 		provider.servers.fetch_mesh_interface.return_value = {
 			"NetworkInterfaceId": "eni-1",
 			"PrivateIpAddress": "10.1.0.11",
@@ -222,6 +223,21 @@ class TestAwsProvider(UnitTestCase):
 		self.assertEqual(server.private_ipv4_address, "10.1.0.11")
 		self.assertEqual(server.private_network_interface, "atlas-mesh")
 		self.assertEqual(provider.mesh_mac_address(server), "02:aa:bb:cc:dd:ee")
+
+	def test_attach_mesh_interface_keeps_the_id_when_attachment_fails(self) -> None:
+		provider = self.provider()
+		provider.servers = Mock()
+		provider.servers.ensure_mesh_interface.return_value = {"NetworkInterfaceId": "eni-1"}
+		provider.servers.attach_mesh_interface.side_effect = AwsError("attachment failed")
+		server = self.server(provider_server_id="i-1")
+
+		with self.assertRaisesRegex(AwsError, "attachment failed"):
+			provider.attach_mesh_interface(server)
+
+		self.assertEqual(
+			json.loads(server.provider_metadata)["mesh_interface"],
+			{"NetworkInterfaceId": "eni-1"},
+		)
 
 	def test_configure_server_network_passes_the_mesh_address_and_mac(self) -> None:
 		provider = self.provider()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING, ClassVar, override
 
 import frappe
@@ -142,13 +141,8 @@ class AwsProvider(ServerProvider):
 
 	@override
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the named AWS instance and its mesh interface."""
-		server = self.servers.ensure(request)
-		interface = self.servers.ensure_mesh_interface(server.provider_server_id, request.name)
-		return replace(
-			server,
-			provider_metadata={**server.provider_metadata, "mesh_interface": dict(interface)},
-		)
+		"""Return the named AWS instance, and create it when necessary."""
+		return self.servers.ensure(request)
 
 	@override
 	def prepare_server(self, server: "MetalServer") -> None:
@@ -230,7 +224,11 @@ class AwsProvider(ServerProvider):
 		if not server.provider_server_id:
 			raise AwsError("Atlas server has no AWS instance ID")
 
-		interface_id = self.mesh_interface_id(server)
+		interface = self.servers.ensure_mesh_interface(server.provider_server_id, server.name)
+		interface_id = interface.get("NetworkInterfaceId")
+		if not isinstance(interface_id, str):
+			raise AwsError("AWS did not return a mesh network interface ID")
+		self.update_provider_metadata(server, mesh_interface=dict(interface))
 		self.servers.attach_mesh_interface(interface_id, server.provider_server_id)
 
 		def attached_interface() -> Mapping | None:
@@ -311,13 +309,3 @@ class AwsProvider(ServerProvider):
 		if not isinstance(mac_address, str):
 			raise AwsError("Atlas server has no AWS mesh interface MAC address")
 		return mac_address
-
-	@staticmethod
-	def mesh_interface_id(server: "MetalServer") -> str:
-		"""Return the stored AWS mesh network interface ID."""
-		metadata = frappe.parse_json(server.provider_metadata or "{}")
-		interface = metadata.get("mesh_interface") if isinstance(metadata, Mapping) else None
-		interface_id = interface.get("NetworkInterfaceId") if isinstance(interface, Mapping) else None
-		if not isinstance(interface_id, str):
-			raise AwsError("Atlas server has no AWS mesh network interface ID")
-		return interface_id
