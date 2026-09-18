@@ -93,10 +93,6 @@ func installHost(uplinkName, wireGuardName string) error {
 		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 
-	if err := attachHook(uplinkName, ndpProgram, "egress"); err != nil {
-		return rollbackInstall(err, uplinkName, wireGuardName)
-	}
-
 	if err := attachHook(wireGuardName, wireguardProgram, "ingress"); err != nil {
 		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
@@ -345,7 +341,7 @@ func showStatus() error {
 	if err != nil {
 		return err
 	}
-	remoteCount, remoteCapacity, err := remoteLocationCount()
+	peers, err := meshPeerCount()
 	if err != nil {
 		return err
 	}
@@ -357,7 +353,7 @@ func showStatus() error {
 	if err == nil {
 		privilegedCount = fmt.Sprint(len(privilegedVMs))
 	}
-	fmt.Printf("discovery interface: %s\nlocal VMs: %d\nprivileged VMs: %s\nremote locations: %d/%d\nWireGuard address: %s\n", discoveryInterfaceName(config), count, privilegedCount, remoteCount, remoteCapacity, netip.AddrFrom16(config.WireGuardIPv6))
+	fmt.Printf("discovery interface: %s\nlocal VMs: %d\nprivileged VMs: %s\npeers: %d\nWireGuard address: %s\n", discoveryInterfaceName(config), count, privilegedCount, peers, netip.AddrFrom16(config.WireGuardIPv6))
 	return nil
 }
 

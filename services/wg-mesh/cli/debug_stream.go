@@ -194,10 +194,15 @@ func printDebugEvent(event debugEvent, first uint64) {
 	}
 
 	/*
-	 * Non-VM events with an operation are protocol events.
+	 * Non-VM events with an operation are protocol events. A zero host
+	 * field means the event carries no owner address.
 	 */
 	if event.Operation != 0 {
-		fmt.Printf("%8.3f %-9s %-2s %-10s vm=%s host=%s tenant=%d\n", elapsed, hookName(event.Hook), directionName(event.Direction), debugOperationName(event), netip.AddrFrom16(event.VM), netip.AddrFrom16(event.Host), binary.BigEndian.Uint32(event.Tenant[:]))
+		host := ""
+		if event.Host != ([16]byte{}) {
+			host = " host=" + netip.AddrFrom16(event.Host).String()
+		}
+		fmt.Printf("%8.3f %-9s %-2s %-10s vm=%s%s tenant=%d\n", elapsed, hookName(event.Hook), directionName(event.Direction), debugOperationName(event), netip.AddrFrom16(event.VM), host, binary.BigEndian.Uint32(event.Tenant[:]))
 		return
 	}
 

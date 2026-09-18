@@ -4,78 +4,69 @@ For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-
 
 Atlas WG Mesh normally uses NDP on a shared Layer-2 VLAN. Use the unicast mode when the participating hosts cannot share that Layer-2 domain, for example on providers that route all host traffic.
 
-The unicast mode transports the same NDP packets over the routed IPv4 underlay. A TC egress hook wraps each solicitation or advertisement in an outer IPv4 header, and a TC ingress hook removes that header on the receiving peer. Linux neighbour discovery, proxy NDP, the Atlas NDP option, and the WireGuard datapath are unchanged.
+The unicast mode transports the same NDP packets over the routed IPv4 underlay. A TC egress hook wraps each solicitation or advertisement in an outer IPv4 header, and a TC ingress hook removes that header on the receiving peer. Linux neighbour discovery, proxy NDP, and the WireGuard datapath are unchanged.
 
 ## Requirements
 
 - Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`. The Atlas neighbour kernel module is required in unicast mode, exactly as in multicast mode: load it with `atlas-wg-mesh module install`.
 - Permit IPv4 protocol 41 between the participating hosts.
-- Keep one peer file on every host with the reachable uplink IPv4 address of every other participating host. The same complete file can be copied everywhere: the local host drops its own address, so the file can list it too.
-- Keep the peer file writable only by trusted administrators. Transported NDP is not authenticated, and a host with a listed address can influence learned VM locations.
+- Keep the WireGuard peer state on every host complete. It is the single source of truth: each entry needs an IPv4 endpoint and the uplink MAC of that host, because the hooks identify a peer by MAC and reach it by IPv4.
 
-A peer file can hold at most 256 addresses:
+## Peer identification
 
-```text
-10.20.0.11
-10.20.0.12
-```
+No Atlas NDP option exists. Every host knows every peer from the WireGuard peer state:
 
-## Manage the peer file
+- An advertisement carries the answering peer's MAC as the frame source. A receiver maps that MAC to the peer through the `peers_by_mac` map, and registers the advertised VM with that MAC.
+- A transported solicitation carries the requester in the outer IPv4 source, which the ingress hook already validates against the peer list.
+- The VM hook resolves a remote VM with `bpf_fib_lookup`: a hit returns the neighbour MAC, which maps to the owning peer's WireGuard address for encapsulation. A miss crafts a solicitation.
 
-Use the `unicast peer` commands to edit the peer file. Every edit replaces the file atomically, so the daemon never reads a partial edit:
+## Manage the peer state
+
+metald writes `wireguard-peers.json` under `base_dir` after every synchronization and reloads the BPF peer maps:
 
 ```sh
-atlas-wg-mesh unicast peer add PEERS_FILE PEER
-atlas-wg-mesh unicast peer remove PEERS_FILE PEER
-atlas-wg-mesh unicast peer list PEERS_FILE
+atlas-wg-mesh peers sync /var/lib/metal/wireguard-peers.json
 ```
 
-Add and remove are safe to repeat. An address that is already present or absent leaves the file unchanged.
-
-The Atlas app knows every host address: the Metal Server document offers `get_mesh_peer_file`, which returns these contents from the running servers of the region.
+Run the same command by hand after a manual edit. It fills the `peer_list` and `peers_by_mac` maps and installs one neighbour entry per peer, which the kernel resolves for the outer transport. Without metald, an operator writes the JSON state file and runs the command.
 
 ## Start the daemon
 
-Run one daemon on every participating host and keep it running with the host's service manager:
+Run one daemon on every participating host:
 
 ```sh
-atlas-wg-mesh unicast start PEERS_FILE
+atlas-wg-mesh unicast start /var/lib/metal/wireguard-peers.json
 ```
 
-The unicast hooks and the multicast NDP hook never run together. On start, the daemon attaches the two unicast TC hooks to the uplink and removes the multicast NDP filters. On a clean stop, it restores the multicast filters and removes the unicast hooks, and the host returns to multicast behavior. `SIGTERM` and `SIGINT` use the clean shutdown path. A second daemon exits rather than competing with the active one.
-
-On start and on every adopted peer file change, the daemon adds one neighbour entry on the discovery interface for every peer, with `nud permanent extern_learn managed` and no MAC address. The kernel then resolves and maintains the MAC address on its own, which the BPF FIB lookup needs to send wrapped packets to a peer. A peer that leaves the file keeps its entry until the daemon restarts.
+The daemon needs at least one peer in the state file. The unicast hooks and the multicast NDP hook never run together. On start, the daemon attaches the two unicast TC hooks to the uplink and removes the multicast NDP filter. On a clean stop, it restores the multicast filter and removes the unicast hooks, and the host returns to multicast behaviour. `SIGTERM` and `SIGINT` use the clean shutdown path. A second daemon exits rather than competing with the active one.
 
 A start or stop passes through a short window where both hook sets are attached. That window is safe: the unicast hooks skip the work that the multicast hook already did, and every learning step is an idempotent replacement.
 
-The daemon checks the peer file modification time once per second. When the file changes, it parses the file, installs the neighbour entries for the new peer set, and rewrites the pinned `peer_list` BPF map. The map holds the peers densely from index zero. If a changed file is invalid, or an install fails, the daemon logs a warning and keeps the previous list until the next successful pass.
+The daemon performs no packet processing and holds no peer state. All transport runs inside the BPF hooks, and the peer maps come from `peers sync`.
 
-The daemon performs no packet processing. All transport runs inside the BPF hooks.
+## Liveness
+
+Advertisements register remote VMs through the Atlas kfunc as managed, externally learned neighbour entries, so Linux NUD owns liveness exactly as in multicast mode. The NUD hooks count consecutive failures and remove the neighbour entry after twenty, which makes the next VM packet fail its fib lookup and trigger discovery again.
 
 ## Atlas-managed unicast
 
 When the Atlas app manages the host, the controller drives the unicast mode:
 
 1. The `Use Unicast Networking` flag in Atlas Settings switches the region to unicast. The flag is off by default, and the region uses multicast NDP.
-2. Every synchronization sends the complete `unicast_peers` set to each host with `POST /v1/sync`. The set lists the private IPv4 address of every running Metal Server, so every host receives the same set.
-3. metald writes the set into the configured peer file and enables `atlas-wg-mesh-unicast.service`. The unit waits until `atlas-wg-mesh status` succeeds, so the daemon starts only after metald configured the host, and its start removes the multicast NDP filters that the configure run attached.
-4. The daemon watches the peer file. A later synchronization that changes the set rewrites the file, and the daemon reloads the peer list map.
-5. A synchronization without the `unicast_peers` field stops and disables the unit. The clean stop restores the multicast filters, so turning the flag off returns the region to multicast on the next synchronization.
+2. Every synchronization sends the WireGuard peer set to each host with `POST /v1/sync`. Each entry carries the endpoint and the uplink MAC that the host itself reported in an earlier sync response, so every host knows every peer. In unicast mode the same request carries the `unicast` flag.
+3. metald applies the WireGuard peers, reloads the BPF peer maps through `peers sync`, and starts the unicast daemon as a supervised child process when the flag is set. The child stops on the next synchronization without the flag, and its clean stop restores the multicast filters.
+4. A metald stop or crash also stops the daemon, because the child runs with a parent-death signal. The next synchronization starts it again.
 
-A host that would keep no remote peer after it drops its own address does not run the daemon, so a single-host region stays in multicast mode.
-
-The host installation writes the unit file and the peer file path into the metald configuration. A host that was installed before the unit existed must run the host installation again before the controller can switch it to unicast.
-
-The `unicast peer` commands above remain for manual operation without the Atlas app.
+A host that would keep no peer after metald drops its own entry does not run the daemon, so a single-host region stays in multicast mode.
 
 ## How discovery works
 
-1. The host route for `fdaa::/16` still selects the uplink, so Linux sends a multicast solicitation on that interface when a VM location is unknown.
-2. The unicast egress hook captures the solicitation before it reaches the wire. It appends a requester option that carries this host's IPv4 address, wraps the packet in an outer IPv4 header, and sends one copy to the peer that last answered for the target VM, or one copy to every peer when no owner is known. Every copy is a `bpf_clone_redirect` clone, so the copies share the packet data.
-3. The peer ingress hook accepts the packet only when the outer IPv4 source is a configured peer. It removes the outer header and records the requester. Linux answers through proxy NDP.
-4. The egress hook appends the TLLAO and Atlas options to the answer, wraps it, and returns it to the requester alone.
-5. The requester ingress hook removes the outer header. It records the owning peer in `vm_peer_map`, the owner in `remote_vms`, and the neighbour entry through the Atlas kfunc, so Linux NUD owns liveness exactly as in multicast mode.
+1. The host route for `fdaa::/16` still selects the uplink, so Linux sends a multicast solicitation on that interface when a VM location is unknown. The VM hook also crafts such a solicitation when its fib lookup misses.
+2. The unicast egress hook captures the solicitation before it reaches the wire. It wraps the packet in an outer IPv4 header and sends one copy to the peer that last answered for the target VM from `vm_peer_map`, or one copy to every peer when no owner is known. Every copy is a `bpf_clone_redirect` clone, so the copies share the packet data.
+3. The peer ingress hook accepts the packet only when the outer IPv4 source is a configured peer. It removes the outer header, records the requester for the answer, and hands the solicitation to Linux, which answers through proxy NDP.
+4. The egress hook wraps the answer and returns it to the recorded requester alone.
+5. The requester ingress hook removes the outer header. It records the owning peer in `vm_peer_map` and registers the neighbour entry through the Atlas kfunc, so Linux NUD owns liveness exactly as in multicast mode.
 
-The owner entry is one shot: the egress hook removes it when it sends the solicitation. When the owner never answers, for example after a VM moved to another host, the next solicitation finds no entry and fans out to every peer. The new owner answers, and both maps point to it again.
+The owner entry is one shot: the egress hook removes it when it sends the solicitation. When the owner never answers, for example after a VM moved to another host, the next solicitation finds no entry and fans out to every peer. The new owner answers, and the map points to it again.
 
-Run `atlas-wg-mesh upgrade` normally while the daemon is running, then restart the daemon so it attaches the programs from the new release. The upgrade preserves the unicast maps.
+Run `atlas-wg-mesh upgrade` normally while the daemon is running, then let the next synchronization restart the daemon so it attaches the programs from the new release. The upgrade preserves the unicast maps; a release that changes the peer map layouts rebuilds them through `peers sync`.

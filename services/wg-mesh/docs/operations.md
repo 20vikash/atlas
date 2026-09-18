@@ -113,7 +113,7 @@ atlas-wg-mesh vm remove --interface veth0 --address fdaa:1:0:7::1
 atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1
 ```
 
-The first neighbour solicitation after the move reaches the new host, which answers with its own WireGuard address in the Atlas option. Senders update the learned location. The VM keeps its private IPv6 address, and no WireGuard change is required.
+The first neighbour solicitation after the move reaches the new host, which answers with its own frame source MAC. Senders map that MAC to the new owner and update the kernel neighbour entry. The VM keeps its private IPv6 address, and no WireGuard change is required.
 
 ## Remove a VM
 
@@ -201,12 +201,12 @@ It compares the embedded BPF hash, keeps compatible pinned maps including `privi
 
 Use `atlas-wg-mesh version` to show CLI and BPF hashes.
 
-## Remove remote entries
+## Remove learned neighbours
 
-When a host is permanently unavailable, clear learned entries for its WireGuard address:
+When a host is permanently unavailable, the NUD hooks remove its neighbour entries after twenty consecutive failures. To clear a stale entry at once:
 
 ```sh
-atlas-wg-mesh remote purge --host fdab::10
+ip -6 neigh del fdaa:1:0:2::20 dev <uplink>
 ```
 
 ## Remove a host installation
@@ -232,4 +232,4 @@ atlas-wg-mesh configure --uplink eth0 --wireguard wg0
 atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1 --mtu 1380
 ```
 
-A forced reset also clears `remote_vms` and `privileged_tenant_allowed_addresses`; NDP rebuilds remote locations, while the controller must reconcile privileged VMs again.
+A forced reset also clears the peer maps and `privileged_tenant_allowed_addresses`; `peers sync` refills the peer maps, NDP rebuilds remote neighbours, and the controller must reconcile privileged VMs again.

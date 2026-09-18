@@ -245,6 +245,31 @@ static __always_inline int add_tunnel_header(struct __sk_buff *packet, struct co
 	return TC_ACT_OK;
 }
 
+/* Address family for IPv6 in bpf_fib_lookup. */
+#define ATLAS_VM_AF_INET6 10
+
+/* Resolve the owning peer of a remote VM through the host neighbour table: the NDP hooks install one entry per remote VM, and the entry MAC identifies the owning peer through peers_by_mac. Returns the peer WireGuard address, or NULL when the VM is unknown. */
+static __always_inline struct in6_addr *remote_location_of(struct __sk_buff *packet, const struct in6_addr *source, const struct in6_addr *destination, __u16 packet_length)
+{
+	struct bpf_fib_lookup route = {};
+
+	int fib_result;
+
+	route.family = ATLAS_VM_AF_INET6;
+	route.tot_len = packet_length;
+	route.ifindex = packet->ifindex;
+
+	__builtin_memcpy(route.ipv6_src, source->s6_addr, sizeof(route.ipv6_src));
+
+	__builtin_memcpy(route.ipv6_dst, destination->s6_addr, sizeof(route.ipv6_dst));
+
+	fib_result = bpf_fib_lookup(packet, &route, sizeof(route), 0);
+
+	if (fib_result) return NULL;
+
+	return peer_with_mac(pack_mac(route.dmac));
+}
+
 /* Attached to TC ingress on every VM interface. Remote VM traffic is
  * encapsulated as Ethernet, IPv6 (outer WG host to remote WG host), IPv6
  * (inner VM to VM), and sent through Linux routing to wg0.
@@ -327,24 +352,23 @@ int handle_vm_packet(struct __sk_buff *packet)
 		return TC_ACT_OK;
 	}
 
+	local_config = get_config();
+
+	if (!local_config)
+	{
+		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_NO_CONFIG, &src, &dst);
+
+		return TC_ACT_SHOT;
+	}
+
 	/*
-	 * Find the Atlas host owning the remote VM.
+	 * Find the peer that owns the remote VM.
 	 */
-	remote_host = get_remote_location(&dst);
+	remote_host = remote_location_of(packet, &src, &dst, inner_packet_length);
 
 	if (!remote_host)
 	{
-				/* The remote VM is unknown locally: trigger multicast NDP discovery. */
-		local_config = get_config();
-
-		if (!local_config)
-		{
-			emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_NO_CONFIG, &src, &dst);
-
-			return TC_ACT_SHOT;
-		}
-
-				/* Replace this VM packet with a multicast Neighbor Solicitation. */
+		/* The remote VM is unknown locally: trigger NDP discovery. */
 		if (send_neighbor_solicitation(packet, local_config, &src, &dst))
 		{
 			emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_ENCAP_FAILED, &src, &dst);
@@ -354,17 +378,8 @@ int handle_vm_packet(struct __sk_buff *packet)
 
 		emit_vm_debug_event(DEBUG_REDIRECT, DEBUG_VM_REMOTE_UNKNOWN, &src, &dst);
 
-				/* Send the newly constructed NS through the shared discovery VLAN. */
+		/* Send the newly constructed NS through the discovery interface. */
 		return bpf_redirect(local_config->discovery_ifindex, 0);
-	}
-
-	local_config = get_config();
-
-	if (!local_config)
-	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_NO_CONFIG, &src, &dst);
-
-		return TC_ACT_SHOT;
 	}
 
 		/* Remote location is known: encapsulate the VM packet. */

@@ -44,7 +44,7 @@ The first packet continues to Linux routing, which triggers NDP. The NDP hook le
 
 ```text
 VM        ACCEPT   src=fdaa:1:0:7::10 dst=fdaa:1:0:7::20 tenant=7
-NDP       RX LEARN vm=fdaa:1:0:7::20 host=fdab::2 tenant=7
+NDP       RX LEARN vm=fdaa:1:0:7::20 tenant=7
 VM        REDIRECT src=fdaa:1:0:7::10 dst=fdaa:1:0:7::20 tenant=7
 WIREGUARD ACCEPT   src=fdaa:1:0:7::20 dst=fdaa:1:0:7::10 tenant=7
 VM        ACCEPT   src=fdaa:1:0:7::10 dst=fe80::1 tenant=7
@@ -99,12 +99,12 @@ When a VM moves from `fdab::2` to `fdab::3`, the managed neighbour entry on each
 ```text
 VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 WIREGUARD DROP     src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
-NDP       RX LEARN vm=fdaa:1:0:2::20 host=fdab::3 tenant=2
+NDP       RX LEARN vm=fdaa:1:0:2::20 tenant=2
 VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 WIREGUARD ACCEPT   src=fdaa:1:0:2::20 dst=fdaa:1:0:2::10 tenant=2
 ```
 
-The old host drops the tunnel for a VM it no longer owns. Linux NUD probing of the managed neighbour entry produces the neighbour solicitation, and the new owner answers it with the Atlas option.
+The old host drops the tunnel for a VM it no longer owns. Linux NUD probing of the managed neighbour entry produces the neighbour solicitation, and the new owner answers it, so the sender re-registers the neighbour entry with the new owner's MAC.
 
 ### Unreachable owner
 
@@ -116,11 +116,10 @@ VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 ```
 
-Purge every cached VM location for that host:
+Remove the neighbour entries that point at that host:
 
 ```sh
-atlas-wg-mesh remote purge --host fdab::2
-# removed 2 remote entries
+ip -6 neigh del fdaa:1:0:2::20 dev <uplink>
 ```
 
 The next guest packet triggers NDP again. A recovered host must remove registrations for VMs it no longer owns before it rejoins.
@@ -163,4 +162,4 @@ local: false
 remote: not learned
 ```
 
-`not learned` is normal until a local guest contacts that VM. It is also expected after a remote purge.
+`not learned` is normal until a local guest contacts that VM. It is also expected after a neighbour entry is removed.
