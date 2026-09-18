@@ -120,6 +120,13 @@
    "label": "Private Network Interface"
   },
   {
+   "description": "MAC address of the discovery uplink. Each host reports it during synchronization, and the mesh uses it to identify NDP advertisers.",
+   "fieldname": "uplink_mac_address",
+   "fieldtype": "Data",
+   "label": "Uplink MAC Address",
+   "read_only": 1
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_metadata",
    "fieldtype": "Section Break",

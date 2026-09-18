@@ -265,14 +265,14 @@ class TestMetalClientPaths(UnitTestCase):
 			{"wireguard_peers": [], "images": [], "privileged_vm_addresses": []},
 		)
 
-	def test_sync_carries_the_unicast_peers_in_unicast_mode(self) -> None:
+	def test_sync_carries_the_unicast_mode_flag(self) -> None:
 		client = build_client()
 
 		with patch(
 			"atlas.vm.core.metal_client.requests.request",
 			return_value=build_response(200, {"capacity": {}}),
 		) as request:
-			client.sync([], [], [], unicast_peers=["10.20.0.11"])
+			client.sync([], [], [], unicast=True)
 
 		self.assertEqual(
 			request.call_args.kwargs["json"],
@@ -280,7 +280,7 @@ class TestMetalClientPaths(UnitTestCase):
 				"wireguard_peers": [],
 				"images": [],
 				"privileged_vm_addresses": [],
-				"unicast_peers": ["10.20.0.11"],
+				"unicast": True,
 			},
 		)
 

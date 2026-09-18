@@ -9,10 +9,11 @@ from atlas.metal_server.usage import (
 	enqueue_server_sync,
 	enqueue_server_syncs,
 	get_desired_images,
-	get_desired_unicast_peers,
 	get_privileged_vm_addresses,
 	get_usage_values,
+	get_wireguard_peers,
 	sync_server,
+	unicast_network_enabled,
 )
 from atlas.vm.core.metal_client import MetalClientError
 
@@ -81,7 +82,7 @@ class TestServerUsage(UnitTestCase):
 			patch("atlas.metal_server.usage.frappe.get_all", return_value=["server-1"]),
 			patch("atlas.metal_server.usage.get_wireguard_peers", return_value=peers),
 			patch("atlas.metal_server.usage.get_privileged_vm_addresses", return_value=addresses),
-			patch("atlas.metal_server.usage.get_desired_unicast_peers", return_value=None),
+			patch("atlas.metal_server.usage.unicast_network_enabled", return_value=False),
 			patch("atlas.metal_server.usage.frappe.enqueue") as enqueue,
 		):
 			enqueue_server_syncs()
@@ -93,7 +94,7 @@ class TestServerUsage(UnitTestCase):
 			server_name="server-1",
 			wireguard_peers=peers,
 			privileged_vm_addresses=addresses,
-			unicast_peers=None,
+			unicast=False,
 			job_id="atlas||server-sync||server-1",
 			deduplicate=True,
 		)
@@ -102,23 +103,22 @@ class TestServerUsage(UnitTestCase):
 	def test_one_server_exchange_reads_the_shared_sets(self) -> None:
 		peers = [{"node": "server-1"}]
 		addresses = ["fdaa:1::1"]
-		unicast_peers = ["10.20.0.11"]
 		with (
 			patch("atlas.metal_server.usage.get_wireguard_peers", return_value=peers),
 			patch("atlas.metal_server.usage.get_privileged_vm_addresses", return_value=addresses),
-			patch("atlas.metal_server.usage.get_desired_unicast_peers", return_value=unicast_peers),
+			patch("atlas.metal_server.usage.unicast_network_enabled", return_value=True),
 			patch("atlas.metal_server.usage.frappe.enqueue") as enqueue,
 		):
 			enqueue_server_sync("server-1")
 
 		self.assertEqual(enqueue.call_args.kwargs["wireguard_peers"], peers)
 		self.assertEqual(enqueue.call_args.kwargs["privileged_vm_addresses"], addresses)
-		self.assertEqual(enqueue.call_args.kwargs["unicast_peers"], unicast_peers)
+		self.assertTrue(enqueue.call_args.kwargs["unicast"])
 		self.assertEqual(enqueue.call_args.kwargs["job_id"], "atlas||server-sync||server-1")
 
-	def test_unicast_peers_reach_the_host_exchange(self) -> None:
-		"""Only unicast mode sends the field, because Metal decodes the request strictly."""
-		server = SimpleNamespace(name="server-1")
+	def test_unicast_mode_reaches_the_host_exchange(self) -> None:
+		"""Only unicast mode sends the flag, because the peer set comes from the WireGuard peers."""
+		server = SimpleNamespace(name="server-1", uplink_mac_address=None)
 		client = Mock()
 		client.sync.return_value = {"capacity": CAPACITY, "virtual_machines": {}}
 		usage_document = Mock()
@@ -134,33 +134,109 @@ class TestServerUsage(UnitTestCase):
 			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
 			patch("atlas.metal_server.usage.store_reported_states"),
 		):
-			sync_server("server-1", [], [], unicast_peers=["10.20.0.11"])
+			sync_server("server-1", [], [], unicast=True)
 
-		self.assertEqual(client.sync.call_args.args[3], ["10.20.0.11"])
+		self.assertIs(client.sync.call_args.args[3], True)
 		usage_document.insert.assert_called_once_with(ignore_permissions=True)
 
-	def test_desired_unicast_peers_follow_the_settings_flag(self) -> None:
+	def test_sync_stores_the_reported_uplink_mac(self) -> None:
+		server = SimpleNamespace(name="server-1", uplink_mac_address=None)
+		client = Mock()
+		client.sync.return_value = {
+			"capacity": CAPACITY,
+			"virtual_machines": {},
+			"uplink_mac": "aa:bb:cc:dd:ee:ff",
+		}
+		usage_document = Mock()
+
+		def get_document(*arguments):
+			if isinstance(arguments[0], str):
+				return server
+			return usage_document
+
+		with (
+			patch("atlas.metal_server.usage.frappe.get_doc", side_effect=get_document),
+			patch("atlas.metal_server.usage.MetalClient", return_value=client),
+			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
+			patch("atlas.metal_server.usage.store_reported_states"),
+			patch("atlas.metal_server.usage.frappe.db.set_value") as set_value,
+		):
+			sync_server("server-1", [], [])
+
+		set_value.assert_called_once_with(
+			"Metal Server", "server-1", "uplink_mac_address", "aa:bb:cc:dd:ee:ff"
+		)
+
+	def test_sync_keeps_an_unchanged_uplink_mac(self) -> None:
+		server = SimpleNamespace(name="server-1", uplink_mac_address="aa:bb:cc:dd:ee:ff")
+		client = Mock()
+		client.sync.return_value = {
+			"capacity": CAPACITY,
+			"virtual_machines": {},
+			"uplink_mac": "aa:bb:cc:dd:ee:ff",
+		}
+		usage_document = Mock()
+
+		def get_document(*arguments):
+			if isinstance(arguments[0], str):
+				return server
+			return usage_document
+
+		with (
+			patch("atlas.metal_server.usage.frappe.get_doc", side_effect=get_document),
+			patch("atlas.metal_server.usage.MetalClient", return_value=client),
+			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
+			patch("atlas.metal_server.usage.store_reported_states"),
+			patch("atlas.metal_server.usage.frappe.db.set_value") as set_value,
+		):
+			sync_server("server-1", [], [])
+
+		set_value.assert_not_called()
+
+	def test_unicast_mode_follows_the_settings_flag(self) -> None:
 		settings = SimpleNamespace(is_unicast_network_enabled=False)
 
-		with (
-			patch("atlas.metal_server.usage.frappe.get_single", return_value=settings),
-			patch("atlas.metal_server.usage.get_mesh_peers") as get_mesh_peers,
-		):
-			self.assertIsNone(get_desired_unicast_peers())
-
-		get_mesh_peers.assert_not_called()
+		with patch("atlas.metal_server.usage.frappe.get_single", return_value=settings):
+			self.assertFalse(unicast_network_enabled())
 
 		settings.is_unicast_network_enabled = True
-		with (
-			patch("atlas.metal_server.usage.frappe.get_single", return_value=settings),
-			patch(
-				"atlas.metal_server.usage.get_mesh_peers",
-				return_value=["10.20.0.11"],
-			) as get_mesh_peers,
-		):
-			self.assertEqual(get_desired_unicast_peers(), ["10.20.0.11"])
+		with patch("atlas.metal_server.usage.frappe.get_single", return_value=settings):
+			self.assertTrue(unicast_network_enabled())
 
-		get_mesh_peers.assert_called_once_with()
+	def test_wireguard_peers_carry_the_uplink_mac(self) -> None:
+		"""The mesh identifies a peer by its uplink MAC, so a peer without one is unusable."""
+		rows = [
+			{
+				"name": "server-11",
+				"wireguard_public_key": "key11",
+				"public_ipv4_address": "10.20.0.11",
+				"port": 7373,
+				"uplink_mac_address": "aa:bb:cc:dd:ee:11",
+			},
+			{
+				"name": "server-12",
+				"wireguard_public_key": "key12",
+				"public_ipv4_address": "10.20.0.12",
+				"port": 7373,
+				"uplink_mac_address": None,
+			},
+		]
+
+		with patch("atlas.metal_server.usage.frappe.get_all", return_value=rows):
+			peers = get_wireguard_peers()
+
+		self.assertEqual(
+			peers,
+			[
+				{
+					"node": "server-11",
+					"node_id": 11,
+					"public_key": "key11",
+					"address": "10.20.0.11:7373",
+					"mac": "aa:bb:cc:dd:ee:11",
+				}
+			],
+		)
 
 	def test_privileged_addresses_select_live_privileged_vms(self) -> None:
 		"""Every host holds the same whitelist, so one region-wide set goes out."""
