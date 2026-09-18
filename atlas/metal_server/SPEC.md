@@ -43,7 +43,7 @@ Placement inserts the Pending Metal Server before its provider job starts. Manua
 
 `POST /v1/sync` sends the desired host state and returns capacity in the same exchange. Atlas records the result as a Metal Server Usage row, which is what placement later reads.
 
-The operator sets `is_sleepy` on a Metal Server to mark it for placement strategies. The flag does not change host setup or capacity reporting.
+The operator can set `is_sleepy` on a Metal Server for placement strategies. Placement also sets the flag when it provisions a host for the sleepy pool. The flag is stored on the Pending record, so later placement requests reuse only a host in the same pool. It does not change host setup or capacity reporting.
 
 A scheduled job queues one exchange for each ready server. The `sync_state` action queues one exchange for a single server, so an operator does not wait for the next scheduled run.
 

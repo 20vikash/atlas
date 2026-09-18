@@ -321,6 +321,7 @@ class MetalServer(Document):
 		size: str | None = None,
 		*,
 		defer_provider_creation: bool = False,
+		is_sleepy: bool = False,
 	) -> MetalServer:
 		"""Create and provision a Server with the selected image and size."""
 		settings: AtlasSettings = frappe.get_single("Atlas Settings")
@@ -329,6 +330,7 @@ class MetalServer(Document):
 		server: "MetalServer" = frappe.new_doc("Metal Server")
 		server.server_size = size or MetalServer._find_default_server_size(settings.server_provider)
 		server.server_image = image.name
+		server.is_sleepy = is_sleepy
 		server.status = "Pending"
 		server.flags.defer_provider_creation = defer_provider_creation
 		server.insert(ignore_permissions=defer_provider_creation)

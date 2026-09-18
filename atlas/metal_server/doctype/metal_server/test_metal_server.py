@@ -127,9 +127,10 @@ class TestServer(UnitTestCase):
 			),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.new_doc", return_value=server),
 		):
-			MetalServer.provision(size="Scaleway/size", defer_provider_creation=True)
+			MetalServer.provision(size="Scaleway/size", defer_provider_creation=True, is_sleepy=True)
 
 		self.assertEqual(server.server_size, "Scaleway/size")
+		self.assertTrue(server.is_sleepy)
 		self.assertTrue(server.flags.defer_provider_creation)
 		server.insert.assert_called_once_with(ignore_permissions=True)
 
