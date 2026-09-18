@@ -223,7 +223,9 @@ class MetalServer(Document):
 		if is_job_enqueued(self.setup_job_id):
 			frappe.throw(_("Metal Server setup is still running for {0}.").format(self.name))
 
-		self.settings.server_provider_controller.delete_server(self._provider_server_id())
+		self.settings.server_provider_controller.delete_server(
+			self._provider_server_id(), self._provider_metadata(self.provider_metadata)
+		)
 		self.db_set({"status": "Deleted", "is_provisioning_completed": 0})
 
 	def _enqueue_setup_server(self) -> None:

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import ipaddress
-import subprocess
-from collections.abc import Callable, Mapping
-from time import monotonic, sleep
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, override
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 import frappe
 
 from atlas.atlas.core.server_providers import register
 from atlas.atlas.core.server_providers.base import (
-	ProviderOperationError,
 	ProviderServer,
 	ReservedIPAddress,
 	ServerCreateRequest,
@@ -31,8 +27,6 @@ if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
-PollResult = TypeVar("PollResult")
-
 
 @register
 class ScalewayProvider(ServerProvider):
@@ -40,11 +34,9 @@ class ScalewayProvider(ServerProvider):
 
 	provider_type = "Scaleway"
 	credential_fields = ("scaleway_secret_key", "scaleway_access_key")
+	error_class = ScalewayError
 	private_network_min_prefix = 20
 	private_network_max_prefix = 29
-	setup_poll_interval_seconds: ClassVar[int] = 5
-	setup_poll_timeout_seconds: ClassVar[int] = 7_200
-	private_address_attempts: ClassVar[int] = 60
 	public_network_interface: ClassVar[str] = "eno1"
 
 	def __init__(self, settings: "AtlasSettings | None" = None) -> None:
@@ -159,7 +151,7 @@ class ScalewayProvider(ServerProvider):
 		self.servers.set_power_state(provider_server_id, action)
 
 	@override
-	def delete_server(self, provider_server_id: str) -> None:
+	def delete_server(self, provider_server_id: str, _provider_metadata: Mapping[str, object]) -> None:
 		"""Delete one Scaleway server if it exists."""
 		self.servers.delete(provider_server_id)
 
@@ -252,83 +244,7 @@ class ScalewayProvider(ServerProvider):
 		"""Promote the Ubuntu Secure Shell user to root access."""
 		if user != "ubuntu":
 			raise ScalewayError(f"Scaleway cannot promote Secure Shell user {user}")
-		self.run_setup_script(server, "scaleway/promote-ubuntu-user.sh", ssh_user=user)
-
-	def wait_for_private_address(self, server: "MetalServer") -> None:
-		"""Wait until the configured private address is available."""
-		from atlas.atlas.core.ssh import SSHRunner
-
-		device = server.private_network_interface
-		expected_address = server.private_ipv4_address
-		if not device or not expected_address:
-			raise ScalewayError("Atlas server has no private network interface or address")
-
-		def has_private_address() -> bool | None:
-			"""Report whether the server has its private network address."""
-			try:
-				result = SSHRunner(server.public_ipv4_address).run_command(
-					f"ip -4 -o addr show dev {device} scope global", timeout_seconds=15
-				)
-			except OSError, subprocess.TimeoutExpired:
-				return None
-			return True if result.exit_code == 0 and expected_address in result.output else None
-
-		try:
-			self.poll(
-				has_private_address,
-				timeout_seconds=self.private_address_attempts * self.setup_poll_interval_seconds,
-				poll_interval_seconds=self.setup_poll_interval_seconds,
-				description=f"the private address {expected_address} on {device}",
-			)
-		except ProviderOperationError as error:
-			raise ScalewayError(str(error), is_retryable=True) from error
-
-	def run_setup_script(
-		self,
-		server: MetalServer,
-		script: str,
-		*,
-		ssh_user: str = "root",
-		environment: Mapping[str, object] | None = None,
-		timeout_seconds: int = 120,
-	) -> None:
-		"""Run one packaged setup script through Secure Shell."""
-		from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
-
-		task = SSHTask.create_for_script_file(
-			target_type=server.doctype,
-			target=server.name,
-			script_path=script,
-			ssh_user=ssh_user,
-			environment=environment,
-			timeout_seconds=timeout_seconds,
-			run_in_background=False,
-		)
-		result = task.result
-		if result is None or not result.is_success:
-			raise ScalewayError(f"Setup script {script} failed", is_retryable=True)
-
-	def poll(
-		self,
-		operation: Callable[[], PollResult | None],
-		*,
-		timeout_seconds: int,
-		poll_interval_seconds: int,
-		description: str,
-	) -> PollResult:
-		"""Poll one operation until it returns a result or reaches its time limit."""
-		deadline = monotonic() + timeout_seconds
-		while monotonic() < deadline:
-			result = operation()
-			if result is not None:
-				return result
-			sleep(poll_interval_seconds)
-		raise ScalewayError(f"Timed out while waiting for {description}", is_retryable=True)
-
-	@property
-	def private_network_prefix_length(self) -> int:
-		"""Return the prefix length of the Atlas private network."""
-		return ipaddress.ip_network(self.settings.private_network_cidr, strict=False).prefixlen
+		self.run_setup_script(server, "promote-ssh-user.sh", ssh_user=user)
 
 	@staticmethod
 	def private_network_vlan(server: "MetalServer") -> int:
@@ -339,24 +255,6 @@ class ScalewayProvider(ServerProvider):
 		if not isinstance(vlan, int):
 			raise ScalewayError("Scaleway private network has no VLAN ID")
 		return vlan
-
-	@staticmethod
-	def apply_provider_server(server: "MetalServer", provider_server: ProviderServer) -> None:
-		"""Apply provider-owned values to an Atlas Server."""
-		server.provider_server_id = provider_server.provider_server_id
-		if provider_server.status:
-			server.status = provider_server.status
-		server.public_ipv4_address = provider_server.public_ipv4_address
-		ScalewayProvider.update_provider_metadata(server, **provider_server.provider_metadata)
-
-	@staticmethod
-	def update_provider_metadata(document: "MetalServer", **updates: object) -> None:
-		"""Merge provider values into the Server metadata."""
-		metadata = frappe.parse_json(document.provider_metadata or "{}")
-		if not isinstance(metadata, dict):
-			metadata = {}
-		metadata.update(updates)
-		document.provider_metadata = frappe.as_json(metadata)
 
 	def _request(
 		self, method: str, path: str, allow_missing: bool = False, **kwargs: object

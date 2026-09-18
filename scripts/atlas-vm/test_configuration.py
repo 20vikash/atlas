@@ -18,6 +18,11 @@ DIRECTORY = Path(__file__).resolve().parent
 EXAMPLE = DIRECTORY / "atlas-vm.example.toml"
 
 
+def as_aws(text: str) -> str:
+	"""Select AWS in the example configuration."""
+	return text.replace('server_provider = "Scaleway"', 'server_provider = "AWS"')
+
+
 def load_module(name: str, filename: str) -> ModuleType:
 	spec = importlib.util.spec_from_file_location(name, DIRECTORY / filename)
 	assert spec and spec.loader
@@ -48,6 +53,67 @@ class ConfigurationTest(unittest.TestCase):
 		self.assertEqual(guest.atlas_setup_values["region_id"], 1)
 		self.assertEqual(guest.atlas_setup_values["scaleway_zone"], "fr-par-1")
 		self.assertEqual(guest.bootstrap_password, "generated-bootstrap-password")
+
+	def test_aws_example_is_valid_for_both_readers(self) -> None:
+		self.path.write_text(as_aws(self.path.read_text()))
+
+		atlas_vm.Settings.read(self.path)
+		with patch.object(setup, "generate_password", return_value="password"):
+			guest = setup.Configuration.read(self.path)
+
+		values = guest.atlas_setup_values
+		self.assertEqual(values["server_provider"], "AWS")
+		self.assertEqual(values["aws_availability_zone"], "eu-west-1a")
+		self.assertEqual(values["aws_storage_pool_device"], "/dev/nvme1n1")
+		self.assertNotIn("scaleway_zone", values)
+
+	def test_unselected_provider_table_is_not_validated(self) -> None:
+		self.path.write_text(
+			self.path.read_text().replace('availability_zone = "eu-west-1a"', "availability_zone = 1")
+		)
+
+		atlas_vm.Settings.read(self.path)
+
+	def test_an_unknown_server_provider_is_rejected(self) -> None:
+		self.path.write_text(
+			self.path.read_text().replace('server_provider = "Scaleway"', 'server_provider = "GCP"')
+		)
+
+		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "server_provider must be one of"):
+			atlas_vm.Settings.read(self.path)
+
+	def test_aws_accepts_a_prefix_that_scaleway_refuses(self) -> None:
+		text = self.path.read_text().replace(
+			'private_network_cidr = "10.1.0.0/20"', 'private_network_cidr = "10.1.0.0/16"'
+		)
+		self.path.write_text(text)
+
+		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "/20 through /29 for Scaleway"):
+			atlas_vm.Settings.read(self.path)
+
+		self.path.write_text(as_aws(text))
+		atlas_vm.Settings.read(self.path)
+
+	def test_the_availability_zone_must_be_in_the_region(self) -> None:
+		self.path.write_text(
+			as_aws(self.path.read_text()).replace(
+				'availability_zone = "eu-west-1a"', 'availability_zone = "us-east-1a"'
+			)
+		)
+
+		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "availability_zone is not in"):
+			atlas_vm.Settings.read(self.path)
+
+	def test_aws_storage_device_must_stay_below_dev(self) -> None:
+		self.path.write_text(
+			as_aws(self.path.read_text()).replace(
+				'storage_pool_device = "/dev/nvme1n1"',
+				'storage_pool_device = "/dev/../etc/passwd"',
+			)
+		)
+
+		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "must be a /dev path"):
+			atlas_vm.Settings.read(self.path)
 
 	def test_atlas_settings_are_required(self) -> None:
 		self.path.write_text('[pilot]\nsite = "atlas.example.com"\nletsencrypt_email = "ops@example.com"\n')

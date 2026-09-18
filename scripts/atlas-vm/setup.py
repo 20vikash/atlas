@@ -123,7 +123,6 @@ class Configuration:
 
 def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
 	"""Return the Atlas command input from the TOML tables."""
-	scaleway = atlas["scaleway"]
 	route53 = atlas["route53"]
 	letsencrypt = atlas["letsencrypt"]
 	return {
@@ -135,17 +134,35 @@ def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
 		"private_network_cidr": atlas["private_network_cidr"],
 		"private_network_mtu": atlas["private_network_mtu"],
 		"central_jwks_url": atlas["central_jwks_url"],
-		"scaleway_organization_id": scaleway["organization_id"],
-		"scaleway_project_id": scaleway["project_id"],
-		"scaleway_zone": scaleway["zone"],
-		"scaleway_machine_billing_cycle": scaleway["machine_billing_cycle"],
-		"scaleway_access_key": scaleway["access_key"],
-		"scaleway_secret_key": scaleway["secret_key"],
+		**read_provider_values(atlas),
 		"route53_access_key_id": route53["access_key_id"],
 		"route53_access_key_secret": route53["secret_access_key"],
 		"letsencrypt_email": letsencrypt["email"],
 		"is_letsencrypt_staging": letsencrypt["staging"],
 		"is_wildcard_tls_auto_renew_enabled": letsencrypt["auto_renew"],
+	}
+
+
+def read_provider_values(atlas: dict) -> dict[str, object]:
+	"""Return the values of the selected server provider."""
+	if atlas["server_provider"] == "Scaleway":
+		scaleway = atlas["scaleway"]
+		return {
+			"scaleway_organization_id": scaleway["organization_id"],
+			"scaleway_project_id": scaleway["project_id"],
+			"scaleway_zone": scaleway["zone"],
+			"scaleway_machine_billing_cycle": scaleway["machine_billing_cycle"],
+			"scaleway_access_key": scaleway["access_key"],
+			"scaleway_secret_key": scaleway["secret_key"],
+		}
+
+	aws = atlas["aws"]
+	return {
+		"aws_region": aws["region"],
+		"aws_availability_zone": aws["availability_zone"],
+		"aws_access_key_id": aws["access_key_id"],
+		"aws_secret_access_key": aws["secret_access_key"],
+		"aws_storage_pool_device": aws["storage_pool_device"],
 	}
 
 

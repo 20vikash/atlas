@@ -38,6 +38,7 @@ server / vm code
 ServerProvider  (typed create, result, catalog, power, address, and error values)
       |
       +-- scaleway/   client, servers, ip_addresses, catalog, partitioning, infrastructure
+      +-- aws/        client, servers, ip_addresses, catalog, configuration, infrastructure
 ```
 
 A provider component never saves a Frappe document. It returns typed values, and the caller decides what to record. That keeps provider code testable without a database and keeps persistence in one place.

@@ -17,7 +17,7 @@ curl -fsSLo atlas-vm.toml https://raw.githubusercontent.com/frappe/atlas/develop
 sudo atlas-vm create
 ```
 
-The configuration must contain the Atlas region, Scaleway, Route53, and Let's Encrypt values. Route53 must contain an existing public zone for `atlas.wildcard_domain`. Do not add `*.` to the domain.
+The configuration must contain the Atlas region, Route53, and Let's Encrypt values. Set `atlas.server_provider` to `Scaleway` or `AWS`. Atlas reads the matching provider table. Route53 must contain an existing public zone for `atlas.wildcard_domain`. Do not add `*.` to the domain.
 
 Atlas uses the `pilot.site` value with HTTPS as its public URL. Set `atlas.base_url` only if the public URL is different.
 
@@ -25,7 +25,7 @@ The setup generates a temporary password for Pilot and the site Administrator. I
 
 The setup creates one Secure Shell key for the `pilot.user`. Atlas uses this key to manage Metal Servers. The setup keeps this key when you run it again.
 
-The setup creates the Scaleway network resources and Route53 records. It also gets the provider catalogs and a wildcard certificate. Each `[[image]]` table creates one system image in site-file storage. Cargo configures object storage later.
+The setup creates the server provider network resources and the Route53 records. It also gets the provider catalogs and a wildcard certificate. Each `[[image]]` table creates one system image in site-file storage. Cargo configures object storage later.
 
 The configuration contains provider secrets. `atlas-vm` stores its copy at `/var/lib/atlas-vm/atlas-vm.toml` with mode `0600`.
 
@@ -42,6 +42,8 @@ sudo atlas-vm resize --vcpu 8 --disk 60     # This restarts the VM. A disk can o
 ```
 
 `atlas-vm setup` updates credentials and other mutable values. It stops if the configuration changes a region or provider value after provider setup.
+
+AWS needs one subnet in one availability zone, because WG Mesh discovery uses a multicast time to live of 1. Atlas creates a transit gateway multicast domain for that discovery traffic.
 
 The VM answers on port 2222, and host ports 80 and 443 reach it.
 
