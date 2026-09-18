@@ -34,6 +34,7 @@ class _Host:
 	name: str
 	host_type: HostType
 	ready: bool
+	is_sleepy: bool = False
 	allocations: dict[int, Resources] = field(default_factory=dict)
 	used_cpu_millicores: int = 0
 	used_memory_mib: int = 0
@@ -78,6 +79,14 @@ class _Tenant:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingAllocation:
+	identifier: int
+	tenant_id: int
+	shape_name: str
+	disk_mib: int
+
+
+@dataclass(frozen=True, slots=True)
 class Result:
 	strategy: str
 	tenants: int
@@ -88,12 +97,15 @@ class Result:
 	asleep_at_end: int
 	stopped_at_end: int
 	hosts_at_end: int
+	regular_hosts_at_end: int
+	sleepy_hosts_at_end: int
 	new_hosts: int
 	host_hours: float
 	host_cost_rupees: float
 	vm_revenue_rupees: float
 	margin_rupees: float
 	create_failures: int
+	pending_creates: int
 	resize_failures: int
 	start_failures: int
 	wake_failures: int
@@ -106,6 +118,7 @@ class Result:
 	cpu_allocation: float
 	memory_utilization: float
 	storage_utilization: float
+	hours_below_three_ready: float
 
 
 class SimulatedPlacementAPI:
@@ -122,6 +135,7 @@ class SimulatedPlacementAPI:
 		self._simulation = simulation
 		self._virtual_machine_id = virtual_machine_id
 		self._selected_host_name: str | None = None
+		self._pending_host_names: tuple[str, ...] = ()
 		self.request = request
 		self.action = action
 		self.current_host_name = current_host_name
@@ -146,7 +160,9 @@ class SimulatedPlacementAPI:
 		self._selected_host_name = host_name
 		return True
 
-	def spawn_host(self, host_type: str | None = None, *, count: int = 1) -> tuple[str, ...]:
+	def spawn_host(
+		self, host_type: str | None = None, *, count: int = 1, is_sleepy: bool = False
+	) -> tuple[str, ...]:
 		if isinstance(count, bool) or not isinstance(count, int) or count < 1:
 			raise ValueError("count must be a positive integer")
 		selected_type = host_type or self._simulation.scenario.new_host_type
@@ -162,13 +178,14 @@ class SimulatedPlacementAPI:
 		names = [
 			host.name
 			for host in self._simulation._hosts.values()
-			if not host.ready and host.host_type.name == selected_type
+			if not host.ready and host.host_type.name == selected_type and host.is_sleepy == is_sleepy
 		]
 		for _ in range(max(0, count - len(names))):
 			if len(self._simulation._hosts) >= self._simulation.scenario.max_host_count:
 				break
-			names.append(self._simulation._spawn(catalog))
-		return tuple(names)
+			names.append(self._simulation._spawn(catalog, is_sleepy=is_sleepy))
+		self._pending_host_names = tuple(names)
+		return self._pending_host_names
 
 
 class Simulation:
@@ -181,6 +198,7 @@ class Simulation:
 		self._now = 0
 		self._hosts: dict[str, _Host] = {}
 		self._virtual_machines: dict[int, _VM] = {}
+		self._pending_allocations: dict[int, _PendingAllocation] = {}
 		self._tenants = {profile.identifier: _Tenant(profile) for profile in workload.tenants}
 		self._events: list[tuple[int, int, str, object]] = []
 		self._sequence = count()
@@ -193,6 +211,7 @@ class Simulation:
 		self._paid_memory_mib = 0
 		self._host_monthly_price_sum = 0.0
 		self._host_hours_ticks = 0
+		self._below_three_ready_ticks = 0
 		self._host_cost_rupees = 0.0
 		self._vm_revenue_rupees = 0.0
 		self._created = 0
@@ -217,17 +236,17 @@ class Simulation:
 			host.host_type.storage_mib,
 		)
 
-	def _add_host(self, host_type: HostType, *, ready: bool) -> str:
+	def _add_host(self, host_type: HostType, *, ready: bool, is_sleepy: bool | None = None) -> str:
 		name = f"host-{len(self._hosts) + 1:04d}"
-		host = _Host(name, host_type, ready)
+		host = _Host(name, host_type, ready, host_type.is_sleepy if is_sleepy is None else is_sleepy)
 		self._hosts[name] = host
 		self._host_monthly_price_sum += host_type.monthly_rupees
 		if ready:
 			self._ready_capacity = _plus(self._ready_capacity, self._host_total(host))
 		return name
 
-	def _spawn(self, host_type: HostType) -> str:
-		name = self._add_host(host_type, ready=False)
+	def _spawn(self, host_type: HostType, *, is_sleepy: bool) -> str:
+		name = self._add_host(host_type, ready=False, is_sleepy=is_sleepy)
 		rng = event_random(self.workload.seed, len(self._hosts))
 		minutes = rng.uniform(self.scenario.host_start_minutes_min, self.scenario.host_start_minutes_max)
 		self._schedule(self._now + max(1, round(minutes * 60 * TICKS_PER_SECOND)), "host_ready", name)
@@ -266,7 +285,7 @@ class Simulation:
 			HostUsage(
 				name=host.name,
 				architecture=host.host_type.architecture,
-				is_sleepy=host.host_type.is_sleepy,
+				is_sleepy=host.is_sleepy,
 				sample_created_at=at,
 				total=self._host_total(host),
 				free=Resources(
@@ -280,9 +299,7 @@ class Simulation:
 				sleepy_reserved_memory_mib=sum(
 					self.scenario.shape(self._virtual_machines[key].shape_name).memory_mib
 					for key in host.allocations
-					if key > 0
-					and host.allocations[key].memory_mib > 0
-					and self.scenario.shape(self._virtual_machines[key].shape_name).is_sleepy
+					if key > 0 and self.scenario.shape(self._virtual_machines[key].shape_name).is_sleepy
 				),
 			)
 			for host in self._hosts.values()
@@ -305,12 +322,14 @@ class Simulation:
 			self._placements.popleft()
 		return sum(host_name is None or name == host_name for _, name in self._placements) / 5
 
-	def _choose(self, request: PlacementRequest, action: str, vm: _VM | None) -> str | None:
+	def _choose(
+		self, request: PlacementRequest, action: str, vm: _VM | None
+	) -> tuple[str | None, tuple[str, ...]]:
 		api = SimulatedPlacementAPI(
 			self, request, action, vm.host_name if vm else None, vm.identifier if vm else None
 		)
 		self._strategy(api)
-		return api._selected_host_name
+		return api._selected_host_name, api._pending_host_names
 
 	def _request(self, tenant_id: int, shape: VMShape, disk_mib: int) -> PlacementRequest:
 		return PlacementRequest(
@@ -375,41 +394,75 @@ class Simulation:
 
 	def _allocate(self, tenant: _Tenant, event: ExternalEvent, rng: random.Random) -> None:
 		for index in range(event.count):
-			if tenant.left or len(tenant.virtual_machines) >= tenant.profile.target_size:
+			pending_count = sum(
+				allocation.tenant_id == tenant.profile.identifier
+				for allocation in self._pending_allocations.values()
+			)
+			if tenant.left or len(tenant.virtual_machines) + pending_count >= tenant.profile.target_size:
 				return
 			if rng.random() >= tenant.allocation_multiplier:
 				continue
 			shape = rng.choices(self.scenario.shapes, weights=tenant.profile.shape_weights)[0]
 			disk_mib = self._disk_mib(shape, rng)
-			request = self._request(tenant.profile.identifier, shape, disk_mib)
-			host_name = self._choose(request, "create", None)
-			if host_name is None:
-				self._failure(tenant, "create")
-				return
-			vm_id = event.identifier * 1_000_000 + index + 1
-			vm = _VM(
-				vm_id,
+			allocation = _PendingAllocation(
+				event.identifier * 1_000_000 + index + 1,
 				tenant.profile.identifier,
 				shape.name,
 				disk_mib,
-				self._now,
-				host_name,
-				last_traffic_tick=self._now,
 			)
-			self._virtual_machines[vm_id] = vm
-			tenant.virtual_machines.add(vm_id)
-			self._change_allocation(
-				self._hosts[host_name], vm_id, Resources(shape.cpu_millicores, shape.memory_mib, disk_mib)
-			)
-			self._placements.append((self._now, host_name))
-			self._created += 1
-			self._schedule(
-				self._now + max(1, round(self.scenario.traffic.boot_seconds * TICKS_PER_SECOND)),
-				"boot",
-				vm_id,
-			)
-			self._schedule_lifetime(vm)
-			self._schedule_visits(vm)
+			if self._place_allocation(allocation) is False:
+				return
+
+	def _place_allocation(self, allocation: _PendingAllocation) -> bool | None:
+		"""Place one request, wait for a provisioning host, or record a hard failure."""
+		tenant = self._tenants[allocation.tenant_id]
+		shape = self.scenario.shape(allocation.shape_name)
+		request = self._request(allocation.tenant_id, shape, allocation.disk_mib)
+		host_name, pending_hosts = self._choose(request, "create", None)
+		if host_name is None:
+			if pending_hosts:
+				self._pending_allocations[allocation.identifier] = allocation
+				return None
+			self._pending_allocations.pop(allocation.identifier, None)
+			self._failure(tenant, "create")
+			return False
+
+		self._pending_allocations.pop(allocation.identifier, None)
+		vm_id = allocation.identifier
+		vm = _VM(
+			vm_id,
+			allocation.tenant_id,
+			shape.name,
+			allocation.disk_mib,
+			self._now,
+			host_name,
+			last_traffic_tick=self._now,
+		)
+		self._virtual_machines[vm_id] = vm
+		tenant.virtual_machines.add(vm_id)
+		self._change_allocation(
+			self._hosts[host_name],
+			vm_id,
+			Resources(shape.cpu_millicores, shape.memory_mib, allocation.disk_mib),
+		)
+		self._placements.append((self._now, host_name))
+		self._created += 1
+		self._schedule(
+			self._now + max(1, round(self.scenario.traffic.boot_seconds * TICKS_PER_SECOND)),
+			"boot",
+			vm_id,
+		)
+		self._schedule_lifetime(vm)
+		self._schedule_visits(vm)
+		return True
+
+	def _retry_pending_allocations(self) -> None:
+		for allocation in tuple(self._pending_allocations.values()):
+			tenant = self._tenants[allocation.tenant_id]
+			if tenant.left or len(tenant.virtual_machines) >= tenant.profile.target_size:
+				self._pending_allocations.pop(allocation.identifier)
+				continue
+			self._place_allocation(allocation)
 
 	def _terminate(self, vm: _VM) -> None:
 		if vm.state == "terminated":
@@ -467,7 +520,7 @@ class Simulation:
 			return
 		shape = self.scenario.shape(vm.shape_name)
 		request = self._request(vm.tenant_id, shape, vm.disk_mib)
-		host_name = self._choose(request, "start", vm)
+		host_name, _ = self._choose(request, "start", vm)
 		if host_name is None:
 			self._failure(self._tenants[vm.tenant_id], "start")
 			return
@@ -487,7 +540,7 @@ class Simulation:
 		if vm.state not in (*PAID_STATES, "stopped") or shape.name == vm.shape_name:
 			return False
 		request = self._request(vm.tenant_id, shape, disk_mib)
-		host_name = self._choose(request, "resize", vm)
+		host_name, _ = self._choose(request, "resize", vm)
 		if host_name is None:
 			self._failure(self._tenants[vm.tenant_id], "resize")
 			return False
@@ -590,7 +643,7 @@ class Simulation:
 			self._schedule_sleep(vm)
 			return
 		request = self._request(vm.tenant_id, shape, vm.disk_mib)
-		target = self._choose(request, "wake", vm)
+		target, _ = self._choose(request, "wake", vm)
 		if target is None:
 			self._failure(self._tenants[vm.tenant_id], "wake")
 			return
@@ -733,6 +786,15 @@ class Simulation:
 		self._host_cost_rupees += self._host_monthly_price_sum * elapsed / monthly_ticks
 		self._vm_revenue_rupees += self._paid_memory_mib * revenue_per_mib_month * elapsed / monthly_ticks
 		self._host_hours_ticks += len(self._hosts) * elapsed
+		ready_regular_below_limit = sum(
+			host.ready
+			and not host.is_sleepy
+			and host.used_memory_mib * 100 < host.host_type.memory_mib * 85
+			and host.used_storage_mib * 100 < host.host_type.storage_mib * 85
+			for host in self._hosts.values()
+		)
+		if ready_regular_below_limit < 3:
+			self._below_three_ready_ticks += elapsed
 		self._capacity_area = _plus(self._capacity_area, _scale(self._ready_capacity, elapsed))
 		self._used_area = _plus(self._used_area, _scale(self._ready_used, elapsed))
 
@@ -752,6 +814,7 @@ class Simulation:
 				host = self._hosts[payload]
 				host.ready = True
 				self._ready_capacity = _plus(self._ready_capacity, self._host_total(host))
+				self._retry_pending_allocations()
 			elif kind == "boot":
 				vm = self._virtual_machines.get(payload)
 				if vm is not None and vm.state == "booting":
@@ -806,12 +869,18 @@ class Simulation:
 			asleep_at_end=states.count("asleep"),
 			stopped_at_end=states.count("stopped"),
 			hosts_at_end=len(self._hosts),
+			regular_hosts_at_end=sum(not host.is_sleepy for host in self._hosts.values()),
+			sleepy_hosts_at_end=sum(host.is_sleepy for host in self._hosts.values()),
 			new_hosts=len(self._hosts) - self.scenario.initial_host_count,
 			host_hours=self._host_hours_ticks / (TICKS_PER_SECOND * 3600),
 			host_cost_rupees=cost,
 			vm_revenue_rupees=revenue,
 			margin_rupees=revenue - cost,
 			create_failures=self._failures["create"],
+			pending_creates=sum(
+				not self._tenants[allocation.tenant_id].left
+				for allocation in self._pending_allocations.values()
+			),
 			resize_failures=self._failures["resize"],
 			start_failures=self._failures["start"],
 			wake_failures=self._failures["wake"],
@@ -824,6 +893,7 @@ class Simulation:
 			cpu_allocation=_ratio(self._used_area.cpu_millicores, self._capacity_area.cpu_millicores),
 			memory_utilization=_ratio(self._used_area.memory_mib, self._capacity_area.memory_mib),
 			storage_utilization=_ratio(self._used_area.storage_mib, self._capacity_area.storage_mib),
+			hours_below_three_ready=self._below_three_ready_ticks / (TICKS_PER_SECOND * 3600),
 		)
 
 

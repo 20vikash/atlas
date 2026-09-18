@@ -98,7 +98,7 @@ class TestPlacementSimulation(TestCase):
 		self.assertAlmostEqual(doubled.vm_revenue_rupees, 2 * result.vm_revenue_rupees)
 		self.assertAlmostEqual(doubled.host_cost_rupees, result.host_cost_rupees)
 
-	def test_host_cap_counts_pending_hosts(self) -> None:
+	def test_pending_host_is_shared_and_retries_create(self) -> None:
 		scenario = replace(self.scenario, initial_host_count=0, max_host_count=1)
 		workload = self._workload(
 			(self._tenant(1, "a1"), self._tenant(2, "a1")),
@@ -109,8 +109,10 @@ class TestPlacementSimulation(TestCase):
 		)
 		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
 		self.assertEqual(result.hosts_at_end, 1)
-		self.assertEqual(result.create_failures, 2)
-		self.assertEqual(result.incidents, 2)
+		self.assertEqual(result.vms_created, 2)
+		self.assertEqual(result.create_failures, 0)
+		self.assertEqual(result.pending_creates, 0)
+		self.assertEqual(result.incidents, 0)
 		self.assertAlmostEqual(result.host_cost_rupees, 50000 / 30)
 
 	def test_host_becomes_ready_after_configured_start_time(self) -> None:
@@ -130,8 +132,61 @@ class TestPlacementSimulation(TestCase):
 			),
 		)
 		result = Simulation(scenario, workload, 1).run("Default", STRATEGIES["Default"])
-		self.assertEqual(result.create_failures, 2)
+		self.assertEqual(result.create_failures, 1)
+		self.assertEqual(result.vms_created, 2)
+
+	def test_create_waiting_at_horizon_is_reported_as_pending(self) -> None:
+		scenario = replace(
+			self.scenario,
+			initial_host_count=0,
+			max_host_count=1,
+			host_start_minutes_min=1500,
+			host_start_minutes_max=1500,
+		)
+		workload = self._workload(
+			(self._tenant(1, "a1"),),
+			(ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),),
+		)
+
+		result = Simulation(scenario, workload, 1).run("best-fit", STRATEGIES["best-fit"])
+
+		self.assertEqual(result.pending_creates, 1)
+		self.assertEqual(result.create_failures, 0)
+		self.assertEqual(result.vms_created, 0)
+
+	def test_sleepy_host_is_marked_when_provisioned_and_pending_create_retries(self) -> None:
+		scenario = replace(
+			self.scenario,
+			max_host_count=2,
+			host_start_minutes_min=25,
+			host_start_minutes_max=25,
+		)
+		workload = self._workload(
+			(self._tenant(1, "sleepy"),),
+			(ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),),
+		)
+		simulation = Simulation(scenario, workload, 1)
+		result = simulation.run("spread-3", STRATEGIES["spread-3"])
 		self.assertEqual(result.vms_created, 1)
+		self.assertEqual(result.create_failures, 0)
+		self.assertEqual(result.pending_creates, 0)
+		self.assertEqual(result.sleepy_hosts_at_end, 1)
+		self.assertTrue(simulation._hosts["host-0002"].is_sleepy)
+
+	def test_sleepy_subscription_counts_stopped_vm_memory(self) -> None:
+		sleepy_host = HostType("small", 2000, 4096, 100000, 50000, is_sleepy=True)
+		scenario = replace(self.scenario, host_types=(sleepy_host,), max_host_count=1)
+		workload = self._workload(
+			(self._tenant(1, "sleepy"),),
+			(
+				ExternalEvent(0, 1, "tenant_arrival", tenant_id=1),
+				ExternalEvent(3602, 2, "night_stop", tenant_id=1, fraction=1),
+			),
+		)
+		simulation = Simulation(scenario, workload, 1)
+		result = simulation.run("spread-3", STRATEGIES["spread-3"])
+		self.assertEqual(result.stopped_at_end, 1)
+		self.assertEqual(simulation._usage(1).hosts[0].sleepy_reserved_memory_mib, 1024)
 
 	def test_cpu_oversubscription_changes_simulated_admission(self) -> None:
 		host = HostType("small", 500, 4096, 100000, 50000)
