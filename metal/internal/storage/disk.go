@@ -143,11 +143,11 @@ func (store *VirtualMachineStore) ResizeDisk(ctx context.Context, virtualMachine
 	return store.growDisk(ctx, virtualMachineID, diskMiB)
 }
 
-// Release removes the VM disk and dependent staging clones.
+// Release removes the VM disk and keeps dependent staging clones.
 func (store *VirtualMachineStore) Release(ctx context.Context, virtualMachineID string) error {
 	dataset := store.pool.virtualMachineDataset(virtualMachineID)
 
-	if err := store.destroyDependentClones(ctx, dataset); err != nil {
+	if err := store.promoteDependentClones(ctx, dataset); err != nil {
 		return err
 	}
 
@@ -161,9 +161,10 @@ func (store *VirtualMachineStore) Release(ctx context.Context, virtualMachineID 
 	return nil
 }
 
-// destroyDependentClones removes the staging clones a snapshot upload leaves on
-// the VM snapshots. ZFS cannot destroy a snapshot while a clone of it exists.
-func (store *VirtualMachineStore) destroyDependentClones(ctx context.Context, dataset string) error {
+// promoteDependentClones gives each staging clone ownership of the snapshot it
+// reads. ZFS cannot destroy a snapshot while a clone of it exists, and a pending
+// snapshot upload still needs its source after the VM disk goes away.
+func (store *VirtualMachineStore) promoteDependentClones(ctx context.Context, dataset string) error {
 	output, err := platform.Output(ctx,
 		"zfs", "get", "-Hp", "-r", "-t", "snapshot", "-o", "value", "clones", dataset)
 	if err != nil {
@@ -178,8 +179,8 @@ func (store *VirtualMachineStore) destroyDependentClones(ctx context.Context, da
 		if !strings.HasPrefix(clone, stagingPrefix) {
 			continue
 		}
-		if err := destroyIfPresent(ctx, clone); err != nil {
-			return fmt.Errorf("destroy dependent clone %s: %w", clone, err)
+		if err := platform.Run(ctx, "zfs", "promote", clone); err != nil {
+			return fmt.Errorf("promote dependent clone %s: %w", clone, err)
 		}
 	}
 
