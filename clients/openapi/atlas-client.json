@@ -1761,7 +1761,7 @@
                 }
               }
             },
-            "description": "Deletion started. Poll the image route."
+            "description": "The image is retired. Poll the image route while it is Deleting."
           },
           "409": {
             "description": "Another tenant owns this System image."

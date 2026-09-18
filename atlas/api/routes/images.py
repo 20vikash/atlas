@@ -103,7 +103,7 @@ def download_image(image_id: str, query: ImageDownloadQuery) -> ApiResult[ImageD
 @images.delete("<image_id>")
 @api_docs(
 	responses={
-		202: {"description": "Deletion started. Poll the image route."},
+		202: {"description": "The image is retired. Poll the image route while it is Deleting."},
 		409: {"description": "Another tenant owns this System image."},
 	},
 )
