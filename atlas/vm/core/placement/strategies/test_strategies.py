@@ -3,10 +3,10 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, call
 
-from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementRequest, Resources
-from atlas.vm.core.placement.strategies.balanced import select_host as select_balanced
-from atlas.vm.core.placement.strategies.best_fit import select_host as select_best_fit
-from atlas.vm.core.placement.strategies.spread_3 import select_host as select_spread_3
+from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementDemand, Resources
+from atlas.vm.core.placement.strategies.balanced import BalancedStrategy
+from atlas.vm.core.placement.strategies.best_fit import BestFitStrategy
+from atlas.vm.core.placement.strategies.spread_3 import SpreadThreeStrategy
 
 
 class TestComparisonStrategies(TestCase):
@@ -56,7 +56,7 @@ class TestComparisonStrategies(TestCase):
 			sum(host.free.storage_mib for host in hosts),
 		)
 		return SimpleNamespace(
-			request=PlacementRequest(1000, memory_mib, storage_mib, "amd64", 7, is_sleepy),
+			request=PlacementDemand(1000, memory_mib, storage_mib, "amd64", 7, is_sleepy),
 			usage=FleetUsage(hosts, total, free, 0, 0),
 			action=action,
 			current_host_name=current_host_name,
@@ -75,7 +75,7 @@ class TestComparisonStrategies(TestCase):
 			)
 		)
 
-		select_spread_3(api)
+		SpreadThreeStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(count=1, is_sleepy=False)
 		api.select.assert_called_once_with("least")
@@ -83,7 +83,7 @@ class TestComparisonStrategies(TestCase):
 	def test_spread_counts_only_regular_hosts_in_its_reserve(self) -> None:
 		api = self._api((self._host("regular"), self._host("sleepy", is_sleepy=True)))
 
-		select_spread_3(api)
+		SpreadThreeStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(count=2, is_sleepy=False)
 		api.select.assert_called_once_with("regular")
@@ -91,7 +91,7 @@ class TestComparisonStrategies(TestCase):
 	def test_best_fit_packs_and_expands_at_projected_pool_threshold(self) -> None:
 		api = self._api((self._host("less", used_memory_mib=8000), self._host("more", used_memory_mib=8800)))
 
-		select_best_fit(api)
+		BestFitStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(is_sleepy=False)
 		api.select.assert_called_once_with("more")
@@ -101,8 +101,8 @@ class TestComparisonStrategies(TestCase):
 		spread = self._api((host,), is_sleepy=True, memory_mib=500, storage_mib=500)
 		best_fit = self._api((host,), is_sleepy=True, memory_mib=500, storage_mib=500)
 
-		select_spread_3(spread)
-		select_best_fit(best_fit)
+		SpreadThreeStrategy().select_host(spread)
+		BestFitStrategy().select_host(best_fit)
 
 		spread.spawn_host.assert_not_called()
 		best_fit.spawn_host.assert_called_once_with(is_sleepy=True)
@@ -112,7 +112,7 @@ class TestComparisonStrategies(TestCase):
 	def test_empty_sleepy_pool_requests_a_marked_host(self) -> None:
 		api = self._api((self._host("regular"),), is_sleepy=True)
 
-		select_spread_3(api)
+		SpreadThreeStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(is_sleepy=True)
 		api.select.assert_not_called()
@@ -124,7 +124,7 @@ class TestComparisonStrategies(TestCase):
 			current_host_name="current",
 		)
 
-		select_spread_3(api)
+		SpreadThreeStrategy().select_host(api)
 
 		api.select.assert_called_once_with("current")
 		api.spawn_host.assert_not_called()
@@ -133,14 +133,14 @@ class TestComparisonStrategies(TestCase):
 		api = self._api((self._host("a"), self._host("b", used_memory_mib=1000)))
 		api.select.side_effect = [False, True]
 
-		select_best_fit(api)
+		BestFitStrategy().select_host(api)
 
 		self.assertEqual(api.select.call_args_list, [call("b"), call("a")])
 
 	def test_balanced_expands_for_storage_pressure(self) -> None:
 		api = self._api((self._host("busy", used_storage_mib=8000),))
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(is_sleepy=False)
 		api.select.assert_called_once_with("busy")
@@ -148,7 +148,7 @@ class TestComparisonStrategies(TestCase):
 	def test_balanced_uses_existing_capacity_below_expansion_threshold(self) -> None:
 		api = self._api((self._host("available", used_storage_mib=7999),))
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.spawn_host.assert_not_called()
 		api.select.assert_called_once_with("available")
@@ -160,7 +160,7 @@ class TestComparisonStrategies(TestCase):
 			current_host_name="current",
 		)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.select.assert_called_once_with("current")
 		api.spawn_host.assert_not_called()
@@ -168,7 +168,7 @@ class TestComparisonStrategies(TestCase):
 	def test_balanced_requests_sleepy_host_instead_of_regular_host(self) -> None:
 		api = self._api((self._host("regular"),), is_sleepy=True)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(is_sleepy=True)
 		api.select.assert_not_called()
@@ -176,7 +176,7 @@ class TestComparisonStrategies(TestCase):
 	def test_balanced_requests_regular_host_instead_of_sleepy_host(self) -> None:
 		api = self._api((self._host("sleepy", is_sleepy=True),))
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(is_sleepy=False)
 		api.select.assert_not_called()
@@ -187,7 +187,7 @@ class TestComparisonStrategies(TestCase):
 			is_sleepy=True,
 		)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.spawn_host.assert_not_called()
 		api.select.assert_called_once_with("sleepy")
@@ -198,7 +198,7 @@ class TestComparisonStrategies(TestCase):
 			is_sleepy=True,
 		)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.spawn_host.assert_called_once_with(is_sleepy=True)
 		api.select.assert_called_once_with("sleepy")
@@ -211,7 +211,7 @@ class TestComparisonStrategies(TestCase):
 			current_host_name="regular",
 		)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.select.assert_called_once_with("sleepy")
 		api.spawn_host.assert_not_called()
@@ -222,7 +222,7 @@ class TestComparisonStrategies(TestCase):
 			rates={"other-tenant": 1.0},
 		)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.select.assert_called_once_with("other-tenant")
 
@@ -232,7 +232,7 @@ class TestComparisonStrategies(TestCase):
 			rates={"busy": 0.8, "quiet": 0.2},
 		)
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.select.assert_called_once_with("quiet")
 
@@ -249,7 +249,7 @@ class TestComparisonStrategies(TestCase):
 		)
 		api.select.side_effect = [False, True]
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		self.assertEqual(api.select.call_args_list, [call("first"), call("second")])
 		api.spawn_host.assert_not_called()
@@ -257,12 +257,12 @@ class TestComparisonStrategies(TestCase):
 	def test_balanced_prefers_cpu_headroom_without_requiring_it(self) -> None:
 		api = self._api((self._host("no-cpu", free_cpu_millicores=0), self._host("cpu")))
 
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 
 		api.select.assert_called_once_with("cpu")
 
 		api = self._api((self._host("no-cpu", free_cpu_millicores=0),))
-		select_balanced(api)
+		BalancedStrategy().select_host(api)
 		api.select.assert_called_once_with("no-cpu")
 
 	def test_balanced_sleepy_factor_changes_soft_memory_ranking(self) -> None:
@@ -273,8 +273,8 @@ class TestComparisonStrategies(TestCase):
 		without_discount = self._api(hosts, is_sleepy=True)
 		with_discount = self._api(hosts, is_sleepy=True, factor=2.0)
 
-		select_balanced(without_discount)
-		select_balanced(with_discount)
+		BalancedStrategy().select_host(without_discount)
+		BalancedStrategy().select_host(with_discount)
 
 		without_discount.select.assert_called_once_with("roomier")
 		with_discount.select.assert_called_once_with("sleepy-loaded")

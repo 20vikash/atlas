@@ -10,15 +10,15 @@ from unittest.mock import Mock, patch
 import frappe
 
 from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
-from atlas.vm.core.placement.models import PlacementRequest
+from atlas.vm.core.placement.models import PlacementDemand
 from atlas.vm.core.placement.simulation import live
 from atlas.vm.core.placement.simulation.live import (
 	HostLimitReached,
 	LiveTrial,
 	request_sequence,
-	trial_placement_api,
+	trial_placement_context,
 )
-from atlas.vm.core.placement.strategies.best_fit import select_host as select_best_fit
+from atlas.vm.core.placement.strategies.best_fit import BestFitStrategy
 from atlas.vm.core.vm_service import VirtualMachineService
 
 
@@ -99,7 +99,7 @@ class TestLiveTrial(TestCase):
 		self.assertIn("new3", report["hosts"])
 
 	def test_best_fit_uses_preexisting_ready_host_without_provisioning(self) -> None:
-		api_class = trial_placement_api("size")
+		api_class = trial_placement_context("size")
 		api = api_class.__new__(api_class)
 		preexisting = SimpleNamespace(name="old", architecture="amd64", is_sleepy=False)
 		resources = SimpleNamespace(cpu_millicores=10000, memory_mib=10000, storage_mib=10000)
@@ -124,90 +124,27 @@ class TestLiveTrial(TestCase):
 		self.assertEqual(api._ready_server_names, frozenset({"old"}))
 		latest_samples.assert_called_once_with(["old"])
 
-		api.request = PlacementRequest(1000, 1000, 1000, "amd64", 7, False)
+		api.request = PlacementDemand(1000, 1000, 1000, "amd64", 7, False)
 		api.action = "create"
 		api.current_host_name = None
 		api.usage = usage
 		api.select = Mock(return_value=True)
 		api.spawn_host = Mock()
 
-		select_best_fit(api)
+		BestFitStrategy().select_host(api)
 
 		api.select.assert_called_once_with("old")
 		api.spawn_host.assert_not_called()
 
-	def test_preexisting_pending_host_is_reused(self) -> None:
-		api_class = trial_placement_api("size")
+	def test_trial_uses_selected_host_type_for_both_pools(self) -> None:
+		api_class = trial_placement_context("size")
 		api = api_class.__new__(api_class)
-		api._stale_ready_servers = {}
-		api._pending_hosts = set()
-		api.request = SimpleNamespace(architecture="amd64")
-		pending = SimpleNamespace(name="old", status="Pending", architecture="amd64", is_sleepy=False)
-		provider = Mock(return_value=SimpleNamespace(name="new"))
-		database = SimpleNamespace(sql=Mock(return_value=[pending]))
-		with (
-			patch.object(frappe, "db", database),
-			patch.object(
-				frappe, "get_doc", side_effect=[SimpleNamespace(server_provider="Provider"), None, None]
-			),
-			patch.object(api, "_validate_host_catalog"),
-			patch.object(MetalServer, "provision", provider),
-		):
-			self.assertEqual(api.spawn_host(), ("old",))
-		provider.assert_not_called()
-		database.sql.assert_called_once()
+		api._host_intents = []
 
-	def test_trial_pending_host_is_reused(self) -> None:
-		api_class = trial_placement_api("size")
-		api = api_class.__new__(api_class)
-		api._stale_ready_servers = {}
-		api._pending_hosts = set()
-		api.request = SimpleNamespace(architecture="amd64")
-		pending = SimpleNamespace(name="owned", status="Pending", architecture="amd64", is_sleepy=True)
-		database = SimpleNamespace(sql=Mock(return_value=[pending]))
-		with (
-			patch.object(frappe, "db", database),
-			patch.object(
-				frappe, "get_doc", side_effect=[SimpleNamespace(server_provider="Provider"), None, None]
-			),
-			patch.object(api, "_validate_host_catalog"),
-			patch.object(MetalServer, "provision") as provider,
-		):
-			self.assertEqual(api.spawn_host(is_sleepy=True), ("owned",))
-		provider.assert_not_called()
-		database.sql.assert_called_once()
+		api.spawn_host()
+		api.spawn_host(is_sleepy=True)
 
-	def test_stale_regular_host_does_not_block_sleepy_provisioning(self) -> None:
-		api_class = trial_placement_api("size")
-		api = api_class.__new__(api_class)
-		api._stale_ready_servers = {"old": ("amd64", False)}
-		api._pending_hosts = set()
-		api.request = SimpleNamespace(architecture="amd64")
-		provider = Mock(return_value=SimpleNamespace(name="sleepy"))
-		database = SimpleNamespace(sql=Mock(return_value=[]))
-		with (
-			patch.object(frappe, "db", database),
-			patch.object(
-				frappe, "get_doc", side_effect=[SimpleNamespace(server_provider="Provider"), None, None]
-			),
-			patch.object(api, "_validate_host_catalog"),
-			patch.object(MetalServer, "provision", provider),
-		):
-			self.assertEqual(api.spawn_host(is_sleepy=True), ("sleepy",))
-		provider.assert_called_once_with(size="size", defer_provider_creation=True, is_sleepy=True)
-
-	def test_stale_sleepy_host_blocks_sleepy_provisioning(self) -> None:
-		api_class = trial_placement_api("size")
-		api = api_class.__new__(api_class)
-		api._stale_ready_servers = {"old": ("amd64", True)}
-		api.request = SimpleNamespace(architecture="amd64")
-		with (
-			patch("atlas.vm.core.placement.api._", side_effect=lambda message: message),
-			patch.object(frappe, "throw", side_effect=RuntimeError) as throw,
-			self.assertRaises(RuntimeError),
-		):
-			api.spawn_host(is_sleepy=True)
-		self.assertIn("old", throw.call_args.args[0])
+		self.assertEqual(api._host_intents, [("size", 1, False), ("size", 1, True)])
 
 	def test_refresh_capacity_queues_stale_hosts_without_blocking_fresh_capacity(self) -> None:
 		trial = LiveTrial(Namespace(output=None), {"hosts": {"owned": {}}})

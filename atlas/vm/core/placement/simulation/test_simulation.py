@@ -1,8 +1,9 @@
+from collections.abc import Callable
 from dataclasses import replace
 from unittest import TestCase
 
 from atlas.vm.core.placement.simulation.__main__ import DEFAULT_SCENARIO, load_scenario
-from atlas.vm.core.placement.simulation.engine import Simulation
+from atlas.vm.core.placement.simulation.engine import SimulatedPlacementContext, Simulation
 from atlas.vm.core.placement.simulation.workload import (
 	ExternalEvent,
 	HostType,
@@ -13,6 +14,15 @@ from atlas.vm.core.placement.simulation.workload import (
 	generate_workload,
 )
 from atlas.vm.core.placement.strategies import STRATEGIES
+from atlas.vm.core.placement.strategies.base import PlacementStrategy
+
+
+class ScriptedStrategy(PlacementStrategy):
+	def __init__(self, select_host: Callable[[SimulatedPlacementContext], None]) -> None:
+		self._select_host = select_host
+
+	def select_host(self, placement: SimulatedPlacementContext) -> None:
+		self._select_host(placement)
 
 
 class TestPlacementSimulation(TestCase):
@@ -86,14 +96,14 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(half_day, 2, "night_stop", tenant_id=1, fraction=1),
 			),
 		)
-		result = Simulation(scenario, workload, 1).run("first", self._first_host)
+		result = Simulation(scenario, workload, 1).run("first", ScriptedStrategy(self._first_host))
 		expected = 2 * 3 * 50000 / 4 * (half_day - 1) / (30 * 172800)
 		self.assertAlmostEqual(result.vm_revenue_rupees, expected)
 		self.assertAlmostEqual(result.host_cost_rupees, 50000 / 30)
 		self.assertEqual(result.stopped_at_end, 1)
 		self.assertGreater(result.storage_utilization, 0)
 		doubled = Simulation(replace(scenario, revenue_multiplier=6), workload, 1).run(
-			"first", self._first_host
+			"first", ScriptedStrategy(self._first_host)
 		)
 		self.assertAlmostEqual(doubled.vm_revenue_rupees, 2 * result.vm_revenue_rupees)
 		self.assertAlmostEqual(doubled.host_cost_rupees, result.host_cost_rupees)
@@ -221,7 +231,7 @@ class TestPlacementSimulation(TestCase):
 			name = "host-0002" if api.action == "wake" else "host-0001"
 			api.select(name)
 
-		result = Simulation(scenario, workload, 1).run("pack", pack_then_move)
+		result = Simulation(scenario, workload, 1).run("pack", ScriptedStrategy(pack_then_move))
 		self.assertEqual(result.vms_created, 2)
 		self.assertGreaterEqual(result.sleeps, 1)
 		self.assertEqual(result.wake_migrations, 1)
@@ -238,7 +248,7 @@ class TestPlacementSimulation(TestCase):
 				ExternalEvent(3604, 3, "traffic_wave", fraction=1, span_ticks=1),
 			),
 		)
-		result = Simulation(scenario, workload, 1).run("first", self._first_host)
+		result = Simulation(scenario, workload, 1).run("first", ScriptedStrategy(self._first_host))
 		self.assertEqual(result.wake_failures, 1)
 		self.assertEqual(result.incidents, 1)
 		self.assertEqual(result.vms_terminated, 1)
@@ -278,7 +288,7 @@ class TestPlacementSimulation(TestCase):
 			seen.append((api.action, api.current_host_name, api.sleepy_vm_overcommit_factor))
 			api.select(api.current_host_name or api.usage.hosts[0].name)
 
-		result = Simulation(self.scenario, workload, 1).run("stay", stay)
+		result = Simulation(self.scenario, workload, 1).run("stay", ScriptedStrategy(stay))
 		self.assertEqual(result.start_migrations, 0)
 		self.assertEqual(seen, [("create", None, 1.5), ("start", "host-0001", 1.5)])
 
@@ -298,7 +308,7 @@ class TestPlacementSimulation(TestCase):
 		def move(api):
 			api.select("host-0002" if api.action == "resize" or api.request.tenant_id == 2 else "host-0001")
 
-		result = Simulation(scenario, workload, 1).run("move", move)
+		result = Simulation(scenario, workload, 1).run("move", ScriptedStrategy(move))
 		self.assertEqual(result.resize_migrations, 1)
 		self.assertEqual(result.create_failures, 1)
 

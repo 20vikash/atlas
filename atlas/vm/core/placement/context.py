@@ -11,7 +11,7 @@ from frappe.utils import now_datetime
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementRequest, Resources
+from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementDemand, Resources
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -26,7 +26,7 @@ class CapacityPending(AtlasUserError):
 	http_status_code = 503
 
 
-class PlacementAPI:
+class PlacementContext:
 	"""Give one strategy a fleet snapshot and a checked host selection."""
 
 	def __init__(
@@ -36,7 +36,7 @@ class PlacementAPI:
 		sleepy_vm_overcommit_factor: float,
 		exclude_servers: set[str] | None = None,
 	) -> None:
-		self.request = PlacementRequest(
+		self.request = PlacementDemand(
 			cpu_millicores=request.cpu_millicores,
 			memory_mib=request.memory_mib,
 			disk_mib=request.disk_mib,
@@ -52,6 +52,7 @@ class PlacementAPI:
 		self._placement_counts: Counter[str] | None = None
 		self._selected_server: MetalServer | None = None
 		self._pending_hosts: set[str] = set()
+		self._host_intents: list[tuple[str | None, int, bool]] = []
 		self.usage = self._load_usage()
 
 	def placement_rate(self, host_name: str | None = None) -> float:
@@ -116,12 +117,14 @@ class PlacementAPI:
 		self._selected_server = server
 		return True
 
-	def spawn_host(
-		self, host_type: str | None = None, *, count: int = 1, is_sleepy: bool = False
-	) -> tuple[str, ...]:
-		"""Keep the requested number of suitable hosts provisioning in one pool."""
+	def spawn_host(self, host_type: str | None = None, *, count: int = 1, is_sleepy: bool = False) -> None:
+		"""Request suitable hosts for this placement."""
 		if isinstance(count, bool) or not isinstance(count, int) or count < 1:
 			raise ValueError("count must be a positive integer")
+		self._host_intents.append((host_type, count, is_sleepy))
+
+	def _ensure_pending_hosts(self, host_type: str | None, count: int, is_sleepy: bool) -> tuple[str, ...]:
+		"""Insert only the missing host intents under a settings lock."""
 		stale_hosts = sorted(
 			name
 			for name, (architecture, sleepy) in self._stale_ready_servers.items()
@@ -149,7 +152,8 @@ class PlacementAPI:
 		# A locking read sees host intents committed while this request waited for Settings.
 		servers = frappe.db.sql(
 			"""select name, status, architecture, is_sleepy from `tabMetal Server`
-			where server_size = %(server_size)s order by creation desc for update""",
+			where server_size = %(server_size)s and status in ('Pending', 'Installing', 'Failed')
+			order by creation desc for update""",
 			{"server_size": selected_type},
 			as_dict=True,
 		)
@@ -161,7 +165,6 @@ class PlacementAPI:
 		pending = [server for server in matching if server.status in ("Pending", "Installing")]
 		names = [row.name for row in pending]
 		if len(names) >= count:
-			self._pending_hosts.update(names)
 			return tuple(names)
 
 		if not names and matching and matching[0].status == "Failed":
@@ -179,7 +182,6 @@ class PlacementAPI:
 				size=selected_type, defer_provider_creation=True, is_sleepy=is_sleepy
 			)
 			names.append(server.name)
-		self._pending_hosts.update(names)
 		return tuple(names)
 
 	def _validate_host_catalog(self, size: frappe._dict, image: frappe._dict, provider: str) -> None:
@@ -230,8 +232,13 @@ class PlacementAPI:
 					exc=AtlasUserError,
 				)
 
-	def _finish(self) -> MetalServer:
-		"""Return the selection or commit pending host intent for a retry."""
+	def finish(self) -> MetalServer:
+		"""Return the selection or save only host intents for a retry."""
+		if self._host_intents and self._selected_server is None:
+			frappe.db.rollback()
+		for host_type, count, is_sleepy in self._host_intents:
+			self._pending_hosts.update(self._ensure_pending_hosts(host_type, count, is_sleepy))
+
 		if self._selected_server is not None:
 			return self._selected_server
 		if self._pending_hosts:

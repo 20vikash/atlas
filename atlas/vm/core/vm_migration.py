@@ -12,7 +12,7 @@ from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.placement.api import PlacementAPI
+from atlas.vm.core.placement.context import PlacementContext
 from atlas.vm.core.placement.service import PlacementService
 from atlas.vm.core.vm_state import LIVE_STATES
 
@@ -59,7 +59,7 @@ class MigrationService:
 					exc=AtlasUserError,
 				)
 			settings = frappe.get_single("Atlas Settings")
-			api = PlacementAPI(
+			api = PlacementContext(
 				shape, architecture, settings.sleepy_vm_overcommit_factor, exclude_servers={locked.server}
 			)
 			if not api.select(target_server):

@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 
 from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.placement.api import PlacementAPI
+from atlas.vm.core.placement.context import PlacementContext
 from atlas.vm.core.placement.strategies import STRATEGIES
 
 if TYPE_CHECKING:
@@ -27,6 +27,8 @@ class PlacementService:
 		if strategy is None:
 			frappe.throw(_("Unknown placement strategy: {0}.").format(settings.placement_strategy))
 
-		api = PlacementAPI(request, architecture, settings.sleepy_vm_overcommit_factor, exclude_servers)
-		strategy(api)
-		return api._finish()
+		placement = PlacementContext(
+			request, architecture, settings.sleepy_vm_overcommit_factor, exclude_servers
+		)
+		strategy.select_host(placement)
+		return placement.finish()

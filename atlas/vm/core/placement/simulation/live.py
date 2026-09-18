@@ -23,7 +23,7 @@ from unittest.mock import patch
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 	from atlas.vm.core.models import VirtualMachineCreateRequest
-	from atlas.vm.core.placement.api import PlacementAPI
+	from atlas.vm.core.placement.context import PlacementContext
 
 
 class HostLimitReached(RuntimeError):
@@ -82,17 +82,17 @@ def timestamp() -> str:
 	return datetime.now(UTC).isoformat()
 
 
-def trial_placement_api(new_host_type: str) -> type[PlacementAPI]:
+def trial_placement_context(new_host_type: str) -> type[PlacementContext]:
 	"""Use normal fleet placement with the trial's selected new host type."""
-	from atlas.vm.core.placement.api import PlacementAPI
+	from atlas.vm.core.placement.context import PlacementContext
 
-	class TrialPlacementAPI(PlacementAPI):
+	class TrialPlacementContext(PlacementContext):
 		def spawn_host(
 			self, host_type: str | None = None, *, count: int = 1, is_sleepy: bool = False
-		) -> tuple[str, ...]:
-			return super().spawn_host(host_type or new_host_type, count=count, is_sleepy=is_sleepy)
+		) -> None:
+			super().spawn_host(host_type or new_host_type, count=count, is_sleepy=is_sleepy)
 
-	return TrialPlacementAPI
+	return TrialPlacementContext
 
 
 class LiveTrial:
@@ -242,12 +242,12 @@ class LiveTrial:
 		import frappe
 
 		from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
-		from atlas.vm.core.placement.api import CapacityPending
+		from atlas.vm.core.placement.context import CapacityPending
 		from atlas.vm.core.placement.service import PlacementService
 		from atlas.vm.core.placement.strategies import STRATEGIES
 		from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 
-		placement_api = trial_placement_api(self.arguments.host_type)
+		placement_context = trial_placement_context(self.arguments.host_type)
 
 		def select_trial_server(
 			service: PlacementService,
@@ -258,9 +258,9 @@ class LiveTrial:
 			if exclude_servers:
 				raise RuntimeError("The live trial supports VM creation only.")
 			settings = frappe.get_single("Atlas Settings")
-			api = placement_api(request, architecture, settings.sleepy_vm_overcommit_factor)
-			STRATEGIES[self.arguments.strategy](api)
-			return api._finish()
+			placement = placement_context(request, architecture, settings.sleepy_vm_overcommit_factor)
+			STRATEGIES[self.arguments.strategy].select_host(placement)
+			return placement.finish()
 
 		deadline = time.monotonic() + self.arguments.timeout_seconds
 		sequence = request_sequence(

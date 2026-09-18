@@ -10,10 +10,10 @@ from atlas.vm.core.placement.service import PlacementService
 
 
 class TestPlacementService(UnitTestCase):
-	def test_configured_strategy_receives_the_api(self) -> None:
+	def test_configured_strategy_receives_the_context(self) -> None:
 		request = VirtualMachineCreateRequest("image", 2000, 2048, 10240, 7)
 		server = SimpleNamespace(name="metal-1")
-		api = SimpleNamespace(_finish=Mock(return_value=server))
+		api = SimpleNamespace(finish=Mock(return_value=server))
 		strategy = Mock()
 
 		with (
@@ -22,14 +22,14 @@ class TestPlacementService(UnitTestCase):
 				return_value=SimpleNamespace(placement_strategy="Custom", sleepy_vm_overcommit_factor=1.5),
 			),
 			patch("atlas.vm.core.placement.service.STRATEGIES", {"Custom": strategy}),
-			patch("atlas.vm.core.placement.service.PlacementAPI", return_value=api) as placement_api,
+			patch("atlas.vm.core.placement.service.PlacementContext", return_value=api) as placement_api,
 		):
 			selected = PlacementService().select_server(request, "amd64", {"source"})
 
 		self.assertIs(selected, server)
 		placement_api.assert_called_once_with(request, "amd64", 1.5, {"source"})
-		strategy.assert_called_once_with(api)
-		api._finish.assert_called_once_with()
+		strategy.select_host.assert_called_once_with(api)
+		api.finish.assert_called_once_with()
 
 	def test_strategy_without_a_selection_reports_no_capacity(self) -> None:
 		with (
@@ -37,7 +37,7 @@ class TestPlacementService(UnitTestCase):
 				"atlas.vm.core.placement.service.frappe.get_single",
 				return_value=SimpleNamespace(placement_strategy="balanced", sleepy_vm_overcommit_factor=1.0),
 			),
-			patch("atlas.vm.core.placement.api.frappe.get_all", return_value=[]),
+			patch("atlas.vm.core.placement.context.frappe.get_all", return_value=[]),
 			patch("atlas.vm.core.placement.service.STRATEGIES", {"balanced": Mock()}),
 			self.assertRaisesRegex(AtlasUserError, "current capacity"),
 		):

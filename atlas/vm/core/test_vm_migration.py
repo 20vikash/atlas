@@ -123,7 +123,7 @@ class TestMigrationCreation(UnitTestCase):
 
 		with (
 			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc) as get_doc,
-			patch("atlas.vm.core.vm_migration.PlacementAPI", return_value=api) as placement_api,
+			patch("atlas.vm.core.vm_migration.PlacementContext", return_value=api) as placement_api,
 			patch(
 				"atlas.vm.core.vm_migration.frappe.get_single",
 				return_value=SimpleNamespace(sleepy_vm_overcommit_factor=1.5),
@@ -163,7 +163,7 @@ class TestMigrationCreation(UnitTestCase):
 				"atlas.vm.core.vm_migration.frappe.get_single",
 				return_value=SimpleNamespace(sleepy_vm_overcommit_factor=1.0),
 			),
-			patch("atlas.vm.core.vm_migration.PlacementAPI", return_value=api),
+			patch("atlas.vm.core.vm_migration.PlacementContext", return_value=api),
 			self.assertRaisesRegex(AtlasUserError, "not ready or has no current capacity"),
 		):
 			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-3")

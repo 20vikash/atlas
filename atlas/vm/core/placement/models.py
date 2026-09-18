@@ -21,7 +21,7 @@ class Resources:
 
 
 @dataclass(frozen=True, slots=True)
-class PlacementRequest:
+class PlacementDemand:
 	"""The VM shape and identity visible to a placement strategy."""
 
 	cpu_millicores: int

@@ -5,13 +5,12 @@ from __future__ import annotations
 import heapq
 import random
 from collections import deque
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
 from math import log
 
-from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementRequest, Resources
+from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementDemand, Resources
 from atlas.vm.core.placement.simulation.workload import (
 	TICKS_PER_DAY,
 	TICKS_PER_SECOND,
@@ -23,6 +22,7 @@ from atlas.vm.core.placement.simulation.workload import (
 	Workload,
 	event_random,
 )
+from atlas.vm.core.placement.strategies.base import PlacementStrategy
 
 RATE_WINDOW_TICKS = 5 * 60 * TICKS_PER_SECOND
 SAMPLE_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -121,13 +121,13 @@ class Result:
 	hours_below_three_ready: float
 
 
-class SimulatedPlacementAPI:
+class SimulatedPlacementContext:
 	"""Expose only placement inputs and checked actions to a strategy."""
 
 	def __init__(
 		self,
 		simulation: Simulation,
-		request: PlacementRequest,
+		request: PlacementDemand,
 		action: str,
 		current_host_name: str | None,
 		virtual_machine_id: int | None,
@@ -203,7 +203,7 @@ class Simulation:
 		self._events: list[tuple[int, int, str, object]] = []
 		self._sequence = count()
 		self._placements: deque[tuple[int, str]] = deque()
-		self._strategy: Callable[[SimulatedPlacementAPI], None] | None = None
+		self._strategy: PlacementStrategy | None = None
 		self._ready_capacity = Resources(0, 0, 0)
 		self._ready_used = Resources(0, 0, 0)
 		self._capacity_area = Resources(0, 0, 0)
@@ -323,16 +323,16 @@ class Simulation:
 		return sum(host_name is None or name == host_name for _, name in self._placements) / 5
 
 	def _choose(
-		self, request: PlacementRequest, action: str, vm: _VM | None
+		self, request: PlacementDemand, action: str, vm: _VM | None
 	) -> tuple[str | None, tuple[str, ...]]:
-		api = SimulatedPlacementAPI(
+		api = SimulatedPlacementContext(
 			self, request, action, vm.host_name if vm else None, vm.identifier if vm else None
 		)
-		self._strategy(api)
+		self._strategy.select_host(api)
 		return api._selected_host_name, api._pending_host_names
 
-	def _request(self, tenant_id: int, shape: VMShape, disk_mib: int) -> PlacementRequest:
-		return PlacementRequest(
+	def _request(self, tenant_id: int, shape: VMShape, disk_mib: int) -> PlacementDemand:
+		return PlacementDemand(
 			shape.cpu_millicores,
 			shape.memory_mib,
 			disk_mib,
@@ -798,7 +798,7 @@ class Simulation:
 		self._capacity_area = _plus(self._capacity_area, _scale(self._ready_capacity, elapsed))
 		self._used_area = _plus(self._used_area, _scale(self._ready_used, elapsed))
 
-	def run(self, name: str, strategy: Callable[[SimulatedPlacementAPI], None]) -> Result:
+	def run(self, name: str, strategy: PlacementStrategy) -> Result:
 		self._strategy = strategy
 		while self._events:
 			at, _, kind, payload = heapq.heappop(self._events)

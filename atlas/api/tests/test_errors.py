@@ -12,7 +12,7 @@ from atlas.api.core.errors import (
 	describe_exception,
 )
 from atlas.api.routes.virtual_machines import create_virtual_machine
-from atlas.vm.core.placement.api import CapacityPending
+from atlas.vm.core.placement.context import CapacityPending
 
 
 class Machine(BaseModel):
@@ -105,3 +105,10 @@ class TestErrorBody(UnitTestCase):
 		self.assertIn("node-a", response.json["error"]["message"])
 		self.assertEqual(response.headers["Retry-After"], "15")
 		log_error.assert_not_called()
+
+	def test_null_error_body_does_not_add_retry_header(self) -> None:
+		with patch("atlas.api.core.base.describe_exception", return_value=(400, {"error": None})):
+			response = create_virtual_machine.build_error_response(ValueError("bad"))
+
+		self.assertEqual(response.status_code, 400)
+		self.assertNotIn("Retry-After", response.headers)
