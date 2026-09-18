@@ -103,14 +103,14 @@ def download_image(image_id: str, query: ImageDownloadQuery) -> ApiResult[ImageD
 @images.delete("<image_id>")
 @api_docs(
 	responses={
-		202: {"description": "Deletion started. Poll the image route."},
+		202: {"description": "The image is retired. Poll the image route while it is Deleting."},
 		409: {"description": "Another tenant owns this System image."},
 	},
 )
 def delete_image(image_id: str) -> ApiResult[ImageResponse]:
 	"""Delete image.
 
-	Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts.
+	Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status and answers again.
 	"""
 	image = get_owned_image(image_id)
 	if image.tenant_id != get_current_tenant_id():
