@@ -34,9 +34,9 @@ Build and load the Atlas neighbour kernel module on every host before you config
 atlas-wg-mesh module install
 ```
 
-The release build compiled the module for the kernel that the hosts run, and the CLI embeds it. The command installs it into `/lib/modules`, runs `depmod`, and loads it. A host needs no compiler and no kernel headers. The command rejects a module that was compiled for another kernel release, and the metald install script runs it automatically.
+The command writes the embedded module sources to `/usr/src`, builds them against the running kernel headers, links the module into `/lib/modules`, and loads it. The build takes the kernel BTF from `/sys/kernel/btf/vmlinux`, so the module carries the BTF section that the BPF object needs. The host needs the `build-essential`, `dwarves`, and `linux-headers-$(uname -r)` packages. The metald install script runs the command automatically.
 
-Run the command again after a kernel upgrade, because a module of one kernel release cannot serve another. A kernel upgrade needs a matching release build.
+Run the command again after a kernel upgrade, because a module of one kernel release cannot serve another.
 
 Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 
@@ -72,9 +72,9 @@ dist/atlas-wg-mesh-linux-amd64
 dist/atlas-wg-mesh-linux-arm64
 ```
 
-Each binary embeds the BPF object and the kernel module. Copy the binary that matches the host CPU architecture. The host does not need `clang`, `bpftool`, a compiler, kernel headers, or separate object files.
+Each binary embeds the BPF object. Copy the binary that matches the host CPU architecture. The host does not need `clang`, `bpftool`, or a separate BPF object file.
 
-Use `make bpf` to build only the embedded BPF object. Use `make module-release KDIR=...` to build the kernel module against the header directory of the kernel that the hosts run; `make build` runs it for the running build kernel. Use `make clean` to remove generated BPF and release files.
+Use `make bpf` to build only the embedded BPF object. Use `make module` to build the kernel module. Use `make clean` to remove generated BPF and release files.
 
 ## Install a host
 
