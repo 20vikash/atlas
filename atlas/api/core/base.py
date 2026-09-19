@@ -389,9 +389,6 @@ class RouteHandler:
 		for name, value in self.router.default_headers.items():
 			response.headers[name] = value
 
-		if (body.get("error") or {}).get("code") == "capacity_pending":
-			response.headers["Retry-After"] = "15"
-
 		return response
 
 

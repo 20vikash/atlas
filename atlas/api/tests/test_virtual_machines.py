@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
+import orjson
 from frappe.tests import UnitTestCase
 
 from atlas.api.models import VirtualMachineDetailResponse, VirtualMachineResponse
@@ -18,8 +19,15 @@ from atlas.api.routes.virtual_machines import (
 	update_virtual_machine_compute,
 	update_virtual_machine_network,
 )
-from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request, call_route
+from atlas.api.tests.test_support import (
+	OTHER_TENANT_ID,
+	TENANT_ID,
+	api_request,
+	call_route,
+	route_response,
+)
 from atlas.vm.core.metal_models import MetalFirewall, MetalFirewallRule
+from atlas.vm.core.placement import OutOfCapacity
 
 CREATE_BODY = {
 	"image_id": "system-image",
@@ -184,6 +192,24 @@ class TestCreateVirtualMachine(UnitTestCase):
 		self.assertEqual(status, 201)
 		self.assertEqual(body["id"], "vm-00001")
 		self.assertEqual(create.call_args.args[0].tenant_id, TENANT_ID)
+
+	def test_create_reports_out_of_capacity_without_retry_header(self) -> None:
+		with (
+			api_request("POST", "/api/atlas/virtual-machines", tenant_id=TENANT_ID, json=CREATE_BODY),
+			patch(
+				"atlas.api.routes.virtual_machines.get_owned_image",
+				return_value=SimpleNamespace(name="system-image"),
+			),
+			patch(
+				"atlas.api.routes.virtual_machines.create_virtual_machine_request",
+				side_effect=OutOfCapacity("Retry later"),
+			),
+		):
+			response = route_response(create_virtual_machine)
+
+		self.assertEqual(response.status_code, 503)
+		self.assertEqual(orjson.loads(response.get_data())["error"]["code"], "out_of_capacity")
+		self.assertNotIn("Retry-After", response.headers)
 
 	def test_create_needs_a_tenant_header(self) -> None:
 		status, body, _ = self.create(CREATE_BODY, tenant_id=None)

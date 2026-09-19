@@ -39,18 +39,18 @@ class ApiErrorField(BaseModel):
 	message: str
 
 
-class CapacityPendingError(BaseModel):
-	"""The error returned while Atlas starts host capacity."""
+class OutOfCapacityError(BaseModel):
+	"""The error returned when no host can accept the VM."""
 
-	code: Literal["capacity_pending"]
+	code: Literal["out_of_capacity"]
 	message: str
 	fields: list[ApiErrorField]
 
 
-class CapacityPendingResponse(BaseModel):
-	"""The JSON body of a pending capacity response."""
+class OutOfCapacityResponse(BaseModel):
+	"""The JSON body of an unavailable capacity response."""
 
-	error: CapacityPendingError
+	error: OutOfCapacityError
 
 
 def to_unix_timestamp(value: str | datetime) -> int:

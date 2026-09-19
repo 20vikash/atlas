@@ -51,14 +51,20 @@ def api_request(
 		frappe.flags.in_test = previous_flag
 
 
-def call_route(handler, *args, **kwargs) -> tuple[int, Any]:
-	"""Return the status code and the decoded body of one route call."""
+def route_response(handler, *args, **kwargs) -> Response:
+	"""Return the response of one route call, including the response of a failure."""
 	try:
 		response = handler(*args, **kwargs)
 	except HTTPException as exception:
 		response = exception.response
 
 	assert isinstance(response, Response)
+	return response
+
+
+def call_route(handler, *args, **kwargs) -> tuple[int, Any]:
+	"""Return the status code and the decoded body of one route call."""
+	response = route_response(handler, *args, **kwargs)
 	body = response.get_data()
 	return response.status_code, orjson.loads(body) if body else None
 

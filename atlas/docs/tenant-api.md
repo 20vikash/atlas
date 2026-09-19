@@ -72,7 +72,7 @@ A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snaps
 
 An error response has `error.code`, `error.message`, and `error.fields`. Validation errors use `400`; missing authentication uses `401`; denied access uses `403`; missing resources use `404`; and invalid resource state uses `409`.
 
-When VM creation needs a new host, it returns `503` with `error.code` set to `capacity_pending`. Read the `Retry-After` response header for the number of seconds to wait before retrying.
+When no host can accept a VM, creation returns `503` with `error.code` set to `out_of_capacity`. Retry later. Atlas can start a host in a separate background job when Metal auto-spawn is enabled.
 
 A list response carries `items`, `offset`, `limit`, and `has_more`. The default limit is 20 and the maximum limit is 100.
 

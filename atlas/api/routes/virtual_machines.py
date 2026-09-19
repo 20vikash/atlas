@@ -13,12 +13,9 @@ from atlas.api.core.base import (
 	get_owned_document,
 )
 from atlas.api.core.docs import api_docs
-from atlas.api.core.errors import (
-	ResourceConflict,
-)
+from atlas.api.core.errors import ResourceConflict
 from atlas.api.models import (
 	AUTO_IP_ADDRESS,
-	CapacityPendingResponse,
 	ComputeUpdatePayload,
 	ConsoleTokenPayload,
 	ConsoleTokenResponse,
@@ -28,6 +25,7 @@ from atlas.api.models import (
 	IPAddressAssignmentPayload,
 	MetadataReplacementPayload,
 	NetworkUpdatePayload,
+	OutOfCapacityResponse,
 	SnapshotPayload,
 	SSHKeysReplacementPayload,
 	VirtualMachineDetailResponse,
@@ -104,15 +102,8 @@ def get_attachable_ip_address_name(ip_address_id: str) -> str:
 	responses={
 		201: {"description": "The virtual machine request is stored."},
 		503: {
-			"description": "Host capacity is pending. Retry after the reported interval.",
-			"model": CapacityPendingResponse,
-			"headers": {
-				"Retry-After": {
-					"description": "Seconds to wait before another create request.",
-					"required": True,
-					"schema": {"type": "integer", "minimum": 0},
-				}
-			},
+			"description": "No host capacity is available. Retry later.",
+			"model": OutOfCapacityResponse,
 		},
 	},
 )
@@ -129,6 +120,7 @@ def create_virtual_machine(
 		get_current_tenant_id(), image.name, ip_address.name if ip_address else None
 	)
 	result = create_virtual_machine_request(request)
+
 	virtual_machine: VirtualMachine = frappe.get_doc("Virtual Machine", result["name"])
 
 	return ApiResult(
