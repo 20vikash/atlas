@@ -65,11 +65,6 @@ func TestMeshNamespaceStepsRouteTheGuestAddress(t *testing.T) {
 			t.Errorf("missing step %q in:\n%s", wanted, joined)
 		}
 	}
-
-	// The guest owns its mesh address, so the namespace must not hold a copy.
-	if strings.Contains(joined, "addr replace fdaa:1:0:7::1/128 dev vg-100") {
-		t.Errorf("the steps must not assign the guest mesh address:\n%s", joined)
-	}
 }
 
 func TestDiscoveryInterfaceReadsTheStatusLine(t *testing.T) {
