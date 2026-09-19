@@ -65,7 +65,7 @@ POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
 POST   /v1/migrations/:id/finish   Atlas records the target finish, static token
 PUT    /v1/migrations/:id/source   the target locks the source, mesh
 POST   /v1/migrations/:id/snapshot the target asks for the next snapshot, mesh
-POST   /v1/migrations/:id/stop     the target stops the source and gets the final snapshot, mesh
+POST   /v1/migrations/:id/stop     the target acknowledges its last snapshot and stops the source, mesh
 POST   /v1/migrations/:id/start    the target restores the source during rollback, mesh
 POST   /v1/migrations/:id/destroy  the target destroys the stopped source, mesh
 DELETE /v1/migrations/:id          the target unlocks the source, mesh

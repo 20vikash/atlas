@@ -30,7 +30,7 @@ Atlas PUT -> target record (preparing), reserve the VM ID
            phase copying
 ```
 
-The target reserves compute only after the handshake supplies the config. Host capacity subtracts that reservation while the target stays out of the VM list. A target that never advances past preparing for 10 minutes is expired: the target aborts the source and releases the reservation.
+The target reserves compute only after the handshake supplies the config. One host allocation lock covers the capacity check and the saved reservation. Host capacity subtracts that reservation while the target stays out of the VM list. A target that stays in preparing for 10 minutes expires. The target then aborts the source and releases the reservation.
 
 ## Copying
 
@@ -52,7 +52,7 @@ mark the interval complete, checkpoint bytes
 copy or cut over
 ```
 
-The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
+The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. The target saves each interval before, during, and after transfer. A record write error ends the transfer pass and reports the storage error. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
 
 ## Cutover
 
@@ -66,6 +66,8 @@ non-running source                -> stop the source before the first transfer
 ```
 
 The target sends the temporary limit on the stream header. The source applies the lower of that limit and the configured disk limit, and never raises an existing limit.
+
+The stop request acknowledges the last completed interval. The source creates the final snapshot after the highest acknowledged sequence.
 
 ```text
 stopping: /stop -> source stops, removes its network, takes the final snapshot
@@ -112,7 +114,7 @@ The daemon removes and logs a migration record that it cannot decode. One corrup
 
 Metal hosts use the trusted WireGuard mesh. Migration traffic carries no credential. The target drives each call and sends the VM ID as `virtual_machine_id`, so the source finds the migration without a token.
 
-The control calls use HTTP against the source Metal API: prepare source, next snapshot, stop, start, destroy, and remove. The disk moves over a plain TCP connection to a fixed source `transfer_port`, not an HTTP body. Every host in a region uses the same port.
+The control calls use HTTP against the source Metal API: prepare source, next snapshot, stop, start, destroy, and remove. A control call has a 60 second timeout. The stop call has a 120 second timeout because it can restore and shut down a guest. The disk moves over a plain TCP connection to a fixed source `transfer_port`, not an HTTP body. Every host in a region uses the same port.
 
 One connection carries one snapshot:
 

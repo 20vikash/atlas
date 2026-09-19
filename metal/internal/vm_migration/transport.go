@@ -22,24 +22,32 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// defaultControlTimeout bounds one target-to-source control call.
-const defaultControlTimeout = 60 * time.Second
+const (
+	// defaultControlTimeout bounds one target-to-source control call.
+	defaultControlTimeout = 60 * time.Second
+	// defaultStopTimeout includes guest restore and shutdown work at cutover.
+	defaultStopTimeout = 2 * defaultControlTimeout
+)
 
 // SourceClient calls the source host over the mesh. Control calls use HTTP; the
 // disk stream uses a plain TCP connection to the source transfer port.
 type SourceClient struct {
 	client       *http.Client
+	stopClient   *http.Client
 	transferPort int
 }
 
 // NewSourceClient returns a client with the given per-call control timeout and
 // the fixed source transfer port used for the disk stream.
 func NewSourceClient(timeout time.Duration, transferPort int) *SourceClient {
+	stopTimeout := timeout
 	if timeout <= 0 {
 		timeout = defaultControlTimeout
+		stopTimeout = defaultStopTimeout
 	}
 	return &SourceClient{
 		client:       &http.Client{Timeout: timeout},
+		stopClient:   &http.Client{Timeout: stopTimeout},
 		transferPort: transferPort,
 	}
 }
@@ -62,7 +70,7 @@ func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, v
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
-	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/snapshot"), body)
+	responseBody, err := c.postJSON(ctx, c.client, address, sourcePath(migrationID, virtualMachineID, "/snapshot"), body)
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -130,14 +138,14 @@ func hostname(address string) (string, error) {
 }
 
 // postJSON sends a JSON control request and returns its body.
-func (c *SourceClient) postJSON(ctx context.Context, address, path string, body []byte) ([]byte, error) {
+func (c *SourceClient) postJSON(ctx context.Context, client *http.Client, address, path string, body []byte) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, address+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build source request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 
-	response, err := c.client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("call source: %w", err)
 	}
@@ -176,8 +184,12 @@ func (c *SourceClient) PrepareSource(ctx context.Context, address, migrationID, 
 
 // StopSource asks the source to stop the VM, remove its network, and create the
 // final snapshot.
-func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (SourceSnapshot, error) {
-	responseBody, err := c.postJSON(ctx, address, sourcePath(migrationID, virtualMachineID, "/stop"), nil)
+func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
+	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
+	if err != nil {
+		return SourceSnapshot{}, err
+	}
+	responseBody, err := c.postJSON(ctx, c.stopClient, address, sourcePath(migrationID, virtualMachineID, "/stop"), body)
 	if err != nil {
 		return SourceSnapshot{}, err
 	}

@@ -3,12 +3,27 @@ package vmmigration
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
+
+func TestBeginIntervalReturnsARecordWriteError(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	if err := os.WriteFile(filepath.Join(machines.MachinesDirectory(), "blocked"), []byte("not a directory"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	record := TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "blocked"}
+
+	_, err := migrationManager.beginInterval(record, SourceSnapshot{Sequence: 1}, 0)
+	if err == nil {
+		t.Fatal("begin interval ignored the record write error")
+	}
+}
 
 // writeCopyingTarget sets up a copying target.
 func writeCopyingTarget(t *testing.T, machines *fakeMachines, sourceState vm.State) *migrationStore {
@@ -131,6 +146,9 @@ func TestRunTransferCutsOverAtTheIntervalLimit(t *testing.T) {
 	}
 	if source.stopCalls != 1 {
 		t.Fatalf("stop calls = %d, want 1", source.stopCalls)
+	}
+	if source.stopReceived != maxTransferIntervals {
+		t.Fatalf("stop acknowledged sequence = %d, want %d", source.stopReceived, maxTransferIntervals)
 	}
 	record, err = store.readTarget("vm-1")
 	if err != nil {

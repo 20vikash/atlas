@@ -29,6 +29,7 @@ type stubMigrationManager struct {
 	finishedID       string
 	finishErr        error
 	receivedSequence int
+	stopReceived     int
 	stopArgs         []string
 	stopErr          error
 	startArgs        []string
@@ -67,8 +68,9 @@ func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID
 	return m.snapshot, m.snapshotErr
 }
 
-func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string) (vmmigration.SourceSnapshot, error) {
+func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error) {
 	m.stopArgs = []string{migrationID, virtualMachineID}
+	m.stopReceived = receivedSequence
 	return m.snapshot, m.stopErr
 }
 
@@ -88,6 +90,10 @@ func (m *stubMigrationManager) UnlockSource(_ context.Context, migrationID, virt
 }
 
 func newMigrationTestServer(t *testing.T, migrations MigrationManager) http.Handler {
+	return newMigrationTestServerWithWake(t, migrations, func() {})
+}
+
+func newMigrationTestServerWithWake(t *testing.T, migrations MigrationManager, wake func()) http.Handler {
 	t.Helper()
 	services := newFakeRuntimeServices()
 	manager := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}, services: services}
@@ -102,7 +108,7 @@ func newMigrationTestServer(t *testing.T, migrations MigrationManager) http.Hand
 		VirtualMachineManager: manager,
 		MigrationManager:      migrations,
 		SnapshotStore:         services,
-		WakeReconciler:        func() {},
+		WakeReconciler:        wake,
 		HostService:           hostService,
 		SerialBroker:          stubSerialBroker{},
 	})
@@ -138,7 +144,8 @@ func TestCreateMigrationRejectsAMissingField(t *testing.T) {
 
 func TestGetAndAbortMigration(t *testing.T) {
 	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationReady, Phase: vmmigration.PhaseCopying}}
-	server := newMigrationTestServer(t, stub)
+	wakeCalls := 0
+	server := newMigrationTestServerWithWake(t, stub, func() { wakeCalls++ })
 
 	recorder := do(t, server, http.MethodGet, "/v1/migrations/mig-1", "", http.StatusOK)
 	var response migrationResponse
@@ -152,6 +159,9 @@ func TestGetAndAbortMigration(t *testing.T) {
 	do(t, server, http.MethodPost, "/v1/migrations/mig-1/abort", "", http.StatusAccepted)
 	if stub.abortedID != "mig-1" {
 		t.Fatalf("aborted = %q", stub.abortedID)
+	}
+	if wakeCalls != 1 {
+		t.Fatalf("wake calls = %d, want 1", wakeCalls)
 	}
 }
 
@@ -244,10 +254,13 @@ func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
 	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 3, SizeBytes: 2048, GUID: "final"}}
 	server := newMigrationTestServer(t, stub)
 
-	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/stop?virtual_machine_id=vm-00001", "", http.StatusOK)
+	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/stop?virtual_machine_id=vm-00001", `{"received_sequence":2}`, http.StatusOK)
 
 	if want := []string{"mig-1", "vm-00001"}; !equalStrings(stub.stopArgs, want) {
 		t.Fatalf("stop args = %v", stub.stopArgs)
+	}
+	if stub.stopReceived != 2 {
+		t.Fatalf("stop received sequence = %d, want 2", stub.stopReceived)
 	}
 	var response snapshotResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {

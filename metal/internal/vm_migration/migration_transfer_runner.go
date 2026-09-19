@@ -160,7 +160,13 @@ func (m *VMMigration) advanceCopying(ctx context.Context, record TargetMigration
 
 // advanceStopping pulls and verifies the final snapshot, then enters starting.
 func (m *VMMigration) advanceStopping(ctx context.Context, record TargetMigrationRecord) error {
-	final, err := m.source.StopSource(ctx, record.Source, record.ID, record.VirtualMachineID)
+	final, err := m.source.StopSource(
+		ctx,
+		record.Source,
+		record.ID,
+		record.VirtualMachineID,
+		lastCompletedSequence(record),
+	)
 	if err != nil {
 		return err
 	}
@@ -263,7 +269,10 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 		}
 	}
 
-	record = m.beginInterval(record, snapshot, throughputMiBps)
+	record, err = m.beginInterval(record, snapshot, throughputMiBps)
+	if err != nil {
+		return err
+	}
 	received, err := m.streamInterval(ctx, record, snapshot, resumeToken, throughputMiBps)
 	if err != nil {
 		return err
@@ -277,8 +286,7 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 		return m.failTransfer(record, "received snapshot GUID does not match the source")
 	}
 
-	m.completeInterval(record, snapshot.Sequence, received, receivedGUID)
-	return nil
+	return m.completeInterval(record, snapshot.Sequence, received, receivedGUID)
 }
 
 // streamInterval streams one snapshot and checkpoints received bytes.
@@ -293,49 +301,54 @@ func (m *VMMigration) streamInterval(ctx context.Context, record TargetMigration
 		writer.CloseWithError(sendError)
 	}()
 
-	progressDone := make(chan struct{})
+	progressDone := make(chan error, 1)
 	go func() {
-		defer close(progressDone)
-		m.checkpointProgress(streamContext, record.VirtualMachineID, snapshot.Sequence, &received)
+		checkpointError := m.checkpointProgress(streamContext, record.VirtualMachineID, snapshot.Sequence, &received)
+		if checkpointError != nil {
+			cancelStream()
+		}
+		progressDone <- checkpointError
 	}()
 
-	err := m.transfer.ReceiveSnapshot(ctx, record.VirtualMachineID, &countingReader{reader: reader, count: &received})
+	receiveError := m.transfer.ReceiveSnapshot(ctx, record.VirtualMachineID, &countingReader{reader: reader, count: &received})
 	cancelStream()
-	<-progressDone
-	return received.Load(), err
+	checkpointError := <-progressDone
+	return received.Load(), errors.Join(receiveError, checkpointError)
 }
 
 // checkpointProgress saves the active interval byte count until the stream ends.
-func (m *VMMigration) checkpointProgress(ctx context.Context, virtualMachineID string, sequence int, received *atomic.Int64) {
+func (m *VMMigration) checkpointProgress(ctx context.Context, virtualMachineID string, sequence int, received *atomic.Int64) error {
 	ticker := time.NewTicker(progressCheckpointInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
-			m.saveIntervalBytes(virtualMachineID, sequence, received.Load())
+			if err := m.saveIntervalBytes(virtualMachineID, sequence, received.Load()); err != nil {
+				return err
+			}
 		}
 	}
 }
 
 // saveIntervalBytes records the bytes received for the active interval.
-func (m *VMMigration) saveIntervalBytes(virtualMachineID string, sequence int, bytesReceived int64) {
+func (m *VMMigration) saveIntervalBytes(virtualMachineID string, sequence int, bytesReceived int64) error {
 	record, err := m.store.readTarget(virtualMachineID)
 	if err != nil {
-		return
+		return err
 	}
 	for index := range record.Intervals {
 		if record.Intervals[index].Sequence == sequence && !record.Intervals[index].Completed {
 			record.Intervals[index].BytesTransferred = bytesReceived
-			_ = m.store.writeTarget(record)
-			return
+			return m.store.writeTarget(record)
 		}
 	}
+	return nil
 }
 
 // beginInterval records the start of one interval and returns the saved record.
-func (m *VMMigration) beginInterval(record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) TargetMigrationRecord {
+func (m *VMMigration) beginInterval(record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) (TargetMigrationRecord, error) {
 	record.ActiveSequence = snapshot.Sequence
 	if !hasInterval(record.Intervals, snapshot.Sequence) {
 		record.Intervals = append(record.Intervals, IntervalProgress{
@@ -345,15 +358,17 @@ func (m *VMMigration) beginInterval(record TargetMigrationRecord, snapshot Sourc
 			ThroughputMiBps: throughputMiBps,
 		})
 	}
-	_ = m.store.writeTarget(record)
-	return record
+	if err := m.store.writeTarget(record); err != nil {
+		return TargetMigrationRecord{}, err
+	}
+	return record, nil
 }
 
 // completeInterval marks one interval done with its byte count and GUID.
-func (m *VMMigration) completeInterval(record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) {
+func (m *VMMigration) completeInterval(record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) error {
 	current, err := m.store.readTarget(record.VirtualMachineID)
 	if err != nil {
-		return
+		return err
 	}
 	for index := range current.Intervals {
 		if current.Intervals[index].Sequence == sequence {
@@ -364,7 +379,7 @@ func (m *VMMigration) completeInterval(record TargetMigrationRecord, sequence in
 			interval.DurationSeconds = int(m.now().Sub(interval.StartedAt).Seconds())
 		}
 	}
-	_ = m.store.writeTarget(current)
+	return m.store.writeTarget(current)
 }
 
 // failTransfer marks the migration failed and keeps the dataset and snapshots.

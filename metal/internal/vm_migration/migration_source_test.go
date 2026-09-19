@@ -122,7 +122,7 @@ func TestStopSourceStopsAndCreatesFinalSnapshot(t *testing.T) {
 	transfer.sizeBytes = 500
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 2)
 
-	snapshot, err := migrationManager.StopSource(context.Background(), "mig-1", "vm-1")
+	snapshot, err := migrationManager.StopSource(context.Background(), "mig-1", "vm-1", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,19 +144,56 @@ func TestStopSourceStopsAndCreatesFinalSnapshot(t *testing.T) {
 	}
 }
 
+func TestStopSourceAcknowledgesTheLastReceivedSnapshot(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer.guid = "final-guid"
+	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 2)
+
+	record, err := migrationManager.store.readSource("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Sequence = 3
+	if err := migrationManager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := migrationManager.StopSource(context.Background(), "mig-1", "vm-1", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Sequence != 4 {
+		t.Fatalf("final sequence = %d, want 4", snapshot.Sequence)
+	}
+	if want := []string{"migration-mig-1-4"}; !equalStringSlices(transfer.removed, want) {
+		t.Fatalf("removed = %v, want %v", transfer.removed, want)
+	}
+}
+
+func TestStopSourceRejectsASequenceTheSourceDidNotCreate(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 2)
+
+	_, err := migrationManager.StopSource(context.Background(), "mig-1", "vm-1", 3)
+	if !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("stop source = %v, want ErrConflict", err)
+	}
+}
+
 func TestStopSourceIsIdempotent(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 0)
 	ctx := context.Background()
 
-	first, err := migrationManager.StopSource(ctx, "mig-1", "vm-1")
+	first, err := migrationManager.StopSource(ctx, "mig-1", "vm-1", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	created := len(transfer.created)
 
-	second, err := migrationManager.StopSource(ctx, "mig-1", "vm-1")
+	second, err := migrationManager.StopSource(ctx, "mig-1", "vm-1", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

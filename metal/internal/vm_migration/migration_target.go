@@ -60,14 +60,28 @@ func (m *VMMigration) AdvanceTarget(ctx context.Context, virtualMachineID string
 	if config.VirtualMachineID != virtualMachineID {
 		return m.recordTargetError(record, fmt.Errorf("source returned config for %s", config.VirtualMachineID))
 	}
-	if err := m.reserveShape(ctx, config.Specification); err != nil {
-		return m.recordTargetError(record, err)
-	}
-	if err := m.reconstructTarget(record, config, observedState); err != nil {
+	if err := m.reserveAndReconstructTarget(ctx, record, config, observedState); err != nil {
 		return err
 	}
 	m.StartTransfer(virtualMachineID)
 	return nil
+}
+
+// reserveAndReconstructTarget makes the capacity check and its reservation one
+// host allocation operation.
+func (m *VMMigration) reserveAndReconstructTarget(
+	ctx context.Context,
+	record TargetMigrationRecord,
+	config PortableConfig,
+	observedState vm.State,
+) error {
+	unlockAllocation := m.machines.LockAllocation()
+	defer unlockAllocation()
+
+	if err := m.reserveShape(ctx, config.Specification); err != nil {
+		return m.recordTargetError(record, err)
+	}
+	return m.reconstructTarget(record, config, observedState)
 }
 
 // ActiveTargetVirtualMachineIDs returns VM IDs for nonterminal target migrations.
@@ -107,9 +121,6 @@ func (m *VMMigration) reserveShape(ctx context.Context, specification vm.Specifi
 
 // reconstructTarget writes local target records and enters copying.
 func (m *VMMigration) reconstructTarget(record TargetMigrationRecord, config PortableConfig, observedState vm.State) error {
-	unlockAllocation := m.machines.LockAllocation()
-	defer unlockAllocation()
-
 	userID, err := m.reuseOrAllocateUserID(config.VirtualMachineID)
 	if err != nil {
 		return m.recordTargetError(record, err)

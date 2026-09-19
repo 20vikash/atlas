@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,8 +20,9 @@ type fakeMachines struct {
 	desired  map[string]vm.DesiredRecord
 	observed map[string]vm.ObservedRecord
 
-	nextUserID   uint32
-	limitDiskCap int
+	nextUserID      uint32
+	limitDiskCap    int
+	allocationMutex sync.Mutex
 
 	normalizeCalls      int
 	removeNetworkCalls  int
@@ -106,7 +108,10 @@ func (f *fakeMachines) AllocateUserID() (uint32, error) {
 	return userID, nil
 }
 
-func (f *fakeMachines) LockAllocation() func() { return func() {} }
+func (f *fakeMachines) LockAllocation() func() {
+	f.allocationMutex.Lock()
+	return f.allocationMutex.Unlock
+}
 
 func (f *fakeMachines) LockOperation(context.Context, string) (func(), error) {
 	return func() {}, nil
@@ -263,6 +268,7 @@ type fakeSourceClient struct {
 	stopSnapshot  SourceSnapshot
 	stopError     error
 	stopCalls     int
+	stopReceived  int
 	startCalls    int
 	startError    error
 	finishCalls   int
@@ -305,8 +311,9 @@ func (c *fakeSourceClient) StreamSnapshot(ctx context.Context, _, _, _ string, _
 	return c.streamBytes, nil
 }
 
-func (c *fakeSourceClient) StopSource(context.Context, string, string, string) (SourceSnapshot, error) {
+func (c *fakeSourceClient) StopSource(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
 	c.stopCalls++
+	c.stopReceived = receivedSequence
 	return c.stopSnapshot, c.stopError
 }
 

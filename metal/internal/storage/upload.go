@@ -233,6 +233,13 @@ func (store *SnapshotStore) cancelAndWaitUpload(snapshotID string) {
 	<-upload.done
 }
 
+// isUploadRunning reports whether an upload goroutine owns the staging data.
+func (store *SnapshotStore) isUploadRunning(snapshotID string) bool {
+	store.uploadsMutex.Lock()
+	defer store.uploadsMutex.Unlock()
+	return store.uploads[snapshotID] != nil
+}
+
 // UploadStatus reports the current upload state of one staged snapshot. An
 // upload recorded as running with no goroutine behind it did not survive a host
 // restart, so it is reported as pending for the controller to start again.

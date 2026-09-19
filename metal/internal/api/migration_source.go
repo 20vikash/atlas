@@ -64,7 +64,11 @@ func (s *Server) stopMigrationSource(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, virtualMachineID)
+	var request nextSnapshotRequest
+	if err := decodeOptionalJSON(c, &request); err != nil {
+		return err
+	}
+	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, virtualMachineID, request.ReceivedSequence)
 	if err != nil {
 		return err
 	}

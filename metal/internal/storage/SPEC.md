@@ -80,6 +80,8 @@ Durable upload state lives in the staging metadata. Live byte progress stays in 
 
 `DeleteSnapshot` cancels a running upload and waits for it to stop before it removes the data that upload is reading. It removes the staging clone before the source snapshot, because ZFS keeps a snapshot alive while a clone of it exists.
 
+The prune pass keeps staging data while an upload goroutine uses it. The pass removes invalid staging metadata and reads the source snapshot from the ZFS clone.
+
 ## Migration transfer
 
 `MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>`, estimates the full or incremental stream, and sends it. The target receives with `zfs recv -s`, which saves a resume token when a receive is interrupted. The target then compares the received snapshot GUID with the source GUID, so only a verified copy counts.

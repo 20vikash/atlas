@@ -110,6 +110,7 @@ func (s *Server) abortMigration(c echo.Context) error {
 	if err := s.migrationManager.AbortTarget(c.Request().Context(), identifier); err != nil {
 		return err
 	}
+	s.wakeReconciler()
 	return c.NoContent(http.StatusAccepted)
 }
 

@@ -23,8 +23,9 @@ type MigrationSourceClient interface {
 	// StreamSnapshot reads one snapshot into w and returns its byte count.
 	// A positive throughputMiBps limits source disk throughput.
 	StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
-	// StopSource stops the source, removes its network, and returns its final snapshot.
-	StopSource(ctx context.Context, address, migrationID, virtualMachineID string) (SourceSnapshot, error)
+	// StopSource acknowledges the last received snapshot, stops the source, and
+	// returns its final snapshot.
+	StopSource(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error)
 	// StartSource restores the source during rollback.
 	StartSource(ctx context.Context, address, migrationID, virtualMachineID string) error
 	// FinishSource destroys the stopped source and migration state.

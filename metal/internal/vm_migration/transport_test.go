@@ -3,6 +3,7 @@ package vmmigration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -82,22 +83,39 @@ func TestNextSnapshotSendsTheAcknowledgedSequence(t *testing.T) {
 }
 
 func TestStopSourceReturnsFinalSnapshot(t *testing.T) {
+	var request nextSnapshotRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/migrations/mig-1/stop" {
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"sequence":3,"size_bytes":2048,"guid":"final"}`))
 	}))
 	defer server.Close()
 
-	snapshot, err := NewSourceClient(0, 0).StopSource(context.Background(), server.URL, "mig-1", "vm-1")
+	snapshot, err := NewSourceClient(0, 0).StopSource(context.Background(), server.URL, "mig-1", "vm-1", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.Sequence != 3 || snapshot.SizeBytes != 2048 || snapshot.GUID != "final" {
 		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if request.ReceivedSequence != 2 {
+		t.Fatalf("received sequence = %d, want 2", request.ReceivedSequence)
+	}
+}
+
+func TestSourceClientUsesALongerDefaultStopTimeout(t *testing.T) {
+	client := NewSourceClient(0, 0)
+	if client.client.Timeout != defaultControlTimeout {
+		t.Fatalf("control timeout = %s, want %s", client.client.Timeout, defaultControlTimeout)
+	}
+	if client.stopClient.Timeout != defaultStopTimeout {
+		t.Fatalf("stop timeout = %s, want %s", client.stopClient.Timeout, defaultStopTimeout)
 	}
 }
 

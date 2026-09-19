@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,6 +156,65 @@ func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
 
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("advance without capacity = %v, want ErrConflict", err)
+	}
+}
+
+func TestTargetCapacityCheckAndReservationAreSerialized(t *testing.T) {
+	machines := newFakeMachines(t)
+	var migrationManager *VMMigration
+	capacity := func(ctx context.Context) (AvailableCapacity, error) {
+		reservations, err := migrationManager.TargetReservations(ctx)
+		if err != nil {
+			return AvailableCapacity{}, err
+		}
+		availableMemoryMiB := 3072
+		for _, reservation := range reservations {
+			availableMemoryMiB -= reservation.MemoryMiB
+		}
+		return AvailableCapacity{MemoryMiB: availableMemoryMiB, StorageMiB: 1 << 20}, nil
+	}
+	var err error
+	migrationManager, err = NewVMMigration(machines, &fakeSourceClient{}, &fakeTransfer{}, capacity, MigrationSettings{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	records := make([]TargetMigrationRecord, 2)
+	for index, virtualMachineID := range []string{"vm-1", "vm-2"} {
+		record, err := migrationManager.CreateTarget(ctx, "mig-"+virtualMachineID, virtualMachineID, "http://10.0.0.3:9000")
+		if err != nil {
+			t.Fatal(err)
+		}
+		records[index] = record
+	}
+
+	results := make(chan error, len(records))
+	var waitGroup sync.WaitGroup
+	for _, record := range records {
+		waitGroup.Add(1)
+		go func(record TargetMigrationRecord) {
+			defer waitGroup.Done()
+			config := portableConfig(record.VirtualMachineID)
+			results <- migrationManager.reserveAndReconstructTarget(ctx, record, config, vm.StateRunning)
+		}(record)
+	}
+	waitGroup.Wait()
+	close(results)
+
+	succeeded, rejected := 0, 0
+	for result := range results {
+		switch {
+		case result == nil:
+			succeeded++
+		case errors.Is(result, vm.ErrConflict):
+			rejected++
+		default:
+			t.Fatalf("reservation result = %v", result)
+		}
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("succeeded = %d, rejected = %d", succeeded, rejected)
 	}
 }
 

@@ -2,11 +2,31 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+type stagingRunner struct {
+	origin        string
+	destroyed     []string
+	destroyErrors map[string]error
+}
+
+func (runner *stagingRunner) Run(_ context.Context, _ string, arguments ...string) error {
+	if len(arguments) == 3 && arguments[0] == "destroy" {
+		runner.destroyed = append(runner.destroyed, arguments[2])
+		return runner.destroyErrors[arguments[2]]
+	}
+	return nil
+}
+
+func (runner *stagingRunner) Output(context.Context, string, ...string) (string, error) {
+	return runner.origin, nil
+}
 
 func TestSnapshotStoreShutdownRejectsNewUploads(t *testing.T) {
 	store := NewStores(t.Context(), "test", filepath.Join(t.TempDir(), "images"), nil).Snapshots
@@ -56,6 +76,85 @@ func TestPruneStagedSnapshotsRechecksActivityAfterLockWait(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.snapshotDirectory(metadata.ID), "metadata.json")); err != nil {
 		t.Fatalf("active staging was removed: %v", err)
+	}
+}
+
+func TestPruneStagedSnapshotsKeepsAStagingCloneDuringUpload(t *testing.T) {
+	store := NewStores(t.Context(), "test", filepath.Join(t.TempDir(), "images"), nil).Snapshots
+	now := time.Now().UTC()
+	metadata := stagedSnapshotMetadata{
+		ID:                     "snapshot-1",
+		SourceVirtualMachineID: "vm-1",
+		SourceSnapshot:         "test/vms/vm-1@snapshot-1",
+		RootfsSizeBytes:        1024,
+		KernelSizeBytes:        512,
+		CreatedAt:              now.Add(-49 * time.Hour),
+		LastActivityAt:         now.Add(-49 * time.Hour),
+	}
+	if err := store.saveStagedSnapshot(metadata); err != nil {
+		t.Fatal(err)
+	}
+	store.uploads[metadata.ID] = &snapshotUpload{}
+
+	if err := store.PruneStagedSnapshots(t.Context(), now, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store.snapshotDirectory(metadata.ID), "metadata.json")); err != nil {
+		t.Fatalf("active upload staging was removed: %v", err)
+	}
+}
+
+func TestPruneStagedSnapshotsRemovesInvalidMetadata(t *testing.T) {
+	store := NewStores(t.Context(), "test", filepath.Join(t.TempDir(), "images"), nil).Snapshots
+	runner := &stagingRunner{origin: "test/vms/vm-1@snapshot-1\n"}
+	store.runner = runner
+	directory := store.snapshotDirectory("snapshot-1")
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "metadata.json"), []byte("not json"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.PruneStagedSnapshots(t.Context(), time.Now().UTC(), 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid staging directory still exists: %v", err)
+	}
+	if got := strings.Join(runner.destroyed, ","); got != "test/staging/snapshot-1,test/vms/vm-1@snapshot-1" {
+		t.Fatalf("destroyed = %q", got)
+	}
+}
+
+func TestInvalidMetadataCleanupCanRetryAfterSourceRemovalFails(t *testing.T) {
+	store := NewStores(t.Context(), "test", filepath.Join(t.TempDir(), "images"), nil).Snapshots
+	sourceSnapshot := "test/vms/vm-1@snapshot-1"
+	runner := &stagingRunner{
+		origin:        sourceSnapshot + "\n",
+		destroyErrors: map[string]error{sourceSnapshot: errors.New("source busy")},
+	}
+	store.runner = runner
+	directory := store.snapshotDirectory("snapshot-1")
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "metadata.json"), []byte("not json"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.PruneStagedSnapshots(t.Context(), time.Now().UTC(), 48*time.Hour); err == nil {
+		t.Fatal("cleanup succeeded while source snapshot removal failed")
+	}
+	if _, _, err := store.loadStagedSnapshot("snapshot-1"); err != nil {
+		t.Fatalf("recovery metadata was not saved: %v", err)
+	}
+	delete(runner.destroyErrors, sourceSnapshot)
+	if err := store.PruneStagedSnapshots(t.Context(), time.Now().UTC(), 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staging directory still exists after retry: %v", err)
 	}
 }
 

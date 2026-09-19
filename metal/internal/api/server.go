@@ -70,7 +70,7 @@ type MigrationManager interface {
 	AbortTarget(ctx context.Context, migrationID string) error
 	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error)
 	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
-	StopSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceSnapshot, error)
+	StopSource(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
 	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
 	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error

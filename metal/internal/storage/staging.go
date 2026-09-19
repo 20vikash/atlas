@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var errInvalidStagedSnapshot = errors.New("invalid staged snapshot metadata")
+
 // ArtifactSize contains the exact artifact size. The controller needs the byte
 // count to plan a multipart upload.
 type ArtifactSize struct {
@@ -163,6 +165,10 @@ func (store *SnapshotStore) DeleteSnapshot(ctx context.Context, snapshotID strin
 	defer lock.Unlock()
 
 	metadata, found, err := store.loadStagedSnapshot(snapshotID)
+	if errors.Is(err, errInvalidStagedSnapshot) {
+		store.logger.Warn("remove staged snapshot with invalid metadata", "snapshot_id", snapshotID, "error", err)
+		return store.deleteStagedSnapshotWithoutMetadata(ctx, snapshotID)
+	}
 	if err != nil {
 		return err
 	}
@@ -180,16 +186,95 @@ func (store *SnapshotStore) deleteStagedSnapshot(
 	snapshotID string,
 	metadata stagedSnapshotMetadata,
 ) error {
-	if err := destroyIfPresent(ctx, store.pool.stagingDataset(snapshotID)); err != nil {
+	if err := store.destroyIfPresent(ctx, store.pool.stagingDataset(snapshotID)); err != nil {
 		return fmt.Errorf("remove staging disk: %w", err)
 	}
-	if err := destroyIfPresent(ctx, metadata.SourceSnapshot); err != nil {
+	if err := store.destroyIfPresent(ctx, metadata.SourceSnapshot); err != nil {
 		return fmt.Errorf("release source disk snapshot: %w", err)
 	}
 	if err := os.RemoveAll(store.snapshotDirectory(snapshotID)); err != nil {
 		return fmt.Errorf("remove staging files: %w", err)
 	}
 
+	return nil
+}
+
+// deleteStagedSnapshotWithoutMetadata reads the clone origin from ZFS before
+// it removes a staging record with corrupt metadata.
+func (store *SnapshotStore) deleteStagedSnapshotWithoutMetadata(ctx context.Context, snapshotID string) error {
+	origin, err := store.stagingOrigin(ctx, snapshotID)
+	if err != nil {
+		return err
+	}
+	if origin == "" {
+		if err := store.destroyIfPresent(ctx, store.pool.stagingDataset(snapshotID)); err != nil {
+			return fmt.Errorf("remove staging disk: %w", err)
+		}
+		if err := os.RemoveAll(store.snapshotDirectory(snapshotID)); err != nil {
+			return fmt.Errorf("remove staging files: %w", err)
+		}
+		return nil
+	}
+
+	virtualMachineID := strings.TrimSuffix(
+		strings.TrimPrefix(origin, store.pool.virtualMachineDataset("")),
+		"@"+snapshotID,
+	)
+	recoveryTime := time.Unix(0, 0).UTC()
+	metadata := stagedSnapshotMetadata{
+		ID:                     snapshotID,
+		SourceVirtualMachineID: virtualMachineID,
+		SourceSnapshot:         origin,
+		RootfsSizeBytes:        1,
+		KernelSizeBytes:        1,
+		CreatedAt:              recoveryTime,
+		LastActivityAt:         recoveryTime,
+	}
+	if err := store.saveStagedSnapshot(metadata); err != nil {
+		return fmt.Errorf("save recovered staging metadata: %w", err)
+	}
+	return store.deleteStagedSnapshot(ctx, snapshotID, metadata)
+}
+
+// stagingOrigin returns the source snapshot of a staging clone. It accepts a
+// clone that is already absent.
+func (store *SnapshotStore) stagingOrigin(ctx context.Context, snapshotID string) (string, error) {
+	output, err := store.runner.Output(
+		ctx,
+		"zfs",
+		"get",
+		"-Hp",
+		"-o",
+		"value",
+		"origin",
+		store.pool.stagingDataset(snapshotID),
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			return "", nil
+		}
+		return "", fmt.Errorf("read staging disk origin: %w", err)
+	}
+	origin := strings.TrimSpace(output)
+	if origin == "-" {
+		return "", nil
+	}
+	expectedPrefix := store.pool.virtualMachineDataset("")
+	virtualMachineID := strings.TrimSuffix(strings.TrimPrefix(origin, expectedPrefix), "@"+snapshotID)
+	if !strings.HasPrefix(origin, expectedPrefix) ||
+		!strings.HasSuffix(origin, "@"+snapshotID) ||
+		!vm.ValidIdentifier(virtualMachineID) {
+		return "", fmt.Errorf("staging disk returned invalid origin")
+	}
+	return origin, nil
+}
+
+// destroyIfPresent removes a dataset and accepts one that is already gone.
+func (store *SnapshotStore) destroyIfPresent(ctx context.Context, dataset string) error {
+	err := store.runner.Run(ctx, "zfs", "destroy", "-r", dataset)
+	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+		return err
+	}
 	return nil
 }
 
@@ -214,10 +299,10 @@ func (store *SnapshotStore) loadStagedSnapshot(snapshotID string) (stagedSnapsho
 
 	var metadata stagedSnapshotMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
-		return stagedSnapshotMetadata{}, false, fmt.Errorf("decode staging metadata: %w", err)
+		return stagedSnapshotMetadata{}, false, fmt.Errorf("%w: %v", errInvalidStagedSnapshot, err)
 	}
 	if metadata.ID != snapshotID || metadata.SourceVirtualMachineID == "" || metadata.SourceSnapshot == "" || metadata.RootfsSizeBytes <= 0 || metadata.KernelSizeBytes <= 0 || metadata.CreatedAt.IsZero() || metadata.LastActivityAt.IsZero() {
-		return stagedSnapshotMetadata{}, false, fmt.Errorf("staging metadata is invalid")
+		return stagedSnapshotMetadata{}, false, errInvalidStagedSnapshot
 	}
 	return metadata, true, nil
 }
@@ -264,8 +349,15 @@ func (store *SnapshotStore) pruneStagedSnapshot(
 	lock := store.snapshotLock(snapshotID)
 	lock.Lock()
 	defer lock.Unlock()
+	if store.isUploadRunning(snapshotID) {
+		return nil
+	}
 
 	metadata, found, err := store.loadStagedSnapshot(snapshotID)
+	if errors.Is(err, errInvalidStagedSnapshot) {
+		store.logger.Warn("remove staged snapshot with invalid metadata", "snapshot_id", snapshotID, "error", err)
+		return store.deleteStagedSnapshotWithoutMetadata(ctx, snapshotID)
+	}
 	if err != nil {
 		return err
 	}

@@ -248,9 +248,9 @@ func (m *VMMigration) NextSourceSnapshot(ctx context.Context, migrationID, virtu
 	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.Sequence)
 }
 
-// StopSource stops the source, removes its network, and creates the final
-// snapshot. Checkpoints make repeats safe.
-func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachineID string) (SourceSnapshot, error) {
+// StopSource records the last received sequence, stops the source, and creates
+// the final snapshot. Checkpoints make repeats safe.
+func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
 	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
 	if err != nil {
 		return SourceSnapshot{}, err
@@ -260,6 +260,9 @@ func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachin
 	record, err := m.boundSourceRecord(virtualMachineID, migrationID)
 	if err != nil {
 		return SourceSnapshot{}, err
+	}
+	if receivedSequence > record.Sequence {
+		return SourceSnapshot{}, vm.ErrConflict
 	}
 
 	if !record.Stopped {
@@ -281,7 +284,7 @@ func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachin
 		}
 	}
 	if record.FinalSequence == 0 {
-		final := record.AcknowledgedSequence + 1
+		final := max(record.AcknowledgedSequence, receivedSequence) + 1
 		name := migrationSnapshotName(migrationID, final)
 		// Replace any untransferred candidate with the post-stop snapshot.
 		if err := m.transfer.RemoveSnapshot(ctx, virtualMachineID, name); err != nil {
