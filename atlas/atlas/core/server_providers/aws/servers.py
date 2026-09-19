@@ -42,7 +42,7 @@ class AwsServers:
 
 	def ensure(self, request: ServerCreateRequest) -> ProviderServer:
 		"""Return the named instance, and create it when it does not exist."""
-		instance = self.find(request.discovery_key)
+		instance = self.find(request.identity_key)
 		if instance is None:
 			instance = self.create(request)
 
@@ -60,7 +60,7 @@ class AwsServers:
 		response = self.client.call(
 			"ec2",
 			"run_instances",
-			ClientToken=self.client_token("instance", request.discovery_key),
+			ClientToken=self.client_token("instance", request.identity_key),
 			ImageId=self.catalog.image_id(request.image_provider_metadata, request.server_image),
 			InstanceType=request.server_size,
 			MinCount=1,
@@ -73,7 +73,7 @@ class AwsServers:
 					"ResourceType": "instance",
 					"Tags": [
 						{"Key": "Name", "Value": request.name},
-						{"Key": self.identity_tag_key, "Value": request.discovery_key},
+						{"Key": self.identity_tag_key, "Value": request.identity_key},
 					],
 				}
 			],
@@ -86,30 +86,25 @@ class AwsServers:
 
 	@staticmethod
 	def cpu_options(size_provider_metadata: Mapping) -> dict:
-		"""Return the CPU options that let a virtual instance run Atlas guests.
-
-		AWS keeps nested virtualization off until an instance asks for it at launch.
-		A bare metal instance already exposes the processor extensions and rejects
-		the option.
-		"""
+		"""Return nested virtualization options for the instance type."""
 		if size_provider_metadata.get("BareMetal"):
 			return {}
 		return {"CpuOptions": {"NestedVirtualization": "enabled"}}
 
-	def find(self, discovery_key: str) -> Mapping | None:
+	def find(self, identity_key: str) -> Mapping | None:
 		"""Return the instance with the Atlas identity tag."""
 		reservations = self.client.paginate(
 			"ec2",
 			"describe_instances",
 			"Reservations",
 			Filters=[
-				{"Name": f"tag:{self.identity_tag_key}", "Values": [discovery_key]},
+				{"Name": f"tag:{self.identity_tag_key}", "Values": [identity_key]},
 				{"Name": "instance-state-name", "Values": sorted(self.live_states)},
 			],
 		)
 		instances = [instance for reservation in reservations for instance in reservation["Instances"]]
 		if len(instances) > 1:
-			raise AwsError(f"AWS returned multiple instances for discovery key {discovery_key}")
+			raise AwsError(f"AWS returned multiple instances for identity key {identity_key}")
 		return instances[0] if instances else None
 
 	def fetch(self, provider_server_id: str) -> Mapping:
@@ -131,7 +126,7 @@ class AwsServers:
 		return False
 
 	def ensure_mesh_interface(self, provider_server_id: str, server_name: str) -> Mapping:
-		"""Return the idempotently created mesh network interface."""
+		"""Create the mesh network interface idempotently."""
 		if not self.configuration.subnet_id or not self.configuration.security_group_id:
 			raise AwsError("Atlas Settings has no AWS subnet or security group")
 

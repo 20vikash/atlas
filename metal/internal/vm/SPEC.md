@@ -62,9 +62,9 @@ The phase and operation ID are written before each host call. A failure stores a
 
 The migration lifecycle lives in [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md). This package supports migration without importing that package.
 
-The manager exposes the operations migration drives: read and write VM records, allocate IDs, take the per-VM and allocation locks, release storage, and the migration runtime and network operations (normalize the source to stopped, remove and create the migration network, apply the migrated state with a cold start, remove the migrated runtime, and limit or refresh the source disk).
+The manager exposes the operations migration needs: VM records, ID allocation, locks, storage release, and migration runtime and network operations. These operations stop the source, create the target network, apply state with a cold start, remove the target runtime, and limit or refresh the source disk.
 
-The manager reads migration lock state through an injected `MigrationGuard`. A source lock blocks every VM mutation and pauses reconciliation. A target reservation hides the VM from get and list and pauses reconciliation. Without a guard, no VM is migrating. The daemon injects the guard with `SetMigrationGuard`.
+The manager reads migration lock state through an injected `MigrationGuard`. A source lock blocks VM changes and reconciliation. A target reservation hides the VM from get and list and pauses reconciliation. Without a guard, no VM is migrating. The daemon injects the guard with `SetMigrationGuard`.
 
 ## Boundaries
 

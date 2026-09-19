@@ -59,7 +59,7 @@ class TestServer(UnitTestCase):
 		server = SimpleNamespace(
 			name="node-test-00007",
 			provider_server_id=None,
-			provider_discovery_key=None,
+			provider_identity_key=None,
 			architecture=None,
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
@@ -74,16 +74,16 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.before_validate(server)
 
-		self.assertEqual(len(server.provider_discovery_key), 32)
+		self.assertEqual(len(server.provider_identity_key), 32)
 		provider.validate_settings.assert_called_once_with()
 		self.assertEqual(server.architecture, "amd64")
 		provider.ensure_server.assert_not_called()
 
-	def test_before_validate_keeps_existing_discovery_key(self) -> None:
+	def test_before_validate_keeps_existing_identity_key(self) -> None:
 		provider = SimpleNamespace(validate_settings=Mock())
 		server = SimpleNamespace(
 			provider_server_id=None,
-			provider_discovery_key=None,
+			provider_identity_key=None,
 			server_size="Scaleway/arm-size",
 			architecture=None,
 			settings=SimpleNamespace(server_provider_controller=provider),
@@ -95,13 +95,13 @@ class TestServer(UnitTestCase):
 			return_value=SimpleNamespace(architecture="arm64"),
 		):
 			MetalServer.before_validate(server)
-			key = server.provider_discovery_key
+			key = server.provider_identity_key
 			MetalServer.before_validate(server)
 
 		self.assertEqual(server.architecture, "arm64")
-		self.assertEqual(server.provider_discovery_key, key)
+		self.assertEqual(server.provider_identity_key, key)
 
-	def test_ensure_provider_server_uses_stored_discovery_key(self) -> None:
+	def test_ensure_provider_server_uses_stored_identity_key(self) -> None:
 		provider = SimpleNamespace(
 			ensure_server=Mock(
 				return_value=ProviderServer(
@@ -115,7 +115,7 @@ class TestServer(UnitTestCase):
 		server = SimpleNamespace(
 			name="node-test-00007",
 			provider_server_id=None,
-			provider_discovery_key="stored-key",
+			provider_identity_key="stored-key",
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
 			status="Pending",
@@ -129,26 +129,19 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.ensure_provider_server(server)
 
-		self.assertEqual(provider.ensure_server.call_args.args[0].discovery_key, "stored-key")
+		self.assertEqual(provider.ensure_server.call_args.args[0].identity_key, "stored-key")
 		self.assertEqual(server.provider_server_id, "server-id")
 
 	def test_provision_inserts_pending_host_for_setup_job(self) -> None:
 		server = SimpleNamespace(insert=Mock())
 		with (
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_single",
-				return_value=SimpleNamespace(server_provider="Scaleway"),
-			),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
-				return_value=SimpleNamespace(name="Scaleway/Ubuntu_26.04"),
-			),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.new_doc", return_value=server),
 		):
-			MetalServer.provision(size="Scaleway/size", is_sleepy=True)
+			MetalServer.provision(size="Scaleway/size", image="Scaleway/Ubuntu_26.04", is_sleepy_vm_host=True)
 
 		self.assertEqual(server.server_size, "Scaleway/size")
-		self.assertTrue(server.is_sleepy)
+		self.assertEqual(server.server_image, "Scaleway/Ubuntu_26.04")
+		self.assertTrue(server.is_sleepy_vm_host)
 		server.insert.assert_called_once_with(ignore_permissions=True)
 
 	def test_provisioning_worker_runs_as_administrator(self) -> None:

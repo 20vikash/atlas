@@ -45,13 +45,13 @@ class MetalServer(Document):
 		architecture: DF.Literal["amd64", "arm64"]
 		disks: DF.Table[MetalServerDisk]
 		is_provisioning_completed: DF.Check
-		is_sleepy: DF.Check
+		is_sleepy_vm_host: DF.Check
 		metald_api_token: DF.Password | None
 		port: DF.Int
 		private_ipv4_address: DF.Data | None
 		private_network_interface: DF.Data | None
+		provider_identity_key: DF.Data | None
 		provider_metadata: DF.Code | None
-		provider_discovery_key: DF.Data | None
 		provider_server_id: DF.Data | None
 		public_ipv4_address: DF.Data | None
 		public_network_interface: DF.Data | None
@@ -92,8 +92,8 @@ class MetalServer(Document):
 		if self.provider_server_id:
 			return
 
-		if not self.provider_discovery_key:
-			self.provider_discovery_key = uuid4().hex
+		if not self.provider_identity_key:
+			self.provider_identity_key = uuid4().hex
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		self.architecture = size.architecture
@@ -102,14 +102,14 @@ class MetalServer(Document):
 		"""Create the provider host once, including after a worker retry."""
 		if self.provider_server_id:
 			return
-		if not self.provider_discovery_key:
-			frappe.throw(_("Metal Server {0} has no provider discovery key.").format(self.name))
+		if not self.provider_identity_key:
+			frappe.throw(_("Metal Server {0} has no provider identity key.").format(self.name))
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		image = frappe.get_doc("Metal Server Image", self.server_image)
 		request = ServerCreateRequest(
 			name=self.name,
-			discovery_key=self.provider_discovery_key,
+			identity_key=self.provider_identity_key,
 			server_size=self.server_size,
 			server_image=self.server_image,
 			size_provider_metadata=self._provider_metadata(size.provider_metadata),
@@ -313,20 +313,16 @@ class MetalServer(Document):
 
 	@staticmethod
 	def provision(
-		os_name: str = "Ubuntu",
-		version: str = "26.04",
-		size: str | None = None,
+		size: str,
+		image: str,
 		*,
-		is_sleepy: bool = False,
+		is_sleepy_vm_host: bool = False,
 	) -> MetalServer:
 		"""Insert a Pending Server with the selected image and size."""
-		settings: AtlasSettings = frappe.get_single("Atlas Settings")
-		image = frappe.get_doc("Metal Server Image", f"{settings.server_provider}/{os_name}_{version}")
-
 		server: "MetalServer" = frappe.new_doc("Metal Server")
-		server.server_size = size or MetalServer._find_default_server_size(settings.server_provider)
-		server.server_image = image.name
-		server.is_sleepy = is_sleepy
+		server.server_size = size
+		server.server_image = image
+		server.is_sleepy_vm_host = is_sleepy_vm_host
 		server.status = "Pending"
 		server.insert(ignore_permissions=True)
 		return server
@@ -420,3 +416,12 @@ class MetalServer(Document):
 		if not isinstance(metadata, dict):
 			frappe.throw(_("Provider metadata must be a JSON object."))
 		return metadata
+
+
+def on_doctype_update() -> None:
+	"""Index the ready host pool that placement filters on."""
+	frappe.db.add_index(
+		"Metal Server",
+		["status", "is_provisioning_completed", "architecture", "is_sleepy_vm_host"],
+		"placement_ready_pool",
+	)

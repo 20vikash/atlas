@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import heapq
+import math
 import random
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import count
 from math import log
 
-from atlas.vm.core.placement.models import FleetUsage, HostUsage, PlacementDemand, Resources
-from atlas.vm.core.placement.simulation.workload import (
+from atlas.simulator.vm_placement.workload import (
 	TICKS_PER_DAY,
 	TICKS_PER_SECOND,
 	ExternalEvent,
@@ -22,7 +23,8 @@ from atlas.vm.core.placement.simulation.workload import (
 	Workload,
 	event_random,
 )
-from atlas.vm.core.placement.strategies.base import PlacementStrategy
+from atlas.vm.core.placement import PlacementRequirements, PlacementStrategy
+from atlas.vm.core.placement.models import FleetUsage, HostUsage, Resources
 
 RATE_WINDOW_TICKS = 5 * 60 * TICKS_PER_SECOND
 SAMPLE_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -127,7 +129,7 @@ class SimulatedPlacementContext:
 	def __init__(
 		self,
 		simulation: Simulation,
-		request: PlacementDemand,
+		requirements: PlacementRequirements,
 		action: str,
 		current_host_name: str | None,
 		virtual_machine_id: int | None,
@@ -136,24 +138,36 @@ class SimulatedPlacementContext:
 		self._virtual_machine_id = virtual_machine_id
 		self._selected_host_name: str | None = None
 		self._pending_host_names: tuple[str, ...] = ()
-		self.request = request
+		self.requirements = requirements
 		self.action = action
 		self.current_host_name = current_host_name
-		self.usage = simulation._usage(request.tenant_id)
+		self.usage = simulation._usage(requirements.tenant_id)
 		self.sleepy_vm_overcommit_factor = simulation.scenario.sleepy_vm_overcommit_factor
+		self.use_dedicated_sleepy_vm_hosts = True
+		self.last_probe_was_contended = False
 
-	def placement_rate(self, host_name: str | None = None) -> float:
+	@property
+	def remaining_seconds(self) -> float:
+		"""A simulated placement has no wall clock deadline."""
+		return math.inf
+
+	def get_placement_rate(self, host_name: str | None = None) -> float:
 		return self._simulation._placement_rate(host_name)
 
-	def select(self, host_name: str) -> bool:
+	def try_select(self, host_name: str, *, wait: bool = False) -> bool:
+		"""Select a simulated host when it still has enough capacity."""
 		if self._selected_host_name is not None:
 			raise RuntimeError("A placement host is already selected.")
 		if host_name not in {host.name for host in self.usage.hosts}:
 			return False
 		host = self._simulation._hosts[host_name]
 		replacing = self._virtual_machine_id if host_name == self.current_host_name else None
-		wanted = Resources(self.request.cpu_millicores, self.request.memory_mib, self.request.disk_mib)
-		if host.host_type.architecture != self.request.architecture or not self._simulation._fits(
+		wanted = Resources(
+			self.requirements.cpu_millicores,
+			self.requirements.memory_mib,
+			self.requirements.disk_mib,
+		)
+		if host.host_type.architecture != self.requirements.architecture or not self._simulation._fits(
 			host, wanted, replacing
 		):
 			return False
@@ -168,11 +182,11 @@ class SimulatedPlacementContext:
 		selected_type = host_type or self._simulation.scenario.new_host_type
 		catalog = self._simulation.scenario.host_type(selected_type)
 		if (
-			catalog.architecture != self.request.architecture
+			catalog.architecture != self.requirements.architecture
 			or int(catalog.cpu_millicores * self._simulation.scenario.cpu_oversubscription)
-			< self.request.cpu_millicores
-			or catalog.memory_mib < self.request.memory_mib
-			or catalog.storage_mib < self.request.disk_mib
+			< self.requirements.cpu_millicores
+			or catalog.memory_mib < self.requirements.memory_mib
+			or catalog.storage_mib < self.requirements.disk_mib
 		):
 			raise ValueError(f"Host type {selected_type} cannot hold this VM shape")
 		names = [
@@ -203,7 +217,7 @@ class Simulation:
 		self._events: list[tuple[int, int, str, object]] = []
 		self._sequence = count()
 		self._placements: deque[tuple[int, str]] = deque()
-		self._strategy: PlacementStrategy | None = None
+		self._strategy: type[PlacementStrategy] | Callable[[SimulatedPlacementContext], None] | None = None
 		self._ready_capacity = Resources(0, 0, 0)
 		self._ready_used = Resources(0, 0, 0)
 		self._capacity_area = Resources(0, 0, 0)
@@ -301,6 +315,7 @@ class Simulation:
 					for key in host.allocations
 					if key > 0 and self.scenario.shape(self._virtual_machines[key].shape_name).is_sleepy
 				),
+				placement_count=self._placement_count(host.name),
 			)
 			for host in self._hosts.values()
 			if host.ready
@@ -315,24 +330,33 @@ class Simulation:
 			),
 			sum(host.tenant_vm_count for host in hosts),
 			sum(host.sleepy_reserved_memory_mib for host in hosts),
+			sum(host.placement_count for host in hosts),
 		)
 
-	def _placement_rate(self, host_name: str | None) -> float:
+	def _placement_count(self, host_name: str | None) -> int:
 		while self._placements and self._placements[0][0] < self._now - RATE_WINDOW_TICKS:
 			self._placements.popleft()
-		return sum(host_name is None or name == host_name for _, name in self._placements) / 5
+		return sum(host_name is None or name == host_name for _, name in self._placements)
+
+	def _placement_rate(self, host_name: str | None) -> float:
+		return self._placement_count(host_name) / 5
 
 	def _choose(
-		self, request: PlacementDemand, action: str, vm: _VM | None
+		self, requirements: PlacementRequirements, action: str, vm: _VM | None
 	) -> tuple[str | None, tuple[str, ...]]:
-		api = SimulatedPlacementContext(
-			self, request, action, vm.host_name if vm else None, vm.identifier if vm else None
+		placement = SimulatedPlacementContext(
+			self, requirements, action, vm.host_name if vm else None, vm.identifier if vm else None
 		)
-		self._strategy.select_host(api)
-		return api._selected_host_name, api._pending_host_names
+		if isinstance(self._strategy, type):
+			self._strategy(placement).select_host()
+		else:
+			self._strategy(placement)
+		if placement._selected_host_name is None and not placement._pending_host_names:
+			placement.spawn_host(is_sleepy=requirements.is_sleepy)
+		return placement._selected_host_name, placement._pending_host_names
 
-	def _request(self, tenant_id: int, shape: VMShape, disk_mib: int) -> PlacementDemand:
-		return PlacementDemand(
+	def _placement_requirements(self, tenant_id: int, shape: VMShape, disk_mib: int) -> PlacementRequirements:
+		return PlacementRequirements(
 			shape.cpu_millicores,
 			shape.memory_mib,
 			disk_mib,
@@ -414,11 +438,11 @@ class Simulation:
 				return
 
 	def _place_allocation(self, allocation: _PendingAllocation) -> bool | None:
-		"""Place one request, wait for a provisioning host, or record a hard failure."""
+		"""Place one request, wait for simulated capacity, or record a hard failure."""
 		tenant = self._tenants[allocation.tenant_id]
 		shape = self.scenario.shape(allocation.shape_name)
-		request = self._request(allocation.tenant_id, shape, allocation.disk_mib)
-		host_name, pending_hosts = self._choose(request, "create", None)
+		requirements = self._placement_requirements(allocation.tenant_id, shape, allocation.disk_mib)
+		host_name, pending_hosts = self._choose(requirements, "create", None)
 		if host_name is None:
 			if pending_hosts:
 				self._pending_allocations[allocation.identifier] = allocation
@@ -519,8 +543,8 @@ class Simulation:
 		if vm.state != "stopped":
 			return
 		shape = self.scenario.shape(vm.shape_name)
-		request = self._request(vm.tenant_id, shape, vm.disk_mib)
-		host_name, _ = self._choose(request, "start", vm)
+		requirements = self._placement_requirements(vm.tenant_id, shape, vm.disk_mib)
+		host_name, _ = self._choose(requirements, "start", vm)
 		if host_name is None:
 			self._failure(self._tenants[vm.tenant_id], "start")
 			return
@@ -539,8 +563,8 @@ class Simulation:
 	def _resize(self, vm: _VM, shape: VMShape, disk_mib: int) -> bool:
 		if vm.state not in (*PAID_STATES, "stopped") or shape.name == vm.shape_name:
 			return False
-		request = self._request(vm.tenant_id, shape, disk_mib)
-		host_name, _ = self._choose(request, "resize", vm)
+		requirements = self._placement_requirements(vm.tenant_id, shape, disk_mib)
+		host_name, _ = self._choose(requirements, "resize", vm)
 		if host_name is None:
 			self._failure(self._tenants[vm.tenant_id], "resize")
 			return False
@@ -642,8 +666,8 @@ class Simulation:
 			self._wakes += 1
 			self._schedule_sleep(vm)
 			return
-		request = self._request(vm.tenant_id, shape, vm.disk_mib)
-		target, _ = self._choose(request, "wake", vm)
+		requirements = self._placement_requirements(vm.tenant_id, shape, vm.disk_mib)
+		target, _ = self._choose(requirements, "wake", vm)
 		if target is None:
 			self._failure(self._tenants[vm.tenant_id], "wake")
 			return
@@ -798,7 +822,11 @@ class Simulation:
 		self._capacity_area = _plus(self._capacity_area, _scale(self._ready_capacity, elapsed))
 		self._used_area = _plus(self._used_area, _scale(self._ready_used, elapsed))
 
-	def run(self, name: str, strategy: PlacementStrategy) -> Result:
+	def run(
+		self,
+		name: str,
+		strategy: type[PlacementStrategy] | Callable[[SimulatedPlacementContext], None],
+	) -> Result:
 		self._strategy = strategy
 		while self._events:
 			at, _, kind, payload = heapq.heappop(self._events)

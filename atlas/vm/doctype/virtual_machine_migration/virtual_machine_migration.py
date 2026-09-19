@@ -33,3 +33,8 @@ class VirtualMachineMigration(Document):
 		from atlas.vm.core.vm_migration import enqueue_migration
 
 		enqueue_migration(self.name)
+
+
+def on_doctype_update() -> None:
+	"""Index in-flight migrations that reserve capacity on a target host."""
+	frappe.db.add_index("Virtual Machine Migration", ["target_server", "status"], "placement_migrations")

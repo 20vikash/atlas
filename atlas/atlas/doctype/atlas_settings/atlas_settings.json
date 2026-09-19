@@ -101,10 +101,18 @@
   "object_storage_access_key_id",
   "object_storage_secret_access_key",
   "object_storage_signed_url_expiry",
-  "placement_tab",
+  "vm_scheduler_tab",
+  "placement_strategy_section",
   "placement_strategy",
-  "new_host_type",
-  "sleepy_vm_overcommit_factor"
+  "column_break_dxsw",
+  "use_dedicated_sleepy_vm_hosts",
+  "sleepy_vm_overcommit_factor",
+  "section_break_azkc",
+  "auto_spawn_metal_server",
+  "column_break_tckj",
+  "default_metal_machine_size",
+  "column_break_jfub",
+  "default_metal_machine_image"
  ],
  "fields": [
   {
@@ -651,13 +659,7 @@
    "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
   },
   {
-   "fieldname": "placement_tab",
-   "fieldtype": "Tab Break",
-   "label": "Placement"
-  },
-  {
    "default": "balanced",
-   "description": "Strategy used to select hosts for new VMs and automatic migrations.",
    "fieldname": "placement_strategy",
    "fieldtype": "Autocomplete",
    "label": "Placement Strategy",
@@ -665,26 +667,74 @@
    "show_description_on_click": 1
   },
   {
-   "description": "Metal Server Size used when placement requests a new host.",
-   "fieldname": "new_host_type",
-   "fieldtype": "Link",
-   "label": "New Host Type",
-   "options": "Metal Server Size"
-  },
-  {
    "default": "1.0",
-   "description": "Multiplier available to placement strategies for VMs that sleep after idle time.",
+   "description": "Memory weight for sleepy VM placement. Higher values allow denser placement; 1.0 means no overcommit.",
    "fieldname": "sleepy_vm_overcommit_factor",
    "fieldtype": "Float",
    "label": "Sleepy VM Overcommit Factor",
    "show_description_on_click": 1
+  },
+  {
+   "default": "1",
+   "description": "Keep sleepy VMs on sleepy hosts and other VMs off them. Disable to allow any VM on any host.",
+   "fieldname": "use_dedicated_sleepy_vm_hosts",
+   "fieldtype": "Check",
+   "label": "Use Dedicated Sleepy VM Hosts",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "column_break_dxsw",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "vm_scheduler_tab",
+   "fieldtype": "Tab Break",
+   "label": "VM Scheduler"
+  },
+  {
+   "fieldname": "section_break_azkc",
+   "fieldtype": "Section Break",
+   "label": "Metal Auto-spawn Config"
+  },
+  {
+   "fieldname": "column_break_tckj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_spawn_metal_server",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "placement_strategy_section",
+   "fieldtype": "Section Break",
+   "label": "Placement Strategy"
+  },
+  {
+   "depends_on": "eval: doc.auto_spawn_metal_server",
+   "fieldname": "default_metal_machine_size",
+   "fieldtype": "Autocomplete",
+   "label": "Default Metal Machine Size",
+   "mandatory_depends_on": "eval: doc.auto_spawn_metal_server"
+  },
+  {
+   "depends_on": "eval: doc.auto_spawn_metal_server",
+   "fieldname": "default_metal_machine_image",
+   "fieldtype": "Autocomplete",
+   "label": "Default Metal Machine Image",
+   "mandatory_depends_on": "eval: doc.auto_spawn_metal_server"
+  },
+  {
+   "fieldname": "column_break_jfub",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-17 12:24:17.026088",
+ "modified": "2026-09-19 18:24:03.863344",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",

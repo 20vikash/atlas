@@ -7,8 +7,8 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from atlas.vm.core.placement.simulation.engine import Simulation
-from atlas.vm.core.placement.simulation.workload import (
+from atlas.simulator.vm_placement.engine import Simulation
+from atlas.simulator.vm_placement.workload import (
 	Demand,
 	HostType,
 	Incidents,
@@ -17,7 +17,7 @@ from atlas.vm.core.placement.simulation.workload import (
 	VMShape,
 	generate_workload,
 )
-from atlas.vm.core.placement.strategies import STRATEGIES
+from atlas.vm.core.placement import PlacementStrategy
 
 DEFAULT_SCENARIO = Path(__file__).with_name("scenario.json")
 
@@ -56,7 +56,7 @@ def main() -> None:
 	parser.add_argument("--scenario", type=Path, default=DEFAULT_SCENARIO)
 	parser.add_argument("--cpu-oversubscription", type=float)
 	parser.add_argument("--max-host-count", type=int)
-	parser.add_argument("--strategy", action="append", choices=tuple(STRATEGIES))
+	parser.add_argument("--strategy", action="append", choices=PlacementStrategy.registered_names())
 	parser.add_argument("--json", action="store_true", help="Print all metrics as JSON")
 	arguments = parser.parse_args()
 	try:
@@ -68,9 +68,10 @@ def main() -> None:
 		workload = generate_workload(scenario, arguments.days, arguments.seed)
 	except (OSError, KeyError, TypeError, ValueError) as error:
 		parser.error(str(error))
-	selected = dict.fromkeys(arguments.strategy or STRATEGIES)
+	selected = dict.fromkeys(arguments.strategy or PlacementStrategy.registered_names())
 	results = [
-		Simulation(scenario, workload, arguments.days).run(name, STRATEGIES[name]) for name in selected
+		Simulation(scenario, workload, arguments.days).run(name, PlacementStrategy.get_strategy_class(name))
+		for name in selected
 	]
 	if arguments.json:
 		print(json.dumps([asdict(result) for result in results], indent=2))

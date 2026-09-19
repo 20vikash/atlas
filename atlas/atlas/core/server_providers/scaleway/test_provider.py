@@ -177,7 +177,7 @@ class TestScalewayServers(UnitTestCase):
 		servers.client.request.side_effect = [{}, {"id": "server-id"}]
 		request = ServerCreateRequest(
 			name="node-test-00001",
-			discovery_key="site-specific-key",
+			identity_key="site-specific-key",
 			server_size="Scaleway/large",
 			server_image="Scaleway/Ubuntu_26.04",
 			size_provider_metadata={"hourly": {}, "monthly": {}},
@@ -198,13 +198,13 @@ class TestScalewayServers(UnitTestCase):
 		servers.find = Mock(return_value={"id": "server-id", "status": "ready", "ips": []})
 		servers.create = Mock()
 
-		result = servers.ensure(SimpleNamespace(name="node-test-00001", discovery_key="unique-key"))
+		result = servers.ensure(SimpleNamespace(name="node-test-00001", identity_key="unique-key"))
 
 		self.assertEqual(result.provider_server_id, "server-id")
 		servers.create.assert_not_called()
 		servers.find.assert_called_once_with("unique-key")
 
-	def test_find_uses_discovery_key_instead_of_display_name(self) -> None:
+	def test_find_uses_identity_key_instead_of_display_name(self) -> None:
 		servers = self.servers()
 		servers.client.request.return_value = {"servers": []}
 

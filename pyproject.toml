@@ -74,10 +74,10 @@ frappe = ">=16.0.0,<18.0.0"
 
 [tool.bench]
 validation-ignore = [
+    "atlas/simulator/vm_placement/*",
     "atlas/vm/scripts/*",
     "scripts/*",
     "clients/*",
     "services/*",
     "metal/*",
 ]
-

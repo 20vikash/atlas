@@ -1,10 +1,10 @@
 # vm_migration
 
-The `vmmigration` package owns VM live migration on a Metal host: the lifecycle, the on-disk migration records, and the host-to-host transport. Another library drives a migration through the `VMMigration` struct.
+The `vmmigration` package owns VM live migration on a Metal host. It owns the lifecycle, records, and host transport. The `VMMigration` struct is the public entry point.
 
 ## Ownership
 
-`VMMigration` owns the migration records beside the VM records and one background worker per VM. It reaches the VM manager through the `Machines` interface, which `vm.Manager` satisfies, so the daemon passes the concrete manager while this package stays testable with a fake. See [Boundary](#boundary).
+`VMMigration` stores migration records beside VM records and runs one worker per VM. It uses the `Machines` interface, which `vm.Manager` implements. Tests can use a fake. See [Boundary](#boundary).
 
 ```text
 machines/<vm-id>/config.json            the VM's own records (vm package)
@@ -13,7 +13,7 @@ machines/<vm-id>/migration/target.json  target reservation and state
 machines/<vm-id>/migration/source.json  source lock
 ```
 
-One VM ID locates all of a VM's state. A source record blocks every VM mutation and pauses reconciliation. A target record reserves the VM ID, hides the VM from the list and get, and pauses reconciliation. A migration ID differs from a VM ID, so the target resolves a migration ID to its VM with a small scan.
+One VM ID locates all VM state. A source record blocks VM changes and reconciliation. A target record reserves the VM ID, hides the VM from list and get, and pauses reconciliation. A migration ID is different from a VM ID, so the target scans records to find the VM.
 
 ## Preparing
 
@@ -34,7 +34,7 @@ The target reserves compute only after the handshake supplies the config. Host c
 
 ## Copying
 
-At the copying phase, `VMMigration` runs one background disk transfer per VM and waits for the transfers at shutdown. The reconciler starts or resumes the transfer through `AdvanceTarget` and never moves data itself. The transfer holds no VM lock while data moves. One background transfer drives the copying, stopping, and starting phases in order, so `AdvanceTarget` resumes any of them from the saved phase.
+During copying, `VMMigration` runs one disk transfer per VM and waits for transfers at shutdown. The reconciler starts or resumes it through `AdvanceTarget`; it does not move data. The transfer holds no VM lock while data moves and drives copying, stopping, and starting from the saved phase.
 
 ```text
 next snapshot from source  (acknowledge the last completed sequence)
@@ -52,7 +52,7 @@ mark the interval complete, checkpoint bytes
 copy or cut over
 ```
 
-The source keeps the acknowledged snapshot as the next incremental base and removes the one before it. A stopped source needs one full interval. A network break or a restart leaves the migration in copying and resumes the same sequence. A GUID mismatch, an invalid sequence, or an unrelated target dataset fails the migration and keeps the dataset and snapshots for inspection.
+The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
 
 ## Cutover
 
@@ -80,9 +80,9 @@ starting: create the target network -> apply the original desired state (cold st
 verify the target state -> status ready
 ```
 
-The source normalizes to stopped before the final snapshot: a running VM stops, a paused VM resumes then stops, a created VM stops without guest work, and a stopped VM with saved state restores then stops. Saved memory is not transferred. The target cold-starts the received disk, so it never inherits the source guest memory. The target keeps the migration record at `ready`, so normal reconciliation stays blocked until Atlas commits.
+The source is stopped before the final snapshot. A running VM stops. A paused VM resumes, then stops. A created VM stops without guest work. A stopped VM with saved state restores, then stops. Saved memory is not transferred. The target cold-starts the disk and keeps the record at `ready` until Atlas commits.
 
-Each source stop, network removal, final snapshot, target network, and target state is checkpointed before the next external operation, so a restart repeats only idempotent work. A failure after the source stop marks the migration failed and keeps both hosts locked and the snapshots preserved for rollback.
+The source stop, network removal, final snapshot, target network, and target state are checkpointed before the next external operation. A restart repeats only safe work. A failure after the source stops marks the migration failed and keeps both hosts locked with snapshots for rollback.
 
 ## Completion and recovery
 
@@ -100,17 +100,17 @@ abort, source not stopped -> clean target -> unlock the still-available source
 abort, source stopped     -> clean target -> restore the source -> unlock the source
 ```
 
-The rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before it removes the dataset. It creates the target network never before the source network is gone. A stopped source is restored to its original desired state with a cold start, then unlocked. A rollback failure keeps both records, both locks, and the source disk, and reports failed with phase rollback.
+Rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before removing the dataset. It creates the target network only after the source network is gone. A stopped source is restored with a cold start, then unlocked. A rollback failure keeps both records, locks, and the source disk, and sets phase `rollback`.
 
-The source stops any in-flight disk stream before it unlocks or destroys the VM. A running `zfs send` therefore never keeps the migration snapshot busy, so the snapshot destroy during unlock always succeeds.
+The source stops any active disk stream before it unlocks or destroys the VM. This releases the migration snapshot before unlock removes it.
 
-A success or abort keeps a compact terminal record with only the schema version, migration ID, VM ID, terminal status, and finished time. A terminal record has no phase, does not hide the VM, and reserves no capacity. Every nonterminal record, including failed, keeps the VM hidden and its capacity reserved. A new target migration can replace an aborted record only when no VM record, source lock, or target dataset remains.
+A success or abort keeps a terminal record with the schema version, migration ID, VM ID, status, and finish time. It has no phase, hides no VM, and reserves no capacity. Every nonterminal record, including failed, hides the VM and reserves capacity. A new target migration can replace an aborted record only after all VM, source-lock, and target-dataset records are gone.
 
-A migration record that cannot be decoded, from a schema change or a corrupt file, is removed at startup and logged, so one leftover record never blocks the daemon.
+The daemon removes and logs a migration record that it cannot decode. One corrupt or old record cannot block startup.
 
 ## Transport
 
-Metal hosts reach each other only over the trusted WireGuard mesh, so migration traffic carries no credential. The target drives every call and carries the VM ID as the `virtual_machine_id` query value, so the source resolves the migration without a token.
+Metal hosts use the trusted WireGuard mesh. Migration traffic carries no credential. The target drives each call and sends the VM ID as `virtual_machine_id`, so the source finds the migration without a token.
 
 The control calls use HTTP against the source Metal API: prepare source, next snapshot, stop, start, destroy, and remove. The disk moves over a plain TCP connection to a fixed source `transfer_port`, not an HTTP body. Every host in a region uses the same port.
 
@@ -122,9 +122,9 @@ One connection carries one snapshot:
 
 ## Boundary
 
-`VMMigration` calls the VM manager only through the `Machines` interface: read and write VM records, allocate IDs, take the per-VM and allocation locks, release storage, and run the migration runtime and network operations (stop the source, remove and create networks, apply state, cold start, limit and refresh the disk). The `vm.Manager` implements every method.
+`VMMigration` calls the VM manager only through `Machines`. The interface reads and writes VM records, allocates IDs, takes locks, releases storage, and runs migration runtime and network operations. `vm.Manager` implements it.
 
-The reverse direction never imports this package. `vm.Manager` reads migration lock state through the `vm.MigrationGuard` it is given. `VMMigration` implements that guard from its own records, and the daemon injects it with `(*vm.Manager).SetMigrationGuard`.
+The `vm` package never imports this package. `vm.Manager` reads lock state through the injected `vm.MigrationGuard`. `VMMigration` implements the guard, and the daemon injects it with `(*vm.Manager).SetMigrationGuard`.
 
 ## Related
 

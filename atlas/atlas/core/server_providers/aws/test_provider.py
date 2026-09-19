@@ -178,7 +178,7 @@ class TestAwsProvider(UnitTestCase):
 
 		request = ServerCreateRequest(
 			name="server-1",
-			discovery_key="discovery-1",
+			identity_key="identity-1",
 			server_size="c6i.metal",
 			server_image="Ubuntu_24.04",
 			size_provider_metadata={"BareMetal": True},
@@ -386,7 +386,7 @@ class TestAwsServers(UnitTestCase):
 		self.assertEqual(servers.client.call.call_args.kwargs["ImageId"], "ami-1")
 		self.assertEqual(
 			servers.client.call.call_args.kwargs["ClientToken"],
-			AwsServers.client_token("instance", "discovery-1"),
+			AwsServers.client_token("instance", "identity-1"),
 		)
 
 	def test_a_virtual_instance_asks_for_nested_virtualization(self) -> None:
@@ -593,7 +593,7 @@ class TestAwsServers(UnitTestCase):
 	def request(size_provider_metadata: dict | None = None) -> ServerCreateRequest:
 		return ServerCreateRequest(
 			name="server-1",
-			discovery_key="discovery-1",
+			identity_key="identity-1",
 			server_size="c6i.metal",
 			server_image="Ubuntu_24.04",
 			size_provider_metadata=size_provider_metadata or {"BareMetal": True},

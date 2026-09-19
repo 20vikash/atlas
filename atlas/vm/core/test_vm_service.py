@@ -5,8 +5,7 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.placement.context import CapacityPending
-from atlas.vm.core.placement.service import PlacementService
+from atlas.vm.core.placement import OutOfCapacity, PlacementStrategy
 from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
@@ -23,13 +22,13 @@ def build_image(tenant_id: int, image_type: str = "machine") -> VirtualMachineIm
 
 
 class TestVirtualMachineCreation(UnitTestCase):
-	def test_pending_capacity_does_not_create_a_vm_draft(self) -> None:
+	def test_out_of_capacity_does_not_create_a_vm_draft(self) -> None:
 		image = SimpleNamespace(architecture="amd64", validate_compatibility=Mock())
 		with (
 			patch.object(VirtualMachineService, "get_image", return_value=image),
-			patch.object(PlacementService, "select_server", side_effect=CapacityPending("node-a")),
+			patch.object(PlacementStrategy, "find_server", side_effect=OutOfCapacity("retry later")),
 			patch.object(VirtualMachineService, "insert_draft") as insert_draft,
-			self.assertRaises(CapacityPending),
+			self.assertRaises(OutOfCapacity),
 		):
 			VirtualMachineService.create(self.request())
 
@@ -44,7 +43,6 @@ class TestVirtualMachineCreation(UnitTestCase):
 			title="Ubuntu",
 			validate_compatibility=Mock(),
 		)
-		server = SimpleNamespace(name="server-1")
 		virtual_machine = SimpleNamespace(
 			name="VM-00001",
 			flags=SimpleNamespace(),
@@ -56,14 +54,14 @@ class TestVirtualMachineCreation(UnitTestCase):
 
 		with (
 			patch.object(VirtualMachineService, "get_image", return_value=image),
-			patch.object(PlacementService, "select_server", return_value=server),
+			patch.object(PlacementStrategy, "find_server", return_value="metal-1"),
 			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
 			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
 			patch(
 				"atlas.vm.core.vm_service.frappe.db.commit",
 				side_effect=lambda: operations.append("commit"),
 			),
-			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
+			patch.object(VirtualMachineService, "metal_client", metal_client),
 		):
 			result = VirtualMachineService.create(self.request())
 
@@ -96,7 +94,6 @@ class TestVirtualMachineCreation(UnitTestCase):
 			title="Ubuntu",
 			validate_compatibility=Mock(),
 		)
-		server = SimpleNamespace(name="server-1")
 		virtual_machine = SimpleNamespace(
 			name="VM-00001",
 			flags=SimpleNamespace(),
@@ -108,11 +105,11 @@ class TestVirtualMachineCreation(UnitTestCase):
 
 		with (
 			patch.object(VirtualMachineService, "get_image", return_value=image),
-			patch.object(PlacementService, "select_server", return_value=server),
+			patch.object(PlacementStrategy, "find_server", return_value="metal-1"),
 			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
 			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
 			patch("atlas.vm.core.vm_service.frappe.db.commit") as commit,
-			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
+			patch.object(VirtualMachineService, "metal_client", metal_client),
 		):
 			result = VirtualMachineService.create(self.request())
 
@@ -128,7 +125,6 @@ class TestVirtualMachineCreation(UnitTestCase):
 			title="Ubuntu",
 			validate_compatibility=Mock(),
 		)
-		server = SimpleNamespace(name="server-1")
 		virtual_machine = SimpleNamespace(
 			name="VM-00001",
 			flags=SimpleNamespace(),
@@ -140,11 +136,11 @@ class TestVirtualMachineCreation(UnitTestCase):
 
 		with (
 			patch.object(VirtualMachineService, "get_image", return_value=image),
-			patch.object(PlacementService, "select_server", return_value=server),
+			patch.object(PlacementStrategy, "find_server", return_value="metal-1"),
 			patch.object(VirtualMachineService, "insert_draft", return_value=virtual_machine),
 			patch.object(VirtualMachineService, "get_metal_request", return_value={"request": True}),
 			patch("atlas.vm.core.vm_service.frappe.db.commit") as commit,
-			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
+			patch.object(VirtualMachineService, "metal_client", metal_client),
 			self.assertRaises(VirtualMachineCreateError) as raised,
 		):
 			VirtualMachineService.create(self.request())
@@ -172,7 +168,7 @@ class TestVirtualMachineInformation(UnitTestCase):
 
 		with (
 			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=Mock()),
-			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
+			patch.object(VirtualMachineService, "metal_client", metal_client),
 		):
 			information = VirtualMachineService(virtual_machine).get_information()
 
@@ -185,7 +181,7 @@ class TestVirtualMachineInformation(UnitTestCase):
 
 		with (
 			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=Mock()),
-			patch("atlas.vm.core.vm_service.MetalClient", return_value=metal_client),
+			patch.object(VirtualMachineService, "metal_client", metal_client),
 			self.assertRaisesRegex(frappe.ValidationError, "connection refused"),
 		):
 			VirtualMachineService(virtual_machine).get_information()

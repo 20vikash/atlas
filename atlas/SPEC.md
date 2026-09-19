@@ -27,6 +27,8 @@ vm/                            Virtual machine records, images, and orchestratio
   core/                        Placement, Metal transport, and image movement
   doctype/                     Virtual Machine and Virtual Machine Image
 realtime/                      Browser console bridge
+simulator/                     Developer simulations that do not run in the application
+  vm_placement/                Offline and live placement trials
 scripts/                       Host installation scripts
 ```
 

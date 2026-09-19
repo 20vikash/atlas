@@ -8,11 +8,11 @@
  "field_order": [
   "status",
   "is_provisioning_completed",
-  "is_sleepy",
+  "metald_api_token",
   "column_break_qbap",
   "provider_server_id",
-  "provider_discovery_key",
-  "metald_api_token",
+  "provider_identity_key",
+  "is_sleepy_vm_host",
   "section_break_configuration",
   "server_image",
   "column_break_njar",
@@ -46,10 +46,11 @@
   },
   {
    "default": "0",
-   "description": "Placement strategies can use this flag when they select a host.",
-   "fieldname": "is_sleepy",
+   "description": "Hosts only VMs that sleep after idle time.",
+   "fieldname": "is_sleepy_vm_host",
    "fieldtype": "Check",
-   "label": "Sleepy Host"
+   "label": "Sleepy VM Host",
+   "show_description_on_click": 1
   },
   {
    "default": "Pending",
@@ -69,10 +70,10 @@
    "read_only": 1
   },
   {
-   "fieldname": "provider_discovery_key",
+   "fieldname": "provider_identity_key",
    "fieldtype": "Data",
    "hidden": 1,
-   "label": "Provider Discovery Key",
+   "label": "Provider Identity Key",
    "no_copy": 1,
    "read_only": 1,
    "set_only_once": 1
@@ -234,8 +235,8 @@
    "link_fieldname": "server"
   }
  ],
- "modified": "2026-09-09 16:54:30.933302",
- "modified_by": "Administrator",
+ "modified": "2026-09-19 02:26:04.637326",
+ "modified_by": "test@gmail.com",
  "module": "Metal Server",
  "name": "Metal Server",
  "naming_rule": "By script",

@@ -18,7 +18,8 @@ from atlas.vm.core.models import (
 	FirewallConfiguration,
 	VirtualMachineCreateRequest,
 )
-from atlas.vm.core.placement.service import PlacementService
+from atlas.vm.core.placement import PlacementRequirements, PlacementStrategy
+from atlas.vm.core.placement.transaction import use_read_committed
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -57,6 +58,7 @@ class VirtualMachineService:
 		self.virtual_machine = virtual_machine
 
 	@classmethod
+	@use_read_committed
 	def create(cls, value: str | dict[str, Any] | VirtualMachineCreateRequest) -> VirtualMachineCreateResult:
 		"""Create and commit an Atlas request before the Metal request."""
 		if isinstance(value, VirtualMachineCreateRequest):
@@ -70,8 +72,16 @@ class VirtualMachineService:
 
 		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
-		server = PlacementService().select_server(request, image.architecture)
-		virtual_machine = cls.insert_draft(request, image, cast(str, server.name))
+		requirements = PlacementRequirements(
+			request.cpu_millicores,
+			request.memory_mib,
+			request.disk_mib,
+			image.architecture,
+			request.tenant_id,
+			request.sleep_after_idle_seconds > 0,
+		)
+		server_name = PlacementStrategy.find_server(requirements)
+		virtual_machine = cls.insert_draft(request, image, server_name)
 		service = cls(virtual_machine)
 		server_ip_address = (
 			service.assign_ip_address(request.server_ip_address) if request.server_ip_address else None
@@ -81,7 +91,7 @@ class VirtualMachineService:
 
 		virtual_machine_name = cast(str, virtual_machine.name)
 		try:
-			MetalClient(server).put_virtual_machine(virtual_machine_name, metal_request)
+			service.metal_client.put_virtual_machine(virtual_machine_name, metal_request)
 		except MetalClientError as error:
 			if error.uncertain:
 				return {"name": virtual_machine_name, "is_draft": True}

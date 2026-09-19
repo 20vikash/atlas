@@ -1,11 +1,7 @@
-"""Run a small, real-host placement trial beside an existing Atlas fleet.
+"""Run a guarded placement trial on real hosts.
 
-Run from the bench root with a running scheduler and worker. Run each strategy
-with the same arguments. Placement sees the ready site fleet. The host cap and
-cleanup cover only trial resources. The report lists baseline resources too.
-A successful run removes its VMs and hosts. An interrupted or failed run keeps
-them for inspection and cleanup.
-Repeat --tenant-id for each tenant. VM requests rotate across those IDs.
+The trial manages only the resources that it creates. A failed trial keeps its
+resources and report for inspection and cleanup.
 """
 
 from __future__ import annotations
@@ -23,7 +19,6 @@ from unittest.mock import patch
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 	from atlas.vm.core.models import VirtualMachineCreateRequest
-	from atlas.vm.core.placement.context import PlacementContext
 
 
 class HostLimitReached(RuntimeError):
@@ -82,19 +77,6 @@ def timestamp() -> str:
 	return datetime.now(UTC).isoformat()
 
 
-def trial_placement_context(new_host_type: str) -> type[PlacementContext]:
-	"""Use normal fleet placement with the trial's selected new host type."""
-	from atlas.vm.core.placement.context import PlacementContext
-
-	class TrialPlacementContext(PlacementContext):
-		def spawn_host(
-			self, host_type: str | None = None, *, count: int = 1, is_sleepy: bool = False
-		) -> None:
-			super().spawn_host(host_type or new_host_type, count=count, is_sleepy=is_sleepy)
-
-	return TrialPlacementContext
-
-
 class LiveTrial:
 	"""Own the state and resource manifest of one live placement trial."""
 
@@ -132,7 +114,7 @@ class LiveTrial:
 		hosts = frappe.get_all(
 			"Metal Server",
 			filters={"status": ["!=", "Deleted"]},
-			fields=["name", "status", "is_sleepy", "is_provisioning_completed"],
+			fields=["name", "status", "is_sleepy_vm_host", "is_provisioning_completed"],
 		)
 		for host in hosts:
 			if host.name not in self.report["hosts"]:
@@ -140,7 +122,7 @@ class LiveTrial:
 			previous = self.report["hosts"].get(host.name)
 			current = {
 				"status": host.status,
-				"is_sleepy": bool(host.is_sleepy),
+				"is_sleepy": bool(host.is_sleepy_vm_host),
 				"is_provisioning_completed": bool(host.is_provisioning_completed),
 			}
 			if previous != current:
@@ -204,7 +186,7 @@ class LiveTrial:
 			server = original(*args, **kwargs)
 			self.report["hosts"][server.name] = {
 				"status": server.status,
-				"is_sleepy": bool(server.is_sleepy),
+				"is_sleepy": bool(server.is_sleepy_vm_host),
 				"is_provisioning_completed": bool(server.is_provisioning_completed),
 			}
 			self.report["events"].append({"at": timestamp(), "kind": "host_requested", "name": server.name})
@@ -238,29 +220,44 @@ class LiveTrial:
 		return has_stale_host and not has_fresh_host
 
 	def create_requests(self) -> None:
-		"""Create each real VM, retrying only when a host is provisioning."""
+		"""Create each real VM and expand trial capacity between retries."""
 		import frappe
 
 		from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
-		from atlas.vm.core.placement.context import CapacityPending
-		from atlas.vm.core.placement.service import PlacementService
-		from atlas.vm.core.placement.strategies import STRATEGIES
+		from atlas.vm.core.placement import OutOfCapacity, PlacementRequirements, PlacementStrategy
+		from atlas.vm.core.placement.context import PlacementContext
 		from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
 
-		placement_context = trial_placement_context(self.arguments.host_type)
-
 		def select_trial_server(
-			service: PlacementService,
-			request: VirtualMachineCreateRequest,
-			architecture: str,
+			requirements: PlacementRequirements,
+			*,
 			exclude_servers: set[str] | None = None,
-		) -> MetalServer:
+		) -> str:
 			if exclude_servers:
 				raise RuntimeError("The live trial supports VM creation only.")
 			settings = frappe.get_single("Atlas Settings")
-			placement = placement_context(request, architecture, settings.sleepy_vm_overcommit_factor)
-			STRATEGIES[self.arguments.strategy].select_host(placement)
-			return placement.finish()
+			placement = PlacementContext(requirements, settings.sleepy_vm_overcommit_factor)
+			PlacementStrategy.bind_strategy(self.arguments.strategy, placement).select_host()
+			if placement.selected_host is not None:
+				return placement.selected_host
+
+			pending = frappe.db.exists(
+				"Metal Server",
+				{
+					"server_size": self.arguments.host_type,
+					"architecture": requirements.architecture,
+					"is_sleepy_vm_host": int(requirements.is_sleepy),
+					"status": ["in", ["Pending", "Installing"]],
+				},
+			)
+			if not pending:
+				MetalServer.provision(
+					size=self.arguments.host_type,
+					image=settings.default_metal_machine_image,
+					is_sleepy_vm_host=requirements.is_sleepy,
+				)
+				frappe.db.commit()  # nosemgrep
+			raise OutOfCapacity("No Metal Server has capacity. Retry later.")
 
 		deadline = time.monotonic() + self.arguments.timeout_seconds
 		sequence = request_sequence(
@@ -268,7 +265,7 @@ class LiveTrial:
 		)
 		with (
 			patch.object(MetalServer, "provision", staticmethod(self.guarded_provision())),
-			patch.object(PlacementService, "select_server", select_trial_server),
+			patch.object(PlacementStrategy, "find_server", select_trial_server),
 		):
 			for index, (is_sleepy, tenant_id) in enumerate(sequence, start=1):
 				started = time.monotonic()
@@ -282,7 +279,7 @@ class LiveTrial:
 						continue
 					try:
 						result = VirtualMachineService.create(request)
-					except CapacityPending:
+					except OutOfCapacity:
 						frappe.db.rollback()
 						self.snapshot()
 						frappe.db.rollback()
@@ -402,10 +399,13 @@ def connect_site(site: str, sites_path: Path) -> None:
 	"""Connect Frappe without keeping a transaction open during sleeps."""
 	import frappe
 
+	from atlas.vm.core.placement.transaction import start_read_committed_transaction
+
 	os.chdir(sites_path)
 	frappe.init(site=site, sites_path=".")
 	frappe.connect()
 	frappe.set_user("Administrator")
+	start_read_committed_transaction()
 
 
 def run(arguments: argparse.Namespace) -> None:
@@ -486,7 +486,7 @@ def cleanup(arguments: argparse.Namespace) -> None:
 
 def main() -> None:
 	"""Parse arguments and run a guarded live trial or its cleanup."""
-	from atlas.vm.core.placement.strategies import STRATEGIES
+	from atlas.vm.core.placement import PlacementStrategy
 
 	parser = argparse.ArgumentParser(description=__doc__)
 	commands = parser.add_subparsers(dest="command", required=True)
@@ -498,7 +498,7 @@ def main() -> None:
 		command.add_argument("--output", required=True, type=Path, help="JSON report path")
 		command.add_argument("--poll-seconds", type=positive_integer, default=10)
 		command.add_argument("--timeout-seconds", type=positive_integer, default=7200)
-	run_parser.add_argument("--strategy", choices=tuple(STRATEGIES), default="balanced")
+	run_parser.add_argument("--strategy", choices=PlacementStrategy.registered_names(), default="balanced")
 	run_parser.add_argument("--host-type", required=True, help="Metal Server Size name")
 	run_parser.add_argument("--image", required=True, help="Virtual Machine Image name")
 	run_parser.add_argument(

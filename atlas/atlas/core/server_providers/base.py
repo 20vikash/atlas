@@ -48,7 +48,7 @@ class ServerCreateRequest:
 	"""Store the data for one idempotent provider server request."""
 
 	name: str
-	discovery_key: str
+	identity_key: str
 	server_size: str
 	server_image: str
 	size_provider_metadata: Mapping[str, Any]
@@ -149,7 +149,7 @@ class ServerProvider(ABC):
 
 	@abstractmethod
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the server for the discovery key, creating it when absent."""
+		"""Return the server for the identity key, creating it when absent."""
 		...
 
 	@abstractmethod

@@ -15,7 +15,7 @@ The provider contract includes these operations:
 - Validate settings and credentials.
 - Set up named provider infrastructure.
 - Return server sizes and images.
-- Ensure one provider host by its discovery key.
+- Ensure one provider host by its identity key.
 - Prepare provider resources before Secure Shell access.
 - Configure the provider network after Secure Shell access.
 - Apply one explicit power action.
@@ -38,7 +38,7 @@ Creation uses `ServerCreateRequest` and returns `ProviderServer`. Catalog operat
 7. Add the provider option and fields to Atlas Settings.
 8. Update this guide and the related specification.
 
-Use the persisted `ServerCreateRequest.discovery_key` for provider discovery. It is unique to one Metal Server record across Atlas sites. Keep the provider host ID in `provider_server_id`; the Metal Server name is only a label. The provider host is created only after Atlas commits the Pending Metal Server record. A retry uses the stored key to find the same host.
+Use the persisted `ServerCreateRequest.identity_key` for provider identity. It is unique to one Metal Server record across Atlas sites. Keep the provider host ID in `provider_server_id`; the Metal Server name is only a label. The provider host is created only after Atlas commits the Pending Metal Server record. A retry uses the stored key to find the same host.
 
 ## Shared provider behavior
 

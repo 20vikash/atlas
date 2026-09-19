@@ -527,3 +527,15 @@ def reconcile_terminating_virtual_machines() -> None:
 def reconcile_terminating_virtual_machine(name: str) -> None:
 	"""Delete a terminated VM once Metal confirms it is absent."""
 	reconciliation.reconcile_terminating(name)
+
+
+def on_doctype_update() -> None:
+	"""Index each aggregate that placement reads, so none of them scans the fleet."""
+	frappe.db.add_index("Virtual Machine", ["server", "creation", "is_draft"], "placement_vm_usage")
+	frappe.db.add_index("Virtual Machine", ["creation", "server"], "placement_rate")
+	frappe.db.add_index("Virtual Machine", ["tenant_id", "server"], "placement_tenant_hosts")
+	frappe.db.add_index(
+		"Virtual Machine",
+		["server", "sleep_after_idle_seconds", "memory_mib"],
+		"placement_sleepy_memory",
+	)
