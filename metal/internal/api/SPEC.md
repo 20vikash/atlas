@@ -59,10 +59,10 @@ POST   /v1/snapshots/:id/upload
 GET    /v1/snapshots/:id
 DELETE /v1/snapshots/:id
 
-PUT    /v1/migrations/:id          Atlas creates or resumes a target, static token
-GET    /v1/migrations/:id          Atlas reads target status, static token
-POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
-POST   /v1/migrations/:id/finish   Atlas records the target finish, static token
+PUT    /v1/migrations/:id          Atlas creates or resumes a target
+GET    /v1/migrations/:id          Atlas reads target status
+POST   /v1/migrations/:id/abort    Atlas aborts a target
+POST   /v1/migrations/:id/finish   Atlas records the target finish
 ```
 
 The coordination server on port 9001 has these routes:
@@ -77,11 +77,11 @@ POST   /v1/migrations/:id/destroy  the target destroys the stopped source
 DELETE /v1/migrations/:id          the target unlocks the source
 ```
 
-Atlas drives create, get, abort, and finish on port 9000 with the static token. A target host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS OpenSSL connection on port 9002. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
+Atlas drives create, get, abort, and finish on port 9000 with its client certificate. A target host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS OpenSSL connection on port 9002. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
 
 The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
-The finish route records the target finish request and returns `202`. Atlas calls it with the static token. The target then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
+The finish route records the target finish request and returns `202`. The target then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 
@@ -110,14 +110,14 @@ Each route group names the middleware it needs, so a route cannot inherit the wr
 
 | Middleware | Credential | Routes |
 |---|---|---|
-| `authenticate` | The static bearer token. Only its SHA-256 digest is configured, so the plain token never reaches this package, and the comparison is constant time. | The `/v1` controller group. |
+| mutual TLS | The Atlas client certificate. The listener requires it and pins its common name. | The Atlas API server and every `/v1` route. |
 | mutual TLS | A node certificate from the regional Metal authority. | The coordination server and its source-side migration routes. |
 
-The TLS listener verifies the node certificate before the coordination router receives a request. A source route then reads the VM ID from the `virtual_machine_id` query value.
+Each TLS listener verifies the client certificate before its router receives a request. This package holds no credential. A source route then reads the VM ID from the `virtual_machine_id` query value.
 
 Group authentication makes the group answer every path below it. An unknown path and a wrong method under `/v1` both return `404`.
 
-The three unauthenticated routes carry no VM data. TLS still authenticates the Metal server to their clients.
+Liveness and the documentation sit outside `/v1`, but the Atlas API listener still requires the Atlas client certificate.
 
 ## Errors
 

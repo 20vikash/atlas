@@ -21,8 +21,7 @@ printf '%s' "$METAL_TLS_CERTIFICATE" > "$tls_directory/node.crt"
 (umask 077 && printf '%s' "$METAL_TLS_PRIVATE_KEY" > "$tls_directory/node.key")
 chmod 0600 "$tls_directory/ca.crt" "$tls_directory/node.crt" "$tls_directory/node.key"
 
-# Metal reads these files once at startup. A running daemon keeps the previous
-# certificate until it restarts. A first install runs before the unit exists.
+# Metal reads these files once at startup. A first install runs before the unit exists.
 if systemctl is-active --quiet "$service"; then
 	echo "==> restart $service"
 	if ! systemctl restart "$service"; then

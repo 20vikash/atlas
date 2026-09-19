@@ -287,11 +287,6 @@ func (fakeCapacityProvider) Capacity(context.Context) (storage.Capacity, error) 
 	return storage.Capacity{TotalMiB: 1000, AvailableMiB: 750}, nil
 }
 
-const (
-	testToken     = "test-token"
-	testTokenHash = "4c5dc9b7708905f77f5e5d16316b5dfb425e68cb326dcd55a860e90a7707031e"
-)
-
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
 	return newServer(t, &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}})
@@ -320,7 +315,7 @@ func newServerWithServices(
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
+	server, err := New(Config{}, Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		MigrationManager:      &stubMigrationManager{},
 		SnapshotStore:         services,
@@ -916,24 +911,6 @@ func TestSyncRequiresControllerCollections(t *testing.T) {
 	)
 }
 
-func TestDocsSkipAuthentication(t *testing.T) {
-	srv := newTestServer(t)
-
-	for _, path := range []string{"/docs", "/docs/swagger.json"} {
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code == http.StatusUnauthorized {
-			t.Fatalf("%s must not need authentication, got %d", path, rec.Code)
-		}
-	}
-
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/vms", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("/v1/vms without a token = %d, want 401", rec.Code)
-	}
-}
-
 func TestOpenAPIDocumentContainsOnlyTheVersionedControllerContract(t *testing.T) {
 	server := newTestServer(t)
 	recorder := httptest.NewRecorder()
@@ -972,7 +949,6 @@ func do(t *testing.T, srv http.Handler, method, path, body string, want int) *ht
 	}
 	req := httptest.NewRequest(method, path, r)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testToken)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != want {

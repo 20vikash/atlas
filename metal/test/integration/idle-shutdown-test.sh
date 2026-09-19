@@ -7,7 +7,7 @@ work_directory=${METALD_WORKDIR:-/tmp/metald}
 listen_address=${METALD_ADDR:-127.0.0.1:8080}
 private_key=${METALD_KEY:-$work_directory/keys/id_ed25519}
 ssh_user=${METALD_SSH_USER:-root}
-authentication_token=${METALD_AUTH_TOKEN:-metal-development-token}
+tls_directory=${METALD_TLS_DIR:-${METALD_WORKDIR:-/tmp/metald}/tls}
 idle_seconds=${METALD_IDLE_SECONDS:-10}
 wait_seconds=${METALD_IDLE_WAIT_SECONDS:-180}
 host_architecture=$(uname -m)
@@ -26,7 +26,12 @@ kernel_url=${METALD_KERNEL_URL:-$image_base_url/vmlinux-5.10.223}
 kernel_sha256=${METALD_KERNEL_SHA256:-$(jq -r .kernel_sha256 "$manifest")}
 architecture=${METALD_ARCHITECTURE:-$architecture}
 
-call_metal() { curl -sS "http://$listen_address$1" -H "Authorization: Bearer $authentication_token" "${@:2}"; }
+call_metal() {
+	curl -sS "https://$listen_address$1" \
+		--cacert "$tls_directory/ca.crt" \
+		--cert "$tls_directory/atlas.crt" \
+		--key "$tls_directory/atlas.key" "${@:2}"
+}
 
 observed_state() { call_metal "/v1/vms/$1" | jq -r '.observed.state // empty'; }
 

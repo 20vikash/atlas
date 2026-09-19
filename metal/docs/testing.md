@@ -21,10 +21,10 @@ Run the script again when required. It performs these actions:
 - Creates a Secure Shell key.
 - Installs the systemd template unit.
 - Enables host forwarding and NAT.
-- Writes the Metal configuration and development token digest.
+- Writes the Metal configuration and the development certificates.
 
-The default development token is `metal-development-token`. Set `METALD_AUTH_TOKEN` to use another value.
-The setup script does not print the configured token.
+The script creates a development authority in `$METALD_WORKDIR/tls` and issues a node certificate and an Atlas client certificate.
+Call the API with `--cacert tls/ca.crt --cert tls/atlas.crt --key tls/atlas.key`.
 
 ## Secure Shell test
 
@@ -81,7 +81,6 @@ The test runs this cycle twice. It verifies that the same guest token and proces
 |---|---|---|
 | `metald.base_dir` | `/var/lib/metal` | Host state directory. |
 | `metald.listen` | `127.0.0.1:8080` | TCP address or `unix:/path`. |
-| `metald.auth_token_hash` | none | Required lowercase SHA-256 token digest. |
 | `firecracker.binary_path` | `/usr/bin/firecracker` | Firecracker binary. |
 | `firecracker.sockets_dir` | `/run/metal` | Short VM socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
@@ -102,7 +101,7 @@ The idle timeout is per VM. A create request and a compute request carry `sleep_
 | `METALD_FC_VERSION` | `v1.16.1` | Firecracker release. |
 | `METALD_POOL` | `metal` | ZFS pool name. |
 | `METALD_LISTEN` | `127.0.0.1:8080` | API address in the generated configuration. |
-| `METALD_AUTH_TOKEN` | `metal-development-token` | API bearer token. |
+| `METALD_ATLAS_COMMON_NAME` | `atlas.metal.test` | Common name of the development Atlas client certificate. |
 | `METALD_SLEEP_AFTER_IDLE_SECONDS` | `1` | The per-VM timeout that the idle shutdown test requests. |
 | `METALD_IMAGE_VERSION` | `22.04` | Ubuntu version the guest image builder uses. |
 

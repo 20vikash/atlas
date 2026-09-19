@@ -116,7 +116,7 @@ func listen(addr string) (net.Listener, error) {
 }
 
 // transferListenAddress keeps the coordination host and replaces its port. The
-// snapshot server must bind one node address, so a wildcard host is rejected.
+// snapshot server binds one node address, so a wildcard host is rejected.
 func transferListenAddress(coordinationAddress string, transferPort int) (string, error) {
 	host, _, err := net.SplitHostPort(coordinationAddress)
 	if err != nil {
@@ -208,9 +208,6 @@ func adoptConsoles(
 }
 
 func serve(options options, logger *slog.Logger) (serveError error) {
-	if options.authTokenHash == "" {
-		return fmt.Errorf("metald.auth_token_hash is required")
-	}
 	tlsConfigurations, err := loadTLS(options.tls)
 	if err != nil {
 		return err
@@ -378,7 +375,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure coordination API: %w", err)
 	}
-	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
+	server, err := api.New(api.Config{Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		MigrationManager:      migrationManager,
 		SnapshotStore:         stores.Snapshots,

@@ -196,8 +196,7 @@ func (transfer *MigrationTransfer) waitForSnapshotServer(ctx context.Context) er
 	return nil
 }
 
-// clientArguments builds the OpenSSL client flags. The readiness probe stops at
-// its own stdin EOF. The data client reads until the source closes the stream.
+// clientArguments builds the OpenSSL client flags. Only the readiness probe stops at its own stdin EOF.
 func (transfer *MigrationTransfer) clientArguments(host string, stopAtInputEOF bool) []string {
 	endOfFile := "-ign_eof"
 	if stopAtInputEOF {

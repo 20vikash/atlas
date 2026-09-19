@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import ipaddress
 import time
-from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import requests
-from frappe.utils.password import get_decrypted_password
 
-from atlas.atlas.core.tls.metal import ca_file
+from atlas.atlas.core.tls.metal import ca_file, client_certificate_files
 from atlas.vm.core.metal_models import MetalVirtualMachine
 
 if TYPE_CHECKING:
@@ -57,11 +55,7 @@ class MetalClient:
 	def __init__(self, server: "MetalServer") -> None:
 		self.base_url = self.get_api_url(server)
 		self.ca_file = ca_file()
-		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
-		if not token:
-			raise MetalClientError(f"Server {server.name} has no Metal API token")
-
-		self.headers = {"Authorization": f"Bearer {token}"}
+		self.client_certificate = client_certificate_files()
 
 	@classmethod
 	def get_api_url(cls, server: "MetalServer") -> str:
@@ -86,13 +80,9 @@ class MetalClient:
 		return f"https://[{wireguard_address}]:{cls.coordination_port}"
 
 	def get_console_connection(self, virtual_machine_id: str, mode: str = "tty") -> dict[str, str]:
-		"""Return the websocket URL and auth header for a VM console."""
+		"""Return the websocket URL for a VM console. The bridge holds the client certificate."""
 		websocket_url = self.base_url.replace("https://", "wss://", 1)
-		return {
-			"url": f"{websocket_url}/v1/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}",
-			"authorization": self.headers["Authorization"],
-			"ca_certificate": Path(self.ca_file).read_text(),
-		}
+		return {"url": f"{websocket_url}/v1/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}"}
 
 	def put_virtual_machine(self, virtual_machine_id: str, request: dict[str, Any]) -> MetalVirtualMachine:
 		"""Store one VM request under its stable Atlas ID."""
@@ -363,9 +353,9 @@ class MetalClient:
 			response = requests.request(
 				method,
 				f"{self.base_url}{path}",
-				headers=self.headers,
 				timeout=timeout,
 				verify=self.ca_file,
+				cert=self.client_certificate,
 				**kwargs,
 			)
 		except requests.RequestException as error:

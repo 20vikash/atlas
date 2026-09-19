@@ -2,10 +2,13 @@
 // socketio server loads this file for a site that has Atlas installed. The python
 // backend stays the preferred one and uses atlas/realtime/handlers.py instead.
 const { get_redis_subscriber } = require("../../frappe/node_utils");
+const fs = require("node:fs");
+const path = require("node:path");
 
+const BENCH_PATH = process.env.FRAPPE_BENCH_ROOT || path.resolve(__dirname, "..", "..", "..");
+const TLS_DIRECTORY = ["private", "atlas-metal-tls"];
 const CONSOLE_TOKEN_PREFIX = "atlas:console:token:";
 const MAXIMUM_CONSOLE_INPUT_BYTES = 64 * 1024;
-const CERTIFICATE_PEM_PREFIX = "-----BEGIN CERTIFICATE-----";
 const INVALID_TOKEN_MESSAGE = "This console link is invalid or expired.";
 const UNREACHABLE_MESSAGE = "Could not reach the virtual machine console.";
 const INVALID_INPUT_MESSAGE = "Console input is invalid.";
@@ -92,18 +95,21 @@ function site_of(socket) {
 function parse_connection(serialized_connection) {
 	const connection = JSON.parse(serialized_connection);
 	const url = connection && connection.url;
-	const authorization = connection && connection.authorization;
-	const ca_certificate = connection && connection.ca_certificate;
 	if (typeof url !== "string" || !is_websocket_url(url)) {
 		throw new Error("Console connection has an invalid WebSocket URL");
 	}
-	if (typeof authorization !== "string" || !authorization || /[\r\n]/.test(authorization)) {
-		throw new Error("Console connection has no authorization value");
-	}
-	if (typeof ca_certificate !== "string" || !ca_certificate.startsWith(CERTIFICATE_PEM_PREFIX)) {
-		throw new Error("Console connection has no CA certificate");
-	}
-	return { url, authorization, ca_certificate };
+	return { url };
+}
+
+// tls_options authenticates Atlas to Metal with the regional client certificate.
+function tls_options(site) {
+	const directory = path.join(BENCH_PATH, "sites", site, ...TLS_DIRECTORY);
+	return {
+		ca: fs.readFileSync(path.join(directory, "ca.crt")),
+		cert: fs.readFileSync(path.join(directory, "atlas.crt")),
+		key: fs.readFileSync(path.join(directory, "atlas.key")),
+		rejectUnauthorized: true,
+	};
 }
 
 function is_websocket_url(value) {
@@ -159,11 +165,7 @@ async function open_console(socket, token) {
 			return;
 		}
 
-		const metal_connection = new WebSocket(connection.url, {
-			headers: { Authorization: connection.authorization },
-			ca: connection.ca_certificate,
-			rejectUnauthorized: true,
-		});
+		const metal_connection = new WebSocket(connection.url, tls_options(socket.site));
 		if (!(await wait_for_open(metal_connection))) {
 			metal_connection.close();
 			socket.emit("atlas_console_error", UNREACHABLE_MESSAGE);

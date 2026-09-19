@@ -4,11 +4,11 @@
 set -eu
 
 : "${METALD_DOWNLOAD_URL:?METALD_DOWNLOAD_URL is required}"
-: "${METALD_AUTH_TOKEN_HASH:?METALD_AUTH_TOKEN_HASH is required}"
 : "${STORAGE_POOL_DEVICE:?STORAGE_POOL_DEVICE is required}"
 : "${MESH_UPLINK_INTERFACE:?MESH_UPLINK_INTERFACE is required}"
 : "${WG_MESH_DOWNLOAD_URL:?WG_MESH_DOWNLOAD_URL is required}"
 : "${COORDINATION_LISTEN_ADDRESS:?COORDINATION_LISTEN_ADDRESS is required}"
+: "${ATLAS_COMMON_NAME:?ATLAS_COMMON_NAME is required}"
 
 storage_pool_name=${STORAGE_POOL_NAME:-metal}
 firecracker_version=${FIRECRACKER_VERSION:-v1.16.1}
@@ -154,6 +154,7 @@ tls_sections() {
 ca_file = "$base_dir/tls/ca.crt"
 certificate_file = "$base_dir/tls/node.crt"
 private_key_file = "$base_dir/tls/node.key"
+atlas_common_name = "$ATLAS_COMMON_NAME"
 EOF
 }
 
@@ -165,11 +166,12 @@ if [ -f "$config_file" ]; then
 	else
 		sed -i "/^listen[[:space:]]*=/a coordination_listen = \"$COORDINATION_LISTEN_ADDRESS\"" "$config_file"
 	fi
-	if grep -q '^auth_token_hash =' "$config_file"; then
-		sed -i "s/^auth_token_hash = .*/auth_token_hash = \"$METALD_AUTH_TOKEN_HASH\"/" "$config_file"
-	else
-		sed -i "/^listen[[:space:]]*=/a auth_token_hash = \"$METALD_AUTH_TOKEN_HASH\"" "$config_file"
+	if grep -q '^atlas_common_name[[:space:]]*=' "$config_file"; then
+		sed -i "s|^atlas_common_name[[:space:]]*=.*|atlas_common_name = \"$ATLAS_COMMON_NAME\"|" "$config_file"
+	elif grep -q '^\[tls\]' "$config_file"; then
+		sed -i "/^\[tls\]/a atlas_common_name = \"$ATLAS_COMMON_NAME\"" "$config_file"
 	fi
+	sed -i "/^auth_token_hash[[:space:]]*=/d" "$config_file"
 	if grep -q '^\[wg_mesh\]' "$config_file"; then
 		sed -i "s|^uplink = .*|uplink = \"$MESH_UPLINK_INTERFACE\"|" "$config_file"
 		sed -i "s|^binary_path = \"/usr/local/bin/atlas-wg-mesh\"|binary_path = \"$mesh_binary_path\"|" "$config_file"
@@ -185,7 +187,6 @@ else
 base_dir = "$base_dir"
 listen   = "$listen_address"
 coordination_listen = "$COORDINATION_LISTEN_ADDRESS"
-auth_token_hash = "$METALD_AUTH_TOKEN_HASH"
 
 [firecracker]
 binary_path = "/usr/bin/firecracker"

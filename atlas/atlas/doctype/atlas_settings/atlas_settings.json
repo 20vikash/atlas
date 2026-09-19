@@ -30,10 +30,12 @@
   "metald_binary_x86_64_file",
   "metald_source_hash",
   "metal_tls_ca_private_key",
+  "atlas_tls_private_key",
   "column_break_bgjv",
   "wg_mesh_binary_x86_64_file",
   "wg_mesh_source_hash",
   "metal_tls_ca_certificate",
+  "atlas_tls_certificate",
   "jwks_data_section",
   "central_jwks_url",
   "jwt_signing_key_id",
@@ -371,10 +373,24 @@
    "read_only": 1
   },
   {
+   "fieldname": "atlas_tls_certificate",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Atlas TLS Certificate",
+   "read_only": 1
+  },
+  {
    "fieldname": "metal_tls_ca_private_key",
    "fieldtype": "Password",
    "hidden": 1,
    "label": "Metal TLS CA Private Key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "atlas_tls_private_key",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Atlas TLS Private Key",
    "read_only": 1
   },
   {

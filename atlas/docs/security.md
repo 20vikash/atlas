@@ -14,7 +14,7 @@ Atlas owns one private certificate authority for each region. Each trusted Metal
 
 A node certificate is valid for 825 days. Atlas renews it inside a window of 30 days and restarts Metal with the new certificate. The authority is valid for 10 years and does not rotate. Atlas reports an error when the authority expires inside 180 days.
 
-Atlas calls the Metal API on port 9000 through TLS and verifies the node certificate. The existing bearer token authenticates Atlas to Metal.
+Atlas calls the Metal API on port 9000 through mutual TLS. Atlas verifies the node certificate, and Metal requires the Atlas client certificate and pins its common name. Metal keeps no shared secret.
 
 Metal nodes call the coordination API on port 9001 through mutual TLS. Both nodes verify certificates from the same regional authority. The coordination API contains source-side migration control routes only.
 
@@ -58,7 +58,7 @@ Tenant `0` is the system tenant. A privileged virtual machine reaches every tena
 
 **A console token is a bearer capability.** It is a 48-character value that expires after 60 seconds and is single use. The realtime handler accepts it from a guest, because the token is the only credential the console needs.
 
-**A regional node certificate gives full node authority.** The coordination API and the snapshot stream accept any certificate that the regional authority signed. They do not bind the caller to one migration or to one virtual machine. A node with a valid certificate can therefore drive the source routes of any other node in the region, and it can receive a snapshot stream that another node started. One compromised host gives the attacker the disk of any virtual machine that migrates while the host holds its certificate. Metal keeps these two surfaces on the WireGuard address, so the attacker must first hold a node in the mesh. Bind each source route and each stream to the migration record that Atlas created when node authority must be narrower.
+**A regional node certificate gives full node authority.** The coordination API and the snapshot stream accept any certificate that the regional authority signed. They do not bind the caller to one migration or to one virtual machine. A node with a valid certificate can therefore drive the source routes of any other node in the region, and it can receive a snapshot stream that another node started. One compromised host gives the attacker the disk of any virtual machine that migrates while the host holds its certificate. Metal keeps these two surfaces on the WireGuard address, so the attacker must first hold a node in the mesh. Bind each source route and each stream to the migration record that Atlas created when node authority must be narrower. The Atlas API on port 9000 does not have this risk, because it pins the Atlas common name.
 
 ## Future work
 

@@ -48,7 +48,6 @@ class MetalServer(Document):
 		disks: DF.Table[MetalServerDisk]
 		is_provisioning_completed: DF.Check
 		is_sleepy_vm_host: DF.Check
-		metald_api_token: DF.Password | None
 		metald_tls_certificate: DF.Password | None
 		metald_tls_expires_on: DF.Datetime | None
 		metald_tls_private_key: DF.Password | None

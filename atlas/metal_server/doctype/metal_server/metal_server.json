@@ -9,10 +9,10 @@
   "status",
   "is_provisioning_completed",
   "metald_tls_expires_on",
-  "provider_identity_key",
   "column_break_qbap",
   "provider_server_id",
   "is_sleepy_vm_host",
+  "provider_identity_key",
   "section_break_configuration",
   "server_image",
   "column_break_njar",
@@ -36,7 +36,6 @@
   "section_break_metadata",
   "provider_metadata",
   "hidden_data_section",
-  "metald_api_token",
   "column_break_xhax",
   "metald_tls_certificate",
   "column_break_yxha",
@@ -52,11 +51,9 @@
   },
   {
    "default": "0",
-   "description": "Hosts only VMs that sleep after idle time.",
    "fieldname": "is_sleepy_vm_host",
    "fieldtype": "Check",
-   "label": "Sleepy VM Host",
-   "show_description_on_click": 1
+   "label": "Sleepy VM Host"
   },
   {
    "fieldname": "metald_tls_expires_on",
@@ -89,13 +86,6 @@
    "no_copy": 1,
    "read_only": 1,
    "set_only_once": 1
-  },
-  {
-   "fieldname": "metald_api_token",
-   "fieldtype": "Password",
-   "hidden": 1,
-   "label": "Metal API Token",
-   "read_only": 1
   },
   {
    "fieldname": "metald_tls_certificate",
@@ -275,7 +265,7 @@
    "link_fieldname": "server"
   }
  ],
- "modified": "2026-09-20 00:42:09.106137",
+ "modified": "2026-09-20 01:06:16.526657",
  "modified_by": "test@gmail.com",
  "module": "Metal Server",
  "name": "Metal Server",

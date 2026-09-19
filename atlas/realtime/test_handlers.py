@@ -7,17 +7,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from atlas.realtime import handlers
 
-CERTIFICATE = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
-
 
 class TestConsoleHandlers(IsolatedAsyncioTestCase):
-	async def test_open_uses_the_regional_ca_for_the_metal_connection(self) -> None:
+	async def test_open_presents_the_atlas_client_certificate(self) -> None:
 		socket = SimpleNamespace(sid="socket-1", site="test.local", emit=AsyncMock())
-		connection = {
-			"url": "wss://192.0.2.12:9000/v1/vms/vm-1/console?mode=tty",
-			"authorization": "Bearer token",
-			"ca_certificate": CERTIFICATE,
-		}
+		connection = {"url": "wss://192.0.2.12:9000/v1/vms/vm-1/console?mode=tty"}
 		cache = SimpleNamespace(getdel=AsyncMock(return_value=json.dumps(connection).encode()))
 		tls_context = Mock()
 		metal_connection = Mock()
@@ -25,7 +19,7 @@ class TestConsoleHandlers(IsolatedAsyncioTestCase):
 
 		with (
 			patch.object(handlers, "_cache", return_value=cache),
-			patch.object(handlers.ssl, "create_default_context", return_value=tls_context) as create_context,
+			patch.object(handlers, "_tls_context", return_value=tls_context) as tls_context_for_site,
 			patch.object(handlers.websockets, "connect", AsyncMock(return_value=metal_connection)) as connect,
 			patch.object(handlers, "ConsoleSession", return_value=session),
 			patch.dict(handlers._sessions, {}, clear=True),
@@ -33,14 +27,26 @@ class TestConsoleHandlers(IsolatedAsyncioTestCase):
 			await handlers.atlas_console_open(socket, "a" * 48)
 			self.assertIs(handlers._sessions[socket.sid], session)
 
-		create_context.assert_called_once_with(cadata=connection["ca_certificate"])
-		connect.assert_awaited_once_with(
-			connection["url"],
-			additional_headers={"Authorization": connection["authorization"]},
-			max_size=None,
-			ssl=tls_context,
-		)
+		tls_context_for_site.assert_called_once_with("test.local")
+		connect.assert_awaited_once_with(connection["url"], max_size=None, ssl=tls_context)
 		socket.emit.assert_awaited_once_with("atlas_console_ready")
+
+	def test_tls_context_loads_the_regional_files(self) -> None:
+		context = Mock()
+
+		with (
+			patch.object(handlers.frappe, "local", SimpleNamespace(sites_path="/bench/sites")),
+			patch.object(handlers.ssl, "create_default_context", return_value=context) as create_context,
+		):
+			self.assertIs(handlers._tls_context("test.local"), context)
+
+		create_context.assert_called_once_with(
+			cafile="/bench/sites/test.local/private/atlas-metal-tls/ca.crt"
+		)
+		context.load_cert_chain.assert_called_once_with(
+			"/bench/sites/test.local/private/atlas-metal-tls/atlas.crt",
+			"/bench/sites/test.local/private/atlas-metal-tls/atlas.key",
+		)
 
 	async def test_open_rejects_an_invalid_stored_payload(self) -> None:
 		socket = SimpleNamespace(sid="socket-1", site="test.local", emit=AsyncMock())

@@ -106,8 +106,6 @@ func statusCode(status int) string {
 	switch status {
 	case http.StatusBadRequest:
 		return "invalid_request"
-	case http.StatusUnauthorized:
-		return "unauthorized"
 	case http.StatusForbidden:
 		return "forbidden"
 	case http.StatusNotFound:
@@ -134,9 +132,4 @@ func isRetryableStatus(status int) bool {
 // badRequest reports an invalid request with a caller-facing message.
 func badRequest(message string) error {
 	return newAPIError(http.StatusBadRequest, "invalid_request", message)
-}
-
-// unauthorized reports a missing or wrong API token.
-func unauthorized() *apiError {
-	return newAPIError(http.StatusUnauthorized, "unauthorized", "invalid API token")
 }

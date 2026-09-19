@@ -13,7 +13,7 @@ def build_client() -> MetalClient:
 	client = MetalClient.__new__(MetalClient)
 	client.base_url = "https://10.0.0.2:9000"
 	client.ca_file = "/private/atlas-metal-tls/ca.crt"
-	client.headers = {"Authorization": "Bearer token"}
+	client.client_certificate = ("/private/atlas-metal-tls/atlas.crt", "/private/atlas-metal-tls/atlas.key")
 	client.timeout_seconds = 5
 	client.retry_delay_seconds = 0
 	return client
@@ -237,6 +237,7 @@ class TestMetalClientPaths(UnitTestCase):
 
 		self.assertEqual(request.call_args.args[1], "https://10.0.0.2:9000/v1/snapshots/a%2Fb")
 		self.assertEqual(request.call_args.kwargs["verify"], client.ca_file)
+		self.assertEqual(request.call_args.kwargs["cert"], client.client_certificate)
 
 	def test_snapshot_routes_use_the_versioned_paths(self) -> None:
 		client = build_client()

@@ -22,14 +22,39 @@ func TestLoadTLSBuildsAPIAndMutualTLSConfigurations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configurations.api.MinVersion != tls.VersionTLS13 || configurations.api.ClientAuth != tls.NoClientCert {
+	if configurations.api.MinVersion != tls.VersionTLS13 || configurations.api.ClientAuth != tls.RequireAndVerifyClientCert {
 		t.Fatalf("API TLS config = version %x, client auth %d", configurations.api.MinVersion, configurations.api.ClientAuth)
+	}
+	if configurations.api.VerifyPeerCertificate == nil || configurations.api.ClientCAs == nil {
+		t.Fatal("API TLS config does not pin the Atlas client")
 	}
 	if configurations.coordination.ClientAuth != tls.RequireAndVerifyClientCert || configurations.coordination.ClientCAs == nil {
 		t.Fatalf("coordination TLS config = client auth %d, CAs %v", configurations.coordination.ClientAuth, configurations.coordination.ClientCAs)
 	}
 	if configurations.client.RootCAs == nil || len(configurations.client.Certificates) != 1 {
 		t.Fatal("client TLS config does not trust the CA and present the node certificate")
+	}
+}
+
+func TestLoadTLSNeedsTheAtlasCommonName(t *testing.T) {
+	options := writeTLSFiles(t)
+	options.atlasCommonName = ""
+
+	if _, err := loadTLS(options); err == nil {
+		t.Fatal("a missing tls.atlas_common_name was accepted")
+	}
+}
+
+func TestVerifyCommonNameAcceptsOnlyTheAtlasLeaf(t *testing.T) {
+	verify := verifyCommonName("atlas.example.test")
+	atlasLeaf := &x509.Certificate{Subject: pkix.Name{CommonName: "atlas.example.test"}}
+	nodeLeaf := &x509.Certificate{Subject: pkix.Name{CommonName: "metal-12.example.test"}}
+
+	if err := verify(nil, [][]*x509.Certificate{{atlasLeaf}}); err != nil {
+		t.Fatalf("Atlas leaf was rejected: %v", err)
+	}
+	if err := verify(nil, [][]*x509.Certificate{{nodeLeaf}}); err == nil {
+		t.Fatal("a node certificate was accepted on the Atlas API")
 	}
 }
 
@@ -58,7 +83,12 @@ func writeTLSFiles(t *testing.T) tlsOptions {
 		t.Fatal(err)
 	}
 	writeTestPEM(t, privateKeyFile, "PRIVATE KEY", keyBytes)
-	return tlsOptions{caFile: caFile, certificateFile: certificateFile, privateKeyFile: privateKeyFile}
+	return tlsOptions{
+		caFile:          caFile,
+		certificateFile: certificateFile,
+		privateKeyFile:  privateKeyFile,
+		atlasCommonName: "atlas.example.test",
+	}
 }
 
 func createTestCertificate(t *testing.T, issuer *x509.Certificate, issuerKey *ecdsa.PrivateKey, isCA bool) (*x509.Certificate, *ecdsa.PrivateKey) {

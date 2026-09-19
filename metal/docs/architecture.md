@@ -74,8 +74,8 @@ Startup validates every record and refuses to run on one it cannot read, because
 
 **Host safety**
 
-- TLS authenticates Metal to Atlas on the controller API.
-- A bearer token authenticates Atlas to the controller API.
+- Mutual TLS authenticates Metal and Atlas on the controller API.
+- The controller API accepts only the pinned Atlas common name.
 - Mutual TLS authenticates both nodes on the coordination API and snapshot stream.
 - The manager holds one operation lock per VM.
 - Cleanup progress stays on disk until every owned resource is gone.

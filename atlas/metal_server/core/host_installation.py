@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 from typing import TYPE_CHECKING
 
 import frappe
 from frappe import _
-from frappe.utils.password import get_decrypted_password
 
 from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.ssh import SSHRunner
-from atlas.atlas.core.tls.metal import ensure_server_certificate
+from atlas.atlas.core.tls.metal import atlas_client_identity, ensure_server_certificate
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 
 if TYPE_CHECKING:
@@ -65,14 +63,6 @@ class HostInstallation:
 		if not settings.metald_binary_x86_64_file or not settings.wg_mesh_binary_x86_64_file:
 			frappe.throw(_("Atlas Settings needs the metald and Atlas WG Mesh binaries."))
 
-		token = get_decrypted_password(
-			"Metal Server", self.server.name, "metald_api_token", raise_exception=False
-		)
-		if not token:
-			token = frappe.generate_hash(length=128)
-			self.server.metald_api_token = token
-			self.server.save(ignore_permissions=True, ignore_version=True)
-
 		self.install_tls_credentials()
 
 		result = SSHTask.create_for_script_file(
@@ -82,8 +72,8 @@ class HostInstallation:
 			environment={
 				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
 				"WG_MESH_DOWNLOAD_URL": get_download_url(settings.wg_mesh_binary_x86_64_file),
-				"METALD_AUTH_TOKEN_HASH": hashlib.sha256(token.encode()).hexdigest(),
 				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"ATLAS_COMMON_NAME": atlas_client_identity(settings),
 				"COORDINATION_LISTEN_ADDRESS": f"[{self.server.wireguard_ip_address}]:9001",
 				"STORAGE_POOL_DEVICE": settings.server_provider_controller.get_storage_pool_device(
 					self.server

@@ -52,7 +52,7 @@ The network constructor receives optional mesh and traffic monitor services. The
 
 The host service receives an optional mesh service, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
 
-The Atlas API uses TLS without a client certificate requirement. Its bearer token authenticates Atlas. The coordination API requires a client certificate from the regional authority.
+Both servers require a client certificate from the regional authority. The Atlas API also pins `tls.atlas_common_name`, because a node certificate is valid for client use on the coordination API.
 
 The source starts a one-shot OpenSSL server on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The target verifies the source WireGuard IP before it receives the stream.
 
@@ -69,10 +69,10 @@ The source starts a one-shot OpenSSL server on `migration.transfer_port` for eac
 | `metald.base_dir` | `/var/lib/metal` | Stores machines, images, policies, peers, and staging files. |
 | `metald.listen` | `127.0.0.1:8080` | TCP address or `unix:/path`. |
 | `metald.coordination_listen` | `127.0.0.1:9001` | Mutual-TLS node coordination address. |
-| `metald.auth_token_hash` | none | Required lowercase SHA-256 token digest. |
 | `tls.ca_file` | none | Required regional Metal authority certificate. |
 | `tls.certificate_file` | none | Required node certificate. |
 | `tls.private_key_file` | none | Required node private key. |
+| `tls.atlas_common_name` | none | Required common name of the Atlas client certificate. |
 | `firecracker.binary_path` | `/usr/bin/firecracker` | Firecracker binary. |
 | `firecracker.sockets_dir` | `/run/metal` | Short API socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |

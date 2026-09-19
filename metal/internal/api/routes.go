@@ -5,13 +5,13 @@ import (
 )
 
 // registerRoutes binds handlers. PUT mutations are idempotent; POST is for
-// actions and resource creation. Health and documentation carry no VM data.
+// actions and resource creation. The TLS listener authenticates the caller.
 func (s *Server) registerRoutes(router *echo.Echo) {
 	router.GET("/health", s.checkHealth)
 	router.GET("/docs", s.showDocumentation)
 	router.GET("/docs/swagger.json", s.getOpenAPISpecification)
 
-	versionOneRoutes := router.Group("/v1", s.authenticate)
+	versionOneRoutes := router.Group("/v1")
 	versionOneRoutes.POST("/sync", s.exchangeControllerState)
 
 	virtualMachineRoutes := versionOneRoutes.Group("/vms")
@@ -34,13 +34,11 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	snapshotRoutes.GET("/:id", s.getSnapshot)
 	snapshotRoutes.DELETE("/:id", s.deleteSnapshot)
 
-	// Atlas calls these with the static Metal token.
 	migrationRoutes := versionOneRoutes.Group("/migrations")
 	migrationRoutes.PUT("/:id", s.createMigration)
 	migrationRoutes.GET("/:id", s.getMigration)
 	migrationRoutes.POST("/:id/abort", s.abortMigration)
 	migrationRoutes.POST("/:id/finish", s.finishMigration)
-
 }
 
 // registerCoordinationRoutes binds the API that Metal nodes call with mutual TLS.

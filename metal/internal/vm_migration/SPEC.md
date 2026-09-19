@@ -94,8 +94,8 @@ The source stop, network removal, final snapshot, target network, and target sta
 One cancellable background worker per VM drives finish and abort as well as the transfer. Atlas records a request on the target, which wakes the worker.
 
 ```text
-finish (Atlas static token, target ready) -> destroy source -> remove received snapshots -> completed
-abort  (Atlas static token, nonterminal)  -> cancel transfer -> rollback -> aborted
+finish (Atlas, target ready) -> destroy source -> remove received snapshots -> completed
+abort  (Atlas, nonterminal)  -> cancel transfer -> rollback -> aborted
 ```
 
 A finish and an abort are mutually exclusive: the first request wins, and the other returns a conflict. A finish is valid only after the target reports ready.

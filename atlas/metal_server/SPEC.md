@@ -40,7 +40,7 @@ insert pending host       one durable placement intent
 
 Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored identity key, so a lost response cannot create a second host. A failed job sets the record to Failed.
 
-Metal listens for the Atlas API on port 9000. It listens for node coordination on its WireGuard address and port 9001. Snapshot data uses port 9002. Host installation configures all three TLS paths before it starts Metal.
+Metal listens for the Atlas API on port 9000 and accepts only the Atlas client certificate. It listens for node coordination on its WireGuard address and port 9001. Snapshot data uses port 9002. Host installation configures all three TLS paths before it starts Metal.
 
 ## Certificate renewal
 

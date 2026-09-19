@@ -16,7 +16,6 @@ type options struct {
 	cfg                firecracker.Config
 	pool, imagesDir    string
 	listen             string
-	authTokenHash      string
 	baseDir            string
 	wireGuardName      string
 	mesh               meshOptions
@@ -30,6 +29,7 @@ type tlsOptions struct {
 	caFile          string
 	certificateFile string
 	privateKeyFile  string
+	atlasCommonName string
 }
 
 // migrationOptions holds VM migration settings.
@@ -95,6 +95,7 @@ type tlsFile struct {
 	CAFile          string `toml:"ca_file"`
 	CertificateFile string `toml:"certificate_file"`
 	PrivateKeyFile  string `toml:"private_key_file"`
+	AtlasCommonName string `toml:"atlas_common_name"`
 }
 
 // tomlDuration decodes a TOML string with time.ParseDuration.
@@ -116,7 +117,6 @@ type metaldFile struct {
 	BaseDir            string `toml:"base_dir"`
 	Listen             string `toml:"listen"`
 	CoordinationListen string `toml:"coordination_listen"`
-	AuthTokenHash      string `toml:"auth_token_hash"`
 }
 
 type firecrackerFile struct {
@@ -177,7 +177,6 @@ func applyFile(resolvedOptions *options, path string) error {
 	overlay(&resolvedOptions.baseDir, fc.Metald.BaseDir)
 	overlay(&resolvedOptions.listen, fc.Metald.Listen)
 	overlay(&resolvedOptions.coordinationListen, fc.Metald.CoordinationListen)
-	overlay(&resolvedOptions.authTokenHash, fc.Metald.AuthTokenHash)
 	overlay(&resolvedOptions.cfg.FirecrackerBin, fc.Firecracker.BinaryPath)
 	overlay(&resolvedOptions.cfg.SocketsDir, fc.Firecracker.SocketsDir)
 	overlay(&resolvedOptions.cfg.JailerBin, fc.Jailer.BinaryPath)
@@ -192,6 +191,7 @@ func applyFile(resolvedOptions *options, path string) error {
 	overlay(&resolvedOptions.tls.caFile, fc.TLS.CAFile)
 	overlay(&resolvedOptions.tls.certificateFile, fc.TLS.CertificateFile)
 	overlay(&resolvedOptions.tls.privateKeyFile, fc.TLS.PrivateKeyFile)
+	overlay(&resolvedOptions.tls.atlasCommonName, fc.TLS.AtlasCommonName)
 	return nil
 }
 

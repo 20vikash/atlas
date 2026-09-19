@@ -1,5 +1,5 @@
 # Example metald configuration.
-# auth_token_hash is required.
+# The tls section is required.
 
 [metald]
 # Stores VM, image, snapshot, and WireGuard state.
@@ -8,13 +8,13 @@ base_dir = "/var/lib/metal"
 listen = "127.0.0.1:8080"
 # Mutual-TLS API for communication between Metal nodes.
 coordination_listen = "[fdab::1]:9001"
-# Lowercase SHA-256 hash of the bearer token.
-auth_token_hash = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [tls]
 ca_file = "/var/lib/metal/tls/ca.crt"
 certificate_file = "/var/lib/metal/tls/node.crt"
 private_key_file = "/var/lib/metal/tls/node.key"
+# Common name of the client certificate that Atlas presents.
+atlas_common_name = "atlas.example.com"
 
 [firecracker]
 binary_path = "/usr/bin/firecracker"

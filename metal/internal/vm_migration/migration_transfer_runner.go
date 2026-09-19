@@ -287,8 +287,7 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 	return m.completeInterval(record, snapshot.Sequence, estimatedBytes, receivedGUID)
 }
 
-// streamInterval pulls one snapshot and returns the source stream estimate. The
-// OpenSSL transport does not report a byte count.
+// streamInterval pulls one snapshot. The OpenSSL transport reports no byte count.
 func (m *VMMigration) streamInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
 	if err := m.source.StartSnapshotStream(
 		ctx, record.Source, record.ID, record.VirtualMachineID,

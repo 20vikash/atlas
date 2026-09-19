@@ -116,7 +116,7 @@ func newMigrationTestServerWithWake(t *testing.T, migrations MigrationManager, w
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
+	server, err := New(Config{}, Dependencies{
 		VirtualMachineManager: manager,
 		MigrationManager:      migrations,
 		SnapshotStore:         services,

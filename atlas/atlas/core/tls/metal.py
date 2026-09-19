@@ -87,21 +87,62 @@ def is_certificate_authority_expiring() -> bool:
 	)
 
 
+def ensure_atlas_client_certificate(settings: "AtlasSettings") -> bool:
+	"""Issue the Atlas client certificate when it is absent or expires soon."""
+	ca_certificate = settings.get_password("metal_tls_ca_certificate", raise_exception=False)
+	ca_private_key = settings.get_password("metal_tls_ca_private_key", raise_exception=False)
+	if not ca_certificate or not ca_private_key:
+		return False
+
+	identity = atlas_client_identity(settings)
+	certificate = settings.get_password("atlas_tls_certificate", raise_exception=False)
+	private_key = settings.get_password("atlas_tls_private_key", raise_exception=False)
+	if _certificate_matches(certificate, private_key, ca_certificate, identity, []):
+		return False
+
+	settings.atlas_tls_certificate, settings.atlas_tls_private_key = issue_certificate(
+		ca_certificate, ca_private_key, identity, []
+	)
+	return True
+
+
+def atlas_client_identity(settings: "AtlasSettings") -> str:
+	"""Return the common name that Metal accepts on the Atlas API."""
+	return f"atlas.{settings.wildcard_domain}"
+
+
 def ca_file() -> str:
 	"""Write the current regional CA to a private site file and return its path."""
-	settings = frappe.get_single("Atlas Settings")
-	certificate = settings.get_password("metal_tls_ca_certificate", raise_exception=False)
+	certificate = frappe.get_single("Atlas Settings").get_password(
+		"metal_tls_ca_certificate", raise_exception=False
+	)
 	if not certificate:
 		frappe.throw("Atlas Settings has no Metal TLS certificate authority.")
+	return _write_private_file("ca.crt", certificate)
 
+
+def client_certificate_files() -> tuple[str, str]:
+	"""Write the Atlas client pair to private site files and return both paths."""
+	settings = frappe.get_single("Atlas Settings")
+	if ensure_atlas_client_certificate(settings):
+		settings.save(ignore_permissions=True, ignore_version=True)
+	certificate = settings.get_password("atlas_tls_certificate", raise_exception=False)
+	private_key = settings.get_password("atlas_tls_private_key", raise_exception=False)
+	if not certificate or not private_key:
+		frappe.throw("Atlas Settings has no Atlas client certificate.")
+
+	return _write_private_file("atlas.crt", certificate), _write_private_file("atlas.key", private_key)
+
+
+def _write_private_file(name: str, content: str) -> str:
 	directory = Path(frappe.get_site_path(*TLS_DIRECTORY))
-	path = directory / "ca.crt"
-	if path.is_file() and path.read_text() == certificate:
+	path = directory / name
+	if path.is_file() and path.read_text() == content:
 		return str(path)
 
 	directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-	with tempfile.NamedTemporaryFile(mode="w", dir=directory, prefix="ca.crt.", delete=False) as temporary:
-		temporary.write(certificate)
+	with tempfile.NamedTemporaryFile(mode="w", dir=directory, prefix=f"{name}.", delete=False) as temporary:
+		temporary.write(content)
 		temporary_path = temporary.name
 	try:
 		os.chmod(temporary_path, 0o600)

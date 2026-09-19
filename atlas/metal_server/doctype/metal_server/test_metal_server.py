@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from hashlib import sha256
 from types import MethodType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -420,9 +419,6 @@ class TestServer(UnitTestCase):
 
 		with (
 			patch(
-				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
-			),
-			patch(
 				"atlas.metal_server.core.host_installation.get_download_url",
 				side_effect=lambda file_name: file_urls[file_name],
 			),
@@ -446,8 +442,8 @@ class TestServer(UnitTestCase):
 			{
 				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
 				"WG_MESH_DOWNLOAD_URL": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
-				"METALD_AUTH_TOKEN_HASH": sha256(b"test-token").hexdigest(),
 				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"ATLAS_COMMON_NAME": "atlas.example.test",
 				"COORDINATION_LISTEN_ADDRESS": "[fdab:1::7]:9001",
 				"STORAGE_POOL_DEVICE": "/dev/md2",
 				"MESH_UPLINK_INTERFACE": "eno1.1878",
@@ -484,7 +480,6 @@ class TestServer(UnitTestCase):
 		)
 
 	def test_tls_renewal_waits_for_a_running_metald_job(self) -> None:
-		"""Renewal restarts metald, so it shares the lock with install and upgrade."""
 		server = self._server(status="Running")
 
 		with (
@@ -667,9 +662,6 @@ class TestServer(UnitTestCase):
 		server.private_network_interface = None
 
 		with (
-			patch(
-				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
-			),
 			patch(
 				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
 			) as create_for_script_file,
@@ -967,6 +959,7 @@ class TestServer(UnitTestCase):
 				),
 				metald_binary_x86_64_file=None,
 				wg_mesh_binary_x86_64_file="wg-mesh-file",
+				wildcard_domain="example.test",
 				region_id=1,
 				private_network_mtu=1500,
 			),

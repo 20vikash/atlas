@@ -331,8 +331,7 @@ func (m *VMMigration) StartSourceStream(ctx context.Context, migrationID, virtua
 		return vm.ErrConflict
 	}
 
-	// The stream outlives its request, so a target that never connects must not
-	// hold the fixed transfer port and the snapshot forever.
+	// The stream outlives its request, so a target that never connects cannot hold the port.
 	streamContext, cancel := context.WithTimeout(m.rootContext, maxTransferDuration)
 	handle := &transferHandle{cancel: cancel, done: make(chan struct{})}
 	m.sourceStreams[virtualMachineID] = handle

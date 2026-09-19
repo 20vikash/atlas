@@ -20,7 +20,7 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 | `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Metal Server IP Address. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
 | `PlacementStrategy` | Selects and reserves Metal Servers for one set of placement requirements. |
-| `MetalClient` | `/v1` HTTPS transport, regional CA verification, and error classification. |
+| `MetalClient` | `/v1` mutual-TLS transport, regional CA verification, and error classification. |
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
 | `vm_image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
@@ -43,7 +43,7 @@ The commit before the Metal call is deliberate. The draft must exist on disk bef
 
 An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
-Atlas calls the Metal API through HTTPS on the server public IPv4 address. The bearer token authenticates Atlas. The regional Metal certificate authority authenticates the server.
+Atlas calls the Metal API through HTTPS on the server public IPv4 address. Atlas presents its client certificate and Metal presents its node certificate. Both come from the regional Metal certificate authority.
 
 ## Placement
 

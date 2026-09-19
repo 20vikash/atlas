@@ -58,7 +58,9 @@ Atlas Settings owns one private certificate authority for the region. Atlas crea
 
 Each Metal Server owns one certificate and private key from this authority. The certificate identity is `<server>.<wildcard_domain>`. Its subject alternative names contain the WireGuard, private, and public IP addresses. The certificate permits TLS client and server use.
 
-Atlas writes the authority certificate to a private site file for Metal API clients. The authority private key stays in Atlas Settings. Host installation sends the node certificate, node key, and authority certificate through a direct SSH execution that does not create an SSH Task record.
+Atlas Settings also owns one client certificate with the identity `atlas.<wildcard_domain>`. Atlas presents it on every Metal API call, and Metal accepts only that common name. A node certificate is valid for client use on the coordination API, so the common name is what separates Atlas from a node.
+
+Atlas writes the authority certificate and the client pair to private site files for Metal API clients and the console bridge. The authority private key stays in Atlas Settings. Host installation sends the node certificate, node key, and authority certificate through a direct SSH execution that does not create an SSH Task record.
 
 `ensure_server_certificate` issues a new certificate when the stored one is absent, does not match the server identity and addresses, or expires inside the renewal window of 30 days. Metal Server stores the expiry in `metald_tls_expires_on`. A daily job queues a renewal for each ready host inside that window, and reports an error when the authority itself expires inside 180 days. The operator can also start one renewal with the Metal Server action Renew TLS Certificate. See [Metal Server setup](../metal_server/SPEC.md).
 

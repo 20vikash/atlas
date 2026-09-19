@@ -67,18 +67,6 @@ func TestLoadBaseDirMovesDerivedDirs(t *testing.T) {
 	}
 }
 
-func TestLoadAuthenticationTokenHash(t *testing.T) {
-	const tokenHash = "4c5dc9b7708905f77f5e5d16316b5dfb425e68cb326dcd55a860e90a7707031e"
-	path := writeConfig(t, "[metald]\nauth_token_hash = \""+tokenHash+"\"\n")
-	options, err := load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.authTokenHash != tokenHash {
-		t.Errorf("authTokenHash = %q, want configured hash", options.authTokenHash)
-	}
-}
-
 func TestLoadMigrationFinalDelta(t *testing.T) {
 	if got := defaultOptions().migration.finalDeltaMiB; got != 512 {
 		t.Fatalf("default final_delta_mib = %d, want 512", got)
@@ -114,12 +102,19 @@ coordination_listen = "[fdab::12]:9001"
 ca_file = "/tls/ca.crt"
 certificate_file = "/tls/node.crt"
 private_key_file = "/tls/node.key"
+atlas_common_name = "atlas.example.test"
 `)
 	options, err := load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.tls != (tlsOptions{caFile: "/tls/ca.crt", certificateFile: "/tls/node.crt", privateKeyFile: "/tls/node.key"}) {
+	want := tlsOptions{
+		caFile:          "/tls/ca.crt",
+		certificateFile: "/tls/node.crt",
+		privateKeyFile:  "/tls/node.key",
+		atlasCommonName: "atlas.example.test",
+	}
+	if options.tls != want {
 		t.Fatalf("TLS options = %+v", options.tls)
 	}
 	if options.coordinationListen != "[fdab::12]:9001" {

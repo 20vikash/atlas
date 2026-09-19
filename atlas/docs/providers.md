@@ -89,7 +89,7 @@ Atlas stores the mesh network interface ID before it starts the attachment. AWS 
 
 ### Network exposure
 
-The Atlas security group opens Secure Shell, the Metal API port, and the WireGuard port to the internet, because Atlas reaches a host through its public address. The Metal API uses a bearer token. Every other port is open only inside the Atlas private network.
+The Atlas security group opens Secure Shell, the Metal API port, and the WireGuard port to the internet, because Atlas reaches a host through its public address. The Metal API accepts only the Atlas client certificate. Every other port is open only inside the Atlas private network.
 
 ### Instance types
 

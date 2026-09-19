@@ -11,7 +11,6 @@ import frappe
 import redis
 
 CONSOLE_TOKEN_TTL_SECONDS = 60
-CERTIFICATE_PEM_PREFIX = "-----BEGIN CERTIFICATE-----"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,8 +18,6 @@ class ConsoleConnection:
 	"""Store one validated Metal console connection."""
 
 	url: str
-	authorization: str
-	ca_certificate: str
 
 	@classmethod
 	def from_value(cls, value: object) -> ConsoleConnection:
@@ -28,20 +25,9 @@ class ConsoleConnection:
 		if not isinstance(value, dict):
 			raise ValueError("Console connection must be an object")
 		url = value.get("url")
-		authorization = value.get("authorization")
-		ca_certificate = value.get("ca_certificate")
 		if not isinstance(url, str) or not cls.is_websocket_url(url):
 			raise ValueError("Console connection has an invalid WebSocket URL")
-		if (
-			not isinstance(authorization, str)
-			or not authorization
-			or "\r" in authorization
-			or "\n" in authorization
-		):
-			raise ValueError("Console connection has no authorization value")
-		if not isinstance(ca_certificate, str) or not ca_certificate.startswith(CERTIFICATE_PEM_PREFIX):
-			raise ValueError("Console connection has no CA certificate")
-		return cls(url=url, authorization=authorization, ca_certificate=ca_certificate)
+		return cls(url=url)
 
 	@classmethod
 	def from_json(cls, value: str | bytes) -> ConsoleConnection:
