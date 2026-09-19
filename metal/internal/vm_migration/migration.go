@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/frappe/atlas/metal/internal/vm"
-	"io"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/storage"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // MigrationSourceClient calls the source host during migration. Every call
@@ -20,9 +22,8 @@ type MigrationSourceClient interface {
 	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, vm.State, error)
 	// NextSnapshot acknowledges a sequence and asks for the next snapshot.
 	NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error)
-	// StreamSnapshot reads one snapshot into w and returns its byte count.
-	// A positive throughputMiBps limits source disk throughput.
-	StreamSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error)
+	// StartSnapshotStream asks the source to start one OpenSSL snapshot server.
+	StartSnapshotStream(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error
 	// StopSource acknowledges the last received snapshot, stops the source, and
 	// returns its final snapshot.
 	StopSource(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error)
@@ -40,10 +41,10 @@ type DiskTransfer interface {
 	RemoveSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
 	SnapshotGUID(ctx context.Context, virtualMachineID, snapshotName string) (string, error)
 	EstimateStreamBytes(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName string) (int64, error)
-	SendSnapshot(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string, w io.Writer) (int64, error)
 	TargetDatasetExists(ctx context.Context, virtualMachineID string) (bool, error)
 	ReceiveResumeToken(ctx context.Context, virtualMachineID string) (string, error)
-	ReceiveSnapshot(ctx context.Context, virtualMachineID string, r io.Reader) error
+	StartSnapshotServer(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string) (storage.SourceStream, error)
+	ReceiveSnapshotTLS(ctx context.Context, virtualMachineID, sourceAddress string) error
 	AbortReceive(ctx context.Context, virtualMachineID string) error
 }
 
@@ -124,8 +125,9 @@ type VMMigration struct {
 	closed             bool
 
 	// The source host tracks its in-flight disk streams so an unlock can stop them.
-	sourceStreamsMutex sync.Mutex
-	sourceStreams      map[string]*transferHandle
+	sourceStreamsMutex     sync.Mutex
+	sourceStreams          map[string]*transferHandle
+	sourceStreamsWaitGroup sync.WaitGroup
 }
 
 // NewVMMigration validates records and returns a host migration manager.
@@ -162,7 +164,7 @@ func NewVMMigration(machines Machines, source MigrationSourceClient, transfer Di
 
 // CreateTarget reserves a VM ID or returns a matching in-progress record.
 func (m *VMMigration) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (TargetMigrationRecord, error) {
-	if !vm.ValidIdentifier(migrationID) || !vm.ValidIdentifier(virtualMachineID) || source == "" {
+	if !vm.ValidIdentifier(migrationID) || !vm.ValidIdentifier(virtualMachineID) || !validSourceAddress(source) {
 		return TargetMigrationRecord{}, vm.ErrConflict
 	}
 	unlock, err := m.locks.Lock(ctx, virtualMachineID)
@@ -222,6 +224,12 @@ func (m *VMMigration) CreateTarget(ctx context.Context, migrationID, virtualMach
 		return TargetMigrationRecord{}, errors.Join(err, m.store.remove(virtualMachineID))
 	}
 	return record, nil
+}
+
+func validSourceAddress(address string) bool {
+	parsed, err := url.Parse(address)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.Path == "" && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 // TargetStatus returns a target record by migration ID.

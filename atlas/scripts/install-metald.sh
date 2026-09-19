@@ -8,6 +8,7 @@ set -eu
 : "${STORAGE_POOL_DEVICE:?STORAGE_POOL_DEVICE is required}"
 : "${MESH_UPLINK_INTERFACE:?MESH_UPLINK_INTERFACE is required}"
 : "${WG_MESH_DOWNLOAD_URL:?WG_MESH_DOWNLOAD_URL is required}"
+: "${COORDINATION_LISTEN_ADDRESS:?COORDINATION_LISTEN_ADDRESS is required}"
 
 storage_pool_name=${STORAGE_POOL_NAME:-metal}
 firecracker_version=${FIRECRACKER_VERSION:-v1.16.1}
@@ -42,10 +43,10 @@ reported_version() {
 
 
 step "install required packages"
-if ! command -v zpool >/dev/null || ! command -v curl >/dev/null || ! command -v iptables >/dev/null; then
+if ! command -v zpool >/dev/null || ! command -v curl >/dev/null || ! command -v iptables >/dev/null || ! command -v openssl >/dev/null; then
 	export DEBIAN_FRONTEND=noninteractive
 	apt update -qq
-	apt install -y -qq curl iptables tar zfsutils-linux
+	apt install -y -qq curl iptables openssl tar zfsutils-linux
 else
 	skip "packages"
 fi
@@ -145,9 +146,25 @@ uplink = "$MESH_UPLINK_INTERFACE"
 EOF
 }
 
+# tls_sections appends the required TLS file paths.
+tls_sections() {
+	cat >> "$config_file" <<EOF
+
+[tls]
+ca_file = "$base_dir/tls/ca.crt"
+certificate_file = "$base_dir/tls/node.crt"
+private_key_file = "$base_dir/tls/node.key"
+EOF
+}
+
 step "config ($config_file)"
 if [ -f "$config_file" ]; then
 	sed -i "s|^listen[[:space:]]*=.*|listen   = \"$listen_address\"|" "$config_file"
+	if grep -q '^coordination_listen[[:space:]]*=' "$config_file"; then
+		sed -i "s|^coordination_listen[[:space:]]*=.*|coordination_listen = \"$COORDINATION_LISTEN_ADDRESS\"|" "$config_file"
+	else
+		sed -i "/^listen[[:space:]]*=/a coordination_listen = \"$COORDINATION_LISTEN_ADDRESS\"" "$config_file"
+	fi
 	if grep -q '^auth_token_hash =' "$config_file"; then
 		sed -i "s/^auth_token_hash = .*/auth_token_hash = \"$METALD_AUTH_TOKEN_HASH\"/" "$config_file"
 	else
@@ -159,11 +176,15 @@ if [ -f "$config_file" ]; then
 	else
 		mesh_sections
 	fi
+	if ! grep -q '^\[tls\]' "$config_file"; then
+		tls_sections
+	fi
 else
 	cat > "$config_file" <<EOF
 [metald]
 base_dir = "$base_dir"
 listen   = "$listen_address"
+coordination_listen = "$COORDINATION_LISTEN_ADDRESS"
 auth_token_hash = "$METALD_AUTH_TOKEN_HASH"
 
 [firecracker]
@@ -177,6 +198,7 @@ binary_path = "/usr/bin/jailer"
 pool = "$storage_pool_name"
 EOF
 	mesh_sections
+	tls_sections
 	chmod 600 "$config_file"
 fi
 

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/frappe/atlas/metal/internal/vm"
-	"io"
 )
 
 // SourceHandshake is the portable state that the source returns to the target.
@@ -302,45 +302,65 @@ func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachin
 	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.FinalSequence)
 }
 
-// SendSourceStream applies the disk limit and streams a requested snapshot.
-func (m *VMMigration) SendSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int, w io.Writer) (int64, error) {
+// StartSourceStream starts one OpenSSL process that sends the requested ZFS stream.
+func (m *VMMigration) StartSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error {
 	record, err := m.boundSourceRecord(virtualMachineID, migrationID)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if sequence != record.Sequence {
-		return 0, vm.ErrConflict
+		return vm.ErrConflict
 	}
-	if err := m.applySourceDiskLimit(ctx, migrationID, virtualMachineID, throughputMiBps); err != nil {
-		return 0, err
+	m.transfersMutex.Lock()
+	if m.closed {
+		m.transfersMutex.Unlock()
+		return vm.ErrConflict
+	}
+	m.sourceStreamsWaitGroup.Add(1)
+	m.transfersMutex.Unlock()
+	waitRegistered := true
+	defer func() {
+		if waitRegistered {
+			m.sourceStreamsWaitGroup.Done()
+		}
+	}()
+
+	m.sourceStreamsMutex.Lock()
+	if len(m.sourceStreams) > 0 {
+		m.sourceStreamsMutex.Unlock()
+		return vm.ErrConflict
 	}
 
-	streamContext, handle := m.beginSourceStream(ctx, virtualMachineID)
-	defer m.endSourceStream(virtualMachineID, handle)
+	// The stream outlives its request, so a target that never connects must not
+	// hold the fixed transfer port and the snapshot forever.
+	streamContext, cancel := context.WithTimeout(m.rootContext, maxTransferDuration)
+	handle := &transferHandle{cancel: cancel, done: make(chan struct{})}
+	m.sourceStreams[virtualMachineID] = handle
+	m.sourceStreamsMutex.Unlock()
+	if err := m.applySourceDiskLimit(ctx, migrationID, virtualMachineID, throughputMiBps); err != nil {
+		m.endSourceStream(virtualMachineID, handle)
+		return err
+	}
 
 	name := migrationSnapshotName(migrationID, sequence)
 	base := ""
 	if sequence > 1 {
 		base = migrationSnapshotName(migrationID, sequence-1)
 	}
-	return m.transfer.SendSnapshot(streamContext, virtualMachineID, name, base, resumeToken, w)
-}
-
-// beginSourceStream registers an in-flight source stream and returns a context
-// that an unlock or a daemon shutdown cancels. It stops any earlier stream for
-// the same VM so at most one stream holds the snapshot.
-func (m *VMMigration) beginSourceStream(parent context.Context, virtualMachineID string) (context.Context, *transferHandle) {
-	streamContext, cancel := context.WithCancel(parent)
-	handle := &transferHandle{cancel: cancel, done: make(chan struct{})}
-
-	m.sourceStreamsMutex.Lock()
-	if previous := m.sourceStreams[virtualMachineID]; previous != nil {
-		previous.cancel()
+	server, err := m.transfer.StartSnapshotServer(streamContext, virtualMachineID, name, base, resumeToken)
+	if err != nil {
+		m.endSourceStream(virtualMachineID, handle)
+		return err
 	}
-	m.sourceStreams[virtualMachineID] = handle
-	m.sourceStreamsMutex.Unlock()
-
-	return streamContext, handle
+	waitRegistered = false
+	go func() {
+		defer m.sourceStreamsWaitGroup.Done()
+		if err := server.Wait(); err != nil && streamContext.Err() == nil {
+			m.logger.Error("source snapshot stream failed", "migration_id", migrationID, "error", err)
+		}
+		m.endSourceStream(virtualMachineID, handle)
+	}()
+	return nil
 }
 
 // endSourceStream clears one stream handle and signals its exit.

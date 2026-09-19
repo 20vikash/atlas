@@ -11,6 +11,7 @@ import frappe
 import redis
 
 CONSOLE_TOKEN_TTL_SECONDS = 60
+CERTIFICATE_PEM_PREFIX = "-----BEGIN CERTIFICATE-----"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +20,7 @@ class ConsoleConnection:
 
 	url: str
 	authorization: str
+	ca_certificate: str
 
 	@classmethod
 	def from_value(cls, value: object) -> ConsoleConnection:
@@ -27,6 +29,7 @@ class ConsoleConnection:
 			raise ValueError("Console connection must be an object")
 		url = value.get("url")
 		authorization = value.get("authorization")
+		ca_certificate = value.get("ca_certificate")
 		if not isinstance(url, str) or not cls.is_websocket_url(url):
 			raise ValueError("Console connection has an invalid WebSocket URL")
 		if (
@@ -36,7 +39,9 @@ class ConsoleConnection:
 			or "\n" in authorization
 		):
 			raise ValueError("Console connection has no authorization value")
-		return cls(url=url, authorization=authorization)
+		if not isinstance(ca_certificate, str) or not ca_certificate.startswith(CERTIFICATE_PEM_PREFIX):
+			raise ValueError("Console connection has no CA certificate")
+		return cls(url=url, authorization=authorization, ca_certificate=ca_certificate)
 
 	@classmethod
 	def from_json(cls, value: str | bytes) -> ConsoleConnection:
@@ -47,7 +52,7 @@ class ConsoleConnection:
 	def is_websocket_url(value: str) -> bool:
 		"""Return whether a URL identifies a WebSocket server."""
 		parsed = urlparse(value)
-		return parsed.scheme in {"ws", "wss"} and bool(parsed.netloc)
+		return parsed.scheme == "wss" and bool(parsed.netloc)
 
 	def as_dict(self) -> dict[str, str]:
 		"""Return values that can be stored as JSON."""

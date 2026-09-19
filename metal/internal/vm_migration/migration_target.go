@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/frappe/atlas/metal/internal/vm"
 	"os"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // AdvanceTarget runs the handshake and starts or resumes transfer. It returns

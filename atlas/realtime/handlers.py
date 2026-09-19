@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import json
+import ssl
 
 import frappe
 import redis.asyncio as redis
@@ -115,10 +116,12 @@ async def atlas_console_open(socket: Socket, token: str) -> None:
 		await socket.emit("atlas_console_error", "This console link is invalid or expired.")
 		return
 	try:
+		tls_context = ssl.create_default_context(cadata=connection.ca_certificate)
 		metal_connection = await websockets.connect(
 			connection.url,
 			additional_headers={"Authorization": connection.authorization},
 			max_size=None,
+			ssl=tls_context,
 		)
 	except OSError, websockets.WebSocketException:
 		await socket.emit("atlas_console_error", "Could not reach the virtual machine console.")

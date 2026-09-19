@@ -11,7 +11,8 @@ from atlas.vm.core.metal_client import MetalClient, MetalClientError
 
 def build_client() -> MetalClient:
 	client = MetalClient.__new__(MetalClient)
-	client.base_url = "http://10.0.0.2:9000"
+	client.base_url = "https://10.0.0.2:9000"
+	client.ca_file = "/private/atlas-metal-tls/ca.crt"
 	client.headers = {"Authorization": "Bearer token"}
 	client.timeout_seconds = 5
 	client.retry_delay_seconds = 0
@@ -234,7 +235,8 @@ class TestMetalClientPaths(UnitTestCase):
 		) as request:
 			client.delete_snapshot("a/b")
 
-		self.assertEqual(request.call_args.args[1], "http://10.0.0.2:9000/v1/snapshots/a%2Fb")
+		self.assertEqual(request.call_args.args[1], "https://10.0.0.2:9000/v1/snapshots/a%2Fb")
+		self.assertEqual(request.call_args.kwargs["verify"], client.ca_file)
 
 	def test_snapshot_routes_use_the_versioned_paths(self) -> None:
 		client = build_client()
@@ -246,7 +248,7 @@ class TestMetalClientPaths(UnitTestCase):
 			client.start_snapshot_upload("SNAP-1", {"rootfs": {"parts": []}})
 
 		self.assertEqual(
-			request.call_args.args[:2], ("POST", "http://10.0.0.2:9000/v1/snapshots/SNAP-1/upload")
+			request.call_args.args[:2], ("POST", "https://10.0.0.2:9000/v1/snapshots/SNAP-1/upload")
 		)
 
 
@@ -262,7 +264,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			result = client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000")
 
 		self.assertEqual(result, migration)
-		self.assertEqual(request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/migrations/mig-00001"))
+		self.assertEqual(request.call_args.args[:2], ("PUT", "https://10.0.0.2:9000/v1/migrations/mig-00001"))
 		# The keys must match Metal's createMigrationRequest, which decodes strictly.
 		self.assertEqual(
 			request.call_args.kwargs["json"],
@@ -280,7 +282,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			result = client.get_migration("mig-00001")
 
 		self.assertEqual(result, progress)
-		self.assertEqual(request.call_args.args[:2], ("GET", "http://10.0.0.2:9000/v1/migrations/mig-00001"))
+		self.assertEqual(request.call_args.args[:2], ("GET", "https://10.0.0.2:9000/v1/migrations/mig-00001"))
 
 	def test_abort_and_finish_use_their_routes(self) -> None:
 		client = build_client()
@@ -294,7 +296,7 @@ class TestMetalClientMigrations(UnitTestCase):
 
 			self.assertEqual(
 				request.call_args.args[:2],
-				("POST", f"http://10.0.0.2:9000/v1/migrations/mig-00001/{suffix}"),
+				("POST", f"https://10.0.0.2:9000/v1/migrations/mig-00001/{suffix}"),
 			)
 
 	def test_repeatable_calls_report_an_uncertain_transport_failure(self) -> None:
@@ -321,3 +323,9 @@ class TestMetalClientMigrations(UnitTestCase):
 
 		with self.assertRaises(MetalClientError):
 			MetalClient.get_api_url(server)
+
+	def test_coordination_url_uses_the_wireguard_address(self) -> None:
+		server = Mock(wireguard_ip_address="fdab::12")
+		server.name = "metal-1"
+
+		self.assertEqual(MetalClient.get_coordination_url(server), "https://[fdab::12]:9001")

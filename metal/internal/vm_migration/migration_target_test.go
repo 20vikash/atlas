@@ -27,7 +27,7 @@ func TestAdvanceTargetRunsTheHandshake(t *testing.T) {
 	source.prepareConfig = portableConfig("vm-1")
 	source.prepareState = vm.StateRunning
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,7 +59,7 @@ func TestAdvanceTargetIsANoOpWhileCopying(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareConfig = portableConfig("vm-1")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
@@ -80,7 +80,7 @@ func TestAdvanceTargetIsANoOpWhileCopying(t *testing.T) {
 func TestAdvanceTargetExpiresAStaleReservation(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 	store := newMigrationStore(machines.MachinesDirectory())
@@ -112,7 +112,7 @@ func TestAdvanceTargetRecordsHandshakeErrors(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareError = errors.New("source unreachable")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,7 +132,7 @@ func TestAdvanceTargetRejectsAWrongConfig(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareConfig = portableConfig("vm-other")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -150,7 +150,7 @@ func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -182,7 +182,7 @@ func TestTargetCapacityCheckAndReservationAreSerialized(t *testing.T) {
 
 	records := make([]TargetMigrationRecord, 2)
 	for index, virtualMachineID := range []string{"vm-1", "vm-2"} {
-		record, err := migrationManager.CreateTarget(ctx, "mig-"+virtualMachineID, virtualMachineID, "http://10.0.0.3:9000")
+		record, err := migrationManager.CreateTarget(ctx, "mig-"+virtualMachineID, virtualMachineID, "https://10.0.0.3:9000")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -221,7 +221,7 @@ func TestTargetCapacityCheckAndReservationAreSerialized(t *testing.T) {
 func TestActiveTargetVirtualMachineIDsListsRunningTargets(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -241,7 +241,7 @@ func writeReadyTarget(t *testing.T, machines *fakeMachines, mutate func(*TargetM
 	record := TargetMigrationRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
-		Source:           "http://10.0.0.3:9000",
+		Source:           "https://10.0.0.3:9000",
 		Status:           MigrationReady,
 		Phase:            PhaseStarting,
 		CreatedAt:        time.Now().UTC(),

@@ -3,20 +3,11 @@ package storage
 import (
 	"context"
 	"errors"
-	"io"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
-
-// failingWriter fails on the first write, like a target that went away mid-stream.
-type failingWriter struct{}
-
-func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("writer closed") }
 
 type fakeRunner struct {
 	runErr   map[string]error
@@ -66,6 +57,51 @@ func TestSendArgumentsFormsFullIncrementalAndResume(t *testing.T) {
 	estimate := transfer.sendArguments("vm-1", "migration-m1-2", "migration-m1-1", "", true)
 	if commandKey(estimate...) != "send -nP -i metal/vms/vm-1@migration-m1-1 metal/vms/vm-1@migration-m1-2" {
 		t.Fatalf("estimate = %v", estimate)
+	}
+}
+
+func TestOpenSSLArgumentsRequireMutualTLSAndVerifyTheSourceIP(t *testing.T) {
+	transfer := &MigrationTransfer{tls: MigrationTLSConfig{
+		CAFile: "/tls/ca.crt", CertificateFile: "/tls/node.crt", PrivateKeyFile: "/tls/node.key",
+		ListenAddress: "[fdab::12]:9002", TransferPort: 9002,
+	}}
+
+	server := commandKey(transfer.serverArguments()...)
+	for _, required := range []string{
+		"-naccept 2", "-accept [fdab::12]:9002", "-cert /tls/node.crt", "-key /tls/node.key",
+		"-verifyCAfile /tls/ca.crt", "-Verify 1", "-verify_return_error", "-tls1_3",
+	} {
+		if !strings.Contains(server, required) {
+			t.Fatalf("server arguments %q do not contain %q", server, required)
+		}
+	}
+
+	client := commandKey(transfer.clientArguments("fdab::11", false)...)
+	for _, required := range []string{
+		"-connect [fdab::11]:9002", "-cert /tls/node.crt", "-key /tls/node.key",
+		"-verifyCAfile /tls/ca.crt", "-verify_return_error", "-verify_ip fdab::11", "-tls1_3",
+	} {
+		if !strings.Contains(client, required) {
+			t.Fatalf("client arguments %q do not contain %q", client, required)
+		}
+	}
+	if !strings.Contains(client, "-ign_eof") || strings.Contains(client, "-no_ign_eof") {
+		t.Fatalf("data client %q must read until the source closes", client)
+	}
+
+	probe := commandKey(transfer.clientArguments("fdab::11", true)...)
+	if !strings.Contains(probe, "-no_ign_eof") {
+		t.Fatalf("readiness probe %q must stop at its own input EOF", probe)
+	}
+}
+
+func TestMigrationHostUsesTheCoordinationURLHost(t *testing.T) {
+	host, err := migrationHost("https://[fdab::11]:9001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host != "fdab::11" {
+		t.Fatalf("host = %q, want fdab::11", host)
 	}
 }
 
@@ -191,84 +227,5 @@ func TestVerifyResumeTokenChecksTheTargetSnapshot(t *testing.T) {
 func TestParseSendSizeBytesRejectsMissingSize(t *testing.T) {
 	if _, err := parseSendSizeBytes("full\tsnap\t10\n"); err == nil {
 		t.Fatal("want an error when no size line is present")
-	}
-}
-
-// TestCopySendStreamKillsTheSendWhenTheWriterFails confirms a failed copy stops
-// the send instead of leaving it blocked on an unread pipe.
-func TestCopySendStreamKillsTheSendWhenTheWriterFails(t *testing.T) {
-	// cat /dev/zero produces an endless stream that fills the pipe.
-	command := exec.Command("cat", "/dev/zero")
-	var sendError strings.Builder
-	command.Stderr = &sendError
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, copyError := copySendStream(command, stdout, failingWriter{}, &sendError)
-		done <- copyError
-	}()
-
-	select {
-	case copyError := <-done:
-		if copyError == nil {
-			t.Fatal("copy into a failing writer returned nil, want an error")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("copySendStream blocked after the writer failed")
-	}
-}
-
-// TestZFSTransferRoundTrip tests streaming send and receive on a writable pool.
-func TestZFSTransferRoundTrip(t *testing.T) {
-	poolName := os.Getenv("METAL_ZFS_TEST_POOL")
-	if poolName == "" {
-		t.Skip("set METAL_ZFS_TEST_POOL to run the ZFS transfer integration test")
-	}
-	if _, err := exec.LookPath("zfs"); err != nil {
-		t.Skip("zfs is not available")
-	}
-	ctx := context.Background()
-	transfer := NewMigrationTransfer(&ZFSPool{name: poolName})
-	source := "e2e-src"
-	target := "e2e-dst"
-	sourceDataset := transfer.pool.virtualMachineDataset(source)
-	targetDataset := transfer.pool.virtualMachineDataset(target)
-	if err := exec.CommandContext(ctx, "zfs", "create", "-V", "16M", sourceDataset).Run(); err != nil {
-		t.Fatalf("create source volume: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command("zfs", "destroy", "-r", sourceDataset).Run()
-		_ = exec.Command("zfs", "destroy", "-r", targetDataset).Run()
-	})
-
-	if err := transfer.CreateSnapshot(ctx, source, "migration-m1-1"); err != nil {
-		t.Fatal(err)
-	}
-	reader, writer := io.Pipe()
-	go func() {
-		_, sendErr := transfer.SendSnapshot(ctx, source, "migration-m1-1", "", "", writer)
-		writer.CloseWithError(sendErr)
-	}()
-	if err := transfer.ReceiveSnapshot(ctx, target, reader); err != nil {
-		t.Fatalf("receive: %v", err)
-	}
-
-	sourceGUID, err := transfer.SnapshotGUID(ctx, source, "migration-m1-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	targetGUID, err := transfer.SnapshotGUID(ctx, target, "migration-m1-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sourceGUID != targetGUID {
-		t.Fatalf("GUID mismatch: source %s target %s", sourceGUID, targetGUID)
 	}
 }

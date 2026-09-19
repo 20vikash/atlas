@@ -3,7 +3,6 @@ package vmmigration
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -182,7 +182,6 @@ type fakeTransfer struct {
 	sent          []string
 	guid          string
 	sizeBytes     int64
-	sentBytes     int64
 	datasetExists bool
 	resumeToken   string
 	received      int
@@ -212,24 +211,6 @@ func (f *fakeTransfer) EstimateStreamBytes(_ context.Context, _, _, _ string) (i
 	return f.sizeBytes, nil
 }
 
-func (f *fakeTransfer) SendSnapshot(ctx context.Context, _, name, base, token string, w io.Writer) (int64, error) {
-	f.sent = append(f.sent, name+"|"+base+"|"+token)
-	if f.sendStarted != nil {
-		f.sendStarted <- struct{}{}
-	}
-	if f.sendHang {
-		<-ctx.Done()
-		return 0, ctx.Err()
-	}
-	if f.sendErr != nil {
-		return 0, f.sendErr
-	}
-	if f.sentBytes > 0 {
-		_, _ = w.Write(make([]byte, f.sentBytes))
-	}
-	return f.sentBytes, nil
-}
-
 func (f *fakeTransfer) TargetDatasetExists(_ context.Context, _ string) (bool, error) {
 	return f.datasetExists, nil
 }
@@ -238,9 +219,31 @@ func (f *fakeTransfer) ReceiveResumeToken(_ context.Context, _ string) (string, 
 	return f.resumeToken, nil
 }
 
-func (f *fakeTransfer) ReceiveSnapshot(_ context.Context, _ string, r io.Reader) error {
+type fakeSourceStream struct {
+	done chan error
+}
+
+func (stream *fakeSourceStream) Wait() error { return <-stream.done }
+
+func (f *fakeTransfer) StartSnapshotServer(ctx context.Context, _, name, base, token string) (storage.SourceStream, error) {
+	f.sent = append(f.sent, name+"|"+base+"|"+token)
+	if f.sendStarted != nil {
+		f.sendStarted <- struct{}{}
+	}
+	stream := &fakeSourceStream{done: make(chan error, 1)}
+	go func() {
+		if f.sendHang {
+			<-ctx.Done()
+			stream.done <- ctx.Err()
+			return
+		}
+		stream.done <- f.sendErr
+	}()
+	return stream, nil
+}
+
+func (f *fakeTransfer) ReceiveSnapshotTLS(_ context.Context, _ string, _ string) error {
 	f.received++
-	_, _ = io.Copy(io.Discard, r)
 	return f.receiveErr
 }
 
@@ -261,7 +264,6 @@ type fakeSourceClient struct {
 	nextError     error
 	nextCalls     int
 	nextSequences []int
-	streamBytes   int64
 	streamError   error
 	streamHang    bool
 	streamMiBps   []int
@@ -296,19 +298,13 @@ func (c *fakeSourceClient) NextSnapshot(_ context.Context, _, _, _ string, recei
 	return c.nextSnapshot, nil
 }
 
-func (c *fakeSourceClient) StreamSnapshot(ctx context.Context, _, _, _ string, _ int, _ string, throughputMiBps int, w io.Writer) (int64, error) {
+func (c *fakeSourceClient) StartSnapshotStream(ctx context.Context, _, _, _ string, _ int, _ string, throughputMiBps int) error {
 	c.streamMiBps = append(c.streamMiBps, throughputMiBps)
 	if c.streamHang {
 		<-ctx.Done()
-		return 0, ctx.Err()
+		return ctx.Err()
 	}
-	if c.streamError != nil {
-		return 0, c.streamError
-	}
-	if c.streamBytes > 0 {
-		_, _ = w.Write(make([]byte, c.streamBytes))
-	}
-	return c.streamBytes, nil
+	return c.streamError
 }
 
 func (c *fakeSourceClient) StopSource(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
@@ -371,7 +367,7 @@ func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
 
-	record, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000")
+	record, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,25 +378,34 @@ func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
 		t.Fatal("VM ID was not reserved")
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatalf("idempotent retry = %v", err)
+	}
+}
+
+func TestCreateTargetRejectsAPlaintextSource(t *testing.T) {
+	migrationManager, _, _ := newMigrationManager(t)
+
+	_, err := migrationManager.CreateTarget(context.Background(), "mig-1", "vm-1", "http://10.0.0.3:9001")
+	if !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("plaintext source = %v, want ErrConflict", err)
 	}
 }
 
 func TestCreateTargetRejectsChangedValues(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.9:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.9:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("changed source = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("changed migration ID = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "http://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("reused migration ID for another VM = %v, want ErrConflict", err)
 	}
 }
@@ -410,7 +415,7 @@ func TestCreateTargetRejectsALiveVirtualMachineID(t *testing.T) {
 	ctx := context.Background()
 	machines.create("vm-1", testSpecification())
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("reserve a live VM ID = %v, want ErrConflict", err)
 	}
 }
@@ -418,7 +423,7 @@ func TestCreateTargetRejectsALiveVirtualMachineID(t *testing.T) {
 func TestTargetStatusResolvesTheMigrationID(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -437,7 +442,7 @@ func TestTargetStatusResolvesTheMigrationID(t *testing.T) {
 func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -463,7 +468,7 @@ func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.removeError = errors.New("source unreachable")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -494,11 +499,9 @@ func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	streamDone := make(chan error, 1)
-	go func() {
-		_, streamErr := migrationManager.SendSourceStream(context.Background(), "mig-1", "vm-1", 1, "", 0, io.Discard)
-		streamDone <- streamErr
-	}()
+	if err := migrationManager.StartSourceStream(context.Background(), "mig-1", "vm-1", 1, "", 0); err != nil {
+		t.Fatal(err)
+	}
 
 	// Wait until the stream holds the snapshot, like a target that stalled.
 	select {
@@ -509,15 +512,6 @@ func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
 
 	if err := migrationManager.UnlockSource(context.Background(), "mig-1", "vm-1"); err != nil {
 		t.Fatalf("unlock with an in-flight stream = %v", err)
-	}
-
-	select {
-	case streamErr := <-streamDone:
-		if !errors.Is(streamErr, context.Canceled) {
-			t.Fatalf("stream error = %v, want context.Canceled", streamErr)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("UnlockSource did not stop the in-flight stream")
 	}
 
 	if len(transfer.removed) != 1 || transfer.removed[0] != "migration-mig-1-1" {
@@ -531,7 +525,7 @@ func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
 func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "http://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 

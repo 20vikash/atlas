@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -50,6 +51,28 @@ func (owner *fakeSerialBroker) Shutdown() {
 
 type fakeSystemdConnection struct {
 	closed bool
+}
+
+type fakeHTTPServer struct {
+	startError error
+	stopped    chan struct{}
+}
+
+func (server *fakeHTTPServer) Start(string) error {
+	if server.startError != nil {
+		return server.startError
+	}
+	<-server.stopped
+	return http.ErrServerClosed
+}
+
+func (server *fakeHTTPServer) Shutdown(context.Context) error {
+	select {
+	case <-server.stopped:
+	default:
+		close(server.stopped)
+	}
+	return nil
 }
 
 func (connection *fakeSystemdConnection) Close() {
@@ -187,4 +210,20 @@ func TestDaemonShutdownWaitIsBounded(t *testing.T) {
 		t.Fatal("shutdown did not report the worker timeout")
 	}
 	close(releaseWorker)
+}
+
+func TestDaemonShutdownDoesNotWaitForAServerExitThatServeConsumed(t *testing.T) {
+	daemonContext, cancelDaemon := context.WithCancel(t.Context())
+	lifecycle := newDaemon(daemonContext, cancelDaemon, discardLogger(),
+		&fakeSnapshotUploadOwner{}, &fakeSerialBroker{}, &fakeSystemdConnection{})
+	serveError := errors.New("listener failed")
+	failed := &fakeHTTPServer{startError: serveError, stopped: make(chan struct{})}
+	running := &fakeHTTPServer{stopped: make(chan struct{})}
+
+	if err := lifecycle.Serve(failed, running); !errors.Is(err, serveError) {
+		t.Fatalf("serve error = %v, want %v", err, serveError)
+	}
+	if err := lifecycle.Shutdown(t.Context()); err != nil {
+		t.Fatalf("shutdown after one server exit = %v", err)
+	}
 }

@@ -50,11 +50,15 @@ class TestRegionalCredentials(UnitTestCase):
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
 		settings = MagicMock(is_setup_completed=False)
-		with patch("atlas.auth.issuer.initialize_signing_key") as initialize_signing_key:
+		with (
+			patch("atlas.auth.issuer.initialize_signing_key") as initialize_signing_key,
+			patch("atlas.atlas.core.tls.metal.ensure_certificate_authority") as ensure_certificate_authority,
+		):
 			AtlasSettings.before_save(settings)
 
 		settings.initialize_proxy_cluster_password.assert_called_once_with()
 		initialize_signing_key.assert_called_once_with(settings)
+		ensure_certificate_authority.assert_called_once_with(settings)
 
 
 class TestRegionID(UnitTestCase):

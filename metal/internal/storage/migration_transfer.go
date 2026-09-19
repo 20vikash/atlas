@@ -2,11 +2,16 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
@@ -15,11 +20,210 @@ import (
 type MigrationTransfer struct {
 	pool   *ZFSPool
 	runner platform.Runner
+	tls    MigrationTLSConfig
+}
+
+// snapshotServerReadyTimeout bounds the readiness probe on the source.
+const snapshotServerReadyTimeout = 30 * time.Second
+
+// MigrationTLSConfig configures the one-shot OpenSSL snapshot transport.
+type MigrationTLSConfig struct {
+	CAFile          string
+	CertificateFile string
+	PrivateKeyFile  string
+	ListenAddress   string
+	TransferPort    int
 }
 
 // NewMigrationTransfer returns a transfer helper for one ZFS pool.
-func NewMigrationTransfer(pool *ZFSPool) *MigrationTransfer {
-	return &MigrationTransfer{pool: pool, runner: platform.HostRunner{}}
+func NewMigrationTransfer(pool *ZFSPool, configuration MigrationTLSConfig) *MigrationTransfer {
+	return &MigrationTransfer{pool: pool, runner: platform.HostRunner{}, tls: configuration}
+}
+
+// SnapshotServer owns one source-side ZFS and OpenSSL pipeline.
+type SnapshotServer struct {
+	done chan error
+}
+
+// SourceStream is one running source-side snapshot transfer.
+type SourceStream interface {
+	Wait() error
+}
+
+// Wait waits until the source pipeline exits.
+func (server *SnapshotServer) Wait() error {
+	return <-server.done
+}
+
+// StartSnapshotServer starts one mutual-TLS source stream without a Go copy loop.
+func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string) (SourceStream, error) {
+	if err := transfer.validateTLS(); err != nil {
+		return nil, err
+	}
+	if resumeToken != "" {
+		if err := transfer.verifyResumeToken(ctx, virtualMachineID, snapshotName, resumeToken); err != nil {
+			return nil, err
+		}
+	}
+
+	streamContext, cancel := context.WithCancel(ctx)
+	pipeReader, pipeWriter, err := os.Pipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create source transfer pipe: %w", err)
+	}
+	serverError := &strings.Builder{}
+	serverCommand := exec.CommandContext(streamContext, "openssl", transfer.serverArguments()...)
+	serverCommand.Stdin = pipeReader
+	serverCommand.Stdout = io.Discard
+	serverCommand.Stderr = serverError
+	if err := serverCommand.Start(); err != nil {
+		pipeReader.Close()
+		pipeWriter.Close()
+		cancel()
+		return nil, fmt.Errorf("start OpenSSL migration server: %w", err)
+	}
+	pipeReader.Close()
+	if err := transfer.waitForSnapshotServer(streamContext); err != nil {
+		pipeWriter.Close()
+		cancel()
+		_ = serverCommand.Wait()
+		return nil, err
+	}
+
+	sendError := &strings.Builder{}
+	sendCommand := exec.CommandContext(streamContext, "zfs", transfer.sendArguments(virtualMachineID, snapshotName, baseSnapshotName, resumeToken, false)...)
+	sendCommand.Stdout = pipeWriter
+	sendCommand.Stderr = sendError
+	if err := sendCommand.Start(); err != nil {
+		pipeWriter.Close()
+		cancel()
+		_ = serverCommand.Wait()
+		return nil, fmt.Errorf("start zfs send: %w", err)
+	}
+	pipeWriter.Close()
+
+	server := &SnapshotServer{done: make(chan error, 1)}
+	go func() {
+		sendWaitError := sendCommand.Wait()
+		serverWaitError := serverCommand.Wait()
+		cancel()
+		server.done <- errors.Join(
+			commandError("zfs send", sendWaitError, sendError.String()),
+			commandError("OpenSSL migration server", serverWaitError, serverError.String()),
+		)
+	}()
+	return server, nil
+}
+
+// ReceiveSnapshotTLS receives a mutual-TLS ZFS stream without a Go copy loop.
+func (transfer *MigrationTransfer) ReceiveSnapshotTLS(ctx context.Context, virtualMachineID, sourceAddress string) error {
+	if err := transfer.validateTLS(); err != nil {
+		return err
+	}
+	host, err := migrationHost(sourceAddress)
+	if err != nil {
+		return err
+	}
+
+	pipeReader, pipeWriter, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create target transfer pipe: %w", err)
+	}
+	clientError := &strings.Builder{}
+	clientCommand := exec.CommandContext(ctx, "openssl", transfer.clientArguments(host, false)...)
+	clientCommand.Stdout = pipeWriter
+	clientCommand.Stderr = clientError
+	receiveError := &strings.Builder{}
+	receiveCommand := exec.CommandContext(ctx, "zfs", "recv", "-s", transfer.pool.virtualMachineDataset(virtualMachineID))
+	receiveCommand.Stdin = pipeReader
+	receiveCommand.Stderr = receiveError
+
+	if err := receiveCommand.Start(); err != nil {
+		pipeReader.Close()
+		pipeWriter.Close()
+		return fmt.Errorf("start zfs receive: %w", err)
+	}
+	pipeReader.Close()
+	if err := clientCommand.Start(); err != nil {
+		pipeWriter.Close()
+		_ = receiveCommand.Process.Kill()
+		_ = receiveCommand.Wait()
+		return fmt.Errorf("start OpenSSL migration client: %w", err)
+	}
+	pipeWriter.Close()
+
+	clientWaitError := clientCommand.Wait()
+	receiveWaitError := receiveCommand.Wait()
+	return errors.Join(
+		commandError("OpenSSL migration client", clientWaitError, clientError.String()),
+		commandError("zfs receive", receiveWaitError, receiveError.String()),
+	)
+}
+
+func (transfer *MigrationTransfer) validateTLS() error {
+	if transfer.tls.CAFile == "" || transfer.tls.CertificateFile == "" || transfer.tls.PrivateKeyFile == "" || transfer.tls.ListenAddress == "" || transfer.tls.TransferPort <= 0 {
+		return fmt.Errorf("migration TLS configuration is required")
+	}
+	return nil
+}
+
+func (transfer *MigrationTransfer) serverArguments() []string {
+	return []string{
+		"s_server", "-quiet", "-no_ign_eof", "-naccept", "2",
+		"-accept", transfer.tls.ListenAddress,
+		"-cert", transfer.tls.CertificateFile, "-key", transfer.tls.PrivateKeyFile,
+		"-verifyCAfile", transfer.tls.CAFile, "-Verify", "1", "-verify_return_error", "-tls1_3",
+	}
+}
+
+func (transfer *MigrationTransfer) waitForSnapshotServer(ctx context.Context) error {
+	host, _, err := net.SplitHostPort(transfer.tls.ListenAddress)
+	if err != nil {
+		return fmt.Errorf("parse migration transfer listen address %q: %w", transfer.tls.ListenAddress, err)
+	}
+
+	readyContext, cancel := context.WithTimeout(ctx, snapshotServerReadyTimeout)
+	defer cancel()
+
+	output := &strings.Builder{}
+	command := exec.CommandContext(readyContext, "openssl", transfer.clientArguments(host, true)...)
+	command.Stdout = io.Discard
+	command.Stderr = output
+	if err := command.Run(); err != nil {
+		return commandError("check OpenSSL migration server", err, output.String())
+	}
+	return nil
+}
+
+// clientArguments builds the OpenSSL client flags. The readiness probe stops at
+// its own stdin EOF. The data client reads until the source closes the stream.
+func (transfer *MigrationTransfer) clientArguments(host string, stopAtInputEOF bool) []string {
+	endOfFile := "-ign_eof"
+	if stopAtInputEOF {
+		endOfFile = "-no_ign_eof"
+	}
+	return []string{
+		"s_client", "-quiet", endOfFile,
+		"-connect", net.JoinHostPort(host, strconv.Itoa(transfer.tls.TransferPort)),
+		"-cert", transfer.tls.CertificateFile, "-key", transfer.tls.PrivateKeyFile,
+		"-verifyCAfile", transfer.tls.CAFile, "-verify_return_error", "-verify_ip", host, "-tls1_3",
+	}
+}
+
+func migrationHost(address string) (string, error) {
+	parsed, err := url.Parse(address)
+	if err != nil || parsed.Hostname() == "" {
+		return "", fmt.Errorf("invalid migration source address %q", address)
+	}
+	return parsed.Hostname(), nil
+}
+
+func commandError(name string, err error, output string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(output))
 }
 
 // CreateSnapshot creates one migration snapshot. A repeat is safe.
@@ -94,60 +298,6 @@ func (transfer *MigrationTransfer) ReceiveResumeToken(ctx context.Context, virtu
 		return "", nil
 	}
 	return token, nil
-}
-
-// SendSnapshot streams a full, incremental, or resumed snapshot to w.
-func (transfer *MigrationTransfer) SendSnapshot(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string, w io.Writer) (int64, error) {
-	if resumeToken != "" {
-		if err := transfer.verifyResumeToken(ctx, virtualMachineID, snapshotName, resumeToken); err != nil {
-			return 0, err
-		}
-	}
-	// zfs send writes the replication stream; -t resumes and -i sends a delta.
-	command := exec.CommandContext(ctx, "zfs", transfer.sendArguments(virtualMachineID, snapshotName, baseSnapshotName, resumeToken, false)...)
-	var sendError strings.Builder
-	command.Stderr = &sendError
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return 0, err
-	}
-	if err := command.Start(); err != nil {
-		return 0, err
-	}
-	return copySendStream(command, stdout, w, &sendError)
-}
-
-// copySendStream copies a started zfs send to w and reaps the process. A failed
-// copy kills the send first, so it cannot block writing to an unread pipe and
-// become an orphan that holds the snapshot busy.
-func copySendStream(command *exec.Cmd, stdout io.Reader, w io.Writer, sendError *strings.Builder) (int64, error) {
-	written, copyError := io.Copy(w, stdout)
-	if copyError != nil {
-		_ = command.Process.Kill()
-	}
-
-	waitError := command.Wait()
-	switch {
-	case copyError != nil:
-		return written, copyError
-	case waitError != nil:
-		return written, fmt.Errorf("zfs send: %w: %s", waitError, strings.TrimSpace(sendError.String()))
-	default:
-		return written, nil
-	}
-}
-
-// ReceiveSnapshot receives a stream and saves a resume token on interruption.
-func (transfer *MigrationTransfer) ReceiveSnapshot(ctx context.Context, virtualMachineID string, r io.Reader) error {
-	// zfs recv -s receives stdin and saves an interruption token.
-	command := exec.CommandContext(ctx, "zfs", "recv", "-s", transfer.pool.virtualMachineDataset(virtualMachineID))
-	command.Stdin = r
-	var receiveError strings.Builder
-	command.Stderr = &receiveError
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("zfs receive: %w: %s", err, strings.TrimSpace(receiveError.String()))
-	}
-	return nil
 }
 
 // AbortReceive cancels an interrupted receive and removes its dataset.

@@ -40,19 +40,22 @@ During copying, `VMMigration` runs one disk transfer per VM and waits for transf
 next snapshot from source  (acknowledge the last completed sequence)
         |
         v
-stream into zfs recv -s -> resume the same sequence after an interrupt
+start the source OpenSSL server
+        |
+        v
+OpenSSL client -> zfs recv -s -> resume the same sequence after an interrupt
         |
         v
 compare received GUID with the source GUID
         |
         v
-mark the interval complete, checkpoint bytes
+mark the interval complete with the estimated stream size
         |
         v
 copy or cut over
 ```
 
-The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. The target saves each interval before, during, and after transfer. A record write error ends the transfer pass and reports the storage error. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
+The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. The target saves each interval before and after transfer. A record write error ends the transfer pass and reports the storage error. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
 
 ## Cutover
 
@@ -112,15 +115,23 @@ The daemon removes and logs a migration record that it cannot decode. One corrup
 
 ## Transport
 
-Metal hosts use the trusted WireGuard mesh. Migration traffic carries no credential. The target drives each call and sends the VM ID as `virtual_machine_id`, so the source finds the migration without a token.
+Metal hosts use WireGuard addresses and certificates from the same regional authority. The target sends the VM ID as `virtual_machine_id`, so the source finds the migration record.
 
-The control calls use HTTP against the source Metal API: prepare source, next snapshot, stop, start, destroy, and remove. A control call has a 60 second timeout. The stop call has a 120 second timeout because it can restore and shut down a guest. The disk moves over a plain TCP connection to a fixed source `transfer_port`, not an HTTP body. Every host in a region uses the same port.
+Control calls use HTTPS and mutual TLS on port 9001. They prepare the source, select snapshots, start a stream, stop or restore the source, and remove it. A normal control call has a 60 second timeout. The stop call has a 120 second timeout because it can restore and shut down a guest.
 
-One connection carries one snapshot:
+Snapshot bytes use port 9002 and do not pass through an HTTP body or a Go copy loop. One OpenSSL server accepts a readiness connection and one data connection. The readiness connection proves that the listener and mutual TLS work before the control request returns.
 
-1. The target dials the source transfer port and writes a length-prefixed JSON header naming the migration, VM, sequence, resume token, and throughput limit.
-2. The source replies with one status byte. `0` is followed by the raw `zfs send` stream. `1` is followed by a length-prefixed message, used when the source rejects the request before any data.
-3. The target runs `zfs recv` from the connection and counts the bytes.
+```text
+source: zfs send -> pipe -> openssl s_server
+                                  |
+                                  | TLS 1.3 and node certificates
+                                  v
+target: zfs recv <- pipe <- openssl s_client
+```
+
+The source permits one outbound snapshot stream at a time because all source streams use the fixed port. A second stream request returns a conflict. This limit does not affect Atlas API calls or migration work on target hosts.
+
+The source stream is not bound to its control request, so it ends at the daemon root context, at an unlock, or at the 30 minute transfer limit. A target that never connects cannot hold the port.
 
 ## Boundary
 

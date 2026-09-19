@@ -1,7 +1,6 @@
 package vmmigration
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -78,25 +77,22 @@ func TestNextSourceSnapshotRejectsAnotherMigration(t *testing.T) {
 	}
 }
 
-func TestSendSourceStreamRejectsAnUnknownSequence(t *testing.T) {
+func TestStartSourceStreamRejectsAnUnknownSequence(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
-	transfer.sentBytes = 2048
 	store := newMigrationStore(machines.MachinesDirectory())
 	if err := store.writeSource(SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Sequence: 2}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
 
-	var buffer bytes.Buffer
-	written, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", 2, "", 0, &buffer)
-	if err != nil || written != 2048 {
-		t.Fatalf("send = %d, %v", written, err)
+	if err := migrationManager.StartSourceStream(ctx, "mig-1", "vm-1", 2, "", 0); err != nil {
+		t.Fatal(err)
 	}
 	if want := []string{"migration-mig-1-2|migration-mig-1-1|"}; !equalStringSlices(transfer.sent, want) {
 		t.Fatalf("sent = %v", transfer.sent)
 	}
-	if _, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", 3, "", 0, &buffer); !errors.Is(err, vm.ErrConflict) {
+	if err := migrationManager.StartSourceStream(ctx, "mig-1", "vm-1", 3, "", 0); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("unknown sequence = %v, want ErrConflict", err)
 	}
 }
@@ -205,13 +201,12 @@ func TestStopSourceIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSendSourceStreamAppliesDiskLimit(t *testing.T) {
+func TestStartSourceStreamAppliesDiskLimit(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 1)
 	ctx := context.Background()
 
-	var buffer bytes.Buffer
-	if _, err := migrationManager.SendSourceStream(ctx, "mig-1", "vm-1", 1, "", 32, &buffer); err != nil {
+	if err := migrationManager.StartSourceStream(ctx, "mig-1", "vm-1", 1, "", 32); err != nil {
 		t.Fatal(err)
 	}
 	if machines.limitDiskValue != 32 {
@@ -223,6 +218,50 @@ func TestSendSourceStreamAppliesDiskLimit(t *testing.T) {
 	}
 	if record.TemporaryDiskLimitMiBps != 32 {
 		t.Fatalf("persisted disk limit = %d, want 32", record.TemporaryDiskLimitMiBps)
+	}
+}
+
+func TestStartSourceStreamRejectsASecondHostStreamBeforeChangingItsDiskLimit(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer.sendHang = true
+	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 1)
+	if err := migrationManager.store.writeSource(SourceMigrationRecord{
+		ID: "mig-2", VirtualMachineID: "vm-2", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrationManager.StartSourceStream(context.Background(), "mig-1", "vm-1", 1, "", 32); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.StartSourceStream(context.Background(), "mig-2", "vm-2", 1, "", 64); !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("second stream = %v, want ErrConflict", err)
+	}
+	if machines.limitDiskCalls != 1 {
+		t.Fatalf("disk limit calls = %d, want 1", machines.limitDiskCalls)
+	}
+	if err := migrationManager.stopSourceStream(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShutdownStopsAnActiveSourceStream(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer.sendHang = true
+	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 1)
+
+	if err := migrationManager.StartSourceStream(context.Background(), "mig-1", "vm-1", 1, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	migrationManager.sourceStreamsMutex.Lock()
+	defer migrationManager.sourceStreamsMutex.Unlock()
+	if len(migrationManager.sourceStreams) != 0 {
+		t.Fatal("source stream remains after shutdown")
 	}
 }
 

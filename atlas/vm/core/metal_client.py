@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import time
+from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -9,6 +10,7 @@ from urllib.parse import quote
 import requests
 from frappe.utils.password import get_decrypted_password
 
+from atlas.atlas.core.tls.metal import ca_file
 from atlas.vm.core.metal_models import MetalVirtualMachine
 
 if TYPE_CHECKING:
@@ -43,6 +45,7 @@ class MetalClient:
 	"""Call the Metal API on one bare-metal Server."""
 
 	api_port = 9000
+	coordination_port = 9001
 	timeout_seconds = (5, 60)
 	create_timeout_seconds = (5, 60)
 	status_timeout_seconds = (5, 30)
@@ -53,6 +56,7 @@ class MetalClient:
 
 	def __init__(self, server: "MetalServer") -> None:
 		self.base_url = self.get_api_url(server)
+		self.ca_file = ca_file()
 		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
 		if not token:
 			raise MetalClientError(f"Server {server.name} has no Metal API token")
@@ -68,14 +72,26 @@ class MetalClient:
 			public_ipv4_address = ipaddress.IPv4Address(server.public_ipv4_address)
 		except (ipaddress.AddressValueError, TypeError) as error:
 			raise MetalClientError(f"Server {server.name} has an invalid public IPv4 address") from error
-		return f"http://{public_ipv4_address}:{cls.api_port}"
+		return f"https://{public_ipv4_address}:{cls.api_port}"
+
+	@classmethod
+	def get_coordination_url(cls, server: "MetalServer") -> str:
+		"""Return the Metal coordination address for one server."""
+		if not server.wireguard_ip_address:
+			raise MetalClientError(f"Server {server.name} has no WireGuard IP address")
+		try:
+			wireguard_address = ipaddress.IPv6Address(server.wireguard_ip_address)
+		except (ipaddress.AddressValueError, TypeError) as error:
+			raise MetalClientError(f"Server {server.name} has an invalid WireGuard IP address") from error
+		return f"https://[{wireguard_address}]:{cls.coordination_port}"
 
 	def get_console_connection(self, virtual_machine_id: str, mode: str = "tty") -> dict[str, str]:
 		"""Return the websocket URL and auth header for a VM console."""
-		websocket_url = self.base_url.replace("http://", "ws://", 1)
+		websocket_url = self.base_url.replace("https://", "wss://", 1)
 		return {
 			"url": f"{websocket_url}/v1/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}",
 			"authorization": self.headers["Authorization"],
+			"ca_certificate": Path(self.ca_file).read_text(),
 		}
 
 	def put_virtual_machine(self, virtual_machine_id: str, request: dict[str, Any]) -> MetalVirtualMachine:
@@ -349,6 +365,7 @@ class MetalClient:
 				f"{self.base_url}{path}",
 				headers=self.headers,
 				timeout=timeout,
+				verify=self.ca_file,
 				**kwargs,
 			)
 		except requests.RequestException as error:

@@ -11,10 +11,12 @@ from frappe import _
 from frappe.desk.utils import slug
 from frappe.model.document import Document
 from frappe.model.naming import make_autoname
+from frappe.utils import add_days, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 
 from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.server_providers.base import ServerCreateRequest, ServerPowerAction
+from atlas.atlas.core.tls.metal import CERTIFICATE_RENEWAL_WINDOW_DAYS, is_certificate_authority_expiring
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.metal_server.core.disk_inventory import DiskInventory
 from atlas.metal_server.core.host_installation import (
@@ -47,6 +49,9 @@ class MetalServer(Document):
 		is_provisioning_completed: DF.Check
 		is_sleepy_vm_host: DF.Check
 		metald_api_token: DF.Password | None
+		metald_tls_certificate: DF.Password | None
+		metald_tls_expires_on: DF.Datetime | None
+		metald_tls_private_key: DF.Password | None
 		port: DF.Int
 		private_ipv4_address: DF.Data | None
 		private_network_interface: DF.Data | None
@@ -287,6 +292,33 @@ class MetalServer(Document):
 		)
 
 	@frappe.whitelist(methods=["POST"])
+	def renew_tls_certificate(self) -> None:
+		"""Queue a Metal TLS certificate renewal for this server."""
+		frappe.only_for("System Manager")
+		if self.status != "Running" or not self.is_provisioning_completed:
+			frappe.throw(_("Metal Server {0} is not ready to renew its certificate.").format(self.name))
+
+		self.enqueue_tls_certificate_renewal()
+
+	def enqueue_tls_certificate_renewal(self) -> None:
+		"""Queue the renewal worker unless another Metald operation runs."""
+		job_id = self.metald_job_id
+
+		if is_job_enqueued(job_id):
+			frappe.throw(_("Another Metald operation already runs for {0}.").format(self.name))
+
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_renew_tls_certificate",
+			queue="long",
+			timeout=METALD_INSTALL_TIMEOUT_SECONDS,
+			job_id=job_id,
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	@frappe.whitelist(methods=["POST"])
 	def upgrade_metald(self) -> None:
 		"""Queue a metald binary upgrade for this server."""
 		frappe.only_for("System Manager")
@@ -355,6 +387,10 @@ class MetalServer(Document):
 		"""Install metald and its host dependencies."""
 		HostInstallation(self).install_metal()
 
+	def _renew_tls_certificate(self) -> None:
+		"""Issue a current certificate and restart Metal with it."""
+		HostInstallation(self).install_tls_credentials()
+
 	def _upgrade_metald(self) -> None:
 		"""Replace the metald binary and restart its daemon."""
 		HostInstallation(self).upgrade_metald()
@@ -416,6 +452,27 @@ class MetalServer(Document):
 		if not isinstance(metadata, dict):
 			frappe.throw(_("Provider metadata must be a JSON object."))
 		return metadata
+
+
+def renew_expiring_tls_certificates() -> None:
+	"""Queue a renewal for every ready host whose certificate expires soon."""
+	if is_certificate_authority_expiring():
+		frappe.log_error(title="The Metal certificate authority expires soon")
+
+	servers = frappe.get_all(
+		"Metal Server",
+		filters={
+			"status": "Running",
+			"is_provisioning_completed": 1,
+			"metald_tls_expires_on": ["<=", add_days(now_datetime(), CERTIFICATE_RENEWAL_WINDOW_DAYS)],
+		},
+		pluck="name",
+	)
+	for name in servers:
+		server: MetalServer = frappe.get_doc("Metal Server", name)
+		if is_job_enqueued(server.metald_job_id):
+			continue
+		server.enqueue_tls_certificate_renewal()
 
 
 def on_doctype_update() -> None:

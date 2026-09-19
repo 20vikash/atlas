@@ -46,7 +46,7 @@ Atlas exchanges WireGuard peers, desired cached images, and host capacity with `
 
 Virtual Machine Image is the durable boot artifact for System and Machine images. Each record owns rootfs and kernel objects, exact sizes, and SHA-256 values. Machine image transfer behavior is documented in [the VM module SPEC](vm/SPEC.md).
 
-Atlas holds one wildcard TLS certificate for the region. A wildcard name can only be proved through DNS, so issuance uses the ACME dns-01 challenge and the configured DNS provider. See [the wildcard TLS guide](docs/wildcard-tls.md).
+Atlas holds one public wildcard TLS certificate and one private Metal certificate authority for the region. The private authority issues each trusted Metal node certificate. See [the security model](docs/security.md).
 
 See [the security model](docs/security.md) for the trust boundaries and the accepted risks. See [the documentation index](docs/README.md) for every guide.
 

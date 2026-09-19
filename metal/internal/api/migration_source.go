@@ -1,12 +1,12 @@
 package api
 
 import (
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 // migrationSourceResponse is portable source state for the target.
@@ -38,6 +38,34 @@ type snapshotResponse struct {
 	Sequence  int    `json:"sequence"`
 	SizeBytes int64  `json:"size_bytes"`
 	GUID      string `json:"guid"`
+}
+
+type streamRequest struct {
+	Sequence        int    `json:"sequence"`
+	ResumeToken     string `json:"resume_token"`
+	ThroughputMiBps int    `json:"throughput_mibps"`
+}
+
+// startMigrationStream starts a one-shot OpenSSL server for one ZFS stream.
+func (s *Server) startMigrationStream(c echo.Context) error {
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
+	if err != nil {
+		return err
+	}
+	var request streamRequest
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
+	}
+	if request.Sequence < 1 || request.ThroughputMiBps < 0 {
+		return badRequest("invalid stream request")
+	}
+	if err := s.migrationManager.StartSourceStream(
+		c.Request().Context(), identifier, virtualMachineID,
+		request.Sequence, request.ResumeToken, request.ThroughputMiBps,
+	); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusAccepted)
 }
 
 // createMigrationSnapshot returns the next source snapshot.

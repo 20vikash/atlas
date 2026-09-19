@@ -41,10 +41,14 @@ func (s *Server) registerRoutes(router *echo.Echo) {
 	migrationRoutes.POST("/:id/abort", s.abortMigration)
 	migrationRoutes.POST("/:id/finish", s.finishMigration)
 
-	// The target host calls these over the trusted mesh with no credential.
+}
+
+// registerCoordinationRoutes binds the API that Metal nodes call with mutual TLS.
+func (s *Server) registerCoordinationRoutes(router *echo.Echo) {
 	sourceRoutes := router.Group("/v1/migrations")
 	sourceRoutes.PUT("/:id/source", s.prepareMigrationSource)
 	sourceRoutes.POST("/:id/snapshot", s.createMigrationSnapshot)
+	sourceRoutes.POST("/:id/stream", s.startMigrationStream)
 	sourceRoutes.POST("/:id/stop", s.stopMigrationSource)
 	sourceRoutes.POST("/:id/start", s.startMigrationSource)
 	sourceRoutes.POST("/:id/destroy", s.destroyMigrationSource)

@@ -32,12 +32,29 @@ insert pending host       one durable placement intent
   -> create provider host in a job
   -> wait for ready
   -> attach addresses
-  -> install Metal
   -> configure WireGuard
+  -> issue and install the Metal TLS certificate
+  -> install Metal
   -> mark provisioning complete
 ```
 
 Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored identity key, so a lost response cannot create a second host. A failed job sets the record to Failed.
+
+Metal listens for the Atlas API on port 9000. It listens for node coordination on its WireGuard address and port 9001. Snapshot data uses port 9002. Host installation configures all three TLS paths before it starts Metal.
+
+## Certificate renewal
+
+The node certificate is valid for 825 days. Metal reads it once at startup, so a new certificate needs a restart.
+
+| Trigger | Result |
+|---|---|
+| Daily job `renew_expiring_tls_certificates` | Queues a renewal for each Running host whose stored expiry is inside 30 days. |
+| Metal Server action Renew TLS Certificate | Queues one renewal for that host. |
+| Host installation | Installs a current certificate before it installs Metal. |
+
+Atlas stores the expiry in `metald_tls_expires_on` each time it issues the host certificate.
+
+Renewal writes the new files and restarts `metal.service` when the unit is active. The unit sets `FileDescriptorStorePreserve=yes`, so the guest virtual machines stay up. A migration or console session on that host does not survive the restart. Renewal shares the Metald job lock, so it never runs at the same time as an install or an upgrade.
 
 ## Capacity
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from hashlib import sha256
 from types import MethodType, SimpleNamespace
 from unittest.mock import Mock, patch
@@ -9,7 +10,11 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.base import ProviderServer, ServerPowerAction
-from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
+from atlas.atlas.core.tls.metal import CERTIFICATE_RENEWAL_WINDOW_DAYS
+from atlas.metal_server.doctype.metal_server.metal_server import (
+	MetalServer,
+	renew_expiring_tls_certificates,
+)
 
 
 def _disk(device: str) -> dict:
@@ -405,7 +410,9 @@ class TestServer(UnitTestCase):
 	def test_install_metald_worker_passes_the_pool_device(self) -> None:
 		server = self._server(status="Running")
 		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.wireguard_ip_address = "fdab:1::7"
 		task = SimpleNamespace(result=SimpleNamespace(is_success=True))
+		tls_result = SimpleNamespace(is_success=True)
 		file_urls = {
 			"metald-file": "https://atlas.test/files/metald-linux-amd64",
 			"wg-mesh-file": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
@@ -423,7 +430,13 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 				return_value=task,
 			) as create_for_script_file,
+			patch(
+				"atlas.metal_server.core.host_installation.ensure_server_certificate",
+				return_value=("ca", "certificate", "private-key"),
+			),
+			patch("atlas.metal_server.core.host_installation.SSHRunner") as ssh_runner,
 		):
+			ssh_runner.return_value.run_script.return_value = tls_result
 			MetalServer._install_metald(server)
 
 		arguments = create_for_script_file.call_args.kwargs
@@ -435,10 +448,71 @@ class TestServer(UnitTestCase):
 				"WG_MESH_DOWNLOAD_URL": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
 				"METALD_AUTH_TOKEN_HASH": sha256(b"test-token").hexdigest(),
 				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"COORDINATION_LISTEN_ADDRESS": "[fdab:1::7]:9001",
 				"STORAGE_POOL_DEVICE": "/dev/md2",
 				"MESH_UPLINK_INTERFACE": "eno1.1878",
 			},
 		)
+		ssh_runner.return_value.run_script.assert_called_once_with(
+			"install-metal-tls.sh",
+			data={
+				"METAL_TLS_CA_CERTIFICATE": "ca",
+				"METAL_TLS_CERTIFICATE": "certificate",
+				"METAL_TLS_PRIVATE_KEY": "private-key",
+			},
+			timeout_seconds=1200,
+		)
+
+	def test_tls_renewal_queues_the_metald_job(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			MetalServer.enqueue_tls_certificate_renewal(server)
+
+		enqueue_doc.assert_called_once_with(
+			"Metal Server",
+			"node-test-00007",
+			"_renew_tls_certificate",
+			queue="long",
+			timeout=1200,
+			job_id="atlas||server||metald||node-test-00007",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	def test_tls_renewal_waits_for_a_running_metald_job(self) -> None:
+		"""Renewal restarts metald, so it shares the lock with install and upgrade."""
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.enqueue_tls_certificate_renewal(server)
+
+		enqueue_doc.assert_not_called()
+
+	def test_renew_tls_certificate_rejects_a_server_that_is_not_provisioned(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.renew_tls_certificate(server)
+
+		enqueue_doc.assert_not_called()
 
 	def test_upgrade_metald_queues_the_upgrade_job(self) -> None:
 		server = self._server(status="Running")
@@ -883,6 +957,7 @@ class TestServer(UnitTestCase):
 			wireguard_ip_address=None,
 			private_ipv4_address="10.0.0.7",
 			private_network_interface="eno1.1878",
+			ssh_host="192.0.2.7",
 			port=51820,
 			settings=SimpleNamespace(
 				server_provider_controller=SimpleNamespace(
@@ -916,3 +991,89 @@ class TestServer(UnitTestCase):
 		server._validate_power_action = MethodType(MetalServer._validate_power_action, server)
 		server._provider_server_id = MethodType(MetalServer._provider_server_id, server)
 		return server
+
+
+class TestExpiringCertificateRenewal(UnitTestCase):
+	def test_renewal_queues_each_server_inside_the_window(self) -> None:
+		server = Mock(metald_job_id="atlas||server||metald||node-test-00007")
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.is_certificate_authority_expiring",
+				return_value=False,
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.now_datetime",
+				return_value=datetime(2026, 9, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.add_days",
+				return_value=datetime(2026, 10, 20),
+			) as add_days,
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all",
+				return_value=["node-test-00007"],
+			) as get_all,
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			renew_expiring_tls_certificates()
+
+		server.enqueue_tls_certificate_renewal.assert_called_once_with()
+		add_days.assert_called_once_with(datetime(2026, 9, 20), CERTIFICATE_RENEWAL_WINDOW_DAYS)
+		self.assertEqual(
+			get_all.call_args.kwargs["filters"],
+			{
+				"status": "Running",
+				"is_provisioning_completed": 1,
+				"metald_tls_expires_on": ["<=", datetime(2026, 10, 20)],
+			},
+		)
+
+	def test_renewal_skips_a_server_with_a_running_metald_job(self) -> None:
+		server = Mock(metald_job_id="atlas||server||metald||node-test-00007")
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.is_certificate_authority_expiring",
+				return_value=False,
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.now_datetime",
+				return_value=datetime(2026, 9, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.add_days",
+				return_value=datetime(2026, 10, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all",
+				return_value=["node-test-00007"],
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+		):
+			renew_expiring_tls_certificates()
+
+		server.enqueue_tls_certificate_renewal.assert_not_called()
+
+	def test_renewal_reports_an_expiring_certificate_authority(self) -> None:
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.is_certificate_authority_expiring",
+				return_value=True,
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.now_datetime",
+				return_value=datetime(2026, 9, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.add_days",
+				return_value=datetime(2026, 10, 20),
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all", return_value=[]),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.log_error") as log_error,
+		):
+			renew_expiring_tls_certificates()
+
+		log_error.assert_called_once()

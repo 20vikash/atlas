@@ -15,10 +15,11 @@ Two ideas explain the rest of the design.
 ## Components
 
 ```text
-controller
-    |
-    v
-api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> Firecracker
+Atlas HTTPS API                 node coordination mTLS API
+    |                                      |
+    +------------------+-------------------+
+                       v
+                      api ----> vm.Manager ----> firecracker.Runtime ----> systemd ----> jailer ----> Firecracker
  |            |                                      |
  |            |                                      └─ one unit for each VM
  |            ├─ storage stores
@@ -73,6 +74,8 @@ Startup validates every record and refuses to run on one it cannot read, because
 
 **Host safety**
 
-- Bearer authentication applies to TCP and Unix listeners.
+- TLS authenticates Metal to Atlas on the controller API.
+- A bearer token authenticates Atlas to the controller API.
+- Mutual TLS authenticates both nodes on the coordination API and snapshot stream.
 - The manager holds one operation lock per VM.
 - Cleanup progress stays on disk until every owned resource is gone.

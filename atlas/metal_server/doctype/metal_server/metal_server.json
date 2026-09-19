@@ -8,10 +8,10 @@
  "field_order": [
   "status",
   "is_provisioning_completed",
-  "metald_api_token",
+  "metald_tls_expires_on",
+  "provider_identity_key",
   "column_break_qbap",
   "provider_server_id",
-  "provider_identity_key",
   "is_sleepy_vm_host",
   "section_break_configuration",
   "server_image",
@@ -34,7 +34,13 @@
   "column_break_zhfx",
   "wireguard_public_key",
   "section_break_metadata",
-  "provider_metadata"
+  "provider_metadata",
+  "hidden_data_section",
+  "metald_api_token",
+  "column_break_xhax",
+  "metald_tls_certificate",
+  "column_break_yxha",
+  "metald_tls_private_key"
  ],
  "fields": [
   {
@@ -51,6 +57,12 @@
    "fieldtype": "Check",
    "label": "Sleepy VM Host",
    "show_description_on_click": 1
+  },
+  {
+   "fieldname": "metald_tls_expires_on",
+   "fieldtype": "Datetime",
+   "label": "TLS Expires On",
+   "read_only": 1
   },
   {
    "default": "Pending",
@@ -83,6 +95,20 @@
    "fieldtype": "Password",
    "hidden": 1,
    "label": "Metal API Token",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metald_tls_certificate",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Metald TLS Certificate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metald_tls_private_key",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Metald TLS Private Key",
    "read_only": 1
   },
   {
@@ -214,6 +240,20 @@
   {
    "fieldname": "column_break_iiyh",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "hidden_data_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Hidden Data"
+  },
+  {
+   "fieldname": "column_break_xhax",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_yxha",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
@@ -235,7 +275,7 @@
    "link_fieldname": "server"
   }
  ],
- "modified": "2026-09-19 02:26:04.637326",
+ "modified": "2026-09-20 00:42:09.106137",
  "modified_by": "test@gmail.com",
  "module": "Metal Server",
  "name": "Metal Server",

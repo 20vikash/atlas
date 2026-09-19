@@ -12,7 +12,7 @@ That is why this package is thin: it owns request validation, the public respons
 
 ## Types
 
-`New(Config, Dependencies)` validates configuration and dependencies, then returns a configured Echo router. `Server` holds the injected services and every handler.
+`New(Config, Dependencies)` returns the Atlas API router. `NewCoordination` returns the node coordination router. `Server` holds the injected services and handlers.
 
 `Dependencies` carries the VM manager, migration manager, snapshot store, host service, wake function, serial broker, and trusted key store. Each is an interface declared here, so this package depends on no implementation.
 
@@ -63,15 +63,21 @@ PUT    /v1/migrations/:id          Atlas creates or resumes a target, static tok
 GET    /v1/migrations/:id          Atlas reads target status, static token
 POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
 POST   /v1/migrations/:id/finish   Atlas records the target finish, static token
-PUT    /v1/migrations/:id/source   the target locks the source, mesh
-POST   /v1/migrations/:id/snapshot the target asks for the next snapshot, mesh
-POST   /v1/migrations/:id/stop     the target acknowledges its last snapshot and stops the source, mesh
-POST   /v1/migrations/:id/start    the target restores the source during rollback, mesh
-POST   /v1/migrations/:id/destroy  the target destroys the stopped source, mesh
-DELETE /v1/migrations/:id          the target unlocks the source, mesh
 ```
 
-Atlas drives create, get, abort, and finish with the static token. The target host drives source, snapshot, stop, start, destroy, and delete on the source host over the trusted mesh with no credential. Every source route carries the VM ID as the `virtual_machine_id` query value, so the source resolves the migration without a token. The disk itself moves over a separate TCP connection, not an HTTP route. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
+The coordination server on port 9001 has these routes:
+
+```text
+PUT    /v1/migrations/:id/source   the target locks the source
+POST   /v1/migrations/:id/snapshot the target asks for the next snapshot
+POST   /v1/migrations/:id/stream   the target starts the one-shot snapshot server
+POST   /v1/migrations/:id/stop     the target acknowledges its last snapshot and stops the source
+POST   /v1/migrations/:id/start    the target restores the source during rollback
+POST   /v1/migrations/:id/destroy  the target destroys the stopped source
+DELETE /v1/migrations/:id          the target unlocks the source
+```
+
+Atlas drives create, get, abort, and finish on port 9000 with the static token. A target host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS OpenSSL connection on port 9002. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
 
 The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
@@ -105,13 +111,13 @@ Each route group names the middleware it needs, so a route cannot inherit the wr
 | Middleware | Credential | Routes |
 |---|---|---|
 | `authenticate` | The static bearer token. Only its SHA-256 digest is configured, so the plain token never reaches this package, and the comparison is constant time. | The `/v1` controller group. |
-| none | The trusted WireGuard mesh. | The source-side migration routes that one Metal host calls on another. |
+| mutual TLS | A node certificate from the regional Metal authority. | The coordination server and its source-side migration routes. |
 
-The source-side migration routes carry no credential. Metal hosts reach each other only over the trusted mesh, so a source route trusts its caller and reads the VM ID from the `virtual_machine_id` query value.
+The TLS listener verifies the node certificate before the coordination router receives a request. A source route then reads the VM ID from the `virtual_machine_id` query value.
 
 Group authentication makes the group answer every path below it. An unknown path and a wrong method under `/v1` both return `404`.
 
-The 3 public routes carry no VM data. Liveness must answer a probe that holds no token, and the documentation page is opened in a browser that cannot send one. Both stay open, so metald is expected to listen on a private control network.
+The three unauthenticated routes carry no VM data. TLS still authenticates the Metal server to their clients.
 
 ## Errors
 

@@ -5,6 +5,7 @@ const { get_redis_subscriber } = require("../../frappe/node_utils");
 
 const CONSOLE_TOKEN_PREFIX = "atlas:console:token:";
 const MAXIMUM_CONSOLE_INPUT_BYTES = 64 * 1024;
+const CERTIFICATE_PEM_PREFIX = "-----BEGIN CERTIFICATE-----";
 const INVALID_TOKEN_MESSAGE = "This console link is invalid or expired.";
 const UNREACHABLE_MESSAGE = "Could not reach the virtual machine console.";
 const INVALID_INPUT_MESSAGE = "Console input is invalid.";
@@ -92,19 +93,23 @@ function parse_connection(serialized_connection) {
 	const connection = JSON.parse(serialized_connection);
 	const url = connection && connection.url;
 	const authorization = connection && connection.authorization;
+	const ca_certificate = connection && connection.ca_certificate;
 	if (typeof url !== "string" || !is_websocket_url(url)) {
 		throw new Error("Console connection has an invalid WebSocket URL");
 	}
 	if (typeof authorization !== "string" || !authorization || /[\r\n]/.test(authorization)) {
 		throw new Error("Console connection has no authorization value");
 	}
-	return { url, authorization };
+	if (typeof ca_certificate !== "string" || !ca_certificate.startsWith(CERTIFICATE_PEM_PREFIX)) {
+		throw new Error("Console connection has no CA certificate");
+	}
+	return { url, authorization, ca_certificate };
 }
 
 function is_websocket_url(value) {
 	try {
 		const parsed = new URL(value);
-		return (parsed.protocol === "ws:" || parsed.protocol === "wss:") && Boolean(parsed.host);
+		return parsed.protocol === "wss:" && Boolean(parsed.host);
 	} catch (error) {
 		return false;
 	}
@@ -156,6 +161,8 @@ async function open_console(socket, token) {
 
 		const metal_connection = new WebSocket(connection.url, {
 			headers: { Authorization: connection.authorization },
+			ca: connection.ca_certificate,
+			rejectUnauthorized: true,
 		});
 		if (!(await wait_for_open(metal_connection))) {
 			metal_connection.close();

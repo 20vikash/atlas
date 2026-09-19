@@ -29,9 +29,11 @@
   "metald_section",
   "metald_binary_x86_64_file",
   "metald_source_hash",
+  "metal_tls_ca_private_key",
   "column_break_bgjv",
   "wg_mesh_binary_x86_64_file",
   "wg_mesh_source_hash",
+  "metal_tls_ca_certificate",
   "jwks_data_section",
   "central_jwks_url",
   "jwt_signing_key_id",
@@ -359,6 +361,20 @@
    "fieldname": "metald_source_hash",
    "fieldtype": "Data",
    "label": "Metald Source Hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metal_tls_ca_certificate",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Metal TLS CA Certificate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metal_tls_ca_private_key",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Metal TLS CA Private Key",
    "read_only": 1
   },
   {
@@ -745,7 +761,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-19 22:25:28.482665",
+ "modified": "2026-09-20 00:02:34.457986",
  "modified_by": "test@gmail.com",
  "module": "Atlas",
  "name": "Atlas Settings",

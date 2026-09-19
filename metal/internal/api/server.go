@@ -7,7 +7,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"io"
 	"log/slog"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 )
 
 // Config contains HTTP server configuration. Only the token hash is stored; the
@@ -70,6 +70,7 @@ type MigrationManager interface {
 	AbortTarget(ctx context.Context, migrationID string) error
 	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error)
 	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
+	StartSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error
 	StopSource(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
 	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
 	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
@@ -127,6 +128,25 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	router.Use(server.logRequest)
 	server.registerRoutes(router)
 
+	return router, nil
+}
+
+// NewCoordination builds the mutual-TLS router used between Metal nodes.
+// The listener enforces the client certificate before a request reaches it.
+func NewCoordination(logger *slog.Logger, migrationManager MigrationManager) (*echo.Echo, error) {
+	if migrationManager == nil {
+		return nil, fmt.Errorf("migration manager is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	server := &Server{migrationManager: migrationManager, logger: logger}
+	router := echo.New()
+	router.HideBanner = true
+	router.HTTPErrorHandler = errorHandler
+	router.Use(correlationMiddleware)
+	router.Use(server.logRequest)
+	server.registerCoordinationRoutes(router)
 	return router, nil
 }
 

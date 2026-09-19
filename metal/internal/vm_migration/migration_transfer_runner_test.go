@@ -32,7 +32,7 @@ func writeCopyingTarget(t *testing.T, machines *fakeMachines, sourceState vm.Sta
 	record := TargetMigrationRecord{
 		ID:                  "mig-1",
 		VirtualMachineID:    "vm-1",
-		Source:              "http://10.0.0.3:9000",
+		Source:              "https://10.0.0.3:9000",
 		Status:              MigrationRunning,
 		Phase:               PhaseCopying,
 		SourceObservedState: sourceState,
@@ -63,7 +63,6 @@ func TestRunTransferCopiesAFullInterval(t *testing.T) {
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	// One queued snapshot stops the loop after the full interval.
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "g"}}
-	source.streamBytes = 1000
 	transfer.guid = "g"
 	store := writeCopyingTarget(t, machines, vm.StateRunning)
 
@@ -164,7 +163,6 @@ func TestRunTransferThrottlesThenCutsOverToReady(t *testing.T) {
 	migrationManager.settings.FinalDeltaMiB = 1
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	transfer.guid = "g"
-	source.streamBytes = 10
 	large := int64(64 * 1024 * 1024)
 	source.nextQueue = []SourceSnapshot{
 		{Sequence: 1, SizeBytes: large, GUID: "g"},
@@ -200,7 +198,6 @@ func TestRunTransferStopsANonRunningSourceFirst(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	transfer.guid = "g"
-	source.streamBytes = 10
 	source.stopSnapshot = SourceSnapshot{Sequence: 1, SizeBytes: 4096, GUID: "g"}
 	seedTargetVM(t, machines, vm.StateStopped)
 	store := writeCopyingTarget(t, machines, vm.StateStopped)
@@ -230,7 +227,6 @@ func TestRunTransferKeepsLockedOnTargetStartFailure(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	transfer.guid = "g"
-	source.streamBytes = 10
 	source.stopSnapshot = SourceSnapshot{Sequence: 1, SizeBytes: 4096, GUID: "g"}
 	seedTargetVM(t, machines, vm.StateRunning)
 	store := writeCopyingTarget(t, machines, vm.StateStopped)
@@ -255,7 +251,6 @@ func TestAdvanceTargetResumesACopyingTransfer(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 800, GUID: "g"}}
-	source.streamBytes = 800
 	transfer.guid = "g"
 	store := writeCopyingTarget(t, machines, vm.StateRunning)
 
@@ -280,7 +275,6 @@ func TestStartTransferRunsOnceAndShutdownWaits(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.transfer.(*fakeTransfer)
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 500, GUID: "g"}}
-	source.streamBytes = 500
 	transfer.guid = "g"
 	store := writeCopyingTarget(t, machines, vm.StateRunning)
 

@@ -5,20 +5,39 @@ from frappe.tests import UnitTestCase
 
 from atlas.vm.core.console_token import ConsoleConnection, is_valid_console_token, issue_console_token
 
+CERTIFICATE = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
+
 
 class TestConsoleConnection(UnitTestCase):
 	def test_connection_accepts_a_websocket_url_and_authorization(self) -> None:
 		connection = ConsoleConnection.from_json(
-			json.dumps({"url": "wss://metal.example.test/console", "authorization": "Bearer token"})
+			json.dumps(
+				{
+					"url": "wss://metal.example.test/console",
+					"authorization": "Bearer token",
+					"ca_certificate": CERTIFICATE,
+				}
+			)
 		)
 
 		self.assertEqual(connection.url, "wss://metal.example.test/console")
 		self.assertEqual(connection.authorization, "Bearer token")
+		self.assertEqual(connection.ca_certificate, CERTIFICATE)
 
 	def test_connection_rejects_an_http_url(self) -> None:
 		with self.assertRaisesRegex(ValueError, "WebSocket URL"):
 			ConsoleConnection.from_value(
 				{"url": "https://metal.example.test/console", "authorization": "Bearer token"}
+			)
+
+	def test_connection_rejects_a_ca_value_that_is_not_a_certificate(self) -> None:
+		with self.assertRaisesRegex(ValueError, "CA certificate"):
+			ConsoleConnection.from_value(
+				{
+					"url": "wss://metal.example.test/console",
+					"authorization": "Bearer token",
+					"ca_certificate": "/private/ca.crt",
+				}
 			)
 
 	def test_console_token_requires_the_generated_format(self) -> None:
@@ -31,7 +50,9 @@ class TestConsoleConnection(UnitTestCase):
 			patch("atlas.vm.core.console_token.redis.from_url") as from_url,
 			self.assertRaises(ValueError),
 		):
-			issue_console_token({"url": "not-a-url", "authorization": "Bearer token"})
+			issue_console_token(
+				{"url": "not-a-url", "authorization": "Bearer token", "ca_certificate": CERTIFICATE}
+			)
 
 		from_url.assert_not_called()
 
@@ -43,8 +64,9 @@ class TestConsoleConnection(UnitTestCase):
 		):
 			token = issue_console_token(
 				{
-					"url": "ws://192.0.2.1:9000/v1/vms/VM-00001/console",
+					"url": "wss://192.0.2.1:9000/v1/vms/VM-00001/console",
 					"authorization": "Bearer secret",
+					"ca_certificate": CERTIFICATE,
 					"ignored": "value",
 				}
 			)
@@ -54,7 +76,8 @@ class TestConsoleConnection(UnitTestCase):
 		self.assertEqual(
 			stored_connection,
 			{
-				"url": "ws://192.0.2.1:9000/v1/vms/VM-00001/console",
+				"url": "wss://192.0.2.1:9000/v1/vms/VM-00001/console",
 				"authorization": "Bearer secret",
+				"ca_certificate": CERTIFICATE,
 			},
 		)

@@ -79,6 +79,8 @@ class AtlasSettings(Document):
 		jwt_signing_private_key: DF.Password | None
 		letsencrypt_config_directory: DF.Data | None
 		letsencrypt_email: DF.Data
+		metal_tls_ca_certificate: DF.Password | None
+		metal_tls_ca_private_key: DF.Password | None
 		metald_binary_x86_64_file: DF.Link | None
 		metald_source_hash: DF.Data | None
 		object_storage_access_key_id: DF.Data | None
@@ -279,8 +281,10 @@ class AtlasSettings(Document):
 
 	def before_save(self) -> None:
 		"""Create the regional credentials and apply provider setup when the credentials change."""
+		from atlas.atlas.core.tls.metal import ensure_certificate_authority
 		from atlas.auth.issuer import initialize_signing_key
 
+		ensure_certificate_authority(self)
 		self.initialize_proxy_cluster_password()
 		initialize_signing_key(self)
 

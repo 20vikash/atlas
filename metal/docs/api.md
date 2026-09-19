@@ -16,7 +16,7 @@ Each VM response nests `desired` and `observed`, so one read shows both what was
 
 `PUT /v1/vms/{id}/compute` sets `cpu_millicores`, `memory_mib`, and `sleep_after_idle_seconds`. `1000` millicores equals one CPU core. The valid CPU range is 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. A CPU or memory change needs a stopped VM. An idle timeout change is accepted in any state. `0` disables automatic idle shutdown. The response reports the value in `desired.compute`.
 
-Every `/v1` controller route needs the static Metal bearer token. The source-side migration routes that one Metal host calls on another carry no credential and trust the WireGuard mesh. Only liveness and the documentation are public.
+Every `/v1` controller route on port 9000 needs the static Metal bearer token. Source-side migration routes are on the port 9001 coordination API and require mutual TLS. Only liveness and documentation need no bearer token. TLS still protects them.
 
 Routes, status codes, and error mapping: [internal/api/SPEC.md](../internal/api/SPEC.md).
 

@@ -182,7 +182,7 @@ class MigrationService:
 
 	def send_request(self) -> None:
 		"""Send the target-pull request. Safe to repeat."""
-		source = MetalClient.get_api_url(self.source_server)
+		source = MetalClient.get_coordination_url(self.source_server)
 		self.target_client.put_migration(
 			cast(str, self.migration.name), self.migration.virtual_machine, source
 		)

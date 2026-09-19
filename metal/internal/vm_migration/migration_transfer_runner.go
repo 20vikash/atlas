@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/frappe/atlas/metal/internal/vm"
-	"io"
-	"sync/atomic"
 	"time"
+
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 const (
@@ -15,8 +14,6 @@ const (
 	maxTransferIntervals = 16
 	// maxTransferDuration bounds copy time before cutover.
 	maxTransferDuration = 30 * time.Minute
-	// progressCheckpointInterval controls active-byte checkpoints.
-	progressCheckpointInterval = 5 * time.Second
 )
 
 // throttleSteps are source disk limits in MiB/s for large deltas.
@@ -82,6 +79,7 @@ func (m *VMMigration) Shutdown(shutdownContext context.Context) error {
 	finished := make(chan struct{})
 	go func() {
 		m.transfersWaitGroup.Wait()
+		m.sourceStreamsWaitGroup.Wait()
 		close(finished)
 	}()
 	select {
@@ -273,7 +271,7 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 	if err != nil {
 		return err
 	}
-	received, err := m.streamInterval(ctx, record, snapshot, resumeToken, throughputMiBps)
+	estimatedBytes, err := m.streamInterval(ctx, record, snapshot, resumeToken, throughputMiBps)
 	if err != nil {
 		return err
 	}
@@ -286,65 +284,22 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 		return m.failTransfer(record, "received snapshot GUID does not match the source")
 	}
 
-	return m.completeInterval(record, snapshot.Sequence, received, receivedGUID)
+	return m.completeInterval(record, snapshot.Sequence, estimatedBytes, receivedGUID)
 }
 
-// streamInterval streams one snapshot and checkpoints received bytes.
+// streamInterval pulls one snapshot and returns the source stream estimate. The
+// OpenSSL transport does not report a byte count.
 func (m *VMMigration) streamInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
-	var received atomic.Int64
-	reader, writer := io.Pipe()
-	streamContext, cancelStream := context.WithCancel(ctx)
-	defer cancelStream()
-
-	go func() {
-		_, sendError := m.source.StreamSnapshot(streamContext, record.Source, record.ID, record.VirtualMachineID, snapshot.Sequence, resumeToken, throughputMiBps, writer)
-		writer.CloseWithError(sendError)
-	}()
-
-	progressDone := make(chan error, 1)
-	go func() {
-		checkpointError := m.checkpointProgress(streamContext, record.VirtualMachineID, snapshot.Sequence, &received)
-		if checkpointError != nil {
-			cancelStream()
-		}
-		progressDone <- checkpointError
-	}()
-
-	receiveError := m.transfer.ReceiveSnapshot(ctx, record.VirtualMachineID, &countingReader{reader: reader, count: &received})
-	cancelStream()
-	checkpointError := <-progressDone
-	return received.Load(), errors.Join(receiveError, checkpointError)
-}
-
-// checkpointProgress saves the active interval byte count until the stream ends.
-func (m *VMMigration) checkpointProgress(ctx context.Context, virtualMachineID string, sequence int, received *atomic.Int64) error {
-	ticker := time.NewTicker(progressCheckpointInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			if err := m.saveIntervalBytes(virtualMachineID, sequence, received.Load()); err != nil {
-				return err
-			}
-		}
+	if err := m.source.StartSnapshotStream(
+		ctx, record.Source, record.ID, record.VirtualMachineID,
+		snapshot.Sequence, resumeToken, throughputMiBps,
+	); err != nil {
+		return 0, err
 	}
-}
-
-// saveIntervalBytes records the bytes received for the active interval.
-func (m *VMMigration) saveIntervalBytes(virtualMachineID string, sequence int, bytesReceived int64) error {
-	record, err := m.store.readTarget(virtualMachineID)
-	if err != nil {
-		return err
+	if err := m.transfer.ReceiveSnapshotTLS(ctx, record.VirtualMachineID, record.Source); err != nil {
+		return 0, err
 	}
-	for index := range record.Intervals {
-		if record.Intervals[index].Sequence == sequence && !record.Intervals[index].Completed {
-			record.Intervals[index].BytesTransferred = bytesReceived
-			return m.store.writeTarget(record)
-		}
-	}
-	return nil
+	return snapshot.SizeBytes, nil
 }
 
 // beginInterval records the start of one interval and returns the saved record.
@@ -429,16 +384,4 @@ func hasInterval(intervals []IntervalProgress, sequence int) bool {
 		}
 	}
 	return false
-}
-
-// countingReader counts the bytes read through it.
-type countingReader struct {
-	reader io.Reader
-	count  *atomic.Int64
-}
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	n, err := c.reader.Read(p)
-	c.count.Add(int64(n))
-	return n, err
 }

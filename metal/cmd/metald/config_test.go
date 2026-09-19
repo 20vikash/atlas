@@ -94,8 +94,8 @@ func TestLoadMigrationFinalDelta(t *testing.T) {
 }
 
 func TestLoadMigrationTransferPort(t *testing.T) {
-	if got := defaultOptions().migration.transferPort; got != 9001 {
-		t.Fatalf("default transfer_port = %d, want 9001", got)
+	if got := defaultOptions().migration.transferPort; got != 9002 {
+		t.Fatalf("default transfer_port = %d, want 9002", got)
 	}
 	path := writeConfig(t, "[migration]\ntransfer_port = 9100\n")
 	options, err := load(path)
@@ -104,6 +104,26 @@ func TestLoadMigrationTransferPort(t *testing.T) {
 	}
 	if options.migration.transferPort != 9100 {
 		t.Errorf("transfer_port = %d, want the file value", options.migration.transferPort)
+	}
+}
+
+func TestLoadTLSAndCoordination(t *testing.T) {
+	path := writeConfig(t, `[metald]
+coordination_listen = "[fdab::12]:9001"
+[tls]
+ca_file = "/tls/ca.crt"
+certificate_file = "/tls/node.crt"
+private_key_file = "/tls/node.key"
+`)
+	options, err := load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.tls != (tlsOptions{caFile: "/tls/ca.crt", certificateFile: "/tls/node.crt", privateKeyFile: "/tls/node.key"}) {
+		t.Fatalf("TLS options = %+v", options.tls)
+	}
+	if options.coordinationListen != "[fdab::12]:9001" {
+		t.Fatalf("coordination listen = %q", options.coordinationListen)
 	}
 }
 
@@ -137,6 +157,21 @@ func TestMakeDirs(t *testing.T) {
 		}
 		if got := info.Mode().Perm(); got != want {
 			t.Errorf("%s mode = %o, want %o", path, got, want)
+		}
+	}
+}
+
+func TestTransferListenAddressNeedsANodeAddress(t *testing.T) {
+	address, err := transferListenAddress("[fdab::12]:9001", 9002)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if address != "[fdab::12]:9002" {
+		t.Fatalf("transfer address = %q", address)
+	}
+	for _, coordination := range []string{"0.0.0.0:9001", "[::]:9001", "unix:/run/metal.sock"} {
+		if _, err := transferListenAddress(coordination, 9002); err == nil {
+			t.Fatalf("coordination address %q was accepted", coordination)
 		}
 	}
 }

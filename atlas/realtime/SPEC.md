@@ -14,4 +14,6 @@ Metal owns the serial console. Atlas owns the browser session and its token.
 
 `ConsoleSession.close` is the only session cleanup owner. A token is one use. The handler validates the stored connection, input encoding, input size, and terminal dimensions before it sends data to Metal.
 
+The bridge connects to Metal with secure WebSocket transport. The stored connection carries the regional Metal certificate authority, so the bridge rejects a server that does not present a valid node certificate.
+
 Use [Atlas operations](../docs/operations.md) for Metal connectivity checks. The console bridge does not log the Metal authorization value.

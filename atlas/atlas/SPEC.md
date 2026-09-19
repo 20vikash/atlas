@@ -8,7 +8,7 @@ For the provider overview, see [docs/providers.md](../docs/providers.md).
 
 Atlas talks to an infrastructure provider only through one interface. Everything provider-specific lives behind it, so adding a provider never reaches into server or virtual machine code.
 
-This module also holds site settings, the regional token key, the wildcard TLS certificate, and the host binaries.
+This module also holds site settings, the regional token key, the wildcard TLS certificate, the private Metal certificate authority, and the host binaries.
 
 The Placement Strategy section selects a registered placement strategy and defaults to `balanced`. Its choices come from the strategy registry, and unknown names are rejected. The section also stores `sleepy_vm_overcommit_factor`, which defaults to `1.0` and must be finite and at least `1.0`. A sleepy VM has `sleep_after_idle_seconds` greater than zero. The factor is available to strategies. `default_metal_machine_size` and `default_metal_machine_image` select the catalog entries used for a new host. See the [VM placement specification](../vm/SPEC.md#placement).
 
@@ -25,7 +25,8 @@ The Placement Strategy section selects a registered placement strategy and defau
 | `artifacts` | Publishing a build output as a public File, and its download URL. |
 | `LetsEncrypt` | Wildcard certificate issuance through the dns-01 challenge. |
 | `AcmeClient` | The ACME v2 conversation for one account key. |
-| `certificate` | Reading a PEM chain, and checking a certificate against its key. |
+| `certificate` | Creating and checking certificate authorities, certificates, and private keys. |
+| `tls.metal` | Creating the regional Metal authority and each node certificate. |
 | `SSHTask` (DocType) | Records one SSH command for a Metal Server or a Virtual Machine. |
 | `ssh`, `parsing`, `mesh_address`, `object_storage` | Host access, strict input parsing, mesh addressing, and object storage. |
 
@@ -50,6 +51,16 @@ Metal Server Size stores disk capacity in GiB and price in integer USD cents. Th
 A wildcard name can only be proved through DNS, so `LetsEncrypt` answers the ACME dns-01 challenge with the configured `DnsProvider` and uses no other challenge type. `AcmeClient` speaks the protocol and touches no file. The account key is the only durable local state.
 
 Atlas Settings owns the certificate chain, the private key, and the expiry. The expiry is read from the certificate on every validate, so the stored values cannot drift apart.
+
+## Metal TLS
+
+Atlas Settings owns one private certificate authority for the region. Atlas creates it after the region name and wildcard domain are available.
+
+Each Metal Server owns one certificate and private key from this authority. The certificate identity is `<server>.<wildcard_domain>`. Its subject alternative names contain the WireGuard, private, and public IP addresses. The certificate permits TLS client and server use.
+
+Atlas writes the authority certificate to a private site file for Metal API clients. The authority private key stays in Atlas Settings. Host installation sends the node certificate, node key, and authority certificate through a direct SSH execution that does not create an SSH Task record.
+
+`ensure_server_certificate` issues a new certificate when the stored one is absent, does not match the server identity and addresses, or expires inside the renewal window of 30 days. Metal Server stores the expiry in `metald_tls_expires_on`. A daily job queues a renewal for each ready host inside that window, and reports an error when the authority itself expires inside 180 days. The operator can also start one renewal with the Metal Server action Renew TLS Certificate. See [Metal Server setup](../metal_server/SPEC.md).
 
 ## SSH tasks
 

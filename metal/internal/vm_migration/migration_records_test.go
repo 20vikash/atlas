@@ -15,7 +15,7 @@ func newTargetRecord() TargetMigrationRecord {
 	return TargetMigrationRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
-		Source:           "http://10.0.0.3:9000",
+		Source:           "https://10.0.0.3:9000",
 		Status:           MigrationRunning,
 		Phase:            PhasePreparing,
 		CreatedAt:        time.Now().UTC(),
