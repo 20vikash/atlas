@@ -18,8 +18,7 @@
 
 enum unicast_debug_operation
 {
-	UNICAST_OPERATION_TX_OWNER = 1,
-	UNICAST_OPERATION_TX_FAN_OUT,
+	UNICAST_OPERATION_TX_FAN_OUT = 1,
 	UNICAST_OPERATION_TX_ADVERTISEMENT,
 	UNICAST_OPERATION_TX_FAILED,
 	UNICAST_OPERATION_RX_REJECTED,
@@ -136,7 +135,7 @@ static __always_inline int atlas_unicast_send_to_peer(struct __sk_buff *packet, 
 
 /* Attached to TC egress on the discovery interface in a unicast environment. Wrapped packets are IPv4, so clones pass through unchanged.
  *
- * A solicitation for a remote VM is wrapped in IPv4 and sent to the last known owner peer from vm_peer_map, or to every peer when no owner is known. The original multicast solicitation is consumed.
+ * A solicitation for a remote VM is wrapped in IPv4 and sent to every peer. The original multicast solicitation is consumed.
  *
  * An advertisement for a local VM is wrapped and returned to the peer that the ingress hook recorded in ndp_requesters.
  */
@@ -155,7 +154,6 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 	struct config *local_config;
 
-	__be32 *known_peer;
 	__be32 *requester;
 	__be32 requester_address;
 
@@ -198,19 +196,6 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 		if (!atlas_unicast_wrap_ipv4(packet) || !atlas_unicast_store_base_header(packet, local_config->underlay_ip4, wrapped_length, &base_sum)) {
 			emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
 			return TC_ACT_OK;
-		}
-
-		known_peer = bpf_map_lookup_elem(&vm_peer_map, &target);
-
-		if (known_peer) {
-			/* A known owner receives the only copy. The entry is one shot: it is removed now, so a missing answer makes the next solicitation fan out to every peer. */
-			if (atlas_unicast_send_to_peer(packet, known_peer, local_config->underlay_ip4, wrapped_length, base_sum)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
-			else emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_OWNER, &target, NULL);
-
-			bpf_map_delete_elem(&vm_peer_map, &target);
-
-			/* The multicast solicitation has no meaning on a routed underlay. */
-			return TC_ACT_SHOT;
 		}
 
 		/* The map key is a separate stack variable, because its address is taken. No counter is carried across iterations, because a precise loop-carried value stops the verifier from pruning equal iteration states. */
@@ -266,7 +251,7 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 /* Attached to TC ingress on the discovery interface in a unicast environment. A wrapped NDP packet is accepted only when the outer IPv4 source is a configured peer and the destination is the local underlay address. The outer header is removed, and the inner packet continues to the Linux neighbour discovery path.
  *
- * A solicitation records the outer source in ndp_requesters for the answer. An advertisement records the outer source as the owner in vm_peer_map and registers the VM neighbour from the frame source MAC, so Linux NUD owns liveness.
+ * A solicitation records the outer source in ndp_requesters for the answer. An advertisement records the location in remote_vms from the frame source MAC.
  */
 SEC("tc")
 int handle_ndp_unicast_ingress(struct __sk_buff *packet)
@@ -343,10 +328,8 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 			struct in6_addr *host = peer_with_mac(mac);
 
 			if (!host) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_UNKNOWN_PEER, &target, NULL);
-			else if (!bpf_map_update_elem(&vm_peer_map, &target, &ip4->saddr, BPF_ANY)) {
-				if (bpf_map_update_elem(&remote_vms, &target, host, BPF_ANY)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARN_FAILED, &target, NULL);
-				else emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARNED, &target, host);
-			}
+			else if (bpf_map_update_elem(&remote_vms, &target, host, BPF_ANY)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARN_FAILED, &target, NULL);
+			else emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARNED, &target, host);
 		}
 	} else {
 		return TC_ACT_OK;

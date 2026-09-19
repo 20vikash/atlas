@@ -60,15 +60,6 @@ struct
 	__uint(max_entries, ATLAS_UNICAST_PEER_LIMIT);
 } peers_by_mac SEC(".maps");
 
-/* Last known owner peer for each remote VM. The unicast egress hook sends one solicitation to that peer and removes the entry. A missing answer therefore makes the next solicitation fan out to every peer. */
-struct
-{
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__type(key, struct in6_addr);
-	__type(value, __be32);
-	__uint(max_entries, 262144);
-} vm_peer_map SEC(".maps");
-
 /* Peers that asked this host about a VM. The key is the requesting address of a transported solicitation, and the value is the outer IPv4 source of that solicitation. The unicast egress hook wraps the answer to that peer. */
 struct
 {

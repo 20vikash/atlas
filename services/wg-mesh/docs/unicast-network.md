@@ -62,11 +62,11 @@ A host that would keep no peer after metald drops its own entry does not run the
 ## How discovery works
 
 1. The host route for `fdaa::/16` still selects the uplink, so Linux sends a multicast solicitation on that interface when a VM location is unknown. The VM hook hands a dummy packet to the host stack when `remote_vms` holds no location.
-2. The unicast egress hook captures the solicitation before it reaches the wire. It wraps the packet in an outer IPv4 header and sends one copy to the peer that last answered for the target VM from `vm_peer_map`, or one copy to every peer when no owner is known. Every copy is a `bpf_clone_redirect` clone, so the copies share the packet data.
+2. The unicast egress hook captures the solicitation before it reaches the wire. It wraps the packet in an outer IPv4 header and sends one copy to every peer. Every copy is a `bpf_clone_redirect` clone, so the copies share the packet data.
 3. The peer ingress hook accepts the packet only when the outer IPv4 source is a configured peer. It removes the outer header, records the requester for the answer, and hands the solicitation to Linux, which answers through proxy NDP.
 4. The egress hook wraps the answer and returns it to the recorded requester alone.
-5. The requester ingress hook removes the outer header. It records the owning peer in `vm_peer_map` and the location in `remote_vms`, exactly as in multicast mode.
+5. The requester ingress hook removes the outer header. It records the location in `remote_vms` from the frame source MAC, exactly as in multicast mode.
 
-The owner entry is one shot: the egress hook removes it when it sends the solicitation. When the owner never answers, for example after a VM moved to another host, the next solicitation finds no entry and fans out to every peer. The new owner answers, and the map points to it again.
+A solicitation always fans out to every peer, and only the owner answers, so the requester learns the current location. Discovery is rare: a solicitation leaves a host only after NOT_HERE removed a stale location or a guest contacts an unknown VM.
 
 Run `atlas-wg-mesh upgrade` normally while the daemon is running, then let the next synchronization restart the daemon so it attaches the programs from the new release. The upgrade preserves the unicast maps; a release that changes the peer map layouts rebuilds them through `peers sync`.

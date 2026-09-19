@@ -68,7 +68,7 @@ func upgradeBPF(force bool) error {
 	defer collection.Close()
 
 	// This release changed the peer map layouts: drop their old pins, so the new maps pin cleanly. A peers sync refills them.
-	for _, name := range []string{"peer_list", "remote_vms"} {
+	for _, name := range []string{"peer_list", "remote_vms", "vm_peer_map"} {
 		_ = os.Remove(filepath.Join(pinDirectory, name))
 	}
 
@@ -250,7 +250,6 @@ func existingMaps() (map[string]*ebpf.Map, func(), error) {
 		"config",
 		"local_vms",
 		privilegedTenantAllowedAddressesMap,
-		"vm_peer_map",
 		"ndp_requesters",
 		"peers_by_mac",
 		"debug_config",

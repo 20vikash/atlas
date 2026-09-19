@@ -318,7 +318,6 @@ const debugUnicastHook uint8 = 3
 func unicastOperationName(operation uint8) string {
 	return enumName(operation, []string{
 		"",
-		"UNICAST_TX_OWNER",
 		"UNICAST_TX_FAN_OUT",
 		"UNICAST_TX_ADVERTISEMENT",
 		"UNICAST_TX_FAILED",

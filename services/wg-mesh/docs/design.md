@@ -80,7 +80,7 @@ The VLAN hook is attached to TC ingress only, because an advertisement needs no 
 | `local_vms` | Local VM ownership. |
 | `peer_list`, `peers_by_mac` | The peer set from the WireGuard peer state: one dense array with IPv4, MAC, and WireGuard address per peer, and a MAC index for identification. |
 | `remote_vms` | Learned remote VM locations. |
-| `vm_peer_map`, `ndp_requesters` | Unicast mode: last answering peer per VM, and peers waiting for an answer. |
+| `ndp_requesters` | Unicast mode: peers waiting for an answer. |
 | `privileged_tenant_allowed_addresses` | Privileged-tenant VM addresses permitted to communicate across tenants. |
 | `debug_config`, `debug_stats`, `debug_events` | Optional debug state and events. |
 | `build_hash` | Installed BPF object hash. |
@@ -223,11 +223,11 @@ Hosts without a shared Layer-2 VLAN use the [unicast mode](unicast-network.md). 
 
 The unicast hooks and `handle_ndp_packet` never run together. A host runs either the multicast NDP hook on the uplink, or the two unicast hooks, never both. The `unicast start` daemon owns the choice: it attaches the unicast hooks and removes the multicast filter, and a clean stop reverses the swap.
 
-The egress unicast hook owns the whole advertisement path. For a solicitation, it wraps the packet in IPv4 and sends one clone per peer with `bpf_clone_redirect`, which is copy on write. When `vm_peer_map` holds the last peer that answered for the target, only that peer receives a copy, and the entry is removed. For an answer, it wraps the packet and returns it to the requester recorded in `ndp_requesters`.
+The egress unicast hook owns the whole advertisement path. For a solicitation, it wraps the packet in IPv4 and sends one clone per peer with `bpf_clone_redirect`, which is copy on write. For an answer, it wraps the packet and returns it to the requester recorded in `ndp_requesters`.
 
-The ingress unicast hook owns the whole learning path. It accepts a wrapped packet only from a configured peer, records the requester from the outer IPv4 source, removes the outer header, and restores the Ethernet type. For an answer, it records the owning peer in `vm_peer_map` from the outer source and the location in `remote_vms` from the frame source MAC, exactly as in multicast mode.
+The ingress unicast hook owns the whole learning path. It accepts a wrapped packet only from a configured peer, records the requester from the outer IPv4 source, removes the outer header, and restores the Ethernet type. For an answer, it records the location in `remote_vms` from the frame source MAC, exactly as in multicast mode.
 
-A one-shot owner entry makes the fan-out self healing. When the owner never answers, for example after a VM moved, the next solicitation finds no entry and fans out to every peer, and the new owner restores the map.
+A solicitation always fans out to every peer, and only the owner answers. Discovery is rare, because NOT_HERE triggers it only after a location turns stale.
 
 The peer state comes from `wireguard-peers.json`, which metald writes and `peers sync` loads into the BPF maps. The daemon processes no packets. A start or stop passes through a short window where both hook sets are attached; that window is safe, because the unicast hooks skip work that the multicast hook already did and every learning step is an idempotent replacement.
 
