@@ -675,7 +675,7 @@
    "show_description_on_click": 1
   },
   {
-   "default": "1",
+   "default": "0",
    "description": "Keep sleepy VMs on sleepy hosts and other VMs off them. Disable to allow any VM on any host.",
    "fieldname": "use_dedicated_sleepy_vm_hosts",
    "fieldtype": "Check",
@@ -734,7 +734,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-19 18:24:03.863344",
+ "modified": "2026-09-19 20:04:31.931629",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",
