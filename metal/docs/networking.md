@@ -74,7 +74,7 @@ namespace metal-<id>          route fdaa::x/128 dev tap0
 
 Atlas WG Mesh assumes the VM is directly behind the interface that it hooks. Metal puts a network namespace between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP. The host route from `vm add` is on-link on `vh-<user-id>`.
 
-Atlas WG Mesh also adds a proxy NDP entry for the guest address on the shared VLAN, so other hosts resolve the guest through the hosting node. Remote hosts learn the guest location from the NDP advertisement, which carries the owning host's `fdab::/16` address in the Atlas option. No Atlas discovery daemon runs, and the `atlas_neigh` kernel module must be loaded before the CLI configures a host.
+Atlas WG Mesh also adds a proxy NDP entry for the guest address on the shared VLAN, so other hosts resolve the guest through the hosting node. Remote hosts learn the guest location from the NDP advertisement, whose frame source MAC identifies the owning host through the WireGuard peer state. No Atlas discovery daemon and no kernel module run.
 
 `metald` runs the `atlas-wg-mesh` CLI. On every start it runs `status` and configures the host when the CLI reports no configuration. It then replays the existing VM network configurations, so a reinstalled or reset host restores the VM registrations without an operator.
 
