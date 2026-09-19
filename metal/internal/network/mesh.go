@@ -250,18 +250,16 @@ func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error
 	return false, nil
 }
 
-// meshNamespaceSteps routes mesh traffic through the namespace. The mesh
-// address is assigned to the veth inside the namespace, so the address is
-// present from creation without depending on the guest applying its own copy.
-// Proxy NDP handles the veth, and a permanent tap0 neighbour reaches a
-// stopped guest.
+// meshNamespaceSteps routes mesh traffic through the namespace. The guest
+// owns its mesh address, and the proxy NDP entry answers for it from
+// creation, before the guest applies its own copy. A permanent tap0 neighbour
+// reaches a stopped guest.
 func meshNamespaceSteps(guestVirtualEthernet, address string) [][]string {
 	return [][]string{
 		{"sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
 		{"sysctl", "-q", "-w", "net.ipv6.conf." + guestVirtualEthernet + ".proxy_ndp=1"},
 		{"ip", "link", "set", guestVirtualEthernet, "mtu", strconv.Itoa(meshMTU)},
 		{"ip", "-6", "addr", "replace", meshGatewayAddress + "/64", "dev", tapName, "nodad"},
-		{"ip", "-6", "addr", "replace", address + "/128", "dev", guestVirtualEthernet},
 		{"ip", "-6", "route", "replace", address + "/128", "dev", tapName},
 		{"ip", "-6", "neigh", "replace", address, "lladdr", guestMACAddress, "dev", tapName, "nud", "permanent"},
 		{"ip", "-6", "route", "replace", meshPrefix, "via", meshGatewayAddress, "dev", guestVirtualEthernet},
