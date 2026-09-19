@@ -41,15 +41,11 @@ reported_version() {
 }
 
 
-kernel_release=$(uname -r)
-
 step "install required packages"
-if ! command -v zpool >/dev/null || ! command -v curl >/dev/null || ! command -v iptables >/dev/null ||
-	! command -v make >/dev/null || ! command -v cc >/dev/null || ! command -v pahole >/dev/null ||
-	[ ! -d "/lib/modules/$kernel_release/build" ]; then
+if ! command -v zpool >/dev/null || ! command -v curl >/dev/null || ! command -v iptables >/dev/null; then
 	export DEBIAN_FRONTEND=noninteractive
 	apt update -qq
-	apt install -y -qq curl iptables tar zfsutils-linux build-essential dwarves "linux-headers-$kernel_release"
+	apt install -y -qq curl iptables tar zfsutils-linux
 else
 	skip "packages"
 fi
@@ -117,19 +113,6 @@ install_binary /usr/bin/metald "$METALD_DOWNLOAD_URL"
 step "install atlas-wg-mesh"
 install -d -m 0755 "$(dirname "$mesh_binary_path")"
 install_binary "$mesh_binary_path" "$WG_MESH_DOWNLOAD_URL"
-
-
-# The Atlas neighbour kernel module must be loaded before metald starts,
-# because Atlas WG Mesh refuses to configure a host without its kfunc. The
-# module builds against the running kernel headers on this host. An old mesh
-# binary has no module command. Skip the step for that binary, because this
-# script does not upgrade an installed binary.
-step "install Atlas neighbour kernel module"
-if "$mesh_binary_path" module --help >/dev/null 2>&1; then
-	"$mesh_binary_path" module install
-else
-	echo "    atlas-wg-mesh has no module command. Skip the neighbour kernel module." >&2
-fi
 
 
 step "create directories for metald"
