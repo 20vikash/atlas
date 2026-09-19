@@ -55,17 +55,18 @@
   "aws_region",
   "aws_availability_zone",
   "aws_storage_pool_device",
-  "aws_management_cidr",
   "column_break_awsa",
   "aws_access_key_id",
   "aws_secret_access_key",
   "aws_vpc_id",
+  "section_break_aijf",
   "aws_subnet_id",
   "aws_security_group_id",
+  "aws_multicast_domain_id",
+  "column_break_qavs",
   "aws_key_pair_name",
   "aws_transit_gateway_id",
   "aws_transit_gateway_attachment_id",
-  "aws_multicast_domain_id",
   "proxy_tab",
   "dns_provider",
   "column_break_caqd",
@@ -599,15 +600,8 @@
    "fieldname": "aws_storage_pool_device",
    "fieldtype": "Data",
    "label": "Storage Pool Device",
-   "mandatory_depends_on": "eval: doc.server_provider == \"AWS\""
-  },
-  {
-   "default": "0.0.0.0/0",
-   "description": "The network that may reach Secure Shell and the Metal API on a host.<br>Narrow this to the Atlas control plane where you can.",
-   "fieldname": "aws_management_cidr",
-   "fieldtype": "Data",
-   "label": "Management CIDR",
-   "mandatory_depends_on": "eval: doc.server_provider == \"AWS\""
+   "mandatory_depends_on": "eval: doc.server_provider == \"AWS\"",
+   "show_description_on_click": 1
   },
   {
    "fieldname": "column_break_awsa",
@@ -737,14 +731,22 @@
   {
    "fieldname": "column_break_jfub",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_aijf",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_qavs",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-19 20:04:31.931629",
- "modified_by": "Administrator",
+ "modified": "2026-09-19 22:25:28.482665",
+ "modified_by": "test@gmail.com",
  "module": "Atlas",
  "name": "Atlas Settings",
  "owner": "Administrator",
