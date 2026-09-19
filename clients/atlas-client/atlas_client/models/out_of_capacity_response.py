@@ -11,25 +11,25 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.capacity_pending_error import CapacityPendingError
+  from ..models.out_of_capacity_error import OutOfCapacityError
 
 
 
 
 
-T = TypeVar("T", bound="CapacityPendingResponse")
+T = TypeVar("T", bound="OutOfCapacityResponse")
 
 
 
 @_attrs_define
-class CapacityPendingResponse:
-    """ The JSON body of a pending capacity response.
+class OutOfCapacityResponse:
+    """ The JSON body of an unavailable capacity response.
 
         Attributes:
-            error (CapacityPendingError): The error returned while Atlas starts host capacity.
+            error (OutOfCapacityError): The error returned when no host can accept the VM.
      """
 
-    error: CapacityPendingError
+    error: OutOfCapacityError
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -37,7 +37,7 @@ class CapacityPendingResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.capacity_pending_error import CapacityPendingError # noqa: PLC0415
+        from ..models.out_of_capacity_error import OutOfCapacityError # noqa: PLC0415
         error = self.error.to_dict()
 
 
@@ -53,20 +53,20 @@ class CapacityPendingResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.capacity_pending_error import CapacityPendingError # noqa: PLC0415
+        from ..models.out_of_capacity_error import OutOfCapacityError # noqa: PLC0415
         d = dict(src_dict)
-        error = CapacityPendingError.from_dict(d.pop("error"))
+        error = OutOfCapacityError.from_dict(d.pop("error"))
 
 
 
 
-        capacity_pending_response = cls(
+        out_of_capacity_response = cls(
             error=error,
         )
 
 
-        capacity_pending_response.additional_properties = d
-        return capacity_pending_response
+        out_of_capacity_response.additional_properties = d
+        return out_of_capacity_response
 
     @property
     def additional_keys(self) -> list[str]:

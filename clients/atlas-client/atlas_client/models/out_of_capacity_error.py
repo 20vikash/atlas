@@ -18,21 +18,21 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="CapacityPendingError")
+T = TypeVar("T", bound="OutOfCapacityError")
 
 
 
 @_attrs_define
-class CapacityPendingError:
-    """ The error returned while Atlas starts host capacity.
+class OutOfCapacityError:
+    """ The error returned when no host can accept the VM.
 
         Attributes:
-            code (Literal['capacity_pending']):
+            code (Literal['out_of_capacity']):
             fields (list[ApiErrorField]):
             message (str):
      """
 
-    code: Literal['capacity_pending']
+    code: Literal['out_of_capacity']
     fields: list[ApiErrorField]
     message: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -71,9 +71,9 @@ class CapacityPendingError:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.api_error_field import ApiErrorField # noqa: PLC0415
         d = dict(src_dict)
-        code = cast(Literal['capacity_pending'] , d.pop("code"))
-        if code != 'capacity_pending':
-            raise ValueError(f"code must match const 'capacity_pending', got '{code}'")
+        code = cast(Literal['out_of_capacity'] , d.pop("code"))
+        if code != 'out_of_capacity':
+            raise ValueError(f"code must match const 'out_of_capacity', got '{code}'")
 
         fields = []
         _fields = d.pop("fields")
@@ -87,15 +87,15 @@ class CapacityPendingError:
 
         message = d.pop("message")
 
-        capacity_pending_error = cls(
+        out_of_capacity_error = cls(
             code=code,
             fields=fields,
             message=message,
         )
 
 
-        capacity_pending_error.additional_properties = d
-        return capacity_pending_error
+        out_of_capacity_error.additional_properties = d
+        return out_of_capacity_error
 
     @property
     def additional_keys(self) -> list[str]:

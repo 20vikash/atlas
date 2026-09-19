@@ -20,47 +20,6 @@
         "title": "ApiErrorField",
         "type": "object"
       },
-      "CapacityPendingError": {
-        "description": "The error returned while Atlas starts host capacity.",
-        "properties": {
-          "code": {
-            "const": "capacity_pending",
-            "title": "Code",
-            "type": "string"
-          },
-          "fields": {
-            "items": {
-              "$ref": "#/components/schemas/ApiErrorField"
-            },
-            "title": "Fields",
-            "type": "array"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "fields"
-        ],
-        "title": "CapacityPendingError",
-        "type": "object"
-      },
-      "CapacityPendingResponse": {
-        "description": "The JSON body of a pending capacity response.",
-        "properties": {
-          "error": {
-            "$ref": "#/components/schemas/CapacityPendingError"
-          }
-        },
-        "required": [
-          "error"
-        ],
-        "title": "CapacityPendingResponse",
-        "type": "object"
-      },
       "ComputeUpdatePayload": {
         "additionalProperties": false,
         "description": "New compute configuration.",
@@ -946,6 +905,47 @@
           }
         },
         "title": "NetworkUpdatePayload",
+        "type": "object"
+      },
+      "OutOfCapacityError": {
+        "description": "The error returned when no host can accept the VM.",
+        "properties": {
+          "code": {
+            "const": "out_of_capacity",
+            "title": "Code",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ApiErrorField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fields"
+        ],
+        "title": "OutOfCapacityError",
+        "type": "object"
+      },
+      "OutOfCapacityResponse": {
+        "description": "The JSON body of an unavailable capacity response.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/OutOfCapacityError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "OutOfCapacityResponse",
         "type": "object"
       },
       "Page[IPAddressResponse]": {
@@ -2293,21 +2293,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CapacityPendingResponse"
+                  "$ref": "#/components/schemas/OutOfCapacityResponse"
                 }
               }
             },
-            "description": "Host capacity is pending. Retry after the reported interval.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before another create request.",
-                "required": true,
-                "schema": {
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              }
-            }
+            "description": "No host capacity is available. Retry later."
           }
         },
         "summary": "Create VM",
