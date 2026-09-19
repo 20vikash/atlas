@@ -13,7 +13,7 @@ def enqueue_capacity_expansion(requirements: PlacementRequirements) -> None:
 		if not settings.auto_spawn_metal_server:
 			return
 
-		# One pool needs one kind of host, so the sleepy flag leaves the request.
+		# One pool needs one kind of host.
 		is_sleepy = bool(requirements.is_sleepy and settings.use_dedicated_sleepy_vm_hosts)
 		job_id = f"atlas||capacity-expansion||{requirements.architecture}||{int(is_sleepy)}"
 		frappe.enqueue(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock, call, patch
 
@@ -22,6 +23,7 @@ def migration_doc(**overrides: object) -> SimpleNamespace:
 		"status": "running",
 		"abort_requested": 0,
 		"progress": "{}",
+		"started_at": now_datetime(),
 		"db_set": Mock(),
 	}
 	values.update(overrides)
@@ -287,10 +289,34 @@ class TestMigrationWorker(UnitTestCase):
 		service = MigrationService(migration_doc())
 		service.mark_failed = Mock()
 		service.request_abort = Mock()
+		service.give_up = Mock()
 
 		self.assertFalse(service.advance({"status": "failed"}))
 		service.mark_failed.assert_called_once()
 		service.request_abort.assert_called_once()
+		service.give_up.assert_not_called()
+
+	def test_a_failure_that_never_aborts_stops_at_the_visibility_timeout(self) -> None:
+		stale = migration_doc(started_at=add_to_date(now_datetime(), minutes=-11))
+		service = MigrationService(stale)
+		service.mark_failed = Mock()
+		service.request_abort = Mock()
+		service.give_up = Mock()
+
+		self.assertTrue(service.advance({"status": "failed"}))
+		service.give_up.assert_called_once()
+
+	def test_a_run_that_never_settles_releases_the_vm(self) -> None:
+		service = MigrationService(migration_doc())
+		service.send_request = Mock()
+		service.poll = Mock(return_value={"status": "running"})
+		service.advance = Mock(return_value=False)
+		service.give_up = Mock()
+
+		with patch("atlas.vm.core.vm_migration.MAXIMUM_RUN_DURATION", timedelta(seconds=0)):
+			service.run()
+
+		service.give_up.assert_called_once()
 
 	def test_commit_target_changes_the_server_once(self) -> None:
 		service = MigrationService(migration_doc())

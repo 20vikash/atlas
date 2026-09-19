@@ -134,6 +134,9 @@ class MigrationService:
 				return
 			time.sleep(self.poll_interval(status))
 
+		# A target that answers but never settles holds its reservation and the VM.
+		self.give_up(f"The migration did not settle within {MAXIMUM_RUN_DURATION}.")
+
 	def advance(self, status: dict[str, Any]) -> bool:
 		"""Apply one Metal status. Return True when the migration is settled."""
 		state = status.get("status")
@@ -146,6 +149,9 @@ class MigrationService:
 		if state == "failed":
 			self.mark_failed()
 			self.request_abort()
+			if self.is_expired:
+				self.give_up("The target reported a failed migration and did not abort.")
+				return True
 			return False
 		if state == "missing":
 			return self.handle_missing_target()
@@ -195,10 +201,7 @@ class MigrationService:
 			if error.is_not_found:
 				return {"status": "missing"}
 			raise
-		stored = frappe.parse_json(self.migration.progress or "{}")
-		if not isinstance(stored, dict):
-			stored = {}
-		self.migration.db_set("progress", frappe.as_json({**stored, **status}), commit=True)
+		self.store_progress(status, commit=True)
 		return status
 
 	@staticmethod
@@ -234,6 +237,11 @@ class MigrationService:
 		except MetalClientError as error:
 			self.record_error(error)
 
+	def give_up(self, reason: str) -> None:
+		"""Record why the migration stopped, then release the VM action lock."""
+		self.store_progress({"error": reason})
+		self.settle("failed")
+
 	def mark_failed(self) -> None:
 		"""Record that Metal reported a failed migration."""
 		if self.migration.status != "failed":
@@ -245,14 +253,17 @@ class MigrationService:
 		self.migration.db_set("status", status)
 		frappe.db.commit()  # nosemgrep
 
-	def record_error(self, error: MetalClientError) -> None:
+	def record_error(self, error: Exception) -> None:
 		"""Store one migration error without releasing the VM lock."""
-		progress = frappe.parse_json(self.migration.progress or "{}")
-		if not isinstance(progress, dict):
-			progress = {}
-		progress["error"] = str(error)
-		self.migration.db_set("progress", frappe.as_json(progress))
+		self.store_progress({"error": str(error)})
 		frappe.db.commit()  # nosemgrep
+
+	def store_progress(self, values: dict[str, Any], *, commit: bool = False) -> None:
+		"""Merge values into the stored progress, keeping the copy history."""
+		stored = frappe.parse_json(self.migration.progress or "{}")
+		if not isinstance(stored, dict):
+			stored = {}
+		self.migration.db_set("progress", frappe.as_json({**stored, **values}), commit=commit)
 
 	@property
 	def is_expired(self) -> bool:
@@ -298,7 +309,7 @@ def run_migration(migration_name: str) -> None:
 	service = MigrationService(migration)
 	try:
 		service.run()
-	except MetalClientError as error:
+	except Exception as error:
 		service.record_error(error)
 		frappe.log_error(
 			title=f"Virtual Machine migration {migration_name} failed",
