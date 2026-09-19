@@ -253,6 +253,31 @@ func (m *VMMigration) AbortTarget(ctx context.Context, migrationID string) error
 	return m.CancelTransfer(ctx, virtualMachineID)
 }
 
+// mutateTarget applies one change to the target record under the migration lock.
+// The worker, the API and the reconciler all write this record, so every change
+// reads the stored copy again instead of writing one it read earlier.
+func (m *VMMigration) mutateTarget(
+	ctx context.Context,
+	virtualMachineID string,
+	apply func(record *TargetMigrationRecord),
+) (TargetMigrationRecord, error) {
+	unlock, err := m.locks.Lock(ctx, virtualMachineID)
+	if err != nil {
+		return TargetMigrationRecord{}, err
+	}
+	defer unlock()
+
+	record, err := m.store.readTarget(virtualMachineID)
+	if err != nil {
+		return TargetMigrationRecord{}, err
+	}
+	apply(&record)
+	if err := m.store.writeTarget(record); err != nil {
+		return TargetMigrationRecord{}, err
+	}
+	return record, nil
+}
+
 // requestAbort records abort intent under the migration lock.
 func (m *VMMigration) requestAbort(ctx context.Context, virtualMachineID string) error {
 	unlock, err := m.locks.Lock(ctx, virtualMachineID)

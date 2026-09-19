@@ -137,10 +137,10 @@ func (m *VMMigration) runTransfer(ctx context.Context, virtualMachineID string) 
 func (m *VMMigration) advanceCopying(ctx context.Context, record TargetMigrationRecord) error {
 	last := lastCompletedSequence(record)
 	if last == 0 && record.SourceObservedState != vm.StateRunning {
-		return m.enterStopping(record)
+		return m.enterStopping(ctx, record)
 	}
 	if last >= 1 && m.transferLimitReached(record) {
-		return m.enterStopping(record)
+		return m.enterStopping(ctx, record)
 	}
 
 	snapshot, err := m.source.NextSnapshot(ctx, record.Source, record.ID, record.VirtualMachineID, last)
@@ -151,7 +151,7 @@ func (m *VMMigration) advanceCopying(ctx context.Context, record TargetMigration
 		return fmt.Errorf("source returned an invalid sequence %d", snapshot.Sequence)
 	}
 	if last >= 1 && m.isSmallDelta(snapshot) {
-		return m.enterStopping(record)
+		return m.enterStopping(ctx, record)
 	}
 	return m.receiveSnapshot(ctx, record, snapshot, m.intervalThroughput(record))
 }
@@ -169,25 +169,25 @@ func (m *VMMigration) advanceStopping(ctx context.Context, record TargetMigratio
 		return err
 	}
 	if final.Sequence < 1 {
-		return m.failTransfer(record, "source returned an invalid final sequence")
+		return m.failTransfer(ctx, record, "source returned an invalid final sequence")
 	}
 
-	record.SourceObservedState = vm.StateStopped
-	record.SourceStopped = true
-	record.FinalSequence = final.Sequence
-	if err := m.store.writeTarget(record); err != nil {
+	record, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		target.SourceObservedState = vm.StateStopped
+		target.SourceStopped = true
+		target.FinalSequence = final.Sequence
+	})
+	if err != nil {
 		return err
 	}
 	if err := m.receiveSnapshot(ctx, record, final, 0); err != nil {
 		return err
 	}
 
-	current, err := m.store.readTarget(record.VirtualMachineID)
-	if err != nil {
-		return err
-	}
-	current.Phase = PhaseStarting
-	return m.store.writeTarget(current)
+	_, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		target.Phase = PhaseStarting
+	})
+	return err
 }
 
 // advanceStarting creates the target network, applies VM state, and marks ready.
@@ -201,31 +201,37 @@ func (m *VMMigration) advanceStarting(ctx context.Context, record TargetMigratio
 
 	if !record.TargetNetworkReady {
 		if err := m.machines.EnsureMigrationNetwork(ctx, record.VirtualMachineID); err != nil {
-			return m.failTransfer(record, "create target network: "+err.Error())
+			return m.failTransfer(ctx, record, "create target network: "+err.Error())
 		}
-		record.TargetNetworkReady = true
-		if err := m.store.writeTarget(record); err != nil {
+		if _, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.TargetNetworkReady = true
+		}); err != nil {
 			return err
 		}
 	}
 	if !record.TargetStateApplied {
 		if err := m.machines.ApplyMigratedTargetState(ctx, record.VirtualMachineID); err != nil {
-			return m.failTransfer(record, "apply target state: "+err.Error())
+			return m.failTransfer(ctx, record, "apply target state: "+err.Error())
 		}
-		record.TargetStateApplied = true
-		if err := m.store.writeTarget(record); err != nil {
+		if _, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.TargetStateApplied = true
+		}); err != nil {
 			return err
 		}
 	}
 
-	record.Status = MigrationReady
-	return m.store.writeTarget(record)
+	_, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		target.Status = MigrationReady
+	})
+	return err
 }
 
 // enterStopping records the move from copying to the stopping phase.
-func (m *VMMigration) enterStopping(record TargetMigrationRecord) error {
-	record.Phase = PhaseStopping
-	return m.store.writeTarget(record)
+func (m *VMMigration) enterStopping(ctx context.Context, record TargetMigrationRecord) error {
+	_, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		target.Phase = PhaseStopping
+	})
+	return err
 }
 
 // isSmallDelta reports whether the source can stop instead of copying.
@@ -263,11 +269,11 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 			return err
 		}
 		if exists {
-			return m.failTransfer(record, "unrelated target dataset already exists")
+			return m.failTransfer(ctx, record, "unrelated target dataset already exists")
 		}
 	}
 
-	record, err = m.beginInterval(record, snapshot, throughputMiBps)
+	record, err = m.beginInterval(ctx, record, snapshot, throughputMiBps)
 	if err != nil {
 		return err
 	}
@@ -281,10 +287,10 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 		return err
 	}
 	if receivedGUID != snapshot.GUID {
-		return m.failTransfer(record, "received snapshot GUID does not match the source")
+		return m.failTransfer(ctx, record, "received snapshot GUID does not match the source")
 	}
 
-	return m.completeInterval(record, snapshot.Sequence, estimatedBytes, receivedGUID)
+	return m.completeInterval(ctx, record, snapshot.Sequence, estimatedBytes, receivedGUID)
 }
 
 // streamInterval pulls one snapshot. The OpenSSL transport reports no byte count.
@@ -302,49 +308,47 @@ func (m *VMMigration) streamInterval(ctx context.Context, record TargetMigration
 }
 
 // beginInterval records the start of one interval and returns the saved record.
-func (m *VMMigration) beginInterval(record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) (TargetMigrationRecord, error) {
-	record.ActiveSequence = snapshot.Sequence
-	if !hasInterval(record.Intervals, snapshot.Sequence) {
-		record.Intervals = append(record.Intervals, IntervalProgress{
+func (m *VMMigration) beginInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, throughputMiBps int) (TargetMigrationRecord, error) {
+	return m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		target.ActiveSequence = snapshot.Sequence
+		if hasInterval(target.Intervals, snapshot.Sequence) {
+			return
+		}
+		target.Intervals = append(target.Intervals, IntervalProgress{
 			Sequence:        snapshot.Sequence,
 			StartedAt:       m.now(),
 			TotalBytes:      snapshot.SizeBytes,
 			ThroughputMiBps: throughputMiBps,
 		})
-	}
-	if err := m.store.writeTarget(record); err != nil {
-		return TargetMigrationRecord{}, err
-	}
-	return record, nil
+	})
 }
 
 // completeInterval marks one interval done with its byte count and GUID.
-func (m *VMMigration) completeInterval(record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) error {
-	current, err := m.store.readTarget(record.VirtualMachineID)
-	if err != nil {
-		return err
-	}
-	for index := range current.Intervals {
-		if current.Intervals[index].Sequence == sequence {
-			interval := &current.Intervals[index]
+func (m *VMMigration) completeInterval(ctx context.Context, record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) error {
+	// The snapshot is already on the dataset. An unrecorded interval makes the
+	// next pass ask for it again, which zfs receive then rejects.
+	_, err := m.mutateTarget(context.WithoutCancel(ctx), record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		for index := range target.Intervals {
+			if target.Intervals[index].Sequence != sequence {
+				continue
+			}
+			interval := &target.Intervals[index]
 			interval.BytesTransferred = bytesReceived
 			interval.GUID = guid
 			interval.Completed = true
 			interval.DurationSeconds = int(m.now().Sub(interval.StartedAt).Seconds())
 		}
-	}
-	return m.store.writeTarget(current)
+	})
+	return err
 }
 
 // failTransfer marks the migration failed and keeps the dataset and snapshots.
-func (m *VMMigration) failTransfer(record TargetMigrationRecord, message string) error {
-	current, err := m.store.readTarget(record.VirtualMachineID)
-	if err != nil {
-		return err
-	}
-	current.Status = MigrationFailed
-	current.Error = &vm.OperationError{Code: "transfer_failed", Message: message, UpdatedAt: m.now()}
-	if err := m.store.writeTarget(current); err != nil {
+func (m *VMMigration) failTransfer(ctx context.Context, record TargetMigrationRecord, message string) error {
+	// A cancelled worker must still leave the reason on the record.
+	if _, err := m.mutateTarget(context.WithoutCancel(ctx), record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		target.Status = MigrationFailed
+		target.Error = &vm.OperationError{Code: "transfer_failed", Message: message, UpdatedAt: m.now()}
+	}); err != nil {
 		return err
 	}
 	return errTransferFailed

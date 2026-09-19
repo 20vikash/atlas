@@ -36,6 +36,8 @@ The target reserves compute only after the handshake supplies the config. One ho
 
 During copying, `VMMigration` runs one disk transfer per VM and waits for transfers at shutdown. The reconciler starts or resumes it through `AdvanceTarget`; it does not move data. The transfer holds no VM lock while data moves and drives copying, stopping, and starting from the saved phase.
 
+An HTTP request, the transfer worker, and the reconciler all change the target record. Every read-modify-write of that record holds the migration lock of its VM. A caller that already holds the lock writes through `writeTarget`. Every other caller uses `mutateTarget`, which takes the lock, reads the stored record again, applies the change, and writes it. The worker therefore cannot write a copy it read before a long operation and drop an abort that arrived in the meantime. The lock is held only for the read and the write, so an abort stays available while data moves. The lock is not reentrant, so a locked caller must not call `mutateTarget`. An interval completion and a transfer failure detach the context, because the snapshot or the reason is already real when the worker stops.
+
 ```text
 next snapshot from source  (acknowledge the last completed sequence)
         |

@@ -12,16 +12,16 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-func TestBeginIntervalReturnsARecordWriteError(t *testing.T) {
+func TestBeginIntervalReturnsARecordStoreError(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	if err := os.WriteFile(filepath.Join(machines.MachinesDirectory(), "blocked"), []byte("not a directory"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	record := TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "blocked"}
 
-	_, err := migrationManager.beginInterval(record, SourceSnapshot{Sequence: 1}, 0)
+	_, err := migrationManager.beginInterval(t.Context(), record, SourceSnapshot{Sequence: 1}, 0)
 	if err == nil {
-		t.Fatal("begin interval ignored the record write error")
+		t.Fatal("begin interval ignored the record store error")
 	}
 }
 
@@ -326,4 +326,70 @@ func equalInts(got, want []int) bool {
 		}
 	}
 	return true
+}
+
+// The worker and the API both write the target record. A worker write must keep
+// an abort that arrived while the worker held an older copy.
+func TestAWorkerWriteKeepsAnAbortThatArrivedFirst(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	stale, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrationManager.requestAbort(t.Context(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	// Each of these once wrote the caller's copy, which had no abort on it.
+	if _, err := migrationManager.beginInterval(t.Context(), stale, SourceSnapshot{Sequence: 1}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.enterStopping(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrationManager.completeInterval(t.Context(), stale, 1, 2048, "guid-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current.AbortRequested {
+		t.Fatal("a worker write dropped the abort request")
+	}
+	if current.Phase != PhaseStopping {
+		t.Fatalf("phase = %q, want %q", current.Phase, PhaseStopping)
+	}
+	if len(current.Intervals) != 1 || !current.Intervals[0].Completed {
+		t.Fatalf("interval was not completed: %+v", current.Intervals)
+	}
+}
+
+// A cancelled worker must still record an interval whose snapshot already landed.
+func TestCompleteIntervalOutlivesTheWorkerContext(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	record, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrationManager.beginInterval(t.Context(), record, SourceSnapshot{Sequence: 1}, 0); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := migrationManager.completeInterval(cancelled, record, 1, 2048, "guid-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Intervals) != 1 || !current.Intervals[0].Completed {
+		t.Fatalf("a cancelled worker lost the completed interval: %+v", current.Intervals)
+	}
 }

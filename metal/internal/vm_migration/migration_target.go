@@ -207,8 +207,9 @@ func (m *VMMigration) RequestFinish(ctx context.Context, migrationID string) err
 // idempotent, so a retry after the source is gone still completes.
 func (m *VMMigration) advanceFinish(ctx context.Context, record TargetMigrationRecord) error {
 	if record.Phase != PhaseFinishing {
-		record.Phase = PhaseFinishing
-		if err := m.store.writeTarget(record); err != nil {
+		if _, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.Phase = PhaseFinishing
+		}); err != nil {
 			return err
 		}
 	}
@@ -220,7 +221,10 @@ func (m *VMMigration) advanceFinish(ctx context.Context, record TargetMigrationR
 		return err
 	}
 
-	return m.store.writeTarget(terminalTargetRecord(record, MigrationCompleted, m.now()))
+	_, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		*target = terminalTargetRecord(*target, MigrationCompleted, m.now())
+	})
+	return err
 }
 
 // removeReceivedSnapshots destroys the migration snapshots left on the received
@@ -240,8 +244,9 @@ func (m *VMMigration) removeReceivedSnapshots(ctx context.Context, record Target
 // keep both hosts locked for the next pass.
 func (m *VMMigration) advanceAbort(ctx context.Context, record TargetMigrationRecord) error {
 	if record.Phase != PhaseRollback {
-		record.Phase = PhaseRollback
-		if err := m.store.writeTarget(record); err != nil {
+		if _, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.Phase = PhaseRollback
+		}); err != nil {
 			return err
 		}
 	}
@@ -256,8 +261,9 @@ func (m *VMMigration) advanceAbort(ctx context.Context, record TargetMigrationRe
 		if err := m.source.StartSource(ctx, record.Source, record.ID, record.VirtualMachineID); err != nil {
 			return err
 		}
-		record.SourceRestored = true
-		if err := m.store.writeTarget(record); err != nil {
+		if record, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.SourceRestored = true
+		}); err != nil {
 			return err
 		}
 	}
@@ -265,13 +271,17 @@ func (m *VMMigration) advanceAbort(ctx context.Context, record TargetMigrationRe
 		if err := m.source.RemoveSource(ctx, record.Source, record.ID, record.VirtualMachineID); err != nil {
 			return err
 		}
-		record.SourceUnlocked = true
-		if err := m.store.writeTarget(record); err != nil {
+		if record, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.SourceUnlocked = true
+		}); err != nil {
 			return err
 		}
 	}
 
-	return m.store.writeTarget(terminalTargetRecord(record, MigrationAborted, m.now()))
+	_, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+		*target = terminalTargetRecord(*target, MigrationAborted, m.now())
+	})
+	return err
 }
 
 // cleanAbortTarget removes target runtime, network, dataset, and staging records.
@@ -280,11 +290,14 @@ func (m *VMMigration) cleanAbortTarget(ctx context.Context, record TargetMigrati
 		if err := m.machines.RemoveMigratedRuntime(ctx, record.VirtualMachineID); err != nil && !errors.Is(err, vm.ErrNotFound) {
 			return record, err
 		}
-		record.TargetRuntimeRemoved = true
-		record.TargetNetworkRemoved = true
-		if err := m.store.writeTarget(record); err != nil {
+		updated, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.TargetRuntimeRemoved = true
+			target.TargetNetworkRemoved = true
+		})
+		if err != nil {
 			return record, err
 		}
+		record = updated
 	}
 	if !record.TargetStorageRemoved {
 		if err := m.transfer.AbortReceive(ctx, record.VirtualMachineID); err != nil {
@@ -293,10 +306,13 @@ func (m *VMMigration) cleanAbortTarget(ctx context.Context, record TargetMigrati
 		if err := m.removeTargetStaging(record.VirtualMachineID); err != nil {
 			return record, err
 		}
-		record.TargetStorageRemoved = true
-		if err := m.store.writeTarget(record); err != nil {
+		updated, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
+			target.TargetStorageRemoved = true
+		})
+		if err != nil {
 			return record, err
 		}
+		record = updated
 	}
 	return record, nil
 }
