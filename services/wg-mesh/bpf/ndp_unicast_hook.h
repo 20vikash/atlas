@@ -26,7 +26,7 @@ enum unicast_debug_operation
 	UNICAST_OPERATION_RX_REQUESTER,
 	UNICAST_OPERATION_RX_LEARNED,
 	UNICAST_OPERATION_RX_UNKNOWN_PEER,
-	UNICAST_OPERATION_RX_KFUNC_FAILED,
+	UNICAST_OPERATION_RX_LEARN_FAILED,
 };
 
 /* Fold a one's-complement checksum down to 16 bits. */
@@ -340,10 +340,12 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 		if (!is_local_virtual_machine(&target)) {
 			mac = pack_mac(eth->h_source);
 
-			if (!peer_with_mac(mac)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_UNKNOWN_PEER, &target, NULL);
+			struct in6_addr *host = peer_with_mac(mac);
+
+			if (!host) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_UNKNOWN_PEER, &target, NULL);
 			else if (!bpf_map_update_elem(&vm_peer_map, &target, &ip4->saddr, BPF_ANY)) {
-				if (register_remote_vm(packet->ifindex, &target, mac)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_KFUNC_FAILED, &target, NULL);
-				else emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARNED, &target, NULL);
+				if (bpf_map_update_elem(&remote_vms, &target, host, BPF_ANY)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARN_FAILED, &target, NULL);
+				else emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_LEARNED, &target, host);
 			}
 		}
 	} else {

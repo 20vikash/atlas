@@ -104,7 +104,7 @@ VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 WIREGUARD ACCEPT   src=fdaa:1:0:2::20 dst=fdaa:1:0:2::10 tenant=2
 ```
 
-The old host drops the tunnel for a VM it no longer owns. Linux NUD probing of the managed neighbour entry produces the neighbour solicitation, and the new owner answers it, so the sender re-registers the neighbour entry with the new owner's MAC.
+The old host answers the tunnel with NOT_HERE, so the sender drops its location. The sender's next packet triggers discovery, and the new owner answers, so the sender records the new location.
 
 ### Unreachable owner
 
@@ -116,13 +116,7 @@ VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2
 ```
 
-Remove the neighbour entries that point at that host:
-
-```sh
-ip -6 neigh del fdaa:1:0:2::20 dev <uplink>
-```
-
-The next guest packet triggers NDP again. A recovered host must remove registrations for VMs it no longer owns before it rejoins.
+A recovered host answers these packets with NOT_HERE, so each sender drops its location and discovers the VM again. A host that is down takes its VMs with it. Check one location with `atlas-wg-mesh debug inspect --address fdaa:1:0:2::20`.
 
 ## `debug top`
 

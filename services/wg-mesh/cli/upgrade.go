@@ -125,10 +125,6 @@ func upgradeBPF(force bool) error {
 		}
 	}
 
-	if err := attachNUDHooksFromRelease(release); err != nil {
-		return err
-	}
-
 	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
 		return err
 	}
@@ -143,8 +139,6 @@ func upgradeBPF(force bool) error {
 		vmBPFProgram,
 		ndpProgram,
 		wireguardProgram,
-		nudFailureProgram,
-		nudReachableProgram,
 	} {
 		_ = os.Remove(filepath.Join(pinDirectory, program))
 	}
@@ -209,11 +203,6 @@ func forceUpgrade(config hostConfig) error {
 		}
 	}
 
-	// The NUD hook is a tracepoint link, so its attach owns no tc filter.
-	if err := attachNUDHooks(); err != nil {
-		return err
-	}
-
 	hash := bpfHash()
 
 	fmt.Printf("Atlas WG Mesh BPF force-upgraded to %x; run peers sync to refill the peer state\n", hash[:6])
@@ -261,7 +250,6 @@ func existingMaps() (map[string]*ebpf.Map, func(), error) {
 		"config",
 		"local_vms",
 		privilegedTenantAllowedAddressesMap,
-		"nud_failures",
 		"vm_peer_map",
 		"ndp_requesters",
 		"peers_by_mac",

@@ -8,7 +8,7 @@ The unicast mode transports the same NDP packets over the routed IPv4 underlay. 
 
 ## Requirements
 
-- Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`. The Atlas neighbour kernel module is required in unicast mode, exactly as in multicast mode: load it with `atlas-wg-mesh module install`.
+- Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`.
 - Permit IPv4 protocol 41 between the participating hosts.
 - Keep the WireGuard peer state on every host complete. It is the single source of truth: each entry needs an IPv4 endpoint and the uplink MAC of that host, because the hooks identify a peer by MAC and reach it by IPv4.
 
@@ -18,7 +18,7 @@ No Atlas NDP option exists. Every host knows every peer from the WireGuard peer 
 
 - An advertisement carries the answering peer's MAC as the frame source. A receiver maps that MAC to the peer through the `peers_by_mac` map, and registers the advertised VM with that MAC.
 - A transported solicitation carries the requester in the outer IPv4 source, which the ingress hook already validates against the peer list.
-- The VM hook resolves a remote VM with `bpf_fib_lookup`: a hit returns the neighbour MAC, which maps to the owning peer's WireGuard address for encapsulation. A miss crafts a solicitation.
+- The VM hook resolves a remote VM through the `remote_vms` map: a hit gives the owning peer's WireGuard address for encapsulation. A miss hands a dummy packet to the host stack, and the kernel sends the solicitation.
 
 ## Manage the peer state
 
@@ -46,7 +46,7 @@ The daemon performs no packet processing and holds no peer state. All transport 
 
 ## Liveness
 
-Advertisements register remote VMs through the Atlas kfunc as managed, externally learned neighbour entries, so Linux NUD owns liveness exactly as in multicast mode. The NUD hooks count consecutive failures and remove the neighbour entry after twenty, which makes the next VM packet fail its fib lookup and trigger discovery again.
+Locations live in `remote_vms` until the host that advertised them contradicts them. A host that receives a tunnel for a VM it does not own answers with NOT_HERE through WireGuard, the sender drops its location, and its next packet triggers discovery again. No kernel module and no NUD tracking exist.
 
 ## Atlas-managed unicast
 
@@ -61,11 +61,11 @@ A host that would keep no peer after metald drops its own entry does not run the
 
 ## How discovery works
 
-1. The host route for `fdaa::/16` still selects the uplink, so Linux sends a multicast solicitation on that interface when a VM location is unknown. The VM hook also crafts such a solicitation when its fib lookup misses.
+1. The host route for `fdaa::/16` still selects the uplink, so Linux sends a multicast solicitation on that interface when a VM location is unknown. The VM hook hands a dummy packet to the host stack when `remote_vms` holds no location.
 2. The unicast egress hook captures the solicitation before it reaches the wire. It wraps the packet in an outer IPv4 header and sends one copy to the peer that last answered for the target VM from `vm_peer_map`, or one copy to every peer when no owner is known. Every copy is a `bpf_clone_redirect` clone, so the copies share the packet data.
 3. The peer ingress hook accepts the packet only when the outer IPv4 source is a configured peer. It removes the outer header, records the requester for the answer, and hands the solicitation to Linux, which answers through proxy NDP.
 4. The egress hook wraps the answer and returns it to the recorded requester alone.
-5. The requester ingress hook removes the outer header. It records the owning peer in `vm_peer_map` and registers the neighbour entry through the Atlas kfunc, so Linux NUD owns liveness exactly as in multicast mode.
+5. The requester ingress hook removes the outer header. It records the owning peer in `vm_peer_map` and the location in `remote_vms`, exactly as in multicast mode.
 
 The owner entry is one shot: the egress hook removes it when it sends the solicitation. When the owner never answers, for example after a VM moved to another host, the next solicitation finds no entry and fans out to every peer. The new owner answers, and the map points to it again.
 

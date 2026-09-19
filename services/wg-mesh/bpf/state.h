@@ -23,14 +23,14 @@ struct
 	__uint(max_entries, 4096);
 } privileged_tenant_allowed_addresses SEC(".maps");
 
-/* Consecutive NUD failures for remote VMs. The NUD hook increments this counter on each NUD_FAILED event, resets it on NUD_REACHABLE, and removes the neighbour entry once the count reaches ATLAS_NUD_FAILURE_LIMIT. */
+/* Learned remote VM-to-WireGuard-host locations, filled from NDP advertisements. */
 struct
 {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, struct in6_addr);
-	__type(value, __u32);
+	__type(value, struct in6_addr);
 	__uint(max_entries, 262144);
-} nud_failures SEC(".maps");
+} remote_vms SEC(".maps");
 
 /* Peer capacity of the peer_list map. The unicast hooks use the same limit to bound their loops. */
 #define ATLAS_UNICAST_PEER_LIMIT 256
@@ -78,12 +78,13 @@ struct
 	__uint(max_entries, 4096);
 } ndp_requesters SEC(".maps");
 
-/* Host configuration. The discovery index records the configured uplink, and the underlay IPv4 address also sources the unicast NDP transport. */
+/* Host configuration. The discovery index records the configured uplink, the underlay IPv4 address sources the unicast NDP transport, and the uplink IPv6 address sources the kernel neighbour solicitation. */
 struct config
 {
 	__u32 discovery_ifindex;
 	__be32 underlay_ip4;
 	struct in6_addr wg_ip6;
+	struct in6_addr uplink_ipv6;
 	__u8 discovery_mac[ETH_ALEN];
 };
 
@@ -103,9 +104,6 @@ struct
 	__type(value, __u8[32]);
 	__uint(max_entries, 1);
 } build_hash SEC(".maps");
-
-/* Atlas neighbour kfunc, provided by the Atlas kernel module. addr_hi/addr_lo carry the first/last 8 bytes of the IPv6 address, and the MAC is packed into the low 6 bytes of mac. */
-extern int atlas_register_neigh(__u32 ifindex, __u64 addr_hi, __u64 addr_lo, __u64 mac) __ksym;
 
 /* Get the current host configuration. */
 static __always_inline struct config *get_config(void)
@@ -155,17 +153,10 @@ static __always_inline struct in6_addr *peer_with_mac(__u64 mac)
 	return bpf_map_lookup_elem(&peers_by_mac, &mac);
 }
 
-/* Register one remote VM with the MAC of its owning peer, so Linux NUD owns liveness. Returns 0 on success. */
-static __always_inline int register_remote_vm(__u32 ifindex, const struct in6_addr *virtual_machine, __u64 mac)
+/* Get the remote location (WireGuard address of the bare metal host) of the given VM. */
+static __always_inline struct in6_addr *get_remote_location(const struct in6_addr *virtual_machine)
 {
-	__u64 addr_hi = 0;
-	__u64 addr_lo = 0;
-
-	__builtin_memcpy(&addr_hi, &virtual_machine->s6_addr[0], sizeof(addr_hi));
-
-	__builtin_memcpy(&addr_lo, &virtual_machine->s6_addr[8], sizeof(addr_lo));
-
-	return atlas_register_neigh(ifindex, addr_hi, addr_lo, mac);
+	return bpf_map_lookup_elem(&remote_vms, virtual_machine);
 }
 
 #endif /* ATLAS_STATE_H */

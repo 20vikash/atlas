@@ -3,6 +3,7 @@
  * Atlas WG Mesh protocol definitions.
  *
  * This file contains the values that must match on every Atlas WG Mesh host.
+ * Changing atlas_msg changes the on-wire protocol.
  */
 
 #ifndef ATLAS_PROTOCOL_H
@@ -34,6 +35,25 @@
 /* ICMPv6 neighbour discovery message types. */
 #define NDISC_NEIGHBOUR_SOLICITATION 135
 #define NDISC_NEIGHBOUR_ADVERTISEMENT 136
+
+/* Recovery messages travel inside WireGuard as an experimental IPv6 next header. */
+#define ATLAS_CONTROL_NEXT_HEADER 253
+#define ATLAS_VER 1
+#define MESSAGE_OPERATION_NOT_HERE 3
+
+/* The WireGuard recovery message. */
+struct atlas_msg
+{
+	__u8 ver;
+	__u8 op;
+	__u8 pad[2];
+	struct in6_addr vm;
+	struct in6_addr host;
+};
+
+/* WireGuard recovery packets have no Ethernet header. */
+#define WIREGUARD_CONTROL_MESSAGE_OFFSET sizeof(struct ipv6hdr)
+#define WIREGUARD_CONTROL_PACKET_LENGTH (WIREGUARD_CONTROL_MESSAGE_OFFSET + sizeof(struct atlas_msg))
 
 /* The fixed part of a neighbour solicitation or advertisement. */
 struct ndp_message

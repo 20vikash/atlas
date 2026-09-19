@@ -51,10 +51,9 @@ func init() {
 	virtualMachineCommand.AddCommand(addVirtualMachineCommand, removeVirtualMachineCommand, listVirtualMachinesCommand)
 	privilegedVMCommand.AddCommand(addPrivilegedVMCommand, removePrivilegedVMCommand, listPrivilegedVMCommand)
 	debugCommand.AddCommand(debugStatusCommand, debugEnableCommand, debugDisableCommand, inspectCommand, dumpCommand, topCommand)
-	moduleCommand.AddCommand(moduleInstallCommand)
 	peersCommand.AddCommand(peersSyncCommand)
 	unicastCommand.AddCommand(unicastStartCommand)
-	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, peersCommand, debugCommand, unicastCommand, moduleCommand, upgradeCommand, versionCommand, resetCommand)
+	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, peersCommand, debugCommand, unicastCommand, upgradeCommand, versionCommand, resetCommand)
 }
 
 func main() {

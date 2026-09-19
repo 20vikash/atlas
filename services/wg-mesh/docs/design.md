@@ -48,9 +48,9 @@ Route lookup for a remote VM destination therefore selects the VLAN, and Linux r
 
 When a VM is registered, the CLI adds a proxy NDP entry for the VM address on the VLAN interface. The host then answers neighbour solicitations for the VM with a neighbour advertisement. No Atlas NDP option exists: every host already knows every peer from the WireGuard peer state, so the frame source MAC of an advertisement identifies the answering host.
 
-The NDP hook on the VLAN ingress path maps that MAC to the peer's WireGuard address through `peers_by_mac` and calls the Atlas kfunc. The kfunc, provided by the `atlas_neigh` kernel module, creates the Linux neighbour entry for the VM with `managed` and `extern_learn` semantics. Linux NUD then owns neighbour liveness: the kernel probes the entry, and every neighbour advertisement refreshes it.
+The NDP hook on the VLAN ingress path maps that MAC to the peer's WireGuard address through `peers_by_mac` and records the location in `remote_vms`.
 
-The VM hook resolves a remote destination with `bpf_fib_lookup`. A hit returns the neighbour MAC, which maps to the owning peer's WireGuard address for encapsulation. A miss crafts a neighbour solicitation.
+The VM hook looks the destination up in `remote_vms`. A miss hands a bare dummy packet to the host stack, and the kernel resolves the destination with its own neighbour solicitation. The dummy carries no payload, so nothing leaks when the kernel transmits it after resolution.
 
 The CLI is a lifecycle and configuration tool only. It never monitors neighbour state and it never configures WireGuard.
 
@@ -70,8 +70,7 @@ Neighbour advertisements are not authenticated, so a host with access to the sha
 | Shared VLAN interface | `handle_ndp_packet` | Learn locations from incoming advertisements, register neighbours. |
 | Shared VLAN interface | `handle_ndp_unicast_egress` | Unicast mode, attached instead of `handle_ndp_packet`: wrap solicitation and advertisement packets in IPv4, and send them to peers. |
 | Shared VLAN interface | `handle_ndp_unicast_ingress` | Unicast mode, attached instead of `handle_ndp_packet`: validate the peer, learn requester, owner, and neighbour, remove the outer IPv4 header. |
-| WireGuard interface | `handle_wireguard_packet` | Remove tunnel headers for local VMs, drop tunnels for others. |
-| `neigh/neigh_update` tracepoint | `handle_atlas_nud` | Count consecutive NUD failures per remote VM, and drop the neighbour entry after 20 failures. |
+| WireGuard interface | `handle_wireguard_packet` | Remove tunnel headers for local VMs, answer tunnels for other VMs with NOT_HERE, and drop stale locations on received NOT_HERE. |
 
 The VLAN hook is attached to TC ingress only, because an advertisement needs no changes on the way out.
 
@@ -80,7 +79,7 @@ The VLAN hook is attached to TC ingress only, because an advertisement needs no 
 | `config` | Host configuration, including this host's WireGuard address. |
 | `local_vms` | Local VM ownership. |
 | `peer_list`, `peers_by_mac` | The peer set from the WireGuard peer state: one dense array with IPv4, MAC, and WireGuard address per peer, and a MAC index for identification. |
-| `nud_failures` | Consecutive NUD failures per remote VM. |
+| `remote_vms` | Learned remote VM locations. |
 | `vm_peer_map`, `ndp_requesters` | Unicast mode: last answering peer per VM, and peers waiting for an answer. |
 | `privileged_tenant_allowed_addresses` | Privileged-tenant VM addresses permitted to communicate across tenants. |
 | `debug_config`, `debug_stats`, `debug_events` | Optional debug state and events. |
@@ -142,39 +141,40 @@ This path applies when the host has no location for the destination.
 sequenceDiagram
     participant A as VM A
     participant HA as Host A vm_hook.h
-    participant N as Host A neighbour table
+    participant K as Host A kernel
+    participant R as remote_vms map
     participant U as Shared VLAN
     participant HB as Host B ndp_hook.h
 
     A->>HA: IPv6 packet for VM B
-    HA->>HA: Fib lookup misses
-    HA->>U: Crafted neighbour solicitation
+    HA->>HA: No remote_vms record
+    HA->>K: Dummy packet for VM B
+    K->>U: Kernel neighbour solicitation
     U->>HB: NS: who has VM B?
     HB->>U: NA, frame source is Host B's MAC
     U->>HA: NA reaches the NDP hook
-    HA->>N: Register VM B with Host B's MAC
+    HA->>R: Record Host B as the owner
 ```
 
 The first packet itself is replaced by the solicitation, so the guest retransmits it. Every later packet uses Scenario 3.
 
 ## Scenario 3: known remote VM
 
-This path applies when the neighbour table has an entry for the destination.
+This path applies when `remote_vms` has a location for the destination.
 
 ```mermaid
 sequenceDiagram
     participant A as VM A
     participant HA as Host A vm_hook.h
-    participant N as Host A neighbour table
+    participant R as remote_vms map
     participant WGA as Host A wg0
     participant WGB as Host B wg0
     participant HB as Host B wireguard_hook.h
     participant B as VM B
 
     A->>HA: IPv6 packet for VM B
-    HA->>N: Fib lookup for VM B
-    N-->>HA: Neighbour MAC
-    HA->>HA: MAC maps to Host B through peers_by_mac
+    HA->>R: Get location for VM B
+    R-->>HA: Host B WireGuard address
     HA->>WGA: Add outer IPv6 header
     WGA->>WGB: WireGuard encrypted packet
     WGB->>HB: Decrypted tunnel packet
@@ -196,7 +196,7 @@ flowchart LR
     C -->|No| F["Drop the packet"]
 ```
 
-The destination host never forwards an Atlas WG Mesh tunnel to another host. It either delivers the inner packet locally or drops it. A dropped tunnel means the sender holds a stale location; NDP refreshes the sender through its managed neighbour entry.
+The destination host never forwards an Atlas WG Mesh tunnel to another host. It either delivers the inner packet locally or answers with NOT_HERE, so the sender drops its stale location and discovers the VM again.
 
 ## Scenario 5: VM move
 
@@ -207,14 +207,14 @@ Host B: vm remove removes the /128 route and the proxy NDP entry.
 Host C: vm add adds the /128 route and the proxy NDP entry.
 ```
 
-The first neighbour solicitation from any sender reaches Host C, which answers with its own frame source MAC. Senders map that MAC to Host C and update the kernel neighbour entry. No Atlas message and no WireGuard change are required.
+The first packet from any sender reaches the old host, which answers with NOT_HERE. The sender drops its location, and its next packet discovers Host C, whose advertisement carries Host C's frame source MAC. No Atlas message and no WireGuard change are required.
 
 ## Scenario 6: unreachable owner
 
-When an owner fails, senders keep their managed neighbour entries, so Linux NUD keeps probing. No host answers, the neighbour entries stay unresolved, and the NUD hooks remove them after twenty consecutive failures, so the next guest packet discovers the VM again. To clear a stale entry at once, remove its neighbour entry:
+A host that fails takes its VMs with it, so senders hold locations that no longer answer. When the host returns without a VM, or the VM moved while the host was down, the first packet to the old host returns NOT_HERE and the sender discovers the VM again. A sender can also clear a location at once:
 
 ```sh
-ip -6 neigh del fdaa:1:0:2::20 dev <vlan>
+atlas-wg-mesh debug inspect --address fdaa:1:0:2::20
 ```
 
 ## Unicast NDP transport
@@ -225,21 +225,17 @@ The unicast hooks and `handle_ndp_packet` never run together. A host runs either
 
 The egress unicast hook owns the whole advertisement path. For a solicitation, it wraps the packet in IPv4 and sends one clone per peer with `bpf_clone_redirect`, which is copy on write. When `vm_peer_map` holds the last peer that answered for the target, only that peer receives a copy, and the entry is removed. For an answer, it wraps the packet and returns it to the requester recorded in `ndp_requesters`.
 
-The ingress unicast hook owns the whole learning path. It accepts a wrapped packet only from a configured peer, records the requester from the outer IPv4 source, removes the outer header, and restores the Ethernet type. For an answer, it records the owning peer in `vm_peer_map` from the outer source and the neighbour entry from the frame source MAC through the Atlas kfunc, so Linux NUD owns liveness exactly as in multicast mode.
+The ingress unicast hook owns the whole learning path. It accepts a wrapped packet only from a configured peer, records the requester from the outer IPv4 source, removes the outer header, and restores the Ethernet type. For an answer, it records the owning peer in `vm_peer_map` from the outer source and the location in `remote_vms` from the frame source MAC, exactly as in multicast mode.
 
 A one-shot owner entry makes the fan-out self healing. When the owner never answers, for example after a VM moved, the next solicitation finds no entry and fans out to every peer, and the new owner restores the map.
 
 The peer state comes from `wireguard-peers.json`, which metald writes and `peers sync` loads into the BPF maps. The daemon processes no packets. A start or stop passes through a short window where both hook sets are attached; that window is safe, because the unicast hooks skip work that the multicast hook already did and every learning step is an idempotent replacement.
 
-## NUD failure tracking
+## Location recovery
 
-Linux NUD owns liveness, and a dead host stops answering probes. A managed neighbour then fails repeatedly, and the failure must remove the neighbour entry, or senders keep routing to a host that no longer holds the VM.
+A location in `remote_vms` lives until the host that advertised it contradicts it. When a host receives a tunnel for a VM it does not own, its WireGuard hook answers with NOT_HERE: a control message that travels back through WireGuard to the sender. The sender accepts NOT_HERE only from the host its cache holds, so no peer can evict another peer's advertisement. The sender then drops the location, and its next packet triggers discovery again.
 
-`handle_atlas_nud` watches the `neigh/neigh_update` tracepoint. A `NUD_REACHABLE` event resets the failure count for the VM, and a `NUD_FAILED` event increments it. After 20 consecutive failures, the hook clears the Linux neighbour entry for garbage collection through the Atlas delete kfunc and removes the counter. The next guest packet then fails its fib lookup and triggers discovery again.
-
-The hook reads the trace event flags as one byte, so the managed bit at bit 8 is lost. The externally-learned bit at bit 4 survives, and only Atlas registrations set it, so the hook filters on that bit together with the `fdaa::/16` address check.
-
-The hook is not a tc hook, so it owns no tc filter. `configure` attaches it to the tracepoint and pins the link in the pin directory, and a pinned link keeps the hook attached after the CLI exits. `upgrade` replaces the link, because a perf event link cannot update its program. `reset` removes the pin directory, which releases the link and detaches the hook.
+NOT_HERE travels as a bare IPv6 packet with the experimental next header 253 inside the WireGuard tunnel, so it needs no checksum and no listeners.
 
 ## Code map
 
@@ -249,10 +245,8 @@ The hook is not a tc hook, so it owns no tc filter. `configure` attaches it to t
 | `bpf/vm_hook.h` | Process packets from VM interfaces. |
 | `bpf/ndp_hook.h` | Process NDP packets on the shared VLAN interface. |
 | `bpf/ndp_unicast_hook.h` | Transport NDP packets over a routed IPv4 underlay. |
-| `bpf/nud_hook.h` | Drop unresponsive remote VMs after repeated NUD failures. |
-| `bpf/wireguard_hook.h` | Process Atlas WG Mesh tunnels. |
+| `bpf/wireguard_hook.h` | Process Atlas WG Mesh tunnels and NOT_HERE recovery. |
 | `bpf/state.h` | Define host and VM BPF state. |
 | `bpf/debug.h` | Define debug maps and event helpers. |
 | `bpf/protocol.h` | Define on-wire values and structures. |
 | `bpf/address.h` | Define VM address helpers. |
-| `kernel/atlas_neigh.c` | Provide the neighbour registration and deletion kfuncs. |

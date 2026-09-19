@@ -1,6 +1,6 @@
 # Atlas WG Mesh operations guide
 
-The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds the BPF object. It does not run as a daemon. Linux NDP discovers remote VM owners, Linux NUD maintains them, and BPF routes packets after the CLI exits.
+The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds the BPF object. It does not run as a daemon. Linux NDP discovers remote VM owners, NOT_HERE recovery removes stale ones, and BPF routes packets after the CLI exits.
 
 ## Contents
 
@@ -27,16 +27,6 @@ The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds 
 ## Requirements
 
 Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Use a prefix that covers every other host, because the VM hook returns the tunnel packet to Linux routing and the host must have a route to the remote host address. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
-
-Build and load the Atlas neighbour kernel module on every host before you configure Atlas WG Mesh. The NDP and NUD hooks call its kfuncs, so the BPF object cannot load without it:
-
-```sh
-atlas-wg-mesh module install
-```
-
-The command writes the embedded module sources to `/usr/src`, builds them against the running kernel headers, links the module into `/lib/modules`, and loads it. The build takes the kernel BTF from `/sys/kernel/btf/vmlinux`, so the module carries the BTF section that the BPF object needs. The host needs the `build-essential`, `dwarves`, and `linux-headers-$(uname -r)` packages. The metald install script runs the command automatically.
-
-Run the command again after a kernel upgrade, because a module of one kernel release cannot serve another.
 
 Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 
@@ -74,7 +64,7 @@ dist/atlas-wg-mesh-linux-arm64
 
 Each binary embeds the BPF object. Copy the binary that matches the host CPU architecture. The host does not need `clang`, `bpftool`, or a separate BPF object file.
 
-Use `make bpf` to build only the embedded BPF object. Use `make module` to build the kernel module. Use `make clean` to remove generated BPF and release files.
+Use `make bpf` to build only the embedded BPF object. Use `make clean` to remove generated BPF and release files.
 
 ## Install a host
 
@@ -113,7 +103,7 @@ atlas-wg-mesh vm remove --interface veth0 --address fdaa:1:0:7::1
 atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1
 ```
 
-The first neighbour solicitation after the move reaches the new host, which answers with its own frame source MAC. Senders map that MAC to the new owner and update the kernel neighbour entry. The VM keeps its private IPv6 address, and no WireGuard change is required.
+The first packet from any sender reaches the old host, which answers with NOT_HERE. The sender drops its location and discovers the new host, whose advertisement carries the new owner's frame source MAC. The VM keeps its private IPv6 address, and no WireGuard change is required.
 
 ## Remove a VM
 
@@ -203,10 +193,10 @@ Use `atlas-wg-mesh version` to show CLI and BPF hashes.
 
 ## Remove learned neighbours
 
-When a host is permanently unavailable, the NUD hooks remove its neighbour entries after twenty consecutive failures. To clear a stale entry at once:
+A sender holds a location until the host that advertised it answers a packet with NOT_HERE, so an unreachable host leaves its locations in place while it is down. Check a location with:
 
 ```sh
-ip -6 neigh del fdaa:1:0:2::20 dev <uplink>
+atlas-wg-mesh debug inspect --address fdaa:1:0:2::20
 ```
 
 ## Remove a host installation

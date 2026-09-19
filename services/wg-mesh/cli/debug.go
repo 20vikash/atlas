@@ -344,7 +344,17 @@ func unicastOperationName(operation uint8) string {
 		"UNICAST_RX_REQUESTER",
 		"UNICAST_RX_LEARNED",
 		"UNICAST_RX_UNKNOWN_PEER",
-		"UNICAST_RX_KFUNC_FAILED",
+		"UNICAST_RX_LEARN_FAILED",
+	})
+}
+
+const debugWireguardHook uint8 = 2
+
+func wireguardOperationName(operation uint8) string {
+	return enumName(operation, []string{
+		"",
+		"WIREGUARD_NOT_HERE_SENT",
+		"WIREGUARD_NOT_HERE_RECEIVED",
 	})
 }
 
@@ -353,7 +363,7 @@ func operationName(operation uint8) string {
 		"",
 		"NDP_LEARN",
 		"NDP_UNKNOWN_PEER",
-		"NDP_KFUNC_FAILED",
+		"NDP_LEARN_FAILED",
 	})
 }
 
@@ -368,6 +378,10 @@ func debugOperationName(event debugEvent) string {
 
 	if event.Hook == debugUnicastHook {
 		return unicastOperationName(event.Operation)
+	}
+
+	if event.Hook == debugWireguardHook {
+		return wireguardOperationName(event.Operation)
 	}
 
 	return operationName(event.Operation)

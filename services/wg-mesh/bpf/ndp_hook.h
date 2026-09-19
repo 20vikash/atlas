@@ -10,15 +10,10 @@ enum ndp_debug_operation
 {
 	NDP_OPERATION_LEARN = 1,
 	NDP_OPERATION_UNKNOWN_PEER,
-	NDP_OPERATION_KFUNC_FAILED,
+	NDP_OPERATION_LEARN_FAILED,
 };
 
-/* Attached to TC ingress on the discovery interface. A Neighbor Advertisement
- * for a remote VM carries the answering peer's MAC as the frame source. When
- * that MAC belongs to a configured peer, the VM is registered with that MAC,
- * so Linux NUD owns liveness and bpf_fib_lookup resolves the VM on the VM hook
- * data path.
- */
+/* Attached to TC ingress on the discovery interface. A Neighbor Advertisement for a remote VM carries the answering peer's MAC as the frame source. When that MAC belongs to a configured peer, the peer's WireGuard address becomes the VM location in remote_vms. */
 SEC("tc")
 int handle_ndp_packet(struct __sk_buff *packet)
 {
@@ -53,17 +48,19 @@ int handle_ndp_packet(struct __sk_buff *packet)
 	mac = pack_mac(eth->h_source);
 
 	/* Only a frame from a configured peer records a location. */
-	if (!peer_with_mac(mac)) {
+	struct in6_addr *host = peer_with_mac(mac);
+
+	if (!host) {
 		emit_protocol_debug_event(DEBUG_NDP, DEBUG_RECEIVE, NDP_OPERATION_UNKNOWN_PEER, &target, NULL);
 		return TC_ACT_OK;
 	}
 
-	if (register_remote_vm(packet->ifindex, &target, mac)) {
-		emit_protocol_debug_event(DEBUG_NDP, DEBUG_RECEIVE, NDP_OPERATION_KFUNC_FAILED, &target, NULL);
+	if (bpf_map_update_elem(&remote_vms, &target, host, BPF_ANY)) {
+		emit_protocol_debug_event(DEBUG_NDP, DEBUG_RECEIVE, NDP_OPERATION_LEARN_FAILED, &target, NULL);
 		return TC_ACT_OK;
 	}
 
-	emit_protocol_debug_event(DEBUG_NDP, DEBUG_RECEIVE, NDP_OPERATION_LEARN, &target, NULL);
+	emit_protocol_debug_event(DEBUG_NDP, DEBUG_RECEIVE, NDP_OPERATION_LEARN, &target, host);
 
 	return TC_ACT_OK;
 }

@@ -54,10 +54,6 @@ func installHost(uplinkName, wireGuardName string) error {
 	if err != nil {
 		return err
 	}
-	if err := requireNeighbourKfunc(); err != nil {
-		return err
-	}
-
 	collection, err := loadCollection(nil)
 	if err != nil {
 		return err
@@ -94,10 +90,6 @@ func installHost(uplinkName, wireGuardName string) error {
 	}
 
 	if err := attachHook(wireGuardName, wireguardProgram, "ingress"); err != nil {
-		return rollbackInstall(err, uplinkName, wireGuardName)
-	}
-
-	if err := attachNUDHooks(); err != nil {
 		return rollbackInstall(err, uplinkName, wireGuardName)
 	}
 

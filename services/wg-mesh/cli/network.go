@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -65,6 +62,19 @@ func readHostConfig(uplinkName, wireGuardName string) (hostConfig, error) {
 		return hostConfig{}, err
 	}
 
+	// The kernel sources its neighbour solicitation from the uplink, so the
+	// uplink needs an IPv6 address. A link-local address is enough.
+	uplinkIPv6, err := interfaceAddress(
+		uplinkInterface,
+		"IPv6",
+		func(ip net.IP) bool {
+			return ip.To4() == nil
+		},
+	)
+	if err != nil {
+		return hostConfig{}, err
+	}
+
 	/*
 	 * The discovery packet is transmitted through the uplink/VLAN
 	 * interface, so the BPF program needs that interface's MAC address
@@ -82,6 +92,7 @@ func readHostConfig(uplinkName, wireGuardName string) (hostConfig, error) {
 		DiscoveryIndex: uint32(uplinkInterface.Index),
 		UplinkIPv4:     [4]byte(uplinkIPv4.To4()),
 		WireGuardIPv6:  [16]byte(wireGuardIPv6.To16()),
+		UplinkIPv6:     [16]byte(uplinkIPv6.To16()),
 		DiscoveryMAC:   discoveryMAC,
 	}, nil
 }
@@ -359,21 +370,6 @@ func removeMeshRoute(uplinkName string) error {
 	}
 
 	return nil
-}
-
-// requireNeighbourKfunc rejects configuration when the Atlas kernel module is
-// not loaded. The NDP hook cannot load without its kfunc.
-func requireNeighbourKfunc() error {
-	symbols, err := os.ReadFile("/proc/kallsyms")
-	if err != nil {
-		return fmt.Errorf("read /proc/kallsyms: %w", err)
-	}
-
-	if bytes.Contains(symbols, []byte("atlas_register_neigh")) {
-		return nil
-	}
-
-	return errors.New("the atlas_neigh kernel module is not loaded; build it with make module and load it before configure")
 }
 
 func runCommand(name string, arguments ...string) error {

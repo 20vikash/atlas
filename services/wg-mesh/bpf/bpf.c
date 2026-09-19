@@ -11,7 +11,6 @@
 #include "vm_hook.h"
 #include "ndp_hook.h"
 #include "ndp_unicast_hook.h"
-#include "nud_hook.h"
 #include "wireguard_hook.h"
 
 /* The kernel BPF ABI requires this string for GPL-only helper access. */
