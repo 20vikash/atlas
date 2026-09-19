@@ -6,49 +6,6 @@
 #include "debug.h"
 #include "state.h"
 
-enum vm_debug_operation
-{
-	DEBUG_VM_UNDERLAY = 1,
-	DEBUG_VM_NOT_VIRTUAL,
-	DEBUG_VM_SOURCE_NOT_OWNED,
-	DEBUG_VM_TENANT_DENIED,
-	DEBUG_VM_LOCAL_DESTINATION,
-	DEBUG_VM_REMOTE_UNKNOWN,
-	DEBUG_VM_NO_CONFIG,
-	DEBUG_VM_ENCAP_FAILED,
-	DEBUG_VM_ENCAP_SUCCEEDED,
-};
-
-static __always_inline void emit_vm_debug_event(__u8 verdict, __u8 operation, const struct in6_addr *source, const struct in6_addr *destination)
-{
-	struct debug_event *event;
-
-	if (!is_debug_enabled()) return;
-
-	record_debug_stats(verdict, DEBUG_NO_DIRECTION);
-
-	event = bpf_ringbuf_reserve(&debug_events, sizeof(*event), 0);
-
-	if (!event)
-	{
-		record_debug_event_loss();
-		return;
-	}
-
-	__builtin_memset(event, 0, sizeof(*event));
-
-	event->timestamp = bpf_ktime_get_ns();
-	event->hook = DEBUG_VM;
-	event->verdict = verdict;
-	event->operation = operation;
-	event->source = *source;
-	event->destination = *destination;
-
-	__builtin_memcpy(event->tenant, &source->s6_addr[4], 4);
-
-	bpf_ringbuf_submit(event, 0);
-}
-
 /* Replace the packet with a bare IPv6 dummy that carries no payload. Routing it through the discovery interface makes the kernel resolve the destination with its own neighbour solicitation. */
 static __always_inline int send_discovery_probe(struct __sk_buff *packet, struct config *local_config, const struct in6_addr *destination)
 {
@@ -90,7 +47,7 @@ static __always_inline int add_tunnel_header(struct __sk_buff *packet, struct co
 
 	if (ret)
 	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_ENCAP_FAILED, &local_config->wg_ip6, remote_host);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &local_config->wg_ip6, remote_host);
 
 		return TC_ACT_SHOT;
 	}
@@ -99,12 +56,12 @@ static __always_inline int add_tunnel_header(struct __sk_buff *packet, struct co
 
 	if (ret)
 	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_ENCAP_FAILED, &local_config->wg_ip6, remote_host);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &local_config->wg_ip6, remote_host);
 
 		return TC_ACT_SHOT;
 	}
 
-	emit_vm_debug_event(DEBUG_REDIRECT, DEBUG_VM_ENCAP_SUCCEEDED, &outer.saddr, &outer.daddr);
+	emit_packet_debug_event(DEBUG_VM, DEBUG_REDIRECT, &outer.saddr, &outer.daddr);
 
 	return TC_ACT_OK;
 }
@@ -144,7 +101,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/* Guests must never inject packets directly to an underlay address. */
 	if (is_underlay_address(&dst))
 	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_UNDERLAY, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &src, &dst);
 
 		return TC_ACT_SHOT;
 	}
@@ -152,7 +109,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/* Only fdaa::/16 traffic belongs to the mesh. */
 	if (!is_virtual_machine_address(&dst))
 	{
-		emit_vm_debug_event(DEBUG_ACCEPT, DEBUG_VM_NOT_VIRTUAL, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_ACCEPT, &src, &dst);
 
 		return TC_ACT_OK;
 	}
@@ -160,7 +117,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/* Only a registered local VM may inject mesh traffic. */
 	if (!owns_source_address(&src, packet->ifindex))
 	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_SOURCE_NOT_OWNED, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &src, &dst);
 
 		return TC_ACT_SHOT;
 	}
@@ -168,7 +125,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/* Enforce tenant isolation. */
 	if (!tenants_can_communicate(&src, &dst))
 	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_TENANT_DENIED, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &src, &dst);
 
 		return TC_ACT_SHOT;
 	}
@@ -176,7 +133,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 	/* Same-host VM traffic stays on the normal Linux path. */
 	if (is_local_virtual_machine(&dst))
 	{
-		emit_vm_debug_event(DEBUG_ACCEPT, DEBUG_VM_LOCAL_DESTINATION, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_ACCEPT, &src, &dst);
 
 		return TC_ACT_OK;
 	}
@@ -185,7 +142,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 
 	if (!local_config)
 	{
-		emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_NO_CONFIG, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &src, &dst);
 
 		return TC_ACT_SHOT;
 	}
@@ -198,12 +155,12 @@ int handle_vm_packet(struct __sk_buff *packet)
 		/* The remote VM is unknown locally: hand a dummy packet to the host stack, so the kernel resolves the destination with its own neighbour solicitation. */
 		if (send_discovery_probe(packet, local_config, &dst))
 		{
-			emit_vm_debug_event(DEBUG_DROP, DEBUG_VM_ENCAP_FAILED, &src, &dst);
+			emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &src, &dst);
 
 			return TC_ACT_SHOT;
 		}
 
-		emit_vm_debug_event(DEBUG_REDIRECT, DEBUG_VM_REMOTE_UNKNOWN, &src, &dst);
+		emit_packet_debug_event(DEBUG_VM, DEBUG_REDIRECT, &src, &dst);
 
 		return bpf_redirect(local_config->discovery_ifindex, BPF_F_INGRESS);
 	}

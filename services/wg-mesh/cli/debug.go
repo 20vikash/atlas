@@ -313,24 +313,6 @@ func directionName(direction uint8) string {
 	)
 }
 
-func vmOperationName(operation uint8) string {
-	return enumName(
-		operation,
-		[]string{
-			"",
-			"UNDERLAY",
-			"NOT_VIRTUAL",
-			"SOURCE_NOT_OWNED",
-			"TENANT_DENIED",
-			"LOCAL_DESTINATION",
-			"REMOTE_UNKNOWN",
-			"NO_CONFIG",
-			"ENCAP_FAILED",
-			"ENCAP_SUCCEEDED",
-		},
-	)
-}
-
 const debugUnicastHook uint8 = 3
 
 func unicastOperationName(operation uint8) string {
@@ -370,10 +352,6 @@ func operationName(operation uint8) string {
 func debugOperationName(event debugEvent) string {
 	if event.Operation == 0 {
 		return ""
-	}
-
-	if event.Hook == debugVMHook {
-		return vmOperationName(event.Operation)
 	}
 
 	if event.Hook == debugUnicastHook {

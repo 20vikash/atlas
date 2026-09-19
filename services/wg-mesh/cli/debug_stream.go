@@ -177,25 +177,8 @@ func printDebugEvent(event debugEvent, first uint64) {
 	elapsed := time.Duration(event.Timestamp - first).Seconds()
 
 	/*
-	 * VM events are packet events and use the VM-specific
-	 * operation namespace.
-	 */
-	if event.Hook == debugVMHook {
-		operation := debugOperationName(event)
-
-		if operation != "" {
-			fmt.Printf("%8.3f %-9s %-8s op=%-18s src=%s dst=%s tenant=%d\n", elapsed, hookName(event.Hook), verdictName(event.Verdict), operation, netip.AddrFrom16(event.Source), netip.AddrFrom16(event.Destination), binary.BigEndian.Uint32(event.Tenant[:]))
-			return
-		}
-
-		fmt.Printf("%8.3f %-9s %-8s src=%s dst=%s tenant=%d\n", elapsed, hookName(event.Hook), verdictName(event.Verdict), netip.AddrFrom16(event.Source), netip.AddrFrom16(event.Destination), binary.BigEndian.Uint32(event.Tenant[:]))
-
-		return
-	}
-
-	/*
-	 * Non-VM events with an operation are protocol events. A zero host
-	 * field means the event carries no owner address.
+	 * Events with an operation are protocol events. A zero host field
+	 * means the event carries no owner address.
 	 */
 	if event.Operation != 0 {
 		host := ""
