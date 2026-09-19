@@ -39,6 +39,14 @@ class AwsInfrastructure:
 		if network.version != 4 or not any(network.subnet_of(item) for item in PRIVATE_IPV4_NETWORKS):
 			raise AwsError(f"Atlas private network CIDR {network} must be a private IPv4 network")
 
+		try:
+			management = ipaddress.ip_network(configuration.management_cidr, strict=False)
+		except ValueError as error:
+			raise AwsError(f"Invalid AWS management CIDR: {configuration.management_cidr}") from error
+
+		if management.version != 4:
+			raise AwsError(f"AWS management CIDR {management} must be an IPv4 network")
+
 		if not (
 			self.provider.private_network_min_prefix
 			<= network.prefixlen
@@ -444,15 +452,17 @@ class AwsInfrastructure:
 		"""Return the inbound rules for Atlas hosts.
 
 		Atlas reaches Secure Shell and the Metal API over the public address of a
-		host, so both ports are open to the internet. The Metal API uses a bearer
-		token. Everything else stays inside the Atlas private network.
+		host, so both ports accept the management network. WireGuard stays open to
+		the internet because a peer dials in from any address and the tunnel
+		authenticates by key. Everything else stays inside the private network.
 		"""
 		from atlas.vm.core.metal_client import MetalClient
 
+		management_cidr = self.provider.configuration.management_cidr
 		return [
-			self.port_rule("tcp", 22, "Atlas Secure Shell"),
-			self.port_rule("tcp", MetalClient.api_port, "Atlas Metal API"),
-			self.port_rule("udp", self.provider.wireguard_port, "WireGuard"),
+			self.port_rule("tcp", 22, "Atlas Secure Shell", management_cidr),
+			self.port_rule("tcp", MetalClient.api_port, "Atlas Metal API", management_cidr),
+			self.port_rule("udp", self.provider.wireguard_port, "WireGuard", "0.0.0.0/0"),
 			{
 				"IpProtocol": "-1",
 				"IpRanges": [
@@ -465,11 +475,11 @@ class AwsInfrastructure:
 		]
 
 	@staticmethod
-	def port_rule(protocol: str, port: int, description: str) -> dict:
-		"""Return one inbound rule that opens a single port to the internet."""
+	def port_rule(protocol: str, port: int, description: str, cidr: str) -> dict:
+		"""Return one inbound rule that opens a single port to one network."""
 		return {
 			"IpProtocol": protocol,
 			"FromPort": port,
 			"ToPort": port,
-			"IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": description}],
+			"IpRanges": [{"CidrIp": cidr, "Description": description}],
 		}

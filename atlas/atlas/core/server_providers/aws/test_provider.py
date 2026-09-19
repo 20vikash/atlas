@@ -24,6 +24,10 @@ class TestAwsInfrastructure(UnitTestCase):
 		with self.assertRaisesRegex(AwsError, "private IPv4"):
 			infrastructure.validate_settings()
 
+	def test_an_invalid_management_cidr_fails_loudly(self) -> None:
+		with self.assertRaises(AwsError):
+			self.infrastructure(management_cidr="not-a-network").validate_settings()
+
 	def test_storage_device_must_stay_below_dev(self) -> None:
 		infrastructure = self.infrastructure(storage_pool_device="/dev/../etc/passwd")
 
@@ -75,6 +79,7 @@ class TestAwsInfrastructure(UnitTestCase):
 			"transit_gateway_attachment_id": None,
 			"multicast_domain_id": None,
 			"storage_pool_device": "/dev/nvme1n1",
+			"management_cidr": "0.0.0.0/0",
 		}
 		settings = {"private_network_cidr": "10.1.0.0/20"}
 		for key, value in changes.items():
@@ -284,7 +289,10 @@ class TestAwsProvider(UnitTestCase):
 			[(rule["IpProtocol"], rule.get("FromPort")) for rule in rules],
 			[("tcp", 22), ("tcp", MetalClient.api_port), ("udp", 51820), ("-1", None)],
 		)
-		self.assertEqual(rules[-1]["IpRanges"][0]["CidrIp"], "10.1.0.0/20")
+		self.assertEqual(
+			[rule["IpRanges"][0]["CidrIp"] for rule in rules],
+			["203.0.113.0/24", "203.0.113.0/24", "0.0.0.0/0", "10.1.0.0/20"],
+		)
 
 	def test_ubuntu_and_debian_users_can_be_promoted(self) -> None:
 		provider = self.provider()
@@ -329,7 +337,9 @@ class TestAwsProvider(UnitTestCase):
 			public_ssh_key="ssh-ed25519 key",
 			is_server_provider_setup_completed=0,
 		)
-		provider.configuration = SimpleNamespace(storage_pool_device="/dev/nvme1n1")
+		provider.configuration = SimpleNamespace(
+			storage_pool_device="/dev/nvme1n1", management_cidr="203.0.113.0/24"
+		)
 		provider.client = Mock()
 		provider.catalog = AwsCatalog()
 		provider.infrastructure = Mock()

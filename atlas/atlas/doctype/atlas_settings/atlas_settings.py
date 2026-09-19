@@ -58,6 +58,7 @@ class AtlasSettings(Document):
 		aws_region: DF.Data | None
 		aws_secret_access_key: DF.Password | None
 		aws_security_group_id: DF.Data | None
+		aws_management_cidr: DF.Data | None
 		aws_storage_pool_device: DF.Data | None
 		aws_subnet_id: DF.Data | None
 		aws_transit_gateway_attachment_id: DF.Data | None

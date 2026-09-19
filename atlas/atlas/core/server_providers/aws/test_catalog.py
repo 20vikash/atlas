@@ -35,19 +35,21 @@ class TestAwsCatalog(UnitTestCase):
 
 		self.assertEqual(size.cpu_count, 128)
 		self.assertEqual(size.memory_mib, 262_144)
-		self.assertEqual(size.disk_gib, 7_600)
+		self.assertEqual(size.disk_gib, 7_078)
 		self.assertIsNone(size.hourly_pricing_usd_cents)
 
 	def test_the_atlas_architecture_comes_from_the_supported_architectures(self) -> None:
 		catalog = AwsCatalog()
 
 		amd64 = catalog.get_server_sizes([self.instance_type("c6i.metal", bare_metal=True)])[0]
-		arm64 = catalog.get_server_sizes(
-			[self.instance_type("c8g.metal", bare_metal=True, architectures=["arm64"])]
-		)[0]
 
 		self.assertEqual(amd64.architecture, "amd64")
-		self.assertEqual(arm64.architecture, "arm64")
+
+	def test_an_instance_type_atlas_cannot_run_fails_loudly(self) -> None:
+		with self.assertRaises(AwsError):
+			AwsCatalog().get_server_sizes(
+				[self.instance_type("c8g.metal", bare_metal=True, architectures=["arm64"])]
+			)
 
 	def test_an_instance_type_without_an_atlas_architecture_fails_loudly(self) -> None:
 		with self.assertRaises(AwsError):

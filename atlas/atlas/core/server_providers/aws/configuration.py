@@ -22,6 +22,7 @@ class AwsConfiguration:
 	transit_gateway_attachment_id: str | None
 	multicast_domain_id: str | None
 	storage_pool_device: str
+	management_cidr: str
 
 	@classmethod
 	def from_settings(cls, settings: "AtlasSettings") -> "AwsConfiguration":
@@ -38,4 +39,5 @@ class AwsConfiguration:
 			transit_gateway_attachment_id=settings.aws_transit_gateway_attachment_id,
 			multicast_domain_id=settings.aws_multicast_domain_id,
 			storage_pool_device=settings.aws_storage_pool_device,
+			management_cidr=settings.aws_management_cidr or "0.0.0.0/0",
 		)

@@ -17,7 +17,8 @@ DEBIAN_IMAGE_NAME = re.compile(r"debian-(\d+)-amd64-")
 
 
 NESTED_VIRTUALIZATION_FEATURE = "nested-virtualization"
-ARCHITECTURES: Mapping[str, str] = {"x86_64": "amd64", "arm64": "arm64"}
+BYTES_IN_GIB = 1_073_741_824
+ARCHITECTURES: Mapping[str, str] = {"x86_64": "amd64"}
 
 
 class AwsCatalog:
@@ -109,7 +110,9 @@ class AwsCatalog:
 	def instance_type_architecture(instance_type: Mapping) -> str:
 		"""Return the Atlas architecture reported by one AWS instance type.
 
-		AWS lists every architecture a type can boot, so a 64-bit type also reports i386."""
+		Atlas fetches x86_64 instance types only. AWS lists every architecture a type
+		can boot, so a 64-bit type also reports i386.
+		"""
 		name = instance_type.get("InstanceType")
 		processor = instance_type.get("ProcessorInfo")
 		supported = processor.get("SupportedArchitectures") if isinstance(processor, Mapping) else None
@@ -123,10 +126,16 @@ class AwsCatalog:
 
 	@staticmethod
 	def _disk_gib(instance_type: Mapping) -> int:
-		"""Return the instance store size, which Atlas uses for the storage pool."""
+		"""Return the instance store size, which Atlas uses for the storage pool.
+
+		AWS reports decimal gigabytes and Atlas stores binary gibibytes.
+		"""
 		storage = instance_type.get("InstanceStorageInfo")
-		disk_gib = storage.get("TotalSizeInGB", 0) if isinstance(storage, Mapping) else 0
-		return disk_gib if isinstance(disk_gib, int) else 0
+		disk_gb = storage.get("TotalSizeInGB", 0) if isinstance(storage, Mapping) else 0
+		if not isinstance(disk_gb, int):
+			return 0
+
+		return disk_gb * 1_000_000_000 // BYTES_IN_GIB
 
 	@staticmethod
 	def _accepted_image(image: Mapping) -> ServerImageData | None:
