@@ -20,7 +20,7 @@ Makefile                     Build targets
 
 ## Software
 
-The CLI uses Go. It builds for Linux with CGO disabled. The dataplane uses Clang and eBPF. The release build compiles the kernel module for the kernel that the hosts run, and a host only installs and loads it.
+The CLI uses Go. It builds for Linux with CGO disabled. The dataplane uses Clang and eBPF. The kernel module builds against the running kernel headers.
 
 ## Module
 
@@ -28,7 +28,7 @@ The module path is `github.com/frappe/atlas/services/wg-mesh/cli`. Run Go comman
 
 ## Validation
 
-From this directory, run `make bpf`, `make module-release`, and `make build`. Run Go tests from `cli/`.
+From this directory, run `make bpf`, `make module`, and `make build`. Run Go tests from `cli/`.
 
 ## Documentation
 
