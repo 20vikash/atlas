@@ -34,9 +34,9 @@ Build and load the Atlas neighbour kernel module on every host before you config
 atlas-wg-mesh module install
 ```
 
-The command writes the embedded module sources to `/usr/src`, builds them against the running kernel headers, links the module into `/lib/modules`, and loads it. The build takes the kernel BTF from `/sys/kernel/btf/vmlinux`, so the module carries the BTF section that the BPF object needs. The host needs the `build-essential`, `dwarves`, and `linux-headers-$(uname -r)` packages. The metald install script runs the command automatically.
+The release build compiled the module for the kernel that the hosts run, and the CLI embeds it. The command installs it into `/lib/modules`, runs `depmod`, and loads it. A host needs no compiler and no kernel headers. The command rejects a module that was compiled for another kernel release, and the metald install script runs it automatically.
 
-Run the command again after a kernel upgrade, because a module of one kernel release cannot serve another.
+Run the command again after a kernel upgrade, because a module of one kernel release cannot serve another. A kernel upgrade needs a matching release build.
 
 Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
 
@@ -72,9 +72,9 @@ dist/atlas-wg-mesh-linux-amd64
 dist/atlas-wg-mesh-linux-arm64
 ```
 
-Each binary embeds the BPF object. Copy the binary that matches the host CPU architecture. The host does not need `clang`, `bpftool`, or a separate BPF object file.
+Each binary embeds the BPF object and the kernel module. Copy the binary that matches the host CPU architecture. The host does not need `clang`, `bpftool`, a compiler, kernel headers, or separate object files.
 
-Use `make bpf` to build only the embedded BPF object. Use `make module` to build the kernel module. Use `make clean` to remove generated BPF and release files.
+Use `make bpf` to build only the embedded BPF object. Use `make module-release KDIR=...` to build the kernel module against the header directory of the kernel that the hosts run; `make build` runs it for the running build kernel. Use `make clean` to remove generated BPF and release files.
 
 ## Install a host
 
@@ -113,7 +113,7 @@ atlas-wg-mesh vm remove --interface veth0 --address fdaa:1:0:7::1
 atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1
 ```
 
-The first neighbour solicitation after the move reaches the new host, which answers with its own WireGuard address in the Atlas option. Senders update the learned location. The VM keeps its private IPv6 address, and no WireGuard change is required.
+The first neighbour solicitation after the move reaches the new host, which answers with its own frame source MAC. Senders map that MAC to the new owner and update the kernel neighbour entry. The VM keeps its private IPv6 address, and no WireGuard change is required.
 
 ## Remove a VM
 
@@ -201,12 +201,12 @@ It compares the embedded BPF hash, keeps compatible pinned maps including `privi
 
 Use `atlas-wg-mesh version` to show CLI and BPF hashes.
 
-## Remove remote entries
+## Remove learned neighbours
 
-When a host is permanently unavailable, clear learned entries for its WireGuard address:
+When a host is permanently unavailable, the NUD hooks remove its neighbour entries after twenty consecutive failures. To clear a stale entry at once:
 
 ```sh
-atlas-wg-mesh remote purge --host fdab::10
+ip -6 neigh del fdaa:1:0:2::20 dev <uplink>
 ```
 
 ## Remove a host installation
@@ -232,4 +232,4 @@ atlas-wg-mesh configure --uplink eth0 --wireguard wg0
 atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1 --mtu 1380
 ```
 
-A forced reset also clears `remote_vms` and `privileged_tenant_allowed_addresses`; NDP rebuilds remote locations, while the controller must reconcile privileged VMs again.
+A forced reset also clears the peer maps and `privileged_tenant_allowed_addresses`; `peers sync` refills the peer maps, NDP rebuilds remote neighbours, and the controller must reconcile privileged VMs again.

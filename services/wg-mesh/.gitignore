@@ -13,8 +13,8 @@ kernel/.*.cmd
 kernel/modules.order
 kernel/Module.symvers
 
-# Kernel module sources staged for the CLI embed.
-kernel_module/
+# Release kernel module staged for the CLI embed.
+cli/atlas-neigh.ko
 
 # Local Go build output.
 /atlas-wg-mesh

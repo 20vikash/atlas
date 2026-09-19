@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 
@@ -22,7 +23,7 @@ func inspectVirtualMachine(addressText string) error {
 	if local {
 		return nil
 	}
-	host, found, err := remoteVirtualMachineHost(virtualMachine)
+	host, found, err := remoteHostOf(virtualMachine)
 	if err != nil {
 		return err
 	}
@@ -30,9 +31,8 @@ func inspectVirtualMachine(addressText string) error {
 		fmt.Println("remote: not learned")
 		return nil
 	}
-	hostAddress := netip.AddrFrom16(host)
-	fmt.Printf("remote host: %s\n", hostAddress)
-	return inspectWireGuardHost(hostAddress)
+	fmt.Printf("remote host: %s\n", host)
+	return inspectWireGuardHost(host)
 }
 
 func isLocalVirtualMachine(virtualMachine [16]byte) (bool, error) {
@@ -50,19 +50,36 @@ func isLocalVirtualMachine(virtualMachine [16]byte) (bool, error) {
 	return err == nil, err
 }
 
-func remoteVirtualMachineHost(virtualMachine [16]byte) ([16]byte, bool, error) {
-	remoteVMs, err := openMap("remote_vms")
+// remoteHostOf reads the neighbour entry of a remote VM and maps its MAC to the owning peer through peers_by_mac.
+func remoteHostOf(virtualMachine [16]byte) (netip.Addr, bool, error) {
+	address := netip.AddrFrom16(virtualMachine)
+	output, err := commandOutput("ip", "-o", "-6", "neigh", "show", "to", address.String())
 	if err != nil {
-		return [16]byte{}, false, err
+		return netip.Addr{}, false, err
 	}
-	defer remoteVMs.Close()
+
+	macText := fieldAfter(strings.Fields(output), "lladdr")
+	if macText == "" {
+		return netip.Addr{}, false, nil
+	}
+
+	mac, err := net.ParseMAC(macText)
+	if err != nil || len(mac) != 6 {
+		return netip.Addr{}, false, nil
+	}
+
+	peerMap, err := openMap("peers_by_mac")
+	if err != nil {
+		return netip.Addr{}, false, err
+	}
+	defer peerMap.Close()
 
 	var host [16]byte
-	err = remoteVMs.Lookup(virtualMachine, &host)
-	if errors.Is(err, ebpf.ErrKeyNotExist) {
-		return [16]byte{}, false, nil
+	key := packPeerMAC([6]byte(mac))
+	if err := peerMap.Lookup(key, &host); err != nil {
+		return netip.Addr{}, false, nil
 	}
-	return host, err == nil, err
+	return netip.AddrFrom16(host), true, nil
 }
 
 func inspectWireGuardHost(host netip.Addr) error {

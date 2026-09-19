@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0 */
-/* Atlas WG Mesh NUD failure tracking: NUD_REACHABLE resets the failure
- * count, NUD_FAILED increments it, and 20 consecutive failures remove the
- * VM from remote_vms, clear the Linux neighbour entry, and remove the
- * failure counter.
- */
+/* Atlas WG Mesh NUD failure tracking: NUD_REACHABLE resets the failure count, NUD_FAILED increments it, and 20 consecutive failures clear the Linux neighbour entry and remove the failure counter. */
 #ifndef ATLAS_NUD_HOOK_H
 #define ATLAS_NUD_HOOK_H
 
@@ -155,19 +151,15 @@ static __always_inline void remove_remote_vm(const struct in6_addr *vm)
 
 	if (!local_config) return;
 
-	bpf_map_delete_elem(&remote_vms, vm);
-
 	split_address(vm, &addr_hi, &addr_lo);
 
-		/* Clear the corresponding Linux neighbour entry. */
+		/* Clear the Linux neighbour entry. */
 	atlas_delete_neigh(local_config->discovery_ifindex, addr_hi, addr_lo);
 
 	bpf_map_delete_elem(&nud_failures, vm);
 }
 
-/* NUD failure hook. neigh_timer_handler observes the NUD timer processing
- * where the neighbour reaches NUD_FAILED.
- */
+/* NUD failure hook. neigh_timer_handler observes the NUD timer processing where the neighbour reaches NUD_FAILED. */
 SEC("tracepoint/neigh/neigh_timer_handler")
 int handle_atlas_nud_failure(struct trace_event_raw_neigh_timer_handler *ctx)
 {
@@ -178,8 +170,8 @@ int handle_atlas_nud_failure(struct trace_event_raw_neigh_timer_handler *ctx)
 
 	get_nud_address(ctx->primary_key6, &vm);
 
-		/* Only track addresses that Atlas currently knows as remote VMs. */
-	if (!bpf_map_lookup_elem(&remote_vms, &vm)) return 0;
+	/* Only track VM addresses that Atlas learned. */
+	if (!is_virtual_machine_address(&vm)) return 0;
 
 		/* The tracepoint exposes the neighbour flags as a u8. NTF_EXT_LEARNED
 	 * identifies the externally learned Atlas neighbour.
@@ -192,18 +184,13 @@ int handle_atlas_nud_failure(struct trace_event_raw_neigh_timer_handler *ctx)
 
 	if (count < ATLAS_NUD_FAILURE_LIMIT) return 0;
 
-		/* 20 consecutive failures: remove the remote_vms entry, the Linux
-	 * neighbour entry, and the NUD failure counter.
-	 */
+		/* 20 consecutive failures: clear the Linux neighbour entry and the NUD failure counter. */
 	remove_remote_vm(&vm);
 
 	return 0;
 }
 
-/* NUD success hook. neigh_update exposes the state that the update is
- * changing to. The current state may still be the old state, so use
- * new_state rather than nud_state.
- */
+/* NUD success hook. neigh_update exposes the state that the update is changing to. The current state may still be the old state, so use new_state rather than nud_state. */
 SEC("tracepoint/neigh/neigh_update")
 int handle_atlas_nud_reachable(struct trace_event_raw_neigh_update *ctx)
 {
@@ -213,10 +200,8 @@ int handle_atlas_nud_reachable(struct trace_event_raw_neigh_update *ctx)
 
 	get_nud_address(ctx->primary_key6, &vm);
 
-		/* Only reset counters for addresses that Atlas currently knows as
-	 * remote VMs.
-	 */
-	if (!bpf_map_lookup_elem(&remote_vms, &vm)) return 0;
+	/* Only reset counters for VM addresses that Atlas learned. */
+	if (!is_virtual_machine_address(&vm)) return 0;
 
 		/* The tracepoint exposes the neighbour flags as a u8. NTF_EXT_LEARNED
 	 * identifies the externally learned Atlas neighbour.

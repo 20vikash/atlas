@@ -2,12 +2,11 @@ package host
 
 import (
 	"context"
-	"net/netip"
+	"runtime"
 	"strings"
 	"testing"
 
 	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
-	"runtime"
 
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
@@ -38,18 +37,33 @@ func (dependencies *testHostDependencies) SetImagePolicies(_ context.Context, im
 }
 
 type testUnicastTransport struct {
-	peers    []netip.Addr
+	enabled  bool
 	disabled bool
 }
 
-func (transport *testUnicastTransport) Apply(_ context.Context, peers []netip.Addr) error {
-	transport.peers = append([]netip.Addr(nil), peers...)
+func (transport *testUnicastTransport) Enable(context.Context) error {
+	transport.enabled = true
 	return nil
 }
 
 func (transport *testUnicastTransport) Disable(context.Context) error {
 	transport.disabled = true
 	return nil
+}
+
+type testPeerState struct {
+	syncs int
+}
+
+func (state *testPeerState) SyncPeerState(context.Context) error {
+	state.syncs++
+	return nil
+}
+
+type testUplink struct{}
+
+func (testUplink) UplinkMAC() (string, error) {
+	return "aa:bb:cc:dd:ee:ff", nil
 }
 
 func (dependencies *testHostDependencies) List(context.Context) ([]vm.Information, error) {
@@ -144,7 +158,7 @@ func TestSynchronizeAllowsMeshToBeDisabled(t *testing.T) {
 	}
 }
 
-func TestSynchronizeAppliesTheUnicastPeerSet(t *testing.T) {
+func TestSynchronizeEnablesUnicastTransportInUnicastMode(t *testing.T) {
 	dependencies := &testHostDependencies{}
 	unicast := &testUnicastTransport{}
 	service, err := NewService(Dependencies{
@@ -155,13 +169,12 @@ func TestSynchronizeAppliesTheUnicastPeerSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	peers := []netip.Addr{netip.MustParseAddr("10.20.0.12")}
-	if _, err := service.Synchronize(t.Context(), DesiredState{UnicastPeers: peers}); err != nil {
+	if _, err := service.Synchronize(t.Context(), DesiredState{UnicastEnabled: true}); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(unicast.peers) != 1 || unicast.peers[0] != peers[0] {
-		t.Fatalf("unicast peers = %v, want %v", unicast.peers, peers)
+	if !unicast.enabled || unicast.disabled {
+		t.Fatalf("unicast transport = enabled %t disabled %t, want an enabled transport", unicast.enabled, unicast.disabled)
 	}
 }
 
@@ -180,12 +193,12 @@ func TestSynchronizeDisablesUnicastTransportInMulticastMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !unicast.disabled || unicast.peers != nil {
-		t.Fatalf("unicast transport = %+v, want a disabled transport", unicast)
+	if !unicast.disabled || unicast.enabled {
+		t.Fatalf("unicast transport = enabled %t disabled %t, want a disabled transport", unicast.enabled, unicast.disabled)
 	}
 }
 
-func TestSynchronizeRejectsUnicastPeersWithoutATransport(t *testing.T) {
+func TestSynchronizeRejectsUnicastWithoutATransport(t *testing.T) {
 	dependencies := &testHostDependencies{}
 	service, err := NewService(Dependencies{
 		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
@@ -195,8 +208,34 @@ func TestSynchronizeRejectsUnicastPeersWithoutATransport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.Synchronize(t.Context(), DesiredState{UnicastPeers: []netip.Addr{}})
+	_, err = service.Synchronize(t.Context(), DesiredState{UnicastEnabled: true})
 	if err == nil || !strings.Contains(err.Error(), "unicast") {
 		t.Fatalf("error = %v, want an unicast transport failure", err)
+	}
+}
+
+func TestSynchronizeSyncsPeerStateAndReportsTheUplinkMAC(t *testing.T) {
+	dependencies := &testHostDependencies{}
+	peerState := &testPeerState{}
+	service, err := NewService(Dependencies{
+		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
+		PeerState: peerState, Uplink: testUplink{}, Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.Synchronize(t.Context(), DesiredState{
+		WireGuardPeers: []network.WireGuardPeer{{Node: "node-2"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if peerState.syncs != 1 {
+		t.Fatalf("peer state syncs = %d, want 1", peerState.syncs)
+	}
+	if result.UplinkMAC != "aa:bb:cc:dd:ee:ff" {
+		t.Fatalf("uplink MAC = %q, want aa:bb:cc:dd:ee:ff", result.UplinkMAC)
 	}
 }

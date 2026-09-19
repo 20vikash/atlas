@@ -1,6 +1,6 @@
 obj-m += atlas_neigh.o
 
-KDIR := /lib/modules/$(shell uname -r)/build
+KDIR ?= /lib/modules/$(shell uname -r)/build
 
 all:
 	$(MAKE) -C $(KDIR) M=$(CURDIR) modules

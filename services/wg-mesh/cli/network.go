@@ -373,7 +373,7 @@ func requireNeighbourKfunc() error {
 		return nil
 	}
 
-	return errors.New("the atlas_neigh kernel module is not loaded; build it with make module and load it before configure")
+	return errors.New("the atlas_neigh kernel module is not loaded; load it with atlas-wg-mesh module install")
 }
 
 func runCommand(name string, arguments ...string) error {

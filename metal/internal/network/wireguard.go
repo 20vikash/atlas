@@ -29,6 +29,8 @@ type WireGuardPeer struct {
 	NodeID    uint32 `json:"node_id"`
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
+	// MAC is the discovery uplink MAC of the peer host. The mesh uses it to identify the sender of an NDP advertisement.
+	MAC string `json:"mac"`
 }
 
 // WireGuardConfig identifies the interface and persistent peer state.
