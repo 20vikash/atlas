@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
+from math import isfinite
 from types import MappingProxyType
 from typing import Any
 
@@ -42,7 +43,9 @@ PROVIDER_IMMUTABLE_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 	}
 )
 
-OPTIONAL_STRING_FIELDS = frozenset({"central_jwks_url"})
+OPTIONAL_STRING_FIELDS = frozenset(
+	{"central_jwks_url", "default_metal_machine_size", "default_metal_machine_image"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,12 @@ class AtlasSetupConfiguration:
 	letsencrypt_email: str
 	is_letsencrypt_staging: bool
 	is_wildcard_tls_auto_renew_enabled: bool
+	use_dedicated_sleepy_vm_hosts: bool
+	placement_strategy: str
+	sleepy_vm_overcommit_factor: float
+	auto_spawn_metal_server: bool
+	default_metal_machine_size: str
+	default_metal_machine_image: str
 	scaleway_organization_id: str = ""
 	scaleway_project_id: str = ""
 	scaleway_zone: str = ""
@@ -101,6 +110,9 @@ class AtlasSetupConfiguration:
 		string_fields = expected_fields - {
 			"region_id",
 			"private_network_mtu",
+			"sleepy_vm_overcommit_factor",
+			"use_dedicated_sleepy_vm_hosts",
+			"auto_spawn_metal_server",
 			"is_letsencrypt_staging",
 			"is_wildcard_tls_auto_renew_enabled",
 		}
@@ -116,11 +128,36 @@ class AtlasSetupConfiguration:
 			raise ValueError("Atlas setup field region_id must be from 0 through 65535")
 		if values["private_network_mtu"] <= 0:
 			raise ValueError("Atlas setup field private_network_mtu must be positive")
-		for field in ("is_letsencrypt_staging", "is_wildcard_tls_auto_renew_enabled"):
+		for field in (
+			"use_dedicated_sleepy_vm_hosts",
+			"auto_spawn_metal_server",
+			"is_letsencrypt_staging",
+			"is_wildcard_tls_auto_renew_enabled",
+		):
 			if not isinstance(values[field], bool):
 				raise ValueError(f"Atlas setup field {field} must be true or false")
+		factor = values["sleepy_vm_overcommit_factor"]
+		if (
+			not isinstance(factor, (int, float))
+			or isinstance(factor, bool)
+			or not isfinite(factor)
+			or factor < 1
+		):
+			raise ValueError(
+				"Atlas setup field sleepy_vm_overcommit_factor must be a finite number of at least 1"
+			)
+		if values["auto_spawn_metal_server"]:
+			for field in ("default_metal_machine_size", "default_metal_machine_image"):
+				if not values[field].strip():
+					raise ValueError(
+						f"Atlas setup field {field} is required when auto_spawn_metal_server is true"
+					)
 
-		normalized_values = {**values, "region_name": values["region_name"].strip().lower()}
+		normalized_values = {
+			**values,
+			"region_name": values["region_name"].strip().lower(),
+			"sleepy_vm_overcommit_factor": float(factor),
+		}
 		return cls(**normalized_values)
 
 	def settings_values(self) -> dict[str, object]:

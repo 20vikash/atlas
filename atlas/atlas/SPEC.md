@@ -67,7 +67,7 @@ A build runs only when its source hash changes. Atlas publishes the result as a 
 
 ## Automatic setup
 
-The `configure-atlas` site command reads one JSON document from standard input. The `atlas-vm` setup script uses this command and does not put secrets in process arguments.
+The `configure-atlas` site command reads one JSON document from standard input. The `atlas-vm` setup script uses this command and does not put secrets in process arguments. The script also applies the VM placement and Metal auto-spawn settings from `[atlas.vm_scheduling]`.
 
 The command keeps provider resource identifiers after each successful setup phase. A repeated command updates mutable settings and rejects changes to completed provider identities.
 

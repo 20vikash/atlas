@@ -52,6 +52,12 @@ class ConfigurationTest(unittest.TestCase):
 		self.assertEqual(guest.atlas_base_url, "https://atlas.example.com")
 		self.assertEqual(guest.atlas_setup_values["region_id"], 1)
 		self.assertEqual(guest.atlas_setup_values["scaleway_zone"], "fr-par-1")
+		self.assertTrue(guest.atlas_setup_values["use_dedicated_sleepy_vm_hosts"])
+		self.assertEqual(guest.atlas_setup_values["placement_strategy"], "balanced")
+		self.assertEqual(guest.atlas_setup_values["sleepy_vm_overcommit_factor"], 1.0)
+		self.assertFalse(guest.atlas_setup_values["auto_spawn_metal_server"])
+		self.assertEqual(guest.atlas_setup_values["default_metal_machine_size"], "")
+		self.assertEqual(guest.atlas_setup_values["default_metal_machine_image"], "")
 		self.assertEqual(guest.bootstrap_password, "generated-bootstrap-password")
 
 	def test_aws_example_is_valid_for_both_readers(self) -> None:
@@ -125,6 +131,24 @@ class ConfigurationTest(unittest.TestCase):
 		self.path.write_text(self.path.read_text().replace('region_name = "par-1"', 'region_nmae = "par-1"'))
 
 		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "atlas.region_nmae"):
+			atlas_vm.Settings.read(self.path)
+
+	def test_auto_spawn_needs_both_metal_catalog_names(self) -> None:
+		self.path.write_text(
+			self.path.read_text().replace("auto_spawn_metal_server = false", "auto_spawn_metal_server = true")
+		)
+
+		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "default_metal_machine_size is required"):
+			atlas_vm.Settings.read(self.path)
+
+	def test_sleepy_vm_overcommit_factor_must_be_at_least_one(self) -> None:
+		self.path.write_text(
+			self.path.read_text().replace(
+				"sleepy_vm_overcommit_factor = 1.0", "sleepy_vm_overcommit_factor = 0.5"
+			)
+		)
+
+		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "finite number of at least 1"):
 			atlas_vm.Settings.read(self.path)
 
 	def test_pilot_password_is_rejected(self) -> None:

@@ -21,6 +21,8 @@ The configuration must contain the Atlas region, Route53, and Let's Encrypt valu
 
 Atlas uses the `pilot.site` value with HTTPS as its public URL. Set `atlas.base_url` only if the public URL is different.
 
+The `[atlas.vm_scheduling]` table configures VM placement and optional Metal Server auto-spawn. When auto-spawn is enabled, set both machine fields to names from the selected provider catalogs.
+
 The setup generates a temporary password for Pilot and the site Administrator. It does not put this password in the configuration or output.
 
 The setup creates one Secure Shell key for the `pilot.user`. Atlas uses this key to manage Metal Servers. The setup keeps this key when you run it again.
