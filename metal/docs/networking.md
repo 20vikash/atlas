@@ -58,23 +58,7 @@ Metal inspects changed firewalls on the next reconcile pass. It also audits unch
 
 Each VM has a private IPv6 address in `fdaa::/16`. Atlas WG Mesh routes it between hosts. Metal registers the address when it creates the veth pair and unregisters it when it removes the pair.
 
-```text
-guest fdaa::x
-    |
-   tap0  fe80::1
-    |
-namespace metal-<id>          route fdaa::x/128 dev tap0
-    |                         route fdaa::/16 via fe80::1 dev vg-<user-id>
- vg-<user-id>                 proxy NDP for fdaa::x
-    |
- vh-<user-id>  fe80::1        Atlas WG Mesh vm_hook, TC ingress
-    |
-   wg0
-```
-
-Atlas WG Mesh assumes the VM is directly behind the interface that it hooks. Metal puts a network namespace between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP. The host route from `vm add` is on-link on `vh-<user-id>`.
-
-Atlas WG Mesh also adds a proxy NDP entry for the guest address on the shared VLAN, so other hosts resolve the guest through the hosting node. Remote hosts learn the guest location from the NDP advertisement, whose frame source MAC identifies the owning host through the WireGuard peer state. No Atlas discovery daemon and no kernel module run.
+How the mesh forwards packets and discovers VM locations: [Atlas WG Mesh design guide](../../services/wg-mesh/docs/design.md).
 
 `metald` runs the `atlas-wg-mesh` CLI. On every start it runs `status` and configures the host when the CLI reports no configuration. It then replays the existing VM network configurations, so a reinstalled or reset host restores the VM registrations without an operator.
 
