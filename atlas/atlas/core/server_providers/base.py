@@ -48,7 +48,6 @@ class ServerCreateRequest:
 	"""Store the data for one idempotent provider server request."""
 
 	name: str
-	identity_key: str
 	server_size: str
 	server_image: str
 	size_provider_metadata: Mapping[str, Any]

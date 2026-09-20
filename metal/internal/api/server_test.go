@@ -847,7 +847,7 @@ func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 	server := newServerWithServices(t, driver, services, wireGuardManager)
 
 	request := `{
-		"wireguard_peers":[{"node":"node-2","node_id":2,"public_key":"key-2","address":"192.0.2.2:51820"}],
+		"wireguard_peers":[{"node":"node-2","mesh_address":"fdab:1::2","public_key":"key-2","address":"192.0.2.2:51820"}],
 		"images":[{
 			"ref":"sha256:image",
 			"architecture":"amd64",

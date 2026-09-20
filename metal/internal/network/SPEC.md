@@ -112,6 +112,8 @@ When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interf
 
 `ApplyPrivilegedAddresses` and `WireGuardManager.Apply` each replace a complete set. `Apply` drops this host from the peer set it receives and records what it applied, so it never peers with itself and never disturbs peers added by other tools.
 
+Each peer supplies `mesh_address`, which becomes its `AllowedIPs` entry. `Apply` rejects a set with a missing, invalid, or repeated mesh address.
+
 ## Related
 
 - [docs/networking.md](../../docs/networking.md) gives the topology and the reasons behind this design.

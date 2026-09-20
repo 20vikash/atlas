@@ -4,13 +4,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import frappe
 from frappe import _
-from frappe.desk.utils import slug
 from frappe.model.document import Document
-from frappe.model.naming import make_autoname
 from frappe.utils import add_days, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 
@@ -54,7 +51,6 @@ class MetalServer(Document):
 		port: DF.Int
 		private_ipv4_address: DF.Data | None
 		private_network_interface: DF.Data | None
-		provider_identity_key: DF.Data | None
 		provider_metadata: DF.Code | None
 		provider_server_id: DF.Data | None
 		public_ipv4_address: DF.Data | None
@@ -62,6 +58,7 @@ class MetalServer(Document):
 		server_image: DF.Link
 		server_size: DF.Link
 		status: DF.Literal["Pending", "Installing", "Running", "Stopped", "Failed", "Deleted"]
+		title: DF.Data
 		wireguard_ip_address: DF.Data | None
 		wireguard_public_key: DF.Data | None
 	# end: auto-generated types
@@ -82,22 +79,12 @@ class MetalServer(Document):
 
 		return self._settings
 
-	def autoname(self) -> None:
-		"""Name the server from its region."""
-		if not self.settings.region_name:
-			frappe.throw(_("Atlas Settings requires a region name before creating a Metal Server"))
-
-		self.name = make_autoname(f"node-{slug(self.settings.region_name)}-.#####", doc=self)
-
 	def before_validate(self) -> None:
 		"""Fill values that depend on the selected size and image."""
 		self.settings.server_provider_controller.validate_settings()
 		self._validate_provider_catalog()
 		if self.provider_server_id:
 			return
-
-		if not self.provider_identity_key:
-			self.provider_identity_key = uuid4().hex
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		self.architecture = size.architecture
@@ -106,14 +93,11 @@ class MetalServer(Document):
 		"""Create the provider host once, including after a worker retry."""
 		if self.provider_server_id:
 			return
-		if not self.provider_identity_key:
-			frappe.throw(_("Metal Server {0} has no provider identity key.").format(self.name))
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		image = frappe.get_doc("Metal Server Image", self.server_image)
 		request = ServerCreateRequest(
 			name=self.name,
-			identity_key=self.provider_identity_key,
 			server_size=self.server_size,
 			server_image=self.server_image,
 			size_provider_metadata=self._provider_metadata(size.provider_metadata),

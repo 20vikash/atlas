@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import frappe
 from frappe import _
@@ -19,6 +20,11 @@ FAILURE_REASON_LINES = 3
 FAILURE_REASON_LENGTH = 500
 WIREGUARD_CONFIGURE_TIMEOUT_SECONDS = 300
 METALD_INSTALL_TIMEOUT_SECONDS = 1_200
+
+MESH_PREFIX = 0xFDAB
+# The prefix and the region take the first 32 bits of the address, so the low 96
+# bits of the server UUID are the host part.
+MESH_HOST_MASK = (1 << 96) - 1
 
 
 class HostInstallation:
@@ -135,14 +141,12 @@ class HostInstallation:
 	@property
 	def wireguard_ip_address(self) -> str:
 		"""Return the host mesh address for this server."""
-		node_number = self.server.name.rsplit("-", 1)[-1]
-		if not node_number.isdigit():
-			frappe.throw(_("Metal Server {0} has no node number in its name.").format(self.server.name))
-
 		region_id = self.server.settings.region_id
 		if not 0 <= region_id <= 0xFFFF:
 			frappe.throw(_("Atlas Settings region ID must fit in one IPv6 field."))
-		return str(ipaddress.IPv6Address((0xFDAB << 112) | (region_id << 96) | int(node_number)))
+
+		host = UUID(self.server.name).int & MESH_HOST_MASK
+		return str(ipaddress.IPv6Address((MESH_PREFIX << 112) | (region_id << 96) | host))
 
 
 def throw_script_failure(message: str, result: "SSHResult | None") -> None:

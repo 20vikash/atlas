@@ -124,19 +124,25 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 	servers = frappe.get_all(
 		"Metal Server",
 		filters={"status": "Running", "is_provisioning_completed": 1},
-		fields=["name", "wireguard_public_key", "private_ipv4_address", "port"],
+		fields=[
+			"name",
+			"wireguard_public_key",
+			"wireguard_ip_address",
+			"private_ipv4_address",
+			"port",
+		],
 	)
 	peers = []
 	for server in servers:
 		if not server.wireguard_public_key or not server.private_ipv4_address:
 			continue
-		node_id = server.name.rsplit("-", 1)[-1]
-		if not node_id.isdigit():
+		if not server.wireguard_ip_address:
 			continue
+
 		peers.append(
 			{
 				"node": server.name,
-				"node_id": int(node_id),
+				"mesh_address": server.wireguard_ip_address,
 				"public_key": server.wireguard_public_key,
 				"address": f"{server.private_ipv4_address}:{server.port}",
 			}

@@ -56,14 +56,17 @@ def _disk(device: str) -> dict:
 
 _LSBLK_OUTPUT = json.dumps({"blockdevices": [_disk("sda"), _disk("sdb")]})
 
+SERVER_NAME = "01a0c05f-e209-70ad-a183-dda2a727cd8b"
+# The low 96 bits of SERVER_NAME under region 1.
+SERVER_MESH_ADDRESS = "fdab:1:e209:70ad:a183:dda2:a727:cd8b"
+
 
 class TestServer(UnitTestCase):
-	def test_before_validate_sets_key_without_provider_creation(self) -> None:
+	def test_before_validate_takes_the_architecture_without_provider_creation(self) -> None:
 		provider = SimpleNamespace(validate_settings=Mock(), ensure_server=Mock())
 		server = SimpleNamespace(
-			name="node-test-00007",
+			name=SERVER_NAME,
 			provider_server_id=None,
-			provider_identity_key=None,
 			architecture=None,
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
@@ -78,34 +81,11 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.before_validate(server)
 
-		self.assertEqual(len(server.provider_identity_key), 32)
 		provider.validate_settings.assert_called_once_with()
 		self.assertEqual(server.architecture, "amd64")
 		provider.ensure_server.assert_not_called()
 
-	def test_before_validate_keeps_existing_identity_key(self) -> None:
-		provider = SimpleNamespace(validate_settings=Mock())
-		server = SimpleNamespace(
-			provider_server_id=None,
-			provider_identity_key=None,
-			server_size="Scaleway/arm-size",
-			architecture=None,
-			settings=SimpleNamespace(server_provider_controller=provider),
-			_validate_provider_catalog=Mock(),
-		)
-
-		with patch(
-			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
-			return_value=SimpleNamespace(architecture="arm64"),
-		):
-			MetalServer.before_validate(server)
-			key = server.provider_identity_key
-			MetalServer.before_validate(server)
-
-		self.assertEqual(server.architecture, "arm64")
-		self.assertEqual(server.provider_identity_key, key)
-
-	def test_ensure_provider_server_uses_stored_identity_key(self) -> None:
+	def test_ensure_provider_server_identifies_the_host_by_name(self) -> None:
 		provider = SimpleNamespace(
 			ensure_server=Mock(
 				return_value=ProviderServer(
@@ -117,9 +97,8 @@ class TestServer(UnitTestCase):
 			)
 		)
 		server = SimpleNamespace(
-			name="node-test-00007",
+			name=SERVER_NAME,
 			provider_server_id=None,
-			provider_identity_key="stored-key",
 			server_size="Scaleway/size",
 			server_image="Scaleway/image",
 			status="Pending",
@@ -133,7 +112,7 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.ensure_provider_server(server)
 
-		self.assertEqual(provider.ensure_server.call_args.args[0].identity_key, "stored-key")
+		self.assertEqual(provider.ensure_server.call_args.args[0].name, SERVER_NAME)
 		self.assertEqual(server.provider_server_id, "server-id")
 
 	def test_provisioning_worker_runs_as_administrator(self) -> None:
@@ -561,7 +540,7 @@ class TestServer(UnitTestCase):
 		from atlas.metal_server.core.host_installation import throw_script_failure
 
 		with self.assertRaises(frappe.ValidationError) as raised:
-			throw_script_failure("Could not upgrade metald on server node-test-00007.", None)
+			throw_script_failure(f"Could not upgrade metald on server {SERVER_NAME}.", None)
 
 		self.assertIn("did not run", str(raised.exception))
 
@@ -581,44 +560,34 @@ class TestServer(UnitTestCase):
 
 		create_for_script_file.assert_not_called()
 
-	def test_get_wireguard_ip_address_uses_the_node_number(self) -> None:
+	def test_get_wireguard_ip_address_uses_the_server_uuid(self) -> None:
 		server = self._server(status="Running")
 
-		self.assertEqual(MetalServer._get_wireguard_ip_address(server), "fdab:1::7")
+		self.assertEqual(MetalServer._get_wireguard_ip_address(server), SERVER_MESH_ADDRESS)
 
-	def test_get_wireguard_ip_address_writes_hexadecimal_fields(self) -> None:
-		"""An IPv6 field is hexadecimal, so node 16 is 10 and region 26 is 1a."""
+	def test_get_wireguard_ip_address_writes_the_region_in_hexadecimal(self) -> None:
+		"""An IPv6 field is hexadecimal, so region 26 is 1a."""
 		server = self._server(status="Running")
-		server.name = "node-test-00016"
 		server.settings.region_id = 26
 
-		self.assertEqual(MetalServer._get_wireguard_ip_address(server), "fdab:1a::10")
+		self.assertEqual(
+			MetalServer._get_wireguard_ip_address(server), "fdab:1a:e209:70ad:a183:dda2:a727:cd8b"
+		)
 
-	def test_get_wireguard_ip_address_carries_a_large_node_number(self) -> None:
-		"""One IPv6 field holds 65535, and the name series runs to 99999."""
+	def test_get_wireguard_ip_address_keeps_the_host_inside_96_bits(self) -> None:
+		"""Only the low 96 bits of the UUID fit, so the region field stays intact."""
 		server = self._server(status="Running")
-		for node_number, want in (
-			("01000", "fdab:1::3e8"),
-			("65535", "fdab:1::ffff"),
-			("99999", "fdab:1::1:869f"),
+		for name, want in (
+			("00000000-0000-0000-0000-000000000000", "fdab:1::"),
+			("ffffffff-ffff-ffff-ffff-ffffffffffff", "fdab:1:ffff:ffff:ffff:ffff:ffff:ffff"),
 		):
-			with self.subTest(node_number=node_number):
-				server.name = f"node-test-{node_number}"
+			with self.subTest(name=name):
+				server.name = name
 				self.assertEqual(MetalServer._get_wireguard_ip_address(server), want)
 
 	def test_get_wireguard_ip_address_rejects_an_oversized_region(self) -> None:
 		server = self._server(status="Running")
 		server.settings.region_id = 0x10000
-
-		with patch(
-			"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
-		):
-			with self.assertRaises(ValueError):
-				MetalServer._get_wireguard_ip_address(server)
-
-	def test_get_wireguard_ip_address_rejects_a_name_without_a_node_number(self) -> None:
-		server = self._server(status="Running")
-		server.name = "node-test-main"
 
 		with patch(
 			"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
@@ -660,12 +629,12 @@ class TestServer(UnitTestCase):
 		self.assertEqual(
 			arguments["environment"],
 			{
-				"WIREGUARD_ADDRESS": "fdab:1::7",
+				"WIREGUARD_ADDRESS": SERVER_MESH_ADDRESS,
 				"WIREGUARD_LISTEN_PORT": 51820,
 			},
 		)
 		self.assertFalse(arguments["run_in_background"])
-		server.db_set.assert_any_call("wireguard_ip_address", "fdab:1::7")
+		server.db_set.assert_any_call("wireguard_ip_address", SERVER_MESH_ADDRESS)
 		server.db_set.assert_called_with("wireguard_public_key", "SGVsbG9XaXJlR3VhcmRQdWJsaWNLZXlIZXJlPQ=")
 
 	def test_configure_wireguard_job_rejects_output_without_a_public_key(self) -> None:
@@ -836,14 +805,14 @@ class TestServer(UnitTestCase):
 	def _server(*, status: str) -> SimpleNamespace:
 		server = SimpleNamespace(
 			doctype="Metal Server",
-			name="node-test-00007",
+			name=SERVER_NAME,
 			status=status,
 			provider_server_id="server-id",
 			provider_metadata="{}",
 			is_provisioning_completed=False,
-			setup_job_id="atlas||server-provision||node-test-00007",
-			wireguard_job_id="atlas||server-wireguard||node-test-00007",
-			metald_job_id="atlas||server||metald||node-test-00007",
+			setup_job_id=f"atlas||server-provision||{SERVER_NAME}",
+			wireguard_job_id=f"atlas||server-wireguard||{SERVER_NAME}",
+			metald_job_id=f"atlas||server||metald||{SERVER_NAME}",
 			wireguard_ip_address=None,
 			private_ipv4_address="10.0.0.7",
 			private_network_interface="eno1.1878",
@@ -886,7 +855,7 @@ class TestServer(UnitTestCase):
 
 class TestExpiringCertificateRenewal(UnitTestCase):
 	def test_renewal_queues_each_server_inside_the_window(self) -> None:
-		server = Mock(metald_job_id="atlas||server||metald||node-test-00007")
+		server = Mock(metald_job_id=f"atlas||server||metald||{SERVER_NAME}")
 
 		with (
 			patch(
@@ -903,7 +872,7 @@ class TestExpiringCertificateRenewal(UnitTestCase):
 			) as add_days,
 			patch(
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all",
-				return_value=["node-test-00007"],
+				return_value=[SERVER_NAME],
 			) as get_all,
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc", return_value=server),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
@@ -922,7 +891,7 @@ class TestExpiringCertificateRenewal(UnitTestCase):
 		)
 
 	def test_renewal_skips_a_server_with_a_running_metald_job(self) -> None:
-		server = Mock(metald_job_id="atlas||server||metald||node-test-00007")
+		server = Mock(metald_job_id=f"atlas||server||metald||{SERVER_NAME}")
 
 		with (
 			patch(
@@ -939,7 +908,7 @@ class TestExpiringCertificateRenewal(UnitTestCase):
 			),
 			patch(
 				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all",
-				return_value=["node-test-00007"],
+				return_value=[SERVER_NAME],
 			),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc", return_value=server),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
