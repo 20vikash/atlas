@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv6Address
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
@@ -70,6 +71,7 @@ def create_certificate_authority(identity: str) -> tuple[str, str]:
 			),
 			critical=True,
 		)
+		.add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
 		.sign(private_key, hashes.SHA256())
 	)
 	return (
@@ -130,6 +132,12 @@ def issue_certificate(
 			),
 			critical=False,
 		)
+		.add_extension(x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
+		# OpenSSL 3.5 requires an authority key identifier on issued certificates.
+		.add_extension(
+			x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_certificate.public_key()),
+			critical=False,
+		)
 		.sign(ca_private_key, hashes.SHA256())
 	)
 	return (
@@ -145,7 +153,7 @@ def verify_issued_certificate(certificate_pem: str, ca_certificate_pem: str) -> 
 	_validate_certificate_authority(ca_certificate)
 	try:
 		certificate.verify_directly_issued_by(ca_certificate)
-	except ValueError as error:
+	except (ValueError, TypeError, InvalidSignature) as error:
 		raise CertificateError(
 			"The certificate was not issued by the regional certificate authority."
 		) from error
