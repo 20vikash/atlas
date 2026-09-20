@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -28,9 +29,11 @@ const (
 var bpfObject []byte
 
 // Must match struct config in bpf/state.h. DiscoveryIndex is the discovery
-// interface for NDP, UplinkIPv4 sources the unicast transport, WireGuardIPv6
-// addresses this host in tunnels, and UplinkIPv6 sources the kernel neighbour
-// solicitation. The trailing padding keeps the Go layout aligned with the BPF
+// interface for NDP, UplinkIPv4 sources the unicast transport on that
+// interface, WireGuardIPv6 addresses this host in tunnels, and UplinkIPv6
+// sources the kernel neighbour solicitation. The unicast hooks pick the
+// public or the private peer address and emit ifindex by the interface they
+// run on. The interior padding keeps the Go layout aligned with the BPF
 // struct.
 type hostConfig struct {
 	DiscoveryIndex uint32
@@ -39,6 +42,8 @@ type hostConfig struct {
 	UplinkIPv6     [16]byte
 	DiscoveryMAC   [6]byte
 	_              [2]byte
+	PublicIfIndex  uint32
+	PrivateIfIndex uint32
 }
 
 // programPath returns the pin for a program: the installed release first,
@@ -150,9 +155,19 @@ func readPinnedConfig() (hostConfig, error) {
 	}
 	defer configMap.Close()
 
-	var config hostConfig
+	// Read through a raw buffer sized to the map itself, so a value layout
+	// change degrades to zero fields instead of failing the forced
+	// migration that must read the old configuration.
+	var raw []byte
+	if err := configMap.Lookup(uint32(0), &raw); err != nil {
+		return hostConfig{}, err
+	}
 
-	if err := configMap.Lookup(uint32(0), &config); err != nil {
+	var config hostConfig
+	buffer := make([]byte, binary.Size(config))
+	copy(buffer, raw)
+
+	if err := binary.Read(bytes.NewReader(buffer), binary.NativeEndian, &config); err != nil {
 		return hostConfig{}, err
 	}
 

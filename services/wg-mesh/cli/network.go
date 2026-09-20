@@ -88,13 +88,45 @@ func readHostConfig(uplinkName, wireGuardName string) (hostConfig, error) {
 	var discoveryMAC [6]byte
 	copy(discoveryMAC[:], uplinkInterface.HardwareAddr)
 
-	return hostConfig{
+	config := hostConfig{
 		DiscoveryIndex: uint32(uplinkInterface.Index),
 		UplinkIPv4:     [4]byte(uplinkIPv4.To4()),
 		WireGuardIPv6:  [16]byte(wireGuardIPv6.To16()),
 		UplinkIPv6:     [16]byte(uplinkIPv6.To16()),
 		DiscoveryMAC:   discoveryMAC,
-	}, nil
+	}
+
+	config.PublicIfIndex, config.PrivateIfIndex = underlayIfIndexes(uplinkInterface)
+
+	return config, nil
+}
+
+// underlayIfIndexes returns the ifindexes of the public and the private
+// underlay interface. The public interface owns the default route, and the
+// uplink is the private interface whenever it is not the public one. The
+// unicast hooks pick their underlay by that split.
+func underlayIfIndexes(uplink *net.Interface) (uint32, uint32) {
+	publicName := defaultRouteInterface()
+	if publicName == "" || publicName == uplink.Name {
+		return uint32(uplink.Index), 0
+	}
+
+	public, err := net.InterfaceByName(publicName)
+	if err != nil {
+		return uint32(uplink.Index), 0
+	}
+
+	return uint32(public.Index), uint32(uplink.Index)
+}
+
+// defaultRouteInterface names the interface that owns the first IPv4 default route.
+func defaultRouteInterface() string {
+	output, err := commandOutput("ip", "-4", "-o", "route", "show", "default")
+	if err != nil {
+		return ""
+	}
+
+	return fieldAfter(strings.Fields(output), "dev")
 }
 
 type hostInterfaces struct {

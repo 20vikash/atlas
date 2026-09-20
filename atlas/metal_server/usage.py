@@ -130,7 +130,14 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 	servers = frappe.get_all(
 		"Metal Server",
 		filters={"status": "Running", "is_provisioning_completed": 1},
-		fields=["name", "wireguard_public_key", "public_ipv4_address", "port", "uplink_mac_address"],
+		fields=[
+			"name",
+			"wireguard_public_key",
+			"public_ipv4_address",
+			"private_ipv4_address",
+			"port",
+			"uplink_mac_address",
+		],
 	)
 	peers = []
 	for server in servers:
@@ -140,15 +147,17 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 		node_id = server.name.rsplit("-", 1)[-1]
 		if not node_id.isdigit():
 			continue
-		peers.append(
-			{
-				"node": server.name,
-				"node_id": int(node_id),
-				"public_key": server.wireguard_public_key,
-				"address": f"{server.public_ipv4_address}:{server.port}",
-				"mac": server.uplink_mac_address,
-			}
-		)
+		peer = {
+			"node": server.name,
+			"node_id": int(node_id),
+			"public_key": server.wireguard_public_key,
+			"address": f"{server.public_ipv4_address}:{server.port}",
+			"mac": server.uplink_mac_address,
+		}
+		# The unicast NDP transport needs the private address when its hook runs on the private interface.
+		if server.private_ipv4_address:
+			peer["private_address"] = server.private_ipv4_address
+		peers.append(peer)
 	return peers
 
 

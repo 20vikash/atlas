@@ -6,6 +6,8 @@ Atlas WG Mesh normally uses NDP on a shared Layer-2 VLAN. Use the unicast mode w
 
 The unicast mode transports the same NDP packets over the routed IPv4 underlay. A TC egress hook wraps each solicitation or advertisement in an outer IPv4 header, and a TC ingress hook removes that header on the receiving peer. Linux neighbour discovery, proxy NDP, and the WireGuard datapath are unchanged.
 
+The outer header and the emit interface follow the interface that carries the hooks. When the discovery interface is the private network interface, every packet uses the peer private IPv4 address and the local private interface index. Otherwise every packet uses the public pair. The pinned configuration holds both interface indexes, and every WireGuard peer entry carries both peer addresses.
+
 ## Requirements
 
 - Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`.

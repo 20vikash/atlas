@@ -34,7 +34,7 @@ static __always_inline __u16 atlas_unicast_csum_fold(__u32 sum)
 	return (__u16)~sum;
 }
 
-/* The configured peer with the given IPv4 address, or NULL. The map key is a separate stack variable, because its address is taken, so the verifier can bound the loop. */
+/* The configured peer with the given IPv4 address, or NULL. The map key is a separate stack variable, because its address is taken, so the verifier can bound the loop. Both peer addresses match, because a peer may transport over either network. */
 static __always_inline struct atlas_peer *atlas_unicast_peer_with_ipv4(__be32 address)
 {
 	__u32 index;
@@ -46,10 +46,16 @@ static __always_inline struct atlas_peer *atlas_unicast_peer_with_ipv4(__be32 ad
 
 		if (!candidate || candidate->ipv4 == 0) return NULL;
 
-		if (candidate->ipv4 == address) return candidate;
+		if (candidate->ipv4 == address || candidate->private_ipv4 == address) return candidate;
 	}
 
 	return NULL;
+}
+
+/* True when the private interface carries this hook, so the private underlay addresses the peers, and the public underlay does otherwise. */
+static __always_inline int atlas_unicast_on_private(struct __sk_buff *packet, struct config *local_config)
+{
+	return local_config->private_ifindex && packet->ifindex == local_config->private_ifindex;
 }
 
 /* Wrap a packet in an outer IPv4 header: the header space is added between the Ethernet header and the payload, and the Ethernet type becomes IPv4. The header bytes are stored by the caller per peer. */
@@ -89,20 +95,20 @@ static __always_inline int atlas_unicast_store_base_header(struct __sk_buff *pac
 	return 1;
 }
 
-/* Send one copy of the wrapped packet to a peer: store the peer IPv4 destination and checksum contribution, frame the copy with the peer MAC and the local uplink MAC, and emit it with bpf_clone_redirect(). Returns 0 on success. */
-static __always_inline int atlas_unicast_send_to_peer(struct __sk_buff *packet, struct atlas_peer *peer, struct config *local_config, __s64 base_sum)
+/* Send one copy of the wrapped packet to a peer: store the destination IPv4 address and checksum contribution, frame the copy with the peer MAC and the local uplink MAC, and emit it on the given ifindex with bpf_clone_redirect(). Returns 0 on success. */
+static __always_inline int atlas_unicast_send_to_peer(struct __sk_buff *packet, struct atlas_peer *peer, __be32 destination, struct config *local_config, __s64 base_sum, __u32 ifindex)
 {
 	__u16 checksum;
 
 	__s64 peer_sum;
 
-	peer_sum = bpf_csum_diff(NULL, 0, &peer->ipv4, sizeof(peer->ipv4), (__wsum)base_sum);
+	peer_sum = bpf_csum_diff(NULL, 0, &destination, sizeof(destination), (__wsum)base_sum);
 
 	if (peer_sum < 0) return -1;
 
 	checksum = atlas_unicast_csum_fold((__u32)peer_sum);
 
-	if (bpf_skb_store_bytes(packet, ETH_HLEN + ATLAS_UNICAST_IPV4_DESTINATION_OFFSET, &peer->ipv4, sizeof(peer->ipv4), BPF_F_INVALIDATE_HASH)) return -1;
+	if (bpf_skb_store_bytes(packet, ETH_HLEN + ATLAS_UNICAST_IPV4_DESTINATION_OFFSET, &destination, sizeof(destination), BPF_F_INVALIDATE_HASH)) return -1;
 
 	if (bpf_skb_store_bytes(packet, ETH_HLEN + ATLAS_UNICAST_IPV4_CHECKSUM_OFFSET, &checksum, sizeof(checksum), 0)) return -1;
 
@@ -110,7 +116,7 @@ static __always_inline int atlas_unicast_send_to_peer(struct __sk_buff *packet, 
 
 	if (bpf_skb_store_bytes(packet, ETH_ALEN, local_config->discovery_mac, ETH_ALEN, 0)) return -1;
 
-	return bpf_clone_redirect(packet, 2, 0);
+	return bpf_clone_redirect(packet, ifindex, 0);
 }
 
 /* Attached to TC egress on the discovery interface in a unicast environment. Wrapped packets are IPv4, so clones pass through unchanged.
@@ -138,11 +144,17 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 	__be32 *requester;
 
+	__be32 underlay_destination;
+
 	__s64 base_sum = 0;
 
 	__u16 wrapped_length;
 
 	__u32 index;
+
+	__u32 ifindex;
+
+	int on_private;
 
 	if ((void *)(eth + 1) > end) return TC_ACT_OK;
 
@@ -172,6 +184,10 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 		if (!local_config) return TC_ACT_OK;
 
+		on_private = atlas_unicast_on_private(packet, local_config);
+
+		ifindex = on_private ? local_config->private_ifindex : local_config->public_ifindex;
+
 		wrapped_length = sizeof(struct iphdr) + sizeof(struct ipv6hdr) + bpf_ntohs(ip6->payload_len);
 
 		if (!atlas_unicast_wrap_ipv4(packet) || !atlas_unicast_store_base_header(packet, local_config->underlay_ip4, wrapped_length, &base_sum)) {
@@ -187,7 +203,12 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 			if (!peer || peer->ipv4 == 0) continue;
 
-			if (atlas_unicast_send_to_peer(packet, peer, local_config, base_sum)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
+			underlay_destination = on_private ? peer->private_ipv4 : peer->ipv4;
+
+			/* A peer without an address on the active network cannot be reached there. */
+			if (!underlay_destination) continue;
+
+			if (atlas_unicast_send_to_peer(packet, peer, underlay_destination, local_config, base_sum, ifindex)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
 		}
 
 		emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAN_OUT, &target, NULL);
@@ -213,6 +234,10 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 	if (!local_config) return TC_ACT_OK;
 
+	on_private = atlas_unicast_on_private(packet, local_config);
+
+	ifindex = on_private ? local_config->private_ifindex : local_config->public_ifindex;
+
 	wrapped_length = sizeof(struct iphdr) + sizeof(struct ipv6hdr) + bpf_ntohs(ip6->payload_len);
 
 	if (!atlas_unicast_wrap_ipv4(packet) || !atlas_unicast_store_base_header(packet, local_config->underlay_ip4, wrapped_length, &base_sum)) {
@@ -220,7 +245,8 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 		return TC_ACT_OK;
 	}
 
-	if (atlas_unicast_send_to_peer(packet, requester_peer, local_config, base_sum)) {
+	/* The requester address already is the peer address on the network that carried the solicitation. */
+	if (atlas_unicast_send_to_peer(packet, requester_peer, *requester, local_config, base_sum, ifindex)) {
 		emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
 		return TC_ACT_SHOT;
 	}

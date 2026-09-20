@@ -19,7 +19,7 @@ var testHostConfig = hostConfig{WireGuardIPv6: [16]byte{0xfd, 0xab, 0, 0, 0, 0, 
 
 func TestReadMeshPeers(t *testing.T) {
 	path := writeTestPeerState(t, `[
-		{"node":"server-11","node_id":11,"public_key":"key11","address":"10.20.0.11:7373","mac":"aa:bb:cc:dd:ee:11"},
+		{"node":"server-11","node_id":11,"public_key":"key11","address":"10.20.0.11:7373","private_address":"10.30.0.11","mac":"aa:bb:cc:dd:ee:11"},
 		{"node":"server-12","node_id":12,"public_key":"key12","address":"10.20.0.12:7373","mac":"aa:bb:cc:dd:ee:12"}
 	]`)
 
@@ -32,6 +32,12 @@ func TestReadMeshPeers(t *testing.T) {
 	}
 	if peers[0].IPv4 != [4]byte{10, 20, 0, 11} {
 		t.Fatalf("got IPv4 %v for the first peer", peers[0].IPv4)
+	}
+	if peers[0].PrivateIPv4 != [4]byte{10, 30, 0, 11} {
+		t.Fatalf("got private IPv4 %v for the first peer", peers[0].PrivateIPv4)
+	}
+	if peers[1].PrivateIPv4 != [4]byte{} {
+		t.Fatalf("got private IPv4 %v for a peer without one", peers[1].PrivateIPv4)
 	}
 	if peers[0].MAC != [6]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x11} {
 		t.Fatalf("got MAC %v for the first peer", peers[0].MAC)

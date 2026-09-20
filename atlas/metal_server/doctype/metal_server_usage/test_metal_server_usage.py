@@ -210,6 +210,7 @@ class TestServerUsage(UnitTestCase):
 				"name": "server-11",
 				"wireguard_public_key": "key11",
 				"public_ipv4_address": "10.20.0.11",
+				"private_ipv4_address": "10.30.0.11",
 				"port": 7373,
 				"uplink_mac_address": "aa:bb:cc:dd:ee:11",
 			},
@@ -217,6 +218,7 @@ class TestServerUsage(UnitTestCase):
 				"name": "server-12",
 				"wireguard_public_key": "key12",
 				"public_ipv4_address": "10.20.0.12",
+				"private_ipv4_address": None,
 				"port": 7373,
 				"uplink_mac_address": None,
 			},
@@ -233,6 +235,7 @@ class TestServerUsage(UnitTestCase):
 					"node_id": 11,
 					"public_key": "key11",
 					"address": "10.20.0.11:7373",
+					"private_address": "10.30.0.11",
 					"mac": "aa:bb:cc:dd:ee:11",
 				}
 			],

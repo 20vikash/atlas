@@ -14,19 +14,21 @@ import (
 
 // Must match struct atlas_peer in bpf/state.h.
 type peerEntry struct {
-	IPv4 [4]byte
-	MAC  [6]byte
-	_    [2]byte
-	WG   [16]byte
+	IPv4        [4]byte
+	PrivateIPv4 [4]byte
+	MAC         [6]byte
+	_           [2]byte
+	WG          [16]byte
 }
 
 // wireGuardPeerFileEntry is one entry of the WireGuard peer state file that metald writes.
 type wireGuardPeerFileEntry struct {
-	Node      string `json:"node"`
-	NodeID    uint32 `json:"node_id"`
-	PublicKey string `json:"public_key"`
-	Address   string `json:"address"`
-	MAC       string `json:"mac"`
+	Node           string `json:"node"`
+	NodeID         uint32 `json:"node_id"`
+	PublicKey      string `json:"public_key"`
+	Address        string `json:"address"`
+	PrivateAddress string `json:"private_address"`
+	MAC            string `json:"mac"`
 }
 
 var peersCommand = &cobra.Command{
@@ -120,6 +122,17 @@ func meshPeer(entry wireGuardPeerFileEntry, config hostConfig) (peerEntry, bool)
 	copy(peer.IPv4[:], ipv4[:])
 	copy(peer.MAC[:], mac)
 	peer.WG = peerWireGuardAddress(config.WireGuardIPv6, entry.NodeID)
+
+	// A private address is optional: the unicast hooks use it only when they run on the private interface.
+	if entry.PrivateAddress != "" {
+		private, err := netip.ParseAddr(entry.PrivateAddress)
+		if err != nil || !private.Is4() {
+			return peer, false
+		}
+
+		privateIPv4 := private.As4()
+		copy(peer.PrivateIPv4[:], privateIPv4[:])
+	}
 
 	return peer, true
 }

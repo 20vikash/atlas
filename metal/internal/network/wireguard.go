@@ -29,6 +29,8 @@ type WireGuardPeer struct {
 	NodeID    uint32 `json:"node_id"`
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
+	// PrivateAddress is the peer address on the private network. The unicast NDP transport uses it when its hook runs on the private interface.
+	PrivateAddress string `json:"private_address,omitempty"`
 	// MAC is the discovery uplink MAC of the peer host. The mesh uses it to identify the sender of an NDP advertisement.
 	MAC string `json:"mac"`
 }

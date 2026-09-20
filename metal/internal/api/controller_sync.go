@@ -27,11 +27,12 @@ type syncRequest struct {
 
 // wireGuardPeerRequest is one desired WireGuard peer.
 type wireGuardPeerRequest struct {
-	Node      string `json:"node"`
-	NodeID    uint32 `json:"node_id"`
-	PublicKey string `json:"public_key"`
-	Address   string `json:"address"`
-	MAC       string `json:"mac"`
+	Node           string `json:"node"`
+	NodeID         uint32 `json:"node_id"`
+	PublicKey      string `json:"public_key"`
+	Address        string `json:"address"`
+	PrivateAddress string `json:"private_address"`
+	MAC            string `json:"mac"`
 }
 
 // syncResponse returns host capacity and virtual machine state in the same
@@ -159,11 +160,12 @@ func (request syncRequest) wireGuardPeers() []network.WireGuardPeer {
 	peers := make([]network.WireGuardPeer, 0, len(request.WireGuardPeers))
 	for _, peer := range request.WireGuardPeers {
 		peers = append(peers, network.WireGuardPeer{
-			Node:      peer.Node,
-			NodeID:    peer.NodeID,
-			PublicKey: peer.PublicKey,
-			Address:   peer.Address,
-			MAC:       peer.MAC,
+			Node:           peer.Node,
+			NodeID:         peer.NodeID,
+			PublicKey:      peer.PublicKey,
+			Address:        peer.Address,
+			PrivateAddress: peer.PrivateAddress,
+			MAC:            peer.MAC,
 		})
 	}
 	return peers

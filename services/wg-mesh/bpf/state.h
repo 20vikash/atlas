@@ -35,10 +35,11 @@ struct
 /* Peer capacity of the peer_list map. The unicast hooks use the same limit to bound their loops. */
 #define ATLAS_UNICAST_PEER_LIMIT 256
 
-/* One mesh peer, filled from the WireGuard peer state. Peers occupy the low indexes densely; the first zero ipv4 ends the list. */
+/* One mesh peer, filled from the WireGuard peer state. Peers occupy the low indexes densely; the first zero ipv4 ends the list. private_ipv4 is the peer address on the private network, zero when it has none. */
 struct atlas_peer
 {
 	__be32 ipv4;
+	__be32 private_ipv4;
 	__u8 mac[ETH_ALEN];
 	struct in6_addr wg;
 };
@@ -69,7 +70,7 @@ struct
 	__uint(max_entries, 4096);
 } ndp_requesters SEC(".maps");
 
-/* Host configuration. The discovery index records the configured uplink, the underlay IPv4 address sources the unicast NDP transport, and the uplink IPv6 address sources the kernel neighbour solicitation. */
+/* Host configuration. The discovery index records the configured uplink, the underlay IPv4 address sources the unicast NDP transport on that interface, and the uplink IPv6 address sources the kernel neighbour solicitation. The unicast hooks pick the public or the private peer address and emit ifindex by the interface they run on. */
 struct config
 {
 	__u32 discovery_ifindex;
@@ -77,6 +78,8 @@ struct config
 	struct in6_addr wg_ip6;
 	struct in6_addr uplink_ipv6;
 	__u8 discovery_mac[ETH_ALEN];
+	__u32 public_ifindex;
+	__u32 private_ifindex;
 };
 
 /* One host configuration entry. The integration writes it during setup. */

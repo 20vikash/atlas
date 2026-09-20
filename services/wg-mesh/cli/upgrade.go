@@ -67,10 +67,27 @@ func upgradeBPF(force bool) error {
 	}
 	defer collection.Close()
 
-	// This release changed the peer map layouts: drop their old pins, so the new maps pin cleanly. A peers sync refills them.
-	for _, name := range []string{"peer_list", "remote_vms", "vm_peer_map"} {
+	// This release changed the peer map and config layouts: drop their old pins, so the new maps pin cleanly. A peers sync refills the peer maps.
+	for _, name := range []string{"peer_list", "remote_vms", "vm_peer_map", "config"} {
 		_ = os.Remove(filepath.Join(pinDirectory, name))
 	}
+
+	interfaces, err := configuredInterfaces()
+	if err != nil {
+		return err
+	}
+
+	if interfaces.uplinkName == "" || interfaces.wireGuardName == "" {
+		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
+	}
+
+	// An old configuration holds no underlay ifindexes, so re-derive them from the uplink.
+	uplinkInterface, err := net.InterfaceByName(interfaces.uplinkName)
+	if err != nil {
+		return err
+	}
+
+	config.PublicIfIndex, config.PrivateIfIndex = underlayIfIndexes(uplinkInterface)
 
 	for name, bpfMap := range collection.Maps {
 		if _, exists := replacements[name]; exists {
@@ -80,6 +97,15 @@ func upgradeBPF(force bool) error {
 		if err := bpfMap.Pin(filepath.Join(pinDirectory, name)); err != nil {
 			return err
 		}
+	}
+
+	// Fill the rebuilt configuration before any hook attaches, so no hook runs against an empty config.
+	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
+		return err
+	}
+
+	if err := collection.Maps["build_hash"].Put(uint32(0), bpfHash()); err != nil {
+		return err
 	}
 
 	candidateHash := bpfHash()
@@ -95,15 +121,6 @@ func upgradeBPF(force bool) error {
 			!errors.Is(err, os.ErrExist) {
 			return err
 		}
-	}
-
-	interfaces, err := configuredInterfaces()
-	if err != nil {
-		return err
-	}
-
-	if interfaces.uplinkName == "" || interfaces.wireGuardName == "" {
-		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
 	}
 
 	if err := attachUplinkHook(
@@ -128,14 +145,6 @@ func upgradeBPF(force bool) error {
 		if err := attachHookPath(interfaceName, filepath.Join(release, vmBPFProgram), "ingress"); err != nil {
 			return err
 		}
-	}
-
-	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
-		return err
-	}
-
-	if err := collection.Maps["build_hash"].Put(uint32(0), bpfHash()); err != nil {
-		return err
 	}
 
 	// The new release owns these programs, so remove the top level pins
@@ -168,6 +177,14 @@ func forceUpgrade(config hostConfig) error {
 	if interfaces.uplinkName == "" || interfaces.wireGuardName == "" {
 		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
 	}
+
+	// An old configuration holds no underlay ifindexes, so re-derive them from the uplink.
+	uplinkInterface, err := net.InterfaceByName(interfaces.uplinkName)
+	if err != nil {
+		return err
+	}
+
+	config.PublicIfIndex, config.PrivateIfIndex = underlayIfIndexes(uplinkInterface)
 
 	// Load first. A verifier rejection must leave the host untouched,
 	// rather than strip its BPF and leave the TC filters dangling.
@@ -272,7 +289,6 @@ func virtualMachineInterfaces() (map[[16]byte]string, error) {
 
 func existingMaps() (map[string]*ebpf.Map, func(), error) {
 	names := []string{
-		"config",
 		"local_vms",
 		privilegedTenantAllowedAddressesMap,
 		"ndp_requesters",
