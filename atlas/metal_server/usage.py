@@ -115,15 +115,20 @@ def get_privileged_vm_addresses() -> list[str]:
 
 
 def get_wireguard_peers() -> list[dict[str, Any]]:
-	"""Return the complete managed WireGuard peer set for one host."""
+	"""Return the managed WireGuard peers for one host.
+
+	An endpoint uses the private address. Every Metal Server in a region shares
+	one private network, which is faster than the public uplink and is not
+	metered, and the mesh carries every migration byte.
+	"""
 	servers = frappe.get_all(
 		"Metal Server",
 		filters={"status": "Running", "is_provisioning_completed": 1},
-		fields=["name", "wireguard_public_key", "public_ipv4_address", "port"],
+		fields=["name", "wireguard_public_key", "private_ipv4_address", "port"],
 	)
 	peers = []
 	for server in servers:
-		if not server.wireguard_public_key or not server.public_ipv4_address:
+		if not server.wireguard_public_key or not server.private_ipv4_address:
 			continue
 		node_id = server.name.rsplit("-", 1)[-1]
 		if not node_id.isdigit():
@@ -133,7 +138,7 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 				"node": server.name,
 				"node_id": int(node_id),
 				"public_key": server.wireguard_public_key,
-				"address": f"{server.public_ipv4_address}:{server.port}",
+				"address": f"{server.private_ipv4_address}:{server.port}",
 			}
 		)
 	return peers
