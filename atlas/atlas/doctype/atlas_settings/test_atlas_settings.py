@@ -133,14 +133,14 @@ class TestPlacementStrategy(UnitTestCase):
 		with (
 			patch("atlas.vm.core.placement.strategies.base._REGISTERED_STRATEGIES", {"Custom": MagicMock()}),
 			patch("frappe.only_for") as only_for,
-			patch("frappe.get_all", side_effect=(["Scaleway/size"], ["Scaleway/image"])),
+			patch("frappe.get_all", side_effect=(["large"], ["Ubuntu_26.04"])),
 		):
 			self.assertEqual(
 				AtlasSettings.get_form_autocomplete_options(MagicMock()),
 				{
 					"placement_strategies": ["Custom"],
-					"available_metal_machine_sizes": ["Scaleway/size"],
-					"available_metal_machine_images": ["Scaleway/image"],
+					"available_metal_machine_sizes": ["large"],
+					"available_metal_machine_images": ["Ubuntu_26.04"],
 				},
 			)
 

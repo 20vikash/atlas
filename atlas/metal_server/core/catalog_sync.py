@@ -23,7 +23,6 @@ class CatalogSynchronizer:
 
 	def save_server_size(self, size: ServerSizeData) -> None:
 		"""Create or update one Metal Server Size record."""
-		name = f"{self.provider.provider_type}/{size.size}"
 		values = {
 			"architecture": size.architecture,
 			"cpu_count": size.cpu_count,
@@ -33,8 +32,8 @@ class CatalogSynchronizer:
 			"monthly_pricing_usd_cents": size.monthly_pricing_usd_cents,
 			"provider_metadata": frappe.as_json(size.provider_metadata),
 		}
-		if frappe.db.exists("Metal Server Size", name):
-			document = frappe.get_doc("Metal Server Size", name)
+		if frappe.db.exists("Metal Server Size", size.name):
+			document = frappe.get_doc("Metal Server Size", size.name)
 			if all(document.get(field) == value for field, value in values.items()):
 				return
 			document.update(values)
@@ -45,17 +44,16 @@ class CatalogSynchronizer:
 			{
 				"doctype": "Metal Server Size",
 				"provider_type": self.provider.provider_type,
-				"size": size.size,
+				"size": size.name,
 				**values,
 			}
 		).insert(ignore_permissions=True)
 
 	def save_server_image(self, image: ServerImageData) -> None:
 		"""Create or update one Metal Server Image record."""
-		name = f"{self.provider.provider_type}/{image.image}"
 		metadata = frappe.as_json(image.provider_metadata)
-		if frappe.db.exists("Metal Server Image", name):
-			document = frappe.get_doc("Metal Server Image", name)
+		if frappe.db.exists("Metal Server Image", image.name):
+			document = frappe.get_doc("Metal Server Image", image.name)
 			if document.provider_metadata == metadata:
 				return
 			document.provider_metadata = metadata
@@ -66,7 +64,7 @@ class CatalogSynchronizer:
 			{
 				"doctype": "Metal Server Image",
 				"provider_type": self.provider.provider_type,
-				"image": image.image,
+				"image": image.name,
 				"provider_metadata": metadata,
 			}
 		).insert(ignore_permissions=True)

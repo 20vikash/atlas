@@ -1,6 +1,6 @@
 {
  "actions": [],
- "autoname": "Prompt",
+ "autoname": "field:size",
  "creation": "2026-09-01 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -115,7 +115,7 @@
  "modified_by": "Administrator",
  "module": "Metal Server",
  "name": "Metal Server Size",
- "naming_rule": "Set by user",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {

@@ -48,9 +48,9 @@ class AwsCatalog:
 			if accepted is None:
 				continue
 			creation_date = str(image.get("CreationDate") or "")
-			current = newest.get(accepted.image)
+			current = newest.get(accepted.name)
 			if current is None or creation_date > current[0]:
-				newest[accepted.image] = (creation_date, accepted)
+				newest[accepted.name] = (creation_date, accepted)
 		return tuple(image for _, image in newest.values())
 
 	@staticmethod
@@ -96,7 +96,7 @@ class AwsCatalog:
 			raise AwsError(f"AWS instance type {name} has invalid CPU or memory data")
 
 		return ServerSizeData(
-			size=name,
+			name=name,
 			architecture=self.instance_type_architecture(instance_type),
 			cpu_count=cpu_count,
 			memory_mib=memory_mib,
@@ -156,7 +156,7 @@ class AwsCatalog:
 			return None
 
 		return ServerImageData(
-			image=f"{os_name}_{version}",
+			name=f"{os_name}_{version}",
 			os=os_name,
 			version=version,
 			provider_metadata=dict(image),

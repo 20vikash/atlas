@@ -23,7 +23,7 @@ PollResult = TypeVar("PollResult")
 class ServerSizeData:
 	"""Store one server size from a provider."""
 
-	size: str
+	name: str
 	architecture: str
 	cpu_count: int
 	memory_mib: int
@@ -37,7 +37,7 @@ class ServerSizeData:
 class ServerImageData:
 	"""Store one server image from a provider."""
 
-	image: str
+	name: str
 	os: str
 	version: str
 	provider_metadata: Mapping[str, Any] | None = None

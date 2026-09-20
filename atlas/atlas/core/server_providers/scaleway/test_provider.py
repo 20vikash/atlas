@@ -157,8 +157,8 @@ class TestScalewayServers(UnitTestCase):
 		servers.client.request.side_effect = [{}, {"id": "server-id"}]
 		request = ServerCreateRequest(
 			name=SERVER_NAME,
-			server_size="Scaleway/large",
-			server_image="Scaleway/Ubuntu_26.04",
+			server_size="large",
+			server_image="Ubuntu_26.04",
 			size_provider_metadata={"hourly": {}, "monthly": {}},
 			image_provider_metadata={"id": "image-id"},
 		)

@@ -71,5 +71,5 @@ def _can_read_virtual_machine(name: str | None, user: str | None) -> bool:
 def _request_tenant_id() -> int | None:
 	try:
 		return get_current_tenant_id()
-	except (InvalidRequest, frappe.PermissionError):
+	except InvalidRequest, frappe.PermissionError:
 		return None

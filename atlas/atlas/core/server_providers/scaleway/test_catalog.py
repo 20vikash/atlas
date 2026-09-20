@@ -71,7 +71,7 @@ class TestScalewayCatalog(UnitTestCase):
 
 	def test_get_offer_id_uses_the_subscription_period(self) -> None:
 		size = SimpleNamespace(
-			name="Scaleway/EM-A410X",
+			name="EM-A410X",
 			provider_metadata=json.dumps({"hourly": {"id": "hourly-id", "monthly_offer_id": "monthly-id"}}),
 		)
 
@@ -81,7 +81,7 @@ class TestScalewayCatalog(UnitTestCase):
 
 	def test_get_private_network_option_id_uses_offer_metadata(self) -> None:
 		size = SimpleNamespace(
-			name="Scaleway/EM-A410X",
+			name="EM-A410X",
 			provider_metadata=json.dumps(
 				{"hourly": {"options": [{"id": "private-network-id", "private_network": {}}]}}
 			),
@@ -93,7 +93,7 @@ class TestScalewayCatalog(UnitTestCase):
 
 	def test_get_private_network_option_id_matches_the_subscription_period(self) -> None:
 		size = SimpleNamespace(
-			name="Scaleway/EM-A410X",
+			name="EM-A410X",
 			provider_metadata=json.dumps(
 				{
 					"hourly": {"options": [{"id": "hourly-option", "private_network": {}}]},
@@ -109,7 +109,7 @@ class TestScalewayCatalog(UnitTestCase):
 	def test_get_private_network_option_id_rejects_a_missing_period(self) -> None:
 		"""Sending an hourly option with a monthly offer makes Scaleway fail."""
 		size = SimpleNamespace(
-			name="Scaleway/EM-A410X",
+			name="EM-A410X",
 			provider_metadata=json.dumps(
 				{"hourly": {"options": [{"id": "hourly-option", "private_network": {}}]}}
 			),

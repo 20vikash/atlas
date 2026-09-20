@@ -16,7 +16,7 @@ class TestAwsCatalog(UnitTestCase):
 			]
 		)
 
-		self.assertEqual([size.size for size in sizes], ["c6i.metal", "m8i.2xlarge"])
+		self.assertEqual([size.name for size in sizes], ["c6i.metal", "m8i.2xlarge"])
 
 	def test_types_without_local_storage_or_a_mesh_interface_are_skipped(self) -> None:
 		without_storage = self.instance_type("m8i.2xlarge", nested_virtualization=True)
@@ -71,7 +71,7 @@ class TestAwsCatalog(UnitTestCase):
 			]
 		)
 
-		self.assertEqual(sorted(image.image for image in images), ["Debian_12", "Ubuntu_24.04"])
+		self.assertEqual(sorted(image.name for image in images), ["Debian_12", "Ubuntu_24.04"])
 
 	def test_the_newest_image_of_one_version_wins(self) -> None:
 		images = AwsCatalog().get_server_images(
