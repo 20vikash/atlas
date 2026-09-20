@@ -201,6 +201,9 @@ func (m *VMMigration) advanceStarting(ctx context.Context, record TargetMigratio
 
 	if !record.TargetNetworkReady {
 		if err := m.machines.EnsureMigrationNetwork(ctx, record.VirtualMachineID); err != nil {
+			if isWorkerCancelled(ctx, err) {
+				return err
+			}
 			return m.failTransfer(ctx, record, "create target network: "+err.Error())
 		}
 		if _, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
@@ -211,6 +214,9 @@ func (m *VMMigration) advanceStarting(ctx context.Context, record TargetMigratio
 	}
 	if !record.TargetStateApplied {
 		if err := m.machines.ApplyMigratedTargetState(ctx, record.VirtualMachineID); err != nil {
+			if isWorkerCancelled(ctx, err) {
+				return err
+			}
 			return m.failTransfer(ctx, record, "apply target state: "+err.Error())
 		}
 		if _, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *TargetMigrationRecord) {
@@ -293,7 +299,7 @@ func (m *VMMigration) receiveSnapshot(ctx context.Context, record TargetMigratio
 	return m.completeInterval(ctx, record, snapshot.Sequence, estimatedBytes, receivedGUID)
 }
 
-// streamInterval pulls one snapshot. The OpenSSL transport reports no byte count.
+// streamInterval pulls one snapshot and records its estimated size.
 func (m *VMMigration) streamInterval(ctx context.Context, record TargetMigrationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
 	if err := m.source.StartSnapshotStream(
 		ctx, record.Source, record.ID, record.VirtualMachineID,
@@ -340,6 +346,11 @@ func (m *VMMigration) completeInterval(ctx context.Context, record TargetMigrati
 		}
 	})
 	return err
+}
+
+// isWorkerCancelled identifies a shutdown that leaves checkpointed work safe to retry.
+func isWorkerCancelled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
 // failTransfer marks the migration failed and keeps the dataset and snapshots.

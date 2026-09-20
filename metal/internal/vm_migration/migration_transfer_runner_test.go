@@ -3,6 +3,7 @@ package vmmigration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -391,5 +392,27 @@ func TestCompleteIntervalOutlivesTheWorkerContext(t *testing.T) {
 	}
 	if len(current.Intervals) != 1 || !current.Intervals[0].Completed {
 		t.Fatalf("a cancelled worker lost the completed interval: %+v", current.Intervals)
+	}
+}
+
+func TestWorkerCancellationIsNotATransferFailure(t *testing.T) {
+	live := context.Background()
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if isWorkerCancelled(live, errors.New("create target network: no bridge")) {
+		t.Fatal("a real failure on a live worker must fail the migration")
+	}
+	if isWorkerCancelled(live, context.Canceled) {
+		t.Fatal("a cancelled step on a live worker must fail the migration")
+	}
+	if isWorkerCancelled(stopped, errors.New("no bridge")) {
+		t.Fatal("a real failure must fail the migration even during a shutdown")
+	}
+	if !isWorkerCancelled(stopped, context.Canceled) {
+		t.Fatal("a shutdown that cancels a step must leave the migration for the next pass")
+	}
+	if !isWorkerCancelled(stopped, fmt.Errorf("apply target state: %w", context.Canceled)) {
+		t.Fatal("a wrapped cancellation must also leave the migration for the next pass")
 	}
 }
