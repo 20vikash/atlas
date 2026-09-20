@@ -60,14 +60,18 @@ class MetalClient:
 
 	@classmethod
 	def get_api_url(cls, server: "MetalServer") -> str:
-		"""Return the Metal HTTP address for one Server."""
-		if not server.public_ipv4_address:
-			raise MetalClientError(f"Server {server.name} has no public IPv4 address")
+		"""Return the selected Metald IPv4 address for one server."""
+		if server.settings.use_public_ip_for_metald:
+			label, address = "public IPv4 address", server.public_ipv4_address
+		else:
+			label, address = "private IPv4 address", server.private_ipv4_address
+		if not address:
+			raise MetalClientError(f"Server {server.name} has no {label}")
 		try:
-			public_ipv4_address = ipaddress.IPv4Address(server.public_ipv4_address)
+			ipv4_address = ipaddress.IPv4Address(address)
 		except (ipaddress.AddressValueError, TypeError) as error:
-			raise MetalClientError(f"Server {server.name} has an invalid public IPv4 address") from error
-		return f"https://{public_ipv4_address}:{cls.api_port}"
+			raise MetalClientError(f"Server {server.name} has an invalid {label}") from error
+		return f"https://{ipv4_address}:{cls.api_port}"
 
 	@classmethod
 	def get_coordination_url(cls, server: "MetalServer") -> str:

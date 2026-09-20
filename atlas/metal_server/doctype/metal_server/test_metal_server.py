@@ -372,7 +372,7 @@ class TestServer(UnitTestCase):
 			{
 				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
 				"WG_MESH_DOWNLOAD_URL": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
-				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"LISTEN_ADDRESS": "10.0.0.7:9000",
 				"ATLAS_COMMON_NAME": "atlas.example.test",
 				"COORDINATION_LISTEN_ADDRESS": "[fdab:1::7]:9001",
 				"STORAGE_POOL_DEVICE": "/dev/md2",
@@ -388,6 +388,49 @@ class TestServer(UnitTestCase):
 			},
 			timeout_seconds=1200,
 		)
+
+	def test_install_metald_listens_on_the_public_address_when_configured(self) -> None:
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.settings.use_public_ip_for_metald = True
+		server.wireguard_ip_address = "fdab:1::7"
+		task = SimpleNamespace(result=SimpleNamespace(is_success=True))
+		tls_result = SimpleNamespace(is_success=True)
+
+		with (
+			patch(
+				"atlas.metal_server.core.host_installation.get_download_url",
+				return_value="https://atlas.test/files/metald-linux-amd64",
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
+				return_value=task,
+			) as create_for_script_file,
+			patch(
+				"atlas.metal_server.core.host_installation.ensure_server_certificate",
+				return_value=("ca", "certificate", "private-key"),
+			),
+			patch("atlas.metal_server.core.host_installation.SSHRunner") as ssh_runner,
+		):
+			ssh_runner.return_value.run_script.return_value = tls_result
+			MetalServer._install_metald(server)
+
+		self.assertEqual(
+			create_for_script_file.call_args.kwargs["environment"]["LISTEN_ADDRESS"], "203.0.113.7:9000"
+		)
+
+	def test_install_metald_rejects_a_missing_selected_address(self) -> None:
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.settings.use_public_ip_for_metald = True
+		server.public_ipv4_address = None
+
+		with (
+			patch("atlas.metal_server.core.host_installation.HostInstallation.install_tls_credentials"),
+			patch("atlas.metal_server.core.host_installation.frappe.throw", side_effect=ValueError),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._install_metald(server)
 
 	def test_tls_renewal_waits_for_a_running_metald_job(self) -> None:
 		server = self._server(status="Running")
@@ -815,6 +858,7 @@ class TestServer(UnitTestCase):
 			metald_job_id=f"atlas||server||metald||{SERVER_NAME}",
 			wireguard_ip_address=None,
 			private_ipv4_address="10.0.0.7",
+			public_ipv4_address="203.0.113.7",
 			private_network_interface="eno1.1878",
 			ssh_host="192.0.2.7",
 			port=51820,
@@ -829,6 +873,7 @@ class TestServer(UnitTestCase):
 				wildcard_domain="example.test",
 				region_id=1,
 				private_network_mtu=1500,
+				use_public_ip_for_metald=False,
 			),
 			set=Mock(),
 			save=Mock(),

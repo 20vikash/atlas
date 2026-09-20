@@ -71,6 +71,25 @@ class HostInstallation:
 
 		self.install_tls_credentials()
 
+		listen_address = (
+			self.server.public_ipv4_address
+			if settings.use_public_ip_for_metald
+			else self.server.private_ipv4_address
+		)
+		if not listen_address:
+			frappe.throw(
+				_("Metal Server {0} has no address for the selected metald endpoint.").format(
+					self.server.name
+				)
+			)
+		try:
+			listen_address = str(ipaddress.IPv4Address(listen_address))
+		except ipaddress.AddressValueError:
+			frappe.throw(
+				_("Metal Server {0} has an invalid address for the selected metald endpoint.").format(
+					self.server.name
+				),
+			)
 		result = SSHTask.create_for_script_file(
 			target_type=self.server.doctype,
 			target=self.server.name,
@@ -78,7 +97,7 @@ class HostInstallation:
 			environment={
 				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
 				"WG_MESH_DOWNLOAD_URL": get_download_url(settings.wg_mesh_binary_x86_64_file),
-				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"LISTEN_ADDRESS": f"{listen_address}:9000",
 				"ATLAS_COMMON_NAME": atlas_client_identity(settings),
 				"COORDINATION_LISTEN_ADDRESS": f"[{self.server.wireguard_ip_address}]:9001",
 				"STORAGE_POOL_DEVICE": settings.server_provider_controller.get_storage_pool_device(

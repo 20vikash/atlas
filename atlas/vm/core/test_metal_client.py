@@ -306,22 +306,47 @@ COMPUTE_REQUEST = {
 class TestMetalClientConnection(UnitTestCase):
 	@patch("atlas.vm.core.metal_client.client_certificate_files", return_value=("atlas.crt", "atlas.key"))
 	@patch("atlas.vm.core.metal_client.ca_file", return_value="ca.crt")
-	def test_client_uses_the_validated_public_ipv4_address(
+	def test_client_uses_the_validated_private_ipv4_address_by_default(
 		self, _ca_file: Mock, _certificate_files: Mock
 	) -> None:
-		client = MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="203.0.113.8"))
+		server = SimpleNamespace(
+			name="Server-1",
+			private_ipv4_address="10.0.0.2",
+			settings=SimpleNamespace(use_public_ip_for_metald=False),
+		)
+		client = MetalClient(server)
 
-		self.assertEqual(client.base_url, "https://203.0.113.8:9000")
+		self.assertEqual(client.base_url, "https://10.0.0.2:9000")
 		self.assertEqual(client.ca_file, "ca.crt")
 		self.assertEqual(client.client_certificate, ("atlas.crt", "atlas.key"))
 
+	@patch("atlas.vm.core.metal_client.client_certificate_files", return_value=("atlas.crt", "atlas.key"))
+	@patch("atlas.vm.core.metal_client.ca_file", return_value="ca.crt")
+	def test_client_uses_the_public_ipv4_address_when_configured(
+		self, _ca_file: Mock, _certificate_files: Mock
+	) -> None:
+		server = SimpleNamespace(
+			name="Server-1",
+			public_ipv4_address="203.0.113.8",
+			settings=SimpleNamespace(use_public_ip_for_metald=True),
+		)
+		client = MetalClient(server)
+
+		self.assertEqual(client.base_url, "https://203.0.113.8:9000")
+
 	@patch("atlas.vm.core.metal_client.client_certificate_files")
 	@patch("atlas.vm.core.metal_client.ca_file")
-	def test_client_rejects_an_invalid_public_ipv4_address(
+	def test_client_rejects_an_invalid_private_ipv4_address(
 		self, ca_file_mock: Mock, certificate_files: Mock
 	) -> None:
-		with self.assertRaisesRegex(MetalClientError, "invalid public IPv4 address"):
-			MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="not-an-address"))
+		server = SimpleNamespace(
+			name="Server-1",
+			private_ipv4_address="not-an-address",
+			settings=SimpleNamespace(use_public_ip_for_metald=False),
+		)
+
+		with self.assertRaisesRegex(MetalClientError, "invalid private IPv4 address"):
+			MetalClient(server)
 
 		ca_file_mock.assert_not_called()
 		certificate_files.assert_not_called()
@@ -535,7 +560,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			self.assertTrue(caught.exception.uncertain)
 
 	def test_api_url_rejects_a_server_without_an_address(self) -> None:
-		server = Mock(public_ipv4_address="")
+		server = Mock(private_ipv4_address="", settings=SimpleNamespace(use_public_ip_for_metald=False))
 		server.name = "metal-1"
 
 		with self.assertRaises(MetalClientError):
