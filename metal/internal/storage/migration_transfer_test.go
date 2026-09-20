@@ -1,10 +1,23 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"io"
+	"math/big"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
@@ -60,38 +73,159 @@ func TestSendArgumentsFormsFullIncrementalAndResume(t *testing.T) {
 	}
 }
 
-func TestOpenSSLArgumentsRequireMutualTLSAndVerifyTheSourceIP(t *testing.T) {
-	transfer := &MigrationTransfer{tls: MigrationTLSConfig{
-		CAFile: "/tls/ca.crt", CertificateFile: "/tls/node.crt", PrivateKeyFile: "/tls/node.key",
-		ListenAddress: "[fdab::12]:9002", TransferPort: 9002,
-	}}
+// writeNodeTLSMaterial writes a throwaway authority and node key pair and
+// returns a configuration that points at them.
+func writeNodeTLSMaterial(t *testing.T) MigrationTLSConfig {
+	t.Helper()
 
-	server := commandKey(transfer.serverArguments()...)
-	for _, required := range []string{
-		"-naccept 2", "-accept [fdab::12]:9002", "-cert /tls/node.crt", "-key /tls/node.key",
-		"-verifyCAfile /tls/ca.crt", "-Verify 1", "-verify_return_error", "-tls1_3",
-	} {
-		if !strings.Contains(server, required) {
-			t.Fatalf("server arguments %q do not contain %q", server, required)
+	authorityKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test authority"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	authorityDER, err := x509.CreateCertificate(rand.Reader, template, template, &authorityKey.PublicKey, authorityKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := x509.ParseCertificate(authorityDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "node"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("fdab::12")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	nodeDER, err := x509.CreateCertificate(rand.Reader, nodeTemplate, authority, &nodeKey.PublicKey, authorityKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	write := func(name string, block *pem.Block) string {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+			t.Fatal(err)
 		}
+		return path
+	}
+	return MigrationTLSConfig{
+		CAFile:          write("ca.crt", &pem.Block{Type: "CERTIFICATE", Bytes: authorityDER}),
+		CertificateFile: write("node.crt", &pem.Block{Type: "CERTIFICATE", Bytes: nodeDER}),
+		PrivateKeyFile:  write("node.key", &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(nodeKey)}),
+		ListenAddress:   "[fdab::12]:9002",
+		TransferPort:    9002,
+	}
+}
+
+func TestSnapshotTLSConfigurationsRequireMutualTLSAndPinTheSourceHost(t *testing.T) {
+	transfer := &MigrationTransfer{tls: writeNodeTLSMaterial(t)}
+
+	server, err := transfer.serverTLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("client auth = %v, want RequireAndVerifyClientCert", server.ClientAuth)
+	}
+	if server.MinVersion != tls.VersionTLS13 || server.ClientCAs == nil || len(server.Certificates) != 1 {
+		t.Fatalf("server configuration = %+v", server)
 	}
 
-	client := commandKey(transfer.clientArguments("fdab::11", false)...)
-	for _, required := range []string{
-		"-connect [fdab::11]:9002", "-cert /tls/node.crt", "-key /tls/node.key",
-		"-verifyCAfile /tls/ca.crt", "-verify_return_error", "-verify_ip fdab::11", "-tls1_3",
-	} {
-		if !strings.Contains(client, required) {
-			t.Fatalf("client arguments %q do not contain %q", client, required)
+	client, err := transfer.clientTLSConfig("fdab::11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.ServerName != "fdab::11" {
+		t.Fatalf("server name = %q, want fdab::11", client.ServerName)
+	}
+	if client.MinVersion != tls.VersionTLS13 || client.RootCAs == nil || len(client.Certificates) != 1 {
+		t.Fatalf("client configuration = %+v", client)
+	}
+	if client.InsecureSkipVerify {
+		t.Fatal("the target must verify the source node certificate")
+	}
+}
+
+func TestSnapshotTLSConfigurationRejectsAnAuthorityFileWithoutACertificate(t *testing.T) {
+	configuration := writeNodeTLSMaterial(t)
+	if err := os.WriteFile(configuration.CAFile, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	transfer := &MigrationTransfer{tls: configuration}
+
+	if _, err := transfer.serverTLSConfig(); err == nil {
+		t.Fatal("an authority file with no certificate must fail")
+	}
+}
+
+func TestSnapshotRelayCopiesTheStreamToTheTargetAndStopsOnCancel(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("zfs"), 100_000)
+	received := make(chan []byte, 1)
+	go func() {
+		connection, dialError := net.Dial("tcp", listener.Addr().String())
+		if dialError != nil {
+			received <- nil
+			return
 		}
+		defer connection.Close()
+		body, _ := io.ReadAll(connection)
+		received <- body
+	}()
+
+	if err := relaySnapshotToTarget(context.Background(), listener, bytes.NewReader(payload)); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(client, "-ign_eof") || strings.Contains(client, "-no_ign_eof") {
-		t.Fatalf("data client %q must read until the source closes", client)
+	if body := <-received; !bytes.Equal(body, payload) {
+		t.Fatalf("target received %d bytes, want %d", len(body), len(payload))
 	}
 
-	probe := commandKey(transfer.clientArguments("fdab::11", true)...)
-	if !strings.Contains(probe, "-no_ign_eof") {
-		t.Fatalf("readiness probe %q must stop at its own input EOF", probe)
+	idle, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := relaySnapshotToTarget(cancelled, idle, bytes.NewReader(payload)); err == nil {
+		t.Fatal("a cancelled relay must not wait for a target")
+	}
+}
+
+func TestSnapshotRelayStopsWhenNoTargetConnects(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The accept wait is bounded, so a target that never dials cannot hold the
+	// fixed transfer port or keep the source lock looking busy.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err = relaySnapshotToTarget(ctx, listener, bytes.NewReader([]byte("zfs")))
+
+	if err == nil {
+		t.Fatal("a relay with no target must end")
 	}
 }
 

@@ -16,7 +16,7 @@ Package `storage` imports images, creates fast virtual machine disk clones, mana
 | `VirtualMachineStore` | VM disk preparation, usage, growth, and release. |
 | `ImageStore` | Image directory, HTTP client, image locks, manifests, policy, pruning, and warm artifacts. |
 | `SnapshotStore` | Snapshot directory, HTTP client, snapshot locks, staging, upload, deletion, and pruning. |
-| `MigrationTransfer` | ZFS snapshot, estimate, OpenSSL transfer processes, resume token, GUID, and cleanup for a disk migration. |
+| `MigrationTransfer` | ZFS snapshot, estimate, mutual-TLS stream transport, resume token, GUID, and cleanup for a disk migration. |
 | `Stores` | The four services created by `NewStores`. |
 
 Consumers define the interfaces that they need. The storage package does not export one broad storage interface.
@@ -84,9 +84,9 @@ The prune pass keeps staging data while an upload goroutine uses it. The pass re
 
 ## Migration transfer
 
-`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>` and estimates the full or incremental stream. A one-shot OpenSSL server reads from `zfs send`. The target verifies the source WireGuard IP and pipes the TLS output into `zfs recv -s`. The receive saves a resume token when it stops early. The target compares the received snapshot GUID with the source GUID, so only a verified copy counts.
+`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>` and estimates the full or incremental stream. A one-shot mutual-TLS listener relays `zfs send` to the one target that connects, in that direction only. The target verifies the source WireGuard IP and pipes the received stream into `zfs recv -s`. The receive saves a resume token when it stops early. The target compares the received snapshot GUID with the source GUID, so only a verified copy counts.
 
-Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send, OpenSSL, and receive commands use `exec`. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
+Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send and receive commands use `exec`, and the stream itself moves through a `crypto/tls` connection. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
 
 `AbortReceive` cancels an interrupted resumable receive and removes the target dataset. An abort calls it before it removes the target VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
 

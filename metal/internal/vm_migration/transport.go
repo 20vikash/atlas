@@ -71,7 +71,7 @@ func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, v
 	return decodeSnapshot(responseBody, "snapshot")
 }
 
-// StartSnapshotStream asks the source to start its one-shot OpenSSL server.
+// StartSnapshotStream asks the source to start its one-shot snapshot listener.
 func (c *SourceClient) StartSnapshotStream(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error {
 	body, err := json.Marshal(streamSnapshotRequest{
 		Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps,

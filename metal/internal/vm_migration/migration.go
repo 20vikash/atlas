@@ -22,7 +22,7 @@ type MigrationSourceClient interface {
 	PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, vm.State, error)
 	// NextSnapshot acknowledges a sequence and asks for the next snapshot.
 	NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error)
-	// StartSnapshotStream asks the source to start one OpenSSL snapshot server.
+	// StartSnapshotStream asks the source to start one snapshot listener.
 	StartSnapshotStream(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error
 	// StopSource acknowledges the last received snapshot, stops the source, and
 	// returns its final snapshot.

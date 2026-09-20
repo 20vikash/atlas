@@ -46,7 +46,7 @@ type streamRequest struct {
 	ThroughputMiBps int    `json:"throughput_mibps"`
 }
 
-// startMigrationStream starts a one-shot OpenSSL server for one ZFS stream.
+// startMigrationStream starts a one-shot mutual-TLS listener for one ZFS stream.
 func (s *Server) startMigrationStream(c echo.Context) error {
 	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {

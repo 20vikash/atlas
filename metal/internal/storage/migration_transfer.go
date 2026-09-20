@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -23,10 +25,16 @@ type MigrationTransfer struct {
 	tls    MigrationTLSConfig
 }
 
-// snapshotServerReadyTimeout bounds the readiness probe on the source.
-const snapshotServerReadyTimeout = 30 * time.Second
+// copyBufferBytes is the snapshot relay buffer size.
+const copyBufferBytes = 1 << 20
 
-// MigrationTLSConfig configures the one-shot OpenSSL snapshot transport.
+// stallTimeout ends a stream that makes no progress.
+const stallTimeout = 2 * time.Minute
+
+// acceptTimeout releases the fixed transfer port when a target does not connect.
+const acceptTimeout = 2 * time.Minute
+
+// MigrationTLSConfig configures the one-shot mutual-TLS snapshot transport.
 type MigrationTLSConfig struct {
 	CAFile          string
 	CertificateFile string
@@ -40,7 +48,7 @@ func NewMigrationTransfer(pool *ZFSPool, configuration MigrationTLSConfig) *Migr
 	return &MigrationTransfer{pool: pool, runner: platform.HostRunner{}, tls: configuration}
 }
 
-// SnapshotServer owns one source-side ZFS and OpenSSL pipeline.
+// SnapshotServer owns one source-side ZFS and TLS pipeline.
 type SnapshotServer struct {
 	done chan error
 }
@@ -55,7 +63,8 @@ func (server *SnapshotServer) Wait() error {
 	return <-server.done
 }
 
-// StartSnapshotServer starts one mutual-TLS source stream without a Go copy loop.
+// StartSnapshotServer starts a one-way mutual-TLS source stream after binding its listener.
+// It must stay one way: the target never writes, so any read of the connection blocks for ever.
 func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string) (SourceStream, error) {
 	if err := transfer.validateTLS(); err != nil {
 		return nil, err
@@ -66,29 +75,21 @@ func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virt
 		}
 	}
 
+	configuration, err := transfer.serverTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	listener, err := tls.Listen("tcp", transfer.tls.ListenAddress, configuration)
+	if err != nil {
+		return nil, fmt.Errorf("listen for migration stream on %s: %w", transfer.tls.ListenAddress, err)
+	}
+
 	streamContext, cancel := context.WithCancel(ctx)
 	pipeReader, pipeWriter, err := os.Pipe()
 	if err != nil {
+		listener.Close()
 		cancel()
 		return nil, fmt.Errorf("create source transfer pipe: %w", err)
-	}
-	serverError := &strings.Builder{}
-	serverCommand := exec.CommandContext(streamContext, "openssl", transfer.serverArguments()...)
-	serverCommand.Stdin = pipeReader
-	serverCommand.Stdout = io.Discard
-	serverCommand.Stderr = serverError
-	if err := serverCommand.Start(); err != nil {
-		pipeReader.Close()
-		pipeWriter.Close()
-		cancel()
-		return nil, fmt.Errorf("start OpenSSL migration server: %w", err)
-	}
-	pipeReader.Close()
-	if err := transfer.waitForSnapshotServer(streamContext); err != nil {
-		pipeWriter.Close()
-		cancel()
-		_ = serverCommand.Wait()
-		return nil, err
 	}
 
 	sendError := &strings.Builder{}
@@ -96,27 +97,82 @@ func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virt
 	sendCommand.Stdout = pipeWriter
 	sendCommand.Stderr = sendError
 	if err := sendCommand.Start(); err != nil {
+		pipeReader.Close()
 		pipeWriter.Close()
+		listener.Close()
 		cancel()
-		_ = serverCommand.Wait()
 		return nil, fmt.Errorf("start zfs send: %w", err)
 	}
 	pipeWriter.Close()
 
 	server := &SnapshotServer{done: make(chan error, 1)}
 	go func() {
+		// Cancel after the send process exits.
+		defer cancel()
+
+		relayError := relaySnapshotToTarget(streamContext, listener, pipeReader)
+
+		// Close the pipe so an early relay failure stops zfs send.
+		pipeReader.Close()
+
 		sendWaitError := sendCommand.Wait()
-		serverWaitError := serverCommand.Wait()
-		cancel()
 		server.done <- errors.Join(
 			commandError("zfs send", sendWaitError, sendError.String()),
-			commandError("OpenSSL migration server", serverWaitError, serverError.String()),
+			relayError,
 		)
 	}()
 	return server, nil
 }
 
-// ReceiveSnapshotTLS receives a mutual-TLS ZFS stream without a Go copy loop.
+// relaySnapshotToTarget accepts one target and relays the stream to it.
+func relaySnapshotToTarget(ctx context.Context, listener net.Listener, stream io.Reader) error {
+	closed := make(chan struct{})
+	defer close(closed)
+
+	// Bound Accept by closing the listener when the context ends.
+	acceptContext, cancelAccept := context.WithTimeout(ctx, acceptTimeout)
+	defer cancelAccept()
+	go func() {
+		select {
+		case <-acceptContext.Done():
+			listener.Close()
+		case <-closed:
+		}
+	}()
+
+	connection, err := listener.Accept()
+	listener.Close()
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("accept migration stream: %w", ctx.Err())
+		}
+		if acceptContext.Err() != nil {
+			return fmt.Errorf("no target connected to the migration stream within %s", acceptTimeout)
+		}
+		return fmt.Errorf("accept migration stream: %w", err)
+	}
+	cancelAccept()
+	defer connection.Close()
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			connection.Close()
+		case <-closed:
+		}
+	}()
+
+	if _, err := io.CopyBuffer(stallingWriter{connection}, stream, make([]byte, copyBufferBytes)); err != nil {
+		return fmt.Errorf("send migration stream: %w", err)
+	}
+	// A clean close lets zfs recv see EOF.
+	if closer, ok := connection.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return nil
+}
+
+// ReceiveSnapshotTLS receives a mutual-TLS ZFS stream from the source host.
 func (transfer *MigrationTransfer) ReceiveSnapshotTLS(ctx context.Context, virtualMachineID, sourceAddress string) error {
 	if err := transfer.validateTLS(); err != nil {
 		return err
@@ -126,39 +182,74 @@ func (transfer *MigrationTransfer) ReceiveSnapshotTLS(ctx context.Context, virtu
 		return err
 	}
 
+	configuration, err := transfer.clientTLSConfig(host)
+	if err != nil {
+		return err
+	}
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: configuration}
+	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(transfer.tls.TransferPort)))
+	if err != nil {
+		return fmt.Errorf("connect to migration source %s: %w", host, err)
+	}
+	defer connection.Close()
+
 	pipeReader, pipeWriter, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("create target transfer pipe: %w", err)
 	}
-	clientError := &strings.Builder{}
-	clientCommand := exec.CommandContext(ctx, "openssl", transfer.clientArguments(host, false)...)
-	clientCommand.Stdout = pipeWriter
-	clientCommand.Stderr = clientError
 	receiveError := &strings.Builder{}
 	receiveCommand := exec.CommandContext(ctx, "zfs", "recv", "-s", transfer.pool.virtualMachineDataset(virtualMachineID))
 	receiveCommand.Stdin = pipeReader
 	receiveCommand.Stderr = receiveError
-
 	if err := receiveCommand.Start(); err != nil {
 		pipeReader.Close()
 		pipeWriter.Close()
 		return fmt.Errorf("start zfs receive: %w", err)
 	}
 	pipeReader.Close()
-	if err := clientCommand.Start(); err != nil {
-		pipeWriter.Close()
-		_ = receiveCommand.Process.Kill()
-		_ = receiveCommand.Wait()
-		return fmt.Errorf("start OpenSSL migration client: %w", err)
-	}
-	pipeWriter.Close()
 
-	clientWaitError := clientCommand.Wait()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			connection.Close()
+		case <-finished:
+		}
+	}()
+
+	_, copyError := io.CopyBuffer(pipeWriter, stallingReader{connection}, make([]byte, copyBufferBytes))
+	// zfs recv ends on EOF, so the write end must close before the wait.
+	pipeWriter.Close()
 	receiveWaitError := receiveCommand.Wait()
-	return errors.Join(
-		commandError("OpenSSL migration client", clientWaitError, clientError.String()),
-		commandError("zfs receive", receiveWaitError, receiveError.String()),
-	)
+	if copyError != nil {
+		copyError = fmt.Errorf("receive migration stream: %w", copyError)
+	}
+	return errors.Join(copyError, commandError("zfs receive", receiveWaitError, receiveError.String()))
+}
+
+// stallingReader fails a read that makes no progress before stallTimeout.
+type stallingReader struct {
+	connection net.Conn
+}
+
+func (reader stallingReader) Read(buffer []byte) (int, error) {
+	if err := reader.connection.SetReadDeadline(time.Now().Add(stallTimeout)); err != nil {
+		return 0, err
+	}
+	return reader.connection.Read(buffer)
+}
+
+// stallingWriter fails a write that makes no progress inside stallTimeout.
+type stallingWriter struct {
+	connection net.Conn
+}
+
+func (writer stallingWriter) Write(buffer []byte) (int, error) {
+	if err := writer.connection.SetWriteDeadline(time.Now().Add(stallTimeout)); err != nil {
+		return 0, err
+	}
+	return writer.connection.Write(buffer)
 }
 
 func (transfer *MigrationTransfer) validateTLS() error {
@@ -168,46 +259,48 @@ func (transfer *MigrationTransfer) validateTLS() error {
 	return nil
 }
 
-func (transfer *MigrationTransfer) serverArguments() []string {
-	return []string{
-		"s_server", "-quiet", "-no_ign_eof", "-naccept", "2",
-		"-accept", transfer.tls.ListenAddress,
-		"-cert", transfer.tls.CertificateFile, "-key", transfer.tls.PrivateKeyFile,
-		"-verifyCAfile", transfer.tls.CAFile, "-Verify", "1", "-verify_return_error", "-tls1_3",
-	}
-}
-
-func (transfer *MigrationTransfer) waitForSnapshotServer(ctx context.Context) error {
-	host, _, err := net.SplitHostPort(transfer.tls.ListenAddress)
+// serverTLSConfig requires a regional node certificate from both peers.
+func (transfer *MigrationTransfer) serverTLSConfig() (*tls.Config, error) {
+	certificate, authority, err := transfer.loadTLSMaterial()
 	if err != nil {
-		return fmt.Errorf("parse migration transfer listen address %q: %w", transfer.tls.ListenAddress, err)
+		return nil, err
 	}
-
-	readyContext, cancel := context.WithTimeout(ctx, snapshotServerReadyTimeout)
-	defer cancel()
-
-	output := &strings.Builder{}
-	command := exec.CommandContext(readyContext, "openssl", transfer.clientArguments(host, true)...)
-	command.Stdout = io.Discard
-	command.Stderr = output
-	if err := command.Run(); err != nil {
-		return commandError("check OpenSSL migration server", err, output.String())
-	}
-	return nil
+	return &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		ClientCAs:    authority,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		MinVersion:   tls.VersionTLS13,
+	}, nil
 }
 
-// clientArguments builds the OpenSSL client flags. Only the readiness probe stops at its own stdin EOF.
-func (transfer *MigrationTransfer) clientArguments(host string, stopAtInputEOF bool) []string {
-	endOfFile := "-ign_eof"
-	if stopAtInputEOF {
-		endOfFile = "-no_ign_eof"
+// clientTLSConfig verifies the source certificate against its address.
+func (transfer *MigrationTransfer) clientTLSConfig(host string) (*tls.Config, error) {
+	certificate, authority, err := transfer.loadTLSMaterial()
+	if err != nil {
+		return nil, err
 	}
-	return []string{
-		"s_client", "-quiet", endOfFile,
-		"-connect", net.JoinHostPort(host, strconv.Itoa(transfer.tls.TransferPort)),
-		"-cert", transfer.tls.CertificateFile, "-key", transfer.tls.PrivateKeyFile,
-		"-verifyCAfile", transfer.tls.CAFile, "-verify_return_error", "-verify_ip", host, "-tls1_3",
+	return &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		RootCAs:      authority,
+		ServerName:   host,
+		MinVersion:   tls.VersionTLS13,
+	}, nil
+}
+
+func (transfer *MigrationTransfer) loadTLSMaterial() (tls.Certificate, *x509.CertPool, error) {
+	certificate, err := tls.LoadX509KeyPair(transfer.tls.CertificateFile, transfer.tls.PrivateKeyFile)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("load migration node certificate: %w", err)
 	}
+	authorityPEM, err := os.ReadFile(transfer.tls.CAFile)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("read migration certificate authority: %w", err)
+	}
+	authority := x509.NewCertPool()
+	if !authority.AppendCertsFromPEM(authorityPEM) {
+		return tls.Certificate{}, nil, fmt.Errorf("migration certificate authority %s holds no certificate", transfer.tls.CAFile)
+	}
+	return certificate, authority, nil
 }
 
 func migrationHost(address string) (string, error) {

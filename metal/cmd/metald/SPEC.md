@@ -54,7 +54,7 @@ The host service receives an optional mesh service, WireGuard, image, VM, storag
 
 Both servers require a client certificate from the regional authority. The Atlas API also pins `tls.atlas_common_name`, because a node certificate is valid for client use on the coordination API.
 
-The source starts a one-shot OpenSSL server on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The target verifies the source WireGuard IP before it receives the stream.
+The source starts a one-shot mutual-TLS listener on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The target verifies the source WireGuard IP before it receives the stream.
 
 `connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 

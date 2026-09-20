@@ -42,10 +42,10 @@ An HTTP request, the transfer worker, and the reconciler all change the target r
 next snapshot from source  (acknowledge the last completed sequence)
         |
         v
-start the source OpenSSL server
+start the source snapshot listener
         |
         v
-OpenSSL client -> zfs recv -s -> resume the same sequence after an interrupt
+target connects -> zfs recv -s -> resume the same sequence after an interrupt
         |
         v
 compare received GUID with the source GUID
@@ -121,19 +121,21 @@ Metal hosts use WireGuard addresses and certificates from the same regional auth
 
 Control calls use HTTPS and mutual TLS on port 9001. They prepare the source, select snapshots, start a stream, stop or restore the source, and remove it. A normal control call has a 60 second timeout. The stop call has a 120 second timeout because it can restore and shut down a guest.
 
-Snapshot bytes use port 9002 and do not pass through an HTTP body or a Go copy loop. One OpenSSL server accepts a readiness connection and one data connection. The readiness connection proves that the listener and mutual TLS work before the control request returns.
+Snapshot bytes use port 9002 and do not pass through an HTTP body. The source binds a `crypto/tls` listener, accepts the one target connection, closes the listener, and relays the `zfs send` pipe into the connection. The relay is one direction only: the target never writes on that connection. The control request returns after the listener is bound, so a bind failure is reported to the target instead of a connection that is refused later.
 
 ```text
-source: zfs send -> pipe -> openssl s_server
+source: zfs send -> pipe -> tls.Listen  (one accept, then closed)
                                   |
                                   | TLS 1.3 and node certificates
                                   v
-target: zfs recv <- pipe <- openssl s_client
+target: zfs recv <- pipe <- tls.Dial
 ```
+
+The transport must stay one direction. A two-way relay on this connection deadlocks, because the target sends nothing and any read of the connection waits forever while the send pipe fills.
 
 The source permits one outbound snapshot stream at a time because all source streams use the fixed port. A second stream request returns a conflict. This limit does not affect Atlas API calls or migration work on target hosts.
 
-The source stream is not bound to its control request, so it ends at the daemon root context, at an unlock, or at the 30 minute transfer limit. A target that never connects cannot hold the port.
+The source stream is not bound to its control request, so it ends at the daemon root context, at an unlock, or at the 30 minute transfer limit. A target that never connects releases the port after 2 minutes, because the accept wait is bounded: otherwise it would hold the fixed port, and make the source lock look busy, until the transfer limit ran out.
 
 ## Boundary
 
