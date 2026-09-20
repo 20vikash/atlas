@@ -124,7 +124,7 @@ class MigrationService:
 		The request repeats on every non-abort run, so a recovery run re-sends the
 		target-pull request to a target that lost it.
 		"""
-		if not self.migration.abort_requested:
+		if not self.is_abort_requested:
 			self.send_request()
 
 		deadline = now_datetime() + MAXIMUM_RUN_DURATION
@@ -155,7 +155,7 @@ class MigrationService:
 			return False
 		if state == "missing":
 			return self.handle_missing_target()
-		if self.migration.abort_requested:
+		if self.is_abort_requested:
 			self.request_abort()
 			return False
 		if state == "ready":
@@ -229,7 +229,7 @@ class MigrationService:
 
 	def request_abort(self) -> None:
 		"""Record the abort intent, then ask the target to abort. Safe to repeat."""
-		if not self.migration.abort_requested:
+		if not self.is_abort_requested:
 			self.migration.db_set("abort_requested", 1)
 			frappe.db.commit()  # nosemgrep
 		try:
@@ -264,6 +264,11 @@ class MigrationService:
 		if not isinstance(stored, dict):
 			stored = {}
 		self.migration.db_set("progress", frappe.as_json({**stored, **values}), commit=commit)
+
+	@property
+	def is_abort_requested(self) -> bool:
+		"""Read the flag because a deduplicated worker holds a stale document."""
+		return bool(frappe.db.get_value("Virtual Machine Migration", self.migration.name, "abort_requested"))
 
 	@property
 	def is_expired(self) -> bool:
@@ -305,6 +310,8 @@ def enqueue_migration(migration_name: str) -> None:
 @run_as_admin
 def run_migration(migration_name: str) -> None:
 	"""Advance one migration to completion, or record why it stopped."""
+	# Let each poll see an abort that another request commits.
+	frappe.db.sql("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
 	migration = cast("VirtualMachineMigration", frappe.get_doc("Virtual Machine Migration", migration_name))
 	service = MigrationService(migration)
 	try:

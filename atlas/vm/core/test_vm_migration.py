@@ -278,11 +278,40 @@ class TestMigrationWorker(UnitTestCase):
 			patch.object(
 				MigrationService, "is_target_committed", new_callable=PropertyMock, return_value=False
 			),
+			patch.object(
+				MigrationService, "is_abort_requested", new_callable=PropertyMock, return_value=True
+			),
 			patch("atlas.vm.core.vm_migration.time.sleep"),
 		):
 			service.run()
 
 		service.send_request.assert_not_called()
+		service.settle.assert_called_once_with("aborted")
+
+	def test_run_asks_the_target_to_abort_when_the_flag_arrives_while_it_polls(self) -> None:
+		"""A running, deduplicated worker must reread the stored abort flag."""
+		service = MigrationService(migration_doc())
+		service.send_request = Mock()
+		service.request_abort = Mock()
+		service.settle = Mock()
+		service.poll = Mock(side_effect=[{"status": "running"}, {"status": "running"}, {"status": "aborted"}])
+
+		with (
+			patch.object(
+				MigrationService, "is_target_committed", new_callable=PropertyMock, return_value=False
+			),
+			patch.object(
+				MigrationService,
+				"is_abort_requested",
+				new_callable=PropertyMock,
+				side_effect=[False, False, True, True],
+			),
+			patch("atlas.vm.core.vm_migration.time.sleep"),
+		):
+			service.run()
+
+		service.send_request.assert_called_once()
+		service.request_abort.assert_called_once()
 		service.settle.assert_called_once_with("aborted")
 
 	def test_failure_marks_failed_and_requests_abort(self) -> None:
