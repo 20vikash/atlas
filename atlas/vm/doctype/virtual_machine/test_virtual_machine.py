@@ -1210,6 +1210,10 @@ class TestSystemImageCreation(UnitTestCase):
 		self.assertEqual(name, "IMG-00001")
 		self.assertEqual(create.call_args.kwargs["image_type"], "machine")
 
+	def test_a_shape_without_a_memory_snapshot_is_rejected(self) -> None:
+		with self.assertRaises(AtlasUserError):
+			self.create_image(tenant_id=0, memory_snapshot_configuration={"memory_mib": 4096})
+
 	def test_another_tenant_cannot_use_a_shared_option(self) -> None:
 		for options in ({"image_type": "system"}, {"cache_image": True}, {"memory_snapshot": True}):
 			with self.assertRaises(AtlasUserError):

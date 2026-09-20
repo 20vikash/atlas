@@ -281,6 +281,7 @@ def restart_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachine
 		"image_type": "machine",
 		"cache_image": False,
 		"memory_snapshot": False,
+		"memory_snapshot_configuration": {"virtual_cpu_count": 2, "memory_mib": 4096},
 		"tags": {"purpose": "pilot"},
 	},
 	responses={201: {"description": "The Machine image record is created."}},
@@ -294,6 +295,8 @@ def create_virtual_machine_snapshot(
 
 	If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
+	Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source VM value. The request needs `memory_snapshot`.
+
 	Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and `?tag=purpose:pilot`.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
@@ -302,6 +305,7 @@ def create_virtual_machine_snapshot(
 		image_type=payload.image_type,
 		cache_image=payload.cache_image,
 		memory_snapshot=payload.memory_snapshot,
+		memory_snapshot_configuration=payload.memory_snapshot_configuration.model_dump(exclude_none=True),
 		tags=payload.tags,
 	)
 	image: VirtualMachineImage = frappe.get_doc("Virtual Machine Image", image_name)

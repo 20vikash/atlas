@@ -13,6 +13,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.memory_snapshot_configuration_payload import MemorySnapshotConfigurationPayload
   from ..models.snapshot_payload_tags import SnapshotPayloadTags
 
 
@@ -32,6 +33,8 @@ class SnapshotPayload:
             cache_image (bool | Unset):  Default: False.
             image_type (SnapshotPayloadImageType | Unset):  Default: SnapshotPayloadImageType.MACHINE.
             memory_snapshot (bool | Unset):  Default: False.
+            memory_snapshot_configuration (MemorySnapshotConfigurationPayload | Unset): The virtual machine shape that a
+                warm artifact serves.
             tags (SnapshotPayloadTags | Unset):
      """
 
@@ -39,6 +42,7 @@ class SnapshotPayload:
     cache_image: bool | Unset = False
     image_type: SnapshotPayloadImageType | Unset = SnapshotPayloadImageType.MACHINE
     memory_snapshot: bool | Unset = False
+    memory_snapshot_configuration: MemorySnapshotConfigurationPayload | Unset = UNSET
     tags: SnapshotPayloadTags | Unset = UNSET
 
 
@@ -46,6 +50,7 @@ class SnapshotPayload:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.memory_snapshot_configuration_payload import MemorySnapshotConfigurationPayload # noqa: PLC0415
         from ..models.snapshot_payload_tags import SnapshotPayloadTags # noqa: PLC0415
         title = self.title
 
@@ -57,6 +62,10 @@ class SnapshotPayload:
 
 
         memory_snapshot = self.memory_snapshot
+
+        memory_snapshot_configuration: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.memory_snapshot_configuration, Unset):
+            memory_snapshot_configuration = self.memory_snapshot_configuration.to_dict()
 
         tags: dict[str, Any] | Unset = UNSET
         if not isinstance(self.tags, Unset):
@@ -74,6 +83,8 @@ class SnapshotPayload:
             field_dict["image_type"] = image_type
         if memory_snapshot is not UNSET:
             field_dict["memory_snapshot"] = memory_snapshot
+        if memory_snapshot_configuration is not UNSET:
+            field_dict["memory_snapshot_configuration"] = memory_snapshot_configuration
         if tags is not UNSET:
             field_dict["tags"] = tags
 
@@ -83,6 +94,7 @@ class SnapshotPayload:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.memory_snapshot_configuration_payload import MemorySnapshotConfigurationPayload # noqa: PLC0415
         from ..models.snapshot_payload_tags import SnapshotPayloadTags # noqa: PLC0415
         d = dict(src_dict)
         title = d.pop("title")
@@ -101,6 +113,16 @@ class SnapshotPayload:
 
         memory_snapshot = d.pop("memory_snapshot", UNSET)
 
+        _memory_snapshot_configuration = d.pop("memory_snapshot_configuration", UNSET)
+        memory_snapshot_configuration: MemorySnapshotConfigurationPayload | Unset
+        if isinstance(_memory_snapshot_configuration,  Unset):
+            memory_snapshot_configuration = UNSET
+        else:
+            memory_snapshot_configuration = MemorySnapshotConfigurationPayload.from_dict(_memory_snapshot_configuration)
+
+
+
+
         _tags = d.pop("tags", UNSET)
         tags: SnapshotPayloadTags | Unset
         if isinstance(_tags,  Unset):
@@ -116,6 +138,7 @@ class SnapshotPayload:
             cache_image=cache_image,
             image_type=image_type,
             memory_snapshot=memory_snapshot,
+            memory_snapshot_configuration=memory_snapshot_configuration,
             tags=tags,
         )
 

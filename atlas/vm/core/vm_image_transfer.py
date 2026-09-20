@@ -35,18 +35,19 @@ class VirtualMachineImageTransferService:
 		image_type: str = "machine",
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
+		memory_snapshot_configuration: dict[str, int] | None = None,
 		tags: dict[str, str] | None = None,
 	) -> str:
-		"""Create a snapshot record and enqueue its transfer."""
-		memory_snapshot_configuration = (
-			(
-				(virtual_machine.cpu_millicores + 999) // 1000,
-				virtual_machine.memory_mib,
-				virtual_machine.disk_mib,
-			)
-			if memory_snapshot
-			else (0, 0, 0)
-		)
+		"""Create a snapshot record and enqueue its transfer. An absent memory snapshot
+		value keeps the source VM shape."""
+		shape: dict[str, int] = {}
+		if memory_snapshot:
+			shape = {
+				"virtual_cpu_count": (virtual_machine.cpu_millicores + 999) // 1000,
+				"memory_mib": virtual_machine.memory_mib,
+				"disk_mib": virtual_machine.disk_mib,
+			} | (memory_snapshot_configuration or {})
+
 		server = cast("MetalServer", frappe.get_doc("Metal Server", virtual_machine.server))
 		metal_client = MetalClient(server)
 		try:
@@ -67,9 +68,9 @@ class VirtualMachineImageTransferService:
 				"tags": [{"key": key, "value": value} for key, value in (tags or {}).items()],
 				"cache_image": int(cache_image),
 				"memory_snapshot": int(memory_snapshot),
-				"memory_snapshot_virtual_cpu_count": memory_snapshot_configuration[0],
-				"memory_snapshot_memory_mib": memory_snapshot_configuration[1],
-				"memory_snapshot_disk_mib": memory_snapshot_configuration[2],
+				"memory_snapshot_virtual_cpu_count": shape.get("virtual_cpu_count", 0),
+				"memory_snapshot_memory_mib": shape.get("memory_mib", 0),
+				"memory_snapshot_disk_mib": shape.get("disk_mib", 0),
 				"image_object_key": f"images/{snapshot_id}/rootfs.img",
 				"image_size_mib": self.get_positive_size(snapshot, "rootfs"),
 				"kernel_object_key": f"images/{snapshot_id}/kernel",

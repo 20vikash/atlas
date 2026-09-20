@@ -270,9 +270,11 @@ class VirtualMachine(Document):
 		image_type: str = "machine",
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
+		memory_snapshot_configuration: dict[str, int] | None = None,
 		tags: dict[str, str] | None = None,
 	) -> str:
-		"""Queue an image transfer from this VM. A System image needs tenant 0."""
+		"""Queue an image transfer from this VM. A System image needs tenant 0. An absent
+		memory snapshot value keeps this VM shape."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		if self.is_draft:
@@ -298,6 +300,9 @@ class VirtualMachine(Document):
 				exc=AtlasUserError,
 			)
 
+		if memory_snapshot_configuration and not memory_snapshot:
+			frappe.throw(_("Memory snapshot configuration needs a memory snapshot."), exc=AtlasUserError)
+
 		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 
 		return VirtualMachineImageTransferService().create_from_virtual_machine(
@@ -306,6 +311,7 @@ class VirtualMachine(Document):
 			image_type=image_type,
 			cache_image=cache_image,
 			memory_snapshot=memory_snapshot,
+			memory_snapshot_configuration=memory_snapshot_configuration,
 			tags=tags,
 		)
 

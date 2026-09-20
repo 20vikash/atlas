@@ -30,6 +30,7 @@ from .ip_address_response_tags import IPAddressResponseTags
 from .json_web_key import JSONWebKey
 from .json_web_key_set_response import JSONWebKeySetResponse
 from .list_images_image_type_type_0 import ListImagesImageTypeType0
+from .memory_snapshot_configuration_payload import MemorySnapshotConfigurationPayload
 from .metadata_replacement_payload import MetadataReplacementPayload
 from .metadata_replacement_payload_metadata import MetadataReplacementPayloadMetadata
 from .network_update_payload import NetworkUpdatePayload
@@ -88,6 +89,7 @@ __all__ = (
     "JSONWebKey",
     "JSONWebKeySetResponse",
     "ListImagesImageTypeType0",
+    "MemorySnapshotConfigurationPayload",
     "MetadataReplacementPayload",
     "MetadataReplacementPayloadMetadata",
     "NetworkUpdatePayload",

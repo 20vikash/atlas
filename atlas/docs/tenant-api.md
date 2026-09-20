@@ -68,6 +68,8 @@ Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token wit
 
 A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snapshot` only from tenant `0`. Any other tenant that sends one receives `400`, and its snapshot becomes a `machine` image. These values cannot change after the image exists.
 
+A snapshot request with `memory_snapshot` can carry `memory_snapshot_configuration` to record a different warm start shape. It accepts `virtual_cpu_count`, `memory_mib`, and `disk_mib`. Each absent value keeps the source VM value. A configuration without `memory_snapshot` returns `400`.
+
 ## Conventions
 
 An error response has `error.code`, `error.message`, and `error.fields`. Validation errors use `400`; missing authentication uses `401`; denied access uses `403`; missing resources use `404`; and invalid resource state uses `409`.

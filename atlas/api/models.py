@@ -467,6 +467,14 @@ class IPAddressAssignmentPayload(StrictModel):
 	)
 
 
+class MemorySnapshotConfigurationPayload(StrictModel):
+	"""The virtual machine shape that a warm artifact serves."""
+
+	virtual_cpu_count: int | None = Field(default=None, ge=1)
+	memory_mib: int | None = Field(default=None, ge=1)
+	disk_mib: int | None = Field(default=None, ge=1)
+
+
 class SnapshotPayload(StrictModel):
 	"""Values that create one image from a virtual machine."""
 
@@ -474,6 +482,9 @@ class SnapshotPayload(StrictModel):
 	image_type: Literal["machine", "system"] = "machine"
 	cache_image: bool = False
 	memory_snapshot: bool = False
+	memory_snapshot_configuration: MemorySnapshotConfigurationPayload = Field(
+		default_factory=MemorySnapshotConfigurationPayload
+	)
 	tags: dict[str, str] = Field(default_factory=dict)
 
 
