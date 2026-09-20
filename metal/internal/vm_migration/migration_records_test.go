@@ -73,13 +73,15 @@ func TestRunningRecordRequiresAPhase(t *testing.T) {
 
 func TestTransferStateRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
+	startedAt := time.Now().UTC().Add(-42 * time.Second)
+	finishedAt := time.Now().UTC()
 	target := newTargetRecord()
 	target.Phase = PhaseCopying
 	target.SourceObservedState = vm.StateRunning
 	target.CopyStartedAt = time.Now().UTC()
 	target.ActiveSequence = 2
 	target.Intervals = []IntervalProgress{
-		{Sequence: 1, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, GUID: "g1", Completed: true},
+		{Sequence: 1, StartedAt: startedAt, FinishedAt: finishedAt, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, GUID: "g1", Completed: true},
 		{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024},
 	}
 	if err := store.writeTarget(target); err != nil {
@@ -97,7 +99,7 @@ func TestTransferStateRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotTarget.ActiveSequence != 2 || len(gotTarget.Intervals) != 2 || !gotTarget.Intervals[0].Completed {
+	if gotTarget.ActiveSequence != 2 || len(gotTarget.Intervals) != 2 || !gotTarget.Intervals[0].Completed || !gotTarget.Intervals[0].FinishedAt.Equal(finishedAt) {
 		t.Fatalf("target = %+v", gotTarget)
 	}
 	gotSource, err := store.readSource("vm-2")

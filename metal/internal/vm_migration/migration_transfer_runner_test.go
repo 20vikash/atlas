@@ -360,7 +360,7 @@ func TestAWorkerWriteKeepsAnAbortThatArrivedFirst(t *testing.T) {
 	if current.Phase != PhaseStopping {
 		t.Fatalf("phase = %q, want %q", current.Phase, PhaseStopping)
 	}
-	if len(current.Intervals) != 1 || !current.Intervals[0].Completed {
+	if len(current.Intervals) != 1 || !current.Intervals[0].Completed || current.Intervals[0].FinishedAt.IsZero() {
 		t.Fatalf("interval was not completed: %+v", current.Intervals)
 	}
 }

@@ -497,7 +497,7 @@ class SnapshotPayload(StrictModel):
 class TerminationProtectionPayload(StrictModel):
 	"""The termination protection state to store."""
 
-	is_termination_protected: bool
+	enabled: bool
 
 
 class ConsoleTokenPayload(StrictModel):

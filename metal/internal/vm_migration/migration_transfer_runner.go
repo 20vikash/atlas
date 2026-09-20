@@ -333,6 +333,7 @@ func (m *VMMigration) beginInterval(ctx context.Context, record TargetMigrationR
 func (m *VMMigration) completeInterval(ctx context.Context, record TargetMigrationRecord, sequence int, bytesReceived int64, guid string) error {
 	// The snapshot is already on the dataset. An unrecorded interval makes the
 	// next pass ask for it again, which zfs receive then rejects.
+	finishedAt := m.now()
 	_, err := m.mutateTarget(context.WithoutCancel(ctx), record.VirtualMachineID, func(target *TargetMigrationRecord) {
 		for index := range target.Intervals {
 			if target.Intervals[index].Sequence != sequence {
@@ -342,7 +343,10 @@ func (m *VMMigration) completeInterval(ctx context.Context, record TargetMigrati
 			interval.BytesTransferred = bytesReceived
 			interval.GUID = guid
 			interval.Completed = true
-			interval.DurationSeconds = int(m.now().Sub(interval.StartedAt).Seconds())
+			if interval.FinishedAt.IsZero() {
+				interval.FinishedAt = finishedAt
+			}
+			interval.DurationSeconds = int(interval.FinishedAt.Sub(interval.StartedAt).Seconds())
 		}
 	})
 	return err

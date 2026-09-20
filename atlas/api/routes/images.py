@@ -125,7 +125,7 @@ def delete_image(image_id: str) -> ApiResult[ImageResponse]:
 
 @images.patch("<image_id>/termination-protection")
 @api_docs(
-	request_example={"is_termination_protected": True},
+	request_example={"enabled": True},
 	responses={202: {"description": "The termination protection state is stored."}},
 )
 def update_image_termination_protection(
@@ -136,5 +136,5 @@ def update_image_termination_protection(
 	Sets or clears termination protection. Deletion of a protected image is refused until a later request clears it. A `system` image is protected when it is created.
 	"""
 	image = get_owned_image(image_id)
-	image.set_termination_protection(payload.is_termination_protected)
+	image.set_termination_protection(payload.enabled)
 	return ApiResult(ImageResponse.from_document(image), status=202)

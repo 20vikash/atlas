@@ -212,8 +212,8 @@ class PlacementContext:
 										FROM `tabVirtual Machine Migration` AS migration
 										INNER JOIN `tabVirtual Machine` AS vm
 											ON vm.name = migration.virtual_machine
-										WHERE migration.target_server = server.name
-											AND migration.status IN ('running', 'ready')
+										WHERE migration.destination_metal_server = server.name
+											AND migration.status IN ('preparing', 'copying', 'cutting_over', 'starting', 'finalizing', 'canceling')
 									), 0),
 								0
 							) >= %(memory_mib)s
@@ -231,8 +231,8 @@ class PlacementContext:
 										FROM `tabVirtual Machine Migration` AS migration
 										INNER JOIN `tabVirtual Machine` AS vm
 											ON vm.name = migration.virtual_machine
-										WHERE migration.target_server = server.name
-											AND migration.status IN ('running', 'ready')
+										WHERE migration.destination_metal_server = server.name
+											AND migration.status IN ('preparing', 'copying', 'cutting_over', 'starting', 'finalizing', 'canceling')
 									), 0),
 								0
 							) >= %(disk_mib)s
@@ -345,14 +345,14 @@ class PlacementContext:
 			),
 			migration_usage AS (
 				SELECT
-					migration.target_server AS server,
+					migration.destination_metal_server AS server,
 					SUM(vm.cpu_millicores) AS cpu_millicores,
 					SUM(vm.memory_mib) AS memory_mib,
 					SUM(vm.disk_mib) AS storage_mib
 				FROM `tabVirtual Machine Migration` AS migration
 				INNER JOIN `tabVirtual Machine` AS vm ON vm.name = migration.virtual_machine
-				WHERE migration.status IN ('running', 'ready')
-				GROUP BY migration.target_server
+				WHERE migration.status IN ('preparing', 'copying', 'cutting_over', 'starting', 'finalizing', 'canceling')
+				GROUP BY migration.destination_metal_server
 			)
 			SELECT
 				server.name,

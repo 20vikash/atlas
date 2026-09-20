@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/vm"
@@ -187,10 +188,11 @@ func TestGetAndAbortMigration(t *testing.T) {
 }
 
 func TestGetMigrationReportsTransferProgress(t *testing.T) {
+	finishedAt := time.Date(2026, time.September, 20, 12, 0, 42, 0, time.UTC)
 	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{
 		ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationRunning, Phase: vmmigration.PhaseCopying,
 		Intervals: []vmmigration.IntervalProgress{
-			{Sequence: 1, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},
+			{Sequence: 1, StartedAt: time.Date(2026, time.September, 20, 12, 0, 0, 0, time.UTC), FinishedAt: finishedAt, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},
 			{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024, ThroughputMiBps: 64},
 		},
 	}}
@@ -201,15 +203,22 @@ func TestGetMigrationReportsTransferProgress(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.BytesTransferred != 1280 || len(response.Snapshots) != 2 {
+	if len(response.Transfers) != 2 {
 		t.Fatalf("response = %+v", response)
 	}
-	if !response.Snapshots[0].Completed || response.Snapshots[0].DurationSeconds != 42 {
-		t.Fatalf("snapshot 0 = %+v", response.Snapshots[0])
+	transfer := response.Transfers[0]
+	if transfer.Sequence != 1 || transfer.StartedAt.IsZero() || transfer.FinishedAt == nil {
+		t.Fatalf("transfer timing = %+v", transfer)
+	}
+	if !transfer.FinishedAt.Equal(finishedAt) || !transfer.Completed || transfer.DurationSeconds != 42 {
+		t.Fatalf("transfer completion = %+v", transfer)
+	}
+	if transfer.TransferredMiB != 1 || transfer.TotalMiB != 1 {
+		t.Fatalf("transfer size = %+v", transfer)
 	}
 	// The throttle step is visible per interval, so an operator sees it decrease.
-	if response.Snapshots[1].ThroughputMiBps != 64 {
-		t.Fatalf("snapshot 1 throughput = %d, want 64", response.Snapshots[1].ThroughputMiBps)
+	if response.Transfers[1].ThroughputMiBps != 64 {
+		t.Fatalf("transfer 1 throughput = %d, want 64", response.Transfers[1].ThroughputMiBps)
 	}
 }
 

@@ -369,7 +369,7 @@ def update_virtual_machine_compute(
 
 @virtual_machine_configuration.patch("<virtual_machine_id>/termination-protection")
 @api_docs(
-	request_example={"is_termination_protected": True},
+	request_example={"enabled": True},
 	responses=ACCEPTED_RESPONSE,
 )
 def update_virtual_machine_termination_protection(
@@ -380,7 +380,7 @@ def update_virtual_machine_termination_protection(
 	Sets or clears termination protection. Termination and deletion of a protected VM are refused until a later request clears it.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	virtual_machine.set_termination_protection(payload.is_termination_protected)
+	virtual_machine.set_termination_protection(payload.enabled)
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 

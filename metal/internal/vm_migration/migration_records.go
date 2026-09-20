@@ -103,6 +103,7 @@ type PortableConfig struct {
 type IntervalProgress struct {
 	Sequence         int       `json:"sequence"`
 	StartedAt        time.Time `json:"started_at"`
+	FinishedAt       time.Time `json:"finished_at,omitempty"`
 	DurationSeconds  int       `json:"duration_seconds"`
 	BytesTransferred int64     `json:"bytes_transferred"`
 	TotalBytes       int64     `json:"total_bytes"`

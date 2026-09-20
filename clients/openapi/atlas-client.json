@@ -1258,13 +1258,13 @@
         "additionalProperties": false,
         "description": "The termination protection state to store.",
         "properties": {
-          "is_termination_protected": {
-            "title": "Is Termination Protected",
+          "enabled": {
+            "title": "Enabled",
             "type": "boolean"
           }
         },
         "required": [
-          "is_termination_protected"
+          "enabled"
         ],
         "title": "TerminationProtectionPayload",
         "type": "object"
@@ -2095,7 +2095,7 @@
           "content": {
             "application/json": {
               "example": {
-                "is_termination_protected": true
+                "enabled": true
               },
               "schema": {
                 "$ref": "#/components/schemas/TerminationProtectionPayload"
@@ -3354,7 +3354,7 @@
           "content": {
             "application/json": {
               "example": {
-                "is_termination_protected": true
+                "enabled": true
               },
               "schema": {
                 "$ref": "#/components/schemas/TerminationProtectionPayload"

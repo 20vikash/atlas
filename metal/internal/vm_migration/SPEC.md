@@ -57,7 +57,7 @@ mark the interval complete with the estimated stream size
 copy or cut over
 ```
 
-The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. The target saves each interval before and after transfer. A record write error ends the transfer pass and reports the storage error. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
+The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. The target saves each interval before transfer, then saves its finish time and result after transfer. A record write error ends the transfer pass and reports the storage error. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong target dataset fails the migration and keeps the data for inspection.
 
 ## Cutover
 

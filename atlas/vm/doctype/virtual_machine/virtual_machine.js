@@ -13,52 +13,58 @@ frappe.ui.form.on("Virtual Machine", {
 		const is_running = current_state === "running";
 		const is_stopped = current_state === "stopped";
 		const is_paused = current_state === "paused";
+		const is_live = is_running || is_stopped || is_paused;
+		const is_migrating = Boolean(frm.doc.active_migration);
 
-		if (is_running || is_paused || current_state === "created") {
-			frm.add_custom_button(
+		const CONSOLE = __("Console Access");
+		const ACTIONS = __("Actions");
+		const DANGEROUS = __("Dangerous Actions");
+
+		// A string action calls that method on the document. A function opens a dialog.
+		[
+			[
 				__("TTY Console"),
 				() => openConsole(frm, "tty"),
-				__("Console Access")
-			);
-		}
-		if (is_running) {
-			frm.add_custom_button(
-				__("SSH Console"),
-				() => openConsole(frm, "ssh"),
-				__("Console Access")
-			);
-		}
-
-		[
-			[__("Start VM"), "start", is_stopped, __("Starting...")],
-			[__("Stop VM"), "stop", is_running || is_paused, __("Stopping...")],
-			[__("Reboot VM"), "reboot", is_running, __("Rebooting...")],
-			[__("Pause VM"), "pause", is_running, __("Pausing...")],
-			[__("Resume VM"), "resume", is_paused, __("Resuming...")],
-		].forEach(([label, method, condition, freeze_message]) => {
-			if (!condition) {
-				return;
-			}
-			frm.add_custom_button(
-				label,
-				() =>
-					frm
-						.call({ method, doc: frm.doc, freeze: true, freeze_message })
-						.then(() => frm.reload_doc()),
-				__("Actions")
-			);
-		});
-
-		const is_migrating = Boolean(frm.doc.active_migration);
-		if ((is_running || is_stopped || is_paused) && !is_migrating) {
-			frm.add_custom_button(
-				__("Migrate VM"),
-				() => migrateVirtualMachine(frm),
-				__("Actions")
-			);
-		}
-		if (is_migrating) {
-			frm.add_custom_button(
+				is_running || is_paused || current_state === "created",
+				CONSOLE,
+			],
+			[__("SSH Console"), () => openConsole(frm, "ssh"), is_running, CONSOLE],
+			[__("Start VM"), "start", is_stopped, ACTIONS, __("Starting...")],
+			[__("Stop VM"), "stop", is_running || is_paused, ACTIONS, __("Stopping...")],
+			[__("Reboot VM"), "reboot", is_running, ACTIONS, __("Rebooting...")],
+			[__("Pause VM"), "pause", is_running, ACTIONS, __("Pausing...")],
+			[__("Resume VM"), "resume", is_paused, ACTIONS, __("Resuming...")],
+			[__("Snapshot VM"), () => showCreateMachineImageDialog(frm), true, ACTIONS],
+			[__("Resize Disk"), () => showResizeDiskDialog(frm), true, ACTIONS],
+			[__("Edit Disk Limits"), () => showEditDiskLimitsDialog(frm), true, ACTIONS],
+			[__("Resize Compute"), () => showResizeComputeDialog(frm), is_stopped, ACTIONS],
+			[__("Edit Idle Sleep"), () => showEditIdleShutdownDialog(frm), true, ACTIONS],
+			[__("Edit SSH Keys"), () => showEditSSHKeysDialog(frm), true, ACTIONS],
+			[__("Edit Metadata"), () => showEditMetadataDialog(frm), true, ACTIONS],
+			[__("Edit Network Throughput"), () => showEditThroughputDialog(frm), true, ACTIONS],
+			[__("Edit Firewall"), () => showEditFirewallDialog(frm), true, ACTIONS],
+			[
+				__("Attach IP Address"),
+				() => showAttachIPAddressDialog(frm),
+				!frm.doc.public_ipv4,
+				ACTIONS,
+			],
+			[
+				__("Detach IP Address"),
+				() => detachIPAddress(frm),
+				Boolean(frm.doc.public_ipv4),
+				ACTIONS,
+			],
+			[__("Change Egress Mode"), () => showEgressDialog(frm), true, ACTIONS],
+			[
+				frm.doc.is_termination_protected
+					? __("Disable Termination Protection")
+					: __("Enable Termination Protection"),
+				() => setTerminationProtection(frm),
+				true,
+				ACTIONS,
+			],
+			[
 				__("View Migration"),
 				() =>
 					frappe.set_route(
@@ -66,91 +72,35 @@ frappe.ui.form.on("Virtual Machine", {
 						"Virtual Machine Migration",
 						frm.doc.active_migration
 					),
-				__("Actions")
-			);
-		}
-
-		frm.add_custom_button(
-			__("Snapshot VM"),
-			() => showCreateMachineImageDialog(frm),
-			__("Actions")
-		);
-		frm.add_custom_button(__("Resize Disk"), () => showResizeDiskDialog(frm), __("Actions"));
-		frm.add_custom_button(
-			__("Edit Disk Limits"),
-			() => showEditDiskLimitsDialog(frm),
-			__("Actions")
-		);
-		if (is_stopped) {
-			frm.add_custom_button(
-				__("Resize Compute"),
-				() => showResizeComputeDialog(frm),
-				__("Actions")
-			);
-		}
-		frm.add_custom_button(
-			__("Edit Idle Sleep"),
-			() => showEditIdleShutdownDialog(frm),
-			__("Actions")
-		);
-		frm.add_custom_button(
-			__("Edit SSH Keys"),
-			() => showEditSSHKeysDialog(frm),
-			__("Actions")
-		);
-		frm.add_custom_button(
-			__("Edit Metadata"),
-			() => showEditMetadataDialog(frm),
-			__("Actions")
-		);
-		frm.add_custom_button(
-			__("Edit Network Throughput"),
-			() => showEditThroughputDialog(frm),
-			__("Actions")
-		);
-		frm.add_custom_button(
-			__("Edit Firewall"),
-			() => showEditFirewallDialog(frm),
-			__("Actions")
-		);
-		frm.add_custom_button(
-			__("Change Egress Mode"),
-			() => showEgressDialog(frm),
-			__("Actions")
-		);
-		if (frm.doc.public_ipv4) {
-			frm.add_custom_button(
-				__("Detach IP Address"),
-				() => detachIPAddress(frm),
-				__("Actions")
-			);
-		} else {
-			frm.add_custom_button(
-				__("Attach IP Address"),
-				() => showAttachIPAddressDialog(frm),
-				__("Actions")
-			);
-		}
-		// Only a tenant 0 VM can hold the Atlas WG Mesh privilege.
-		if (frm.doc.tenant_id === 0) {
-			frm.add_custom_button(
+				is_migrating,
+				ACTIONS,
+			],
+			// Only a tenant 0 VM can hold the Atlas WG Mesh privilege.
+			[
 				frm.doc.is_privileged ? __("Revoke Privilege") : __("Grant Privilege"),
 				() => showPrivilegeDialog(frm),
-				__("Dangerous Actions")
-			);
-		}
-		frm.add_custom_button(
-			frm.doc.is_termination_protected
-				? __("Disable Termination Protection")
-				: __("Enable Termination Protection"),
-			() => setTerminationProtection(frm),
-			__("Dangerous Actions")
-		);
-		frm.add_custom_button(
-			__("Terminate VM"),
-			() => terminateVirtualMachine(frm),
-			__("Dangerous Actions")
-		);
+				frm.doc.tenant_id === 0,
+				DANGEROUS,
+			],
+			[
+				__("Migrate VM"),
+				() => migrateVirtualMachine(frm),
+				is_live && !is_migrating,
+				DANGEROUS,
+			],
+			[__("Terminate VM"), () => terminateVirtualMachine(frm), true, DANGEROUS],
+		].forEach(([label, action, condition, group, freeze_message]) => {
+			if (!condition) {
+				return;
+			}
+
+			const call = () =>
+				frm
+					.call({ method: action, doc: frm.doc, freeze: true, freeze_message })
+					.then(() => frm.reload_doc());
+
+			frm.add_custom_button(label, typeof action === "string" ? call : action, group);
+		});
 	},
 });
 
@@ -200,16 +150,16 @@ function migrateVirtualMachine(frm) {
 				fieldtype: "HTML",
 				fieldname: "summary",
 				options: __(
-					"This copies the disk and moves {0} off {1}. It stays available until the short cutover.",
+					"This moves {0} off {1}. It stays available until the short cutover.<br><br>",
 					[frm.doc.name.bold(), (frm.doc.server || "").bold()]
 				),
 			},
 			{
 				fieldtype: "Link",
-				fieldname: "target_server",
-				label: __("Target Host"),
+				fieldname: "destination_metal_server",
+				label: __("Destination Metal Server"),
 				options: "Metal Server",
-				description: __("Leave empty to let Atlas choose a host."),
+				description: __("Leave empty to let auto select a Metal Server."),
 				get_query: () => ({
 					filters: {
 						status: "Running",
@@ -225,9 +175,11 @@ function migrateVirtualMachine(frm) {
 			frm.call({
 				method: "migrate",
 				doc: frm.doc,
-				args: { target_server: values.target_server || null },
+				args: {
+					destination_metal_server: values.destination_metal_server || null,
+				},
 				freeze: true,
-				freeze_message: __("Starting migration..."),
+				freeze_message: __("Scheduling migration..."),
 			}).then((response) => {
 				if (response.message) {
 					frappe.set_route("Form", "Virtual Machine Migration", response.message);

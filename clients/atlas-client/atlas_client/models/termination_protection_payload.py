@@ -23,23 +23,23 @@ class TerminationProtectionPayload:
     """ The termination protection state to store.
 
         Attributes:
-            is_termination_protected (bool):
+            enabled (bool):
      """
 
-    is_termination_protected: bool
+    enabled: bool
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        is_termination_protected = self.is_termination_protected
+        enabled = self.enabled
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "is_termination_protected": is_termination_protected,
+            "enabled": enabled,
         })
 
         return field_dict
@@ -49,10 +49,10 @@ class TerminationProtectionPayload:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        is_termination_protected = d.pop("is_termination_protected")
+        enabled = d.pop("enabled")
 
         termination_protection_payload = cls(
-            is_termination_protected=is_termination_protected,
+            enabled=enabled,
         )
 
         return termination_protection_payload

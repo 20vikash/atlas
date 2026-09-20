@@ -28,6 +28,7 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
 | `vm_state` | The only writer of Virtual Machine State. The host sync job calls it. |
 | `state_webhook` | The Webhook records that deliver each stored state report to a Central. |
+| `Virtual Machine Migration` | The scheduled migration request, its lifecycle, and its typed transfer history. See [migration operation](../docs/virtual-machine-migrations.md). |
 
 ## Create
 
@@ -49,7 +50,7 @@ Atlas calls the Metal API through HTTPS on the server public IPv4 address. Atlas
 
 `PlacementStrategy.find_server(requirements)` returns the name of a ready host for VM creation or migration. It does not return a document.
 
-`PlacementRequirements` contains the resource, architecture, tenant, and host pool constraints. A strategy owns its snapshot and lock. An explicit migration target uses `PlacementStrategy.reserve_server`.
+`PlacementRequirements` contains the resource, architecture, tenant, and host pool constraints. A strategy owns its snapshot and lock. An explicit migration destination uses `PlacementStrategy.reserve_server`.
 
 `balanced` is the default strategy. It uses separate regular and sleepy host pools. It first keeps a start or resize on the current host when that host matches the VM pool and fits the request. Otherwise, it filters ready hosts by pool, architecture, memory, and storage, then tries them in this order:
 

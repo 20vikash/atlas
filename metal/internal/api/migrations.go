@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -32,18 +33,20 @@ type migrationResponse struct {
 	VirtualMachineID string                  `json:"virtual_machine_id"`
 	Status           string                  `json:"status"`
 	Phase            string                  `json:"phase"`
-	BytesTransferred int64                   `json:"bytes_transferred,omitempty"`
-	Snapshots        []snapshotProgress      `json:"snapshots,omitempty"`
+	Transfers        []migrationTransfer     `json:"transfers,omitempty"`
 	Error            *migrationErrorResponse `json:"error,omitempty"`
 }
 
-// snapshotProgress is transfer progress for one interval.
-type snapshotProgress struct {
-	DurationSeconds  int   `json:"duration_seconds"`
-	BytesTransferred int64 `json:"bytes_transferred"`
-	TotalBytes       int64 `json:"total_bytes"`
-	ThroughputMiBps  int   `json:"throughput_mibps,omitempty"`
-	Completed        bool  `json:"completed"`
+// migrationTransfer reports one migration data transfer.
+type migrationTransfer struct {
+	Sequence        int        `json:"sequence"`
+	StartedAt       time.Time  `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	DurationSeconds int        `json:"duration_seconds"`
+	TransferredMiB  int        `json:"transferred_mib"`
+	TotalMiB        int        `json:"total_mib"`
+	ThroughputMiBps int        `json:"throughput_mibps,omitempty"`
+	Completed       bool       `json:"completed"`
 }
 
 // migrationErrorResponse is safe migration error detail.
@@ -123,19 +126,38 @@ func toMigration(record vmmigration.TargetMigrationRecord) migrationResponse {
 		Phase:            string(record.Phase),
 	}
 	for _, interval := range record.Intervals {
-		response.BytesTransferred += interval.BytesTransferred
-		response.Snapshots = append(response.Snapshots, snapshotProgress{
-			DurationSeconds:  interval.DurationSeconds,
-			BytesTransferred: interval.BytesTransferred,
-			TotalBytes:       interval.TotalBytes,
-			ThroughputMiBps:  interval.ThroughputMiBps,
-			Completed:        interval.Completed,
+		var finishedAt *time.Time
+		if !interval.FinishedAt.IsZero() {
+			finishedAt = &interval.FinishedAt
+		}
+		response.Transfers = append(response.Transfers, migrationTransfer{
+			Sequence:        interval.Sequence,
+			StartedAt:       interval.StartedAt,
+			FinishedAt:      finishedAt,
+			DurationSeconds: interval.DurationSeconds,
+			TransferredMiB:  bytesToMiB(interval.BytesTransferred),
+			TotalMiB:        bytesToMiB(interval.TotalBytes),
+			ThroughputMiBps: interval.ThroughputMiBps,
+			Completed:       interval.Completed,
 		})
 	}
 	if record.Error != nil {
 		response.Error = &migrationErrorResponse{Code: record.Error.Code, Message: record.Error.Message}
 	}
 	return response
+}
+
+func bytesToMiB(bytes int64) int {
+	const bytesPerMiB = 1024 * 1024
+
+	if bytes <= 0 {
+		return 0
+	}
+	mib := bytes / bytesPerMiB
+	if bytes%bytesPerMiB != 0 {
+		mib++
+	}
+	return int(mib)
 }
 
 // migrationIdentifier reads and validates the path migration ID.
