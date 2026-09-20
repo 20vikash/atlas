@@ -1,5 +1,5 @@
 // Package migration carries VM migration traffic between Metal hosts. The
-// target host drives the migration through the mutual-TLS coordination API.
+// destination host drives the migration through the mutual-TLS coordination API.
 package migration
 
 import (

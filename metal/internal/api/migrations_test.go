@@ -13,7 +13,7 @@ import (
 )
 
 type stubMigrationManager struct {
-	record            migration.TargetProgress
+	record            migration.DestinationProgress
 	createErr         error
 	statusErr         error
 	abortErr          error
@@ -43,12 +43,12 @@ type stubMigrationManager struct {
 	destroyErr        error
 }
 
-func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source string) (migration.TargetProgress, error) {
+func (m *stubMigrationManager) CreateDestination(_ context.Context, migrationID, virtualMachineID, source string) (migration.DestinationProgress, error) {
 	m.createArgs = []string{migrationID, virtualMachineID, source}
 	return m.record, m.createErr
 }
 
-func (m *stubMigrationManager) TargetStatus(context.Context, string) (migration.TargetProgress, error) {
+func (m *stubMigrationManager) DestinationStatus(context.Context, string) (migration.DestinationProgress, error) {
 	return m.record, m.statusErr
 }
 
@@ -57,7 +57,7 @@ func (m *stubMigrationManager) RequestFinish(_ context.Context, migrationID stri
 	return m.finishErr
 }
 
-func (m *stubMigrationManager) AbortTarget(_ context.Context, migrationID string) error {
+func (m *stubMigrationManager) AbortDestination(_ context.Context, migrationID string) error {
 	m.abortedID = migrationID
 	return m.abortErr
 }
@@ -140,8 +140,8 @@ func newCoordinationTestServer(t *testing.T, migrations MigrationManager) http.H
 	return server
 }
 
-func TestCreateMigrationDrivesTheTarget(t *testing.T) {
-	stub := &stubMigrationManager{record: migration.TargetProgress{ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusRunning, Phase: migration.PhasePreparing}}
+func TestCreateMigrationDrivesTheDestination(t *testing.T) {
+	stub := &stubMigrationManager{record: migration.DestinationProgress{ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusRunning, Phase: migration.PhasePreparing}}
 	server := newMigrationTestServer(t, stub)
 
 	body := `{"virtual_machine_id":"vm-1","source":"https://10.0.0.3:9000"}`
@@ -165,7 +165,7 @@ func TestCreateMigrationRejectsAMissingField(t *testing.T) {
 }
 
 func TestGetAndAbortMigration(t *testing.T) {
-	stub := &stubMigrationManager{record: migration.TargetProgress{ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusReady, Phase: migration.PhaseCopying}}
+	stub := &stubMigrationManager{record: migration.DestinationProgress{ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusReady, Phase: migration.PhaseCopying}}
 	wakeCalls := 0
 	server := newMigrationTestServerWithWake(t, stub, func() { wakeCalls++ })
 
@@ -189,7 +189,7 @@ func TestGetAndAbortMigration(t *testing.T) {
 
 func TestGetMigrationReportsTransferProgress(t *testing.T) {
 	finishedAt := time.Date(2026, time.September, 20, 12, 0, 42, 0, time.UTC)
-	stub := &stubMigrationManager{record: migration.TargetProgress{
+	stub := &stubMigrationManager{record: migration.DestinationProgress{
 		ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusRunning, Phase: migration.PhaseCopying,
 		Intervals: []migration.TransferProgress{
 			{Sequence: 1, StartedAt: time.Date(2026, time.September, 20, 12, 0, 0, 0, time.UTC), FinishedAt: finishedAt, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},

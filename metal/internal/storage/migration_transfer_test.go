@@ -160,7 +160,7 @@ func TestSnapshotTLSConfigurationsRequireMutualTLSAndPinTheSourceHost(t *testing
 		t.Fatalf("client configuration = %+v", client)
 	}
 	if client.InsecureSkipVerify {
-		t.Fatal("the target must verify the source node certificate")
+		t.Fatal("the destination must verify the source node certificate")
 	}
 }
 
@@ -176,7 +176,7 @@ func TestSnapshotTLSConfigurationRejectsAnAuthorityFileWithoutACertificate(t *te
 	}
 }
 
-func TestSnapshotRelayCopiesTheStreamToTheTargetAndStopsOnCancel(t *testing.T) {
+func TestSnapshotRelayCopiesTheStreamToTheDestinationAndStopsOnCancel(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -194,11 +194,11 @@ func TestSnapshotRelayCopiesTheStreamToTheTargetAndStopsOnCancel(t *testing.T) {
 		received <- body
 	}()
 
-	if err := relaySnapshotToTarget(context.Background(), listener, bytes.NewReader(payload)); err != nil {
+	if err := relaySnapshotToDestination(context.Background(), listener, bytes.NewReader(payload)); err != nil {
 		t.Fatal(err)
 	}
 	if body := <-received; !bytes.Equal(body, payload) {
-		t.Fatalf("target received %d bytes, want %d", len(body), len(payload))
+		t.Fatalf("destination received %d bytes, want %d", len(body), len(payload))
 	}
 
 	idle, err := net.Listen("tcp", "127.0.0.1:0")
@@ -207,25 +207,25 @@ func TestSnapshotRelayCopiesTheStreamToTheTargetAndStopsOnCancel(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := relaySnapshotToTarget(cancelled, idle, bytes.NewReader(payload)); err == nil {
-		t.Fatal("a cancelled relay must not wait for a target")
+	if err := relaySnapshotToDestination(cancelled, idle, bytes.NewReader(payload)); err == nil {
+		t.Fatal("a cancelled relay must not wait for a destination")
 	}
 }
 
-func TestSnapshotRelayStopsWhenNoTargetConnects(t *testing.T) {
+func TestSnapshotRelayStopsWhenNoDestinationConnects(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The accept wait is bounded, so a target that never dials cannot hold the
+	// The accept wait is bounded, so a destination that never dials cannot hold the
 	// fixed transfer port or keep the source lock looking busy.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err = relaySnapshotToTarget(ctx, listener, bytes.NewReader([]byte("zfs")))
+	err = relaySnapshotToDestination(ctx, listener, bytes.NewReader([]byte("zfs")))
 
 	if err == nil {
-		t.Fatal("a relay with no target must end")
+		t.Fatal("a relay with no destination must end")
 	}
 }
 
@@ -327,9 +327,9 @@ func TestReceiveResumeTokenHandlesDashAndMissing(t *testing.T) {
 	}
 }
 
-func TestTargetDatasetExists(t *testing.T) {
+func TestDestinationDatasetExists(t *testing.T) {
 	runner := &fakeRunner{}
-	present, err := newTransfer(runner).TargetDatasetExists(context.Background(), "vm-1")
+	present, err := newTransfer(runner).DestinationDatasetExists(context.Background(), "vm-1")
 	if err != nil || !present {
 		t.Fatalf("present = %v, %v", present, err)
 	}
@@ -337,13 +337,13 @@ func TestTargetDatasetExists(t *testing.T) {
 	runner = &fakeRunner{runErr: map[string]error{
 		"list metal/vms/vm-2": errors.New("dataset does not exist"),
 	}}
-	present, err = newTransfer(runner).TargetDatasetExists(context.Background(), "vm-2")
+	present, err = newTransfer(runner).DestinationDatasetExists(context.Background(), "vm-2")
 	if err != nil || present {
 		t.Fatalf("absent = %v, %v", present, err)
 	}
 }
 
-func TestVerifyResumeTokenChecksTheTargetSnapshot(t *testing.T) {
+func TestVerifyResumeTokenChecksTheDestinationSnapshot(t *testing.T) {
 	runner := &fakeRunner{combined: map[string]string{
 		"send -nvt good": "resume token contents:\n\ttoname = metal/vms/vm-1@migration-m1-2\n",
 		"send -nvt bad":  "resume token contents:\n\ttoname = metal/vms/other-vm@migration-x-1\n",

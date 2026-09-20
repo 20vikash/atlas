@@ -9,11 +9,11 @@ import (
 // defaultMigrationOperationTimeout bounds one handshake and record write.
 const defaultMigrationOperationTimeout = 5 * time.Minute
 
-// MigrationDriver advances active target migrations and releases source locks
-// whose target stopped answering.
+// MigrationDriver advances active destination migrations and releases source locks
+// whose destination stopped answering.
 type MigrationDriver interface {
-	ActiveTargetVirtualMachineIDs(ctx context.Context) ([]string, error)
-	AdvanceTarget(ctx context.Context, virtualMachineID string) error
+	ActiveDestinationVirtualMachineIDs(ctx context.Context) ([]string, error)
+	AdvanceDestination(ctx context.Context, virtualMachineID string) error
 	ExpiredSourceVirtualMachineIDs(ctx context.Context) ([]string, error)
 	ExpireSource(ctx context.Context, virtualMachineID string) error
 }
@@ -24,7 +24,7 @@ type MigrationConfig struct {
 	OperationTimeout time.Duration
 }
 
-// MigrationReconciler advances target migrations on an interval or on demand.
+// MigrationReconciler advances destination migrations on an interval or on demand.
 type MigrationReconciler struct {
 	passScheduler
 
@@ -54,15 +54,15 @@ func (r *MigrationReconciler) Run(ctx context.Context) {
 	r.run(ctx, r.pass)
 }
 
-// pass advances every target migration, then releases every expired source lock.
+// pass advances every destination migration, then releases every expired source lock.
 func (r *MigrationReconciler) pass(ctx context.Context) {
 	r.advanceAll(ctx)
 	r.expireAll(ctx)
 }
 
-// advanceAll advances every active target migration once.
+// advanceAll advances every active destination migration once.
 func (r *MigrationReconciler) advanceAll(ctx context.Context) {
-	virtualMachineIDs, err := r.list(ctx, r.driver.ActiveTargetVirtualMachineIDs)
+	virtualMachineIDs, err := r.list(ctx, r.driver.ActiveDestinationVirtualMachineIDs)
 	if err != nil {
 		r.logFailure(ctx, "migration reconciler list failed", err)
 		return
@@ -76,7 +76,7 @@ func (r *MigrationReconciler) advanceAll(ctx context.Context) {
 	}
 }
 
-// expireAll releases the source locks whose target stopped answering.
+// expireAll releases the source locks whose destination stopped answering.
 func (r *MigrationReconciler) expireAll(ctx context.Context) {
 	virtualMachineIDs, err := r.list(ctx, r.driver.ExpiredSourceVirtualMachineIDs)
 	if err != nil {
@@ -109,7 +109,7 @@ func (r *MigrationReconciler) advance(ctx context.Context, virtualMachineID stri
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
 
-	if err := r.driver.AdvanceTarget(operationContext, virtualMachineID); err != nil {
+	if err := r.driver.AdvanceDestination(operationContext, virtualMachineID); err != nil {
 		r.logFailure(ctx, "migration handshake failed", err, "virtual_machine_id", virtualMachineID)
 	}
 }

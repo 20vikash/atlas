@@ -18,7 +18,7 @@ Atlas calls the Metal API on port 9000 through mutual TLS. Atlas verifies the no
 
 Metal nodes call the coordination API on port 9001 through mutual TLS. Both nodes verify certificates from the same regional authority. The coordination API contains source-side migration control routes only.
 
-Snapshot bytes use a one-shot OpenSSL mutual-TLS connection on port 9002. The source connects `zfs send` to OpenSSL. The target connects OpenSSL to `zfs recv`. The Metal process controls both commands but does not copy snapshot bytes.
+Snapshot bytes use a one-shot OpenSSL mutual-TLS connection on port 9002. The source connects `zfs send` to OpenSSL. The destination connects OpenSSL to `zfs recv`. The Metal process controls both commands but does not copy snapshot bytes.
 
 ## Who can call the API
 

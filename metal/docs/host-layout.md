@@ -33,9 +33,9 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
         ├── status.json             versioned observed state and cleanup progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
         ├── migration/              present only while a migration holds this VM
-        │   ├── target.json         target reservation and state
+        │   ├── destination.json         destination reservation and state
         │   ├── source.json         source lock
-        │   └── token               the target-to-source token, mode 0600
+        │   └── token               the destination-to-source token, mode 0600
         ├── saved-state/            one resumable state for automatic idle shutdown
         │   ├── state
         │   ├── memory

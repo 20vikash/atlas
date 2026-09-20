@@ -135,7 +135,7 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 		return Information{}, ErrConflict
 	}
 	defer manager.allocationMutex.Unlock()
-	if manager.isTargetReserved(identifier) {
+	if manager.isDestinationReserved(identifier) {
 		return Information{}, ErrConflict
 	}
 	if inUse, err := manager.publicIPv4InUse(identifier, specification.Network.PublicIPv4); err != nil {
@@ -172,8 +172,8 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 // that holds the lock across an image pull and a boot. Each record is written
 // atomically, so a read sees whole records.
 func (manager *Manager) Information(_ context.Context, identifier string) (Information, error) {
-	// Incoming migration targets are not normal VMs.
-	if manager.isTargetReserved(identifier) {
+	// Incoming migration destinations are not normal VMs.
+	if manager.isDestinationReserved(identifier) {
 		return Information{}, ErrNotFound
 	}
 
@@ -190,8 +190,8 @@ func (manager *Manager) List(ctx context.Context) ([]Information, error) {
 	}
 	information := make([]Information, 0, len(identifiers))
 	for _, identifier := range identifiers {
-		// Hide incoming migration targets from the VM list.
-		if manager.isTargetReserved(identifier) {
+		// Hide incoming migration destinations from the VM list.
+		if manager.isDestinationReserved(identifier) {
 			continue
 		}
 		current, err := manager.Information(ctx, identifier)

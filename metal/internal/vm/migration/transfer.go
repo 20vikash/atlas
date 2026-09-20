@@ -100,24 +100,24 @@ func (m *Manager) forgetTransfer(virtualMachineID string) {
 // leave it for the next pass.
 func (m *Manager) runTransfer(ctx context.Context, virtualMachineID string) {
 	for {
-		record, err := m.store.readTarget(virtualMachineID)
+		record, err := m.store.readDestination(virtualMachineID)
 		if err != nil {
 			return
 		}
 
 		var advanceError error
 		switch record.State {
-		case targetCompleted, targetAborted, targetFailed, targetReady:
+		case destinationCompleted, destinationAborted, destinationFailed, destinationReady:
 			return
-		case targetRemovingRuntime, targetRemovingStorage, targetRestoringSource, targetUnlockingSource:
+		case destinationRemovingRuntime, destinationRemovingStorage, destinationRestoringSource, destinationUnlockingSource:
 			advanceError = m.advanceAbort(ctx, record)
-		case targetFinishing:
+		case destinationFinishing:
 			advanceError = m.advanceFinish(ctx, record)
-		case targetCopying:
+		case destinationCopying:
 			advanceError = m.advanceCopying(ctx, record)
-		case targetStopping:
+		case destinationStopping:
 			advanceError = m.advanceStopping(ctx, record)
-		case targetCreatingNetwork, targetApplyingState:
+		case destinationCreatingNetwork, destinationApplyingState:
 			advanceError = m.advanceStarting(ctx, record)
 		default:
 			return
@@ -133,7 +133,7 @@ func (m *Manager) runTransfer(ctx context.Context, virtualMachineID string) {
 
 // advanceCopying copies an interval or enters stopping. Running sources send a
 // full first interval; other sources cut over first.
-func (m *Manager) advanceCopying(ctx context.Context, record targetRecord) error {
+func (m *Manager) advanceCopying(ctx context.Context, record destinationRecord) error {
 	last := lastCompletedSequence(record)
 	if last == 0 && record.SourceObservedState != vm.StateRunning {
 		return m.enterStopping(ctx, record)
@@ -156,7 +156,7 @@ func (m *Manager) advanceCopying(ctx context.Context, record targetRecord) error
 }
 
 // advanceStopping pulls and verifies the final snapshot, then enters starting.
-func (m *Manager) advanceStopping(ctx context.Context, record targetRecord) error {
+func (m *Manager) advanceStopping(ctx context.Context, record destinationRecord) error {
 	final, err := m.source.StopSource(
 		ctx,
 		record.Source,
@@ -171,73 +171,73 @@ func (m *Manager) advanceStopping(ctx context.Context, record targetRecord) erro
 		return m.failTransfer(ctx, record, "source returned an invalid final sequence")
 	}
 
-	record, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *targetRecord) {
-		target.SourceObservedState = vm.StateStopped
-		target.SourceStopped = true
+	record, err = m.mutateDestination(ctx, record.VirtualMachineID, func(destination *destinationRecord) {
+		destination.SourceObservedState = vm.StateStopped
+		destination.SourceStopped = true
 	})
 	if err != nil {
 		return err
 	}
-	if record.State != targetStopping {
+	if record.State != destinationStopping {
 		return nil
 	}
 	if err := m.receiveSnapshot(ctx, record, final, 0); err != nil {
 		return err
 	}
 
-	_, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *targetRecord) {
-		if target.State == targetStopping {
-			target.State = targetCreatingNetwork
+	_, err = m.mutateDestination(ctx, record.VirtualMachineID, func(destination *destinationRecord) {
+		if destination.State == destinationStopping {
+			destination.State = destinationCreatingNetwork
 		}
 	})
 	return err
 }
 
-// advanceStarting creates the target network, applies VM state, and marks ready.
+// advanceStarting creates the destination network, applies VM state, and marks ready.
 // A failure keeps both hosts locked for rollback.
-func (m *Manager) advanceStarting(ctx context.Context, record targetRecord) error {
+func (m *Manager) advanceStarting(ctx context.Context, record destinationRecord) error {
 	unlock, err := m.host.LockOperation(ctx, record.VirtualMachineID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
-	if record.State == targetCreatingNetwork {
+	if record.State == destinationCreatingNetwork {
 		if err := m.host.EnsureMigrationNetwork(ctx, record.VirtualMachineID); err != nil {
 			if isWorkerCancelled(ctx, err) {
 				return err
 			}
-			return m.failTransfer(ctx, record, "create target network: "+err.Error())
+			return m.failTransfer(ctx, record, "create destination network: "+err.Error())
 		}
-		if record, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *targetRecord) {
-			if target.State == targetCreatingNetwork {
-				target.State = targetApplyingState
+		if record, err = m.mutateDestination(ctx, record.VirtualMachineID, func(destination *destinationRecord) {
+			if destination.State == destinationCreatingNetwork {
+				destination.State = destinationApplyingState
 			}
 		}); err != nil {
 			return err
 		}
 	}
-	if record.State == targetApplyingState {
-		if err := m.host.ApplyMigratedTargetState(ctx, record.VirtualMachineID); err != nil {
+	if record.State == destinationApplyingState {
+		if err := m.host.ApplyMigratedDestinationState(ctx, record.VirtualMachineID); err != nil {
 			if isWorkerCancelled(ctx, err) {
 				return err
 			}
-			return m.failTransfer(ctx, record, "apply target state: "+err.Error())
+			return m.failTransfer(ctx, record, "apply destination state: "+err.Error())
 		}
 	}
 
-	_, err = m.mutateTarget(ctx, record.VirtualMachineID, func(target *targetRecord) {
-		if target.State == targetApplyingState {
-			target.State = targetReady
+	_, err = m.mutateDestination(ctx, record.VirtualMachineID, func(destination *destinationRecord) {
+		if destination.State == destinationApplyingState {
+			destination.State = destinationReady
 		}
 	})
 	return err
 }
 
-func (m *Manager) enterStopping(ctx context.Context, record targetRecord) error {
-	_, err := m.mutateTarget(ctx, record.VirtualMachineID, func(target *targetRecord) {
-		if target.State == targetCopying {
-			target.State = targetStopping
+func (m *Manager) enterStopping(ctx context.Context, record destinationRecord) error {
+	_, err := m.mutateDestination(ctx, record.VirtualMachineID, func(destination *destinationRecord) {
+		if destination.State == destinationCopying {
+			destination.State = destinationStopping
 		}
 	})
 	return err
@@ -249,7 +249,7 @@ func (m *Manager) isSmallDelta(snapshot SourceSnapshot) bool {
 
 // intervalThroughput returns the next source disk limit. The first interval is
 // unlimited; each later delta lowers the limit one step.
-func (m *Manager) intervalThroughput(record targetRecord) int {
+func (m *Manager) intervalThroughput(record destinationRecord) int {
 	if lastCompletedSequence(record) == 0 {
 		return 0
 	}
@@ -265,18 +265,18 @@ func (m *Manager) intervalThroughput(record targetRecord) int {
 	return throttleSteps[throttled]
 }
 
-func (m *Manager) receiveSnapshot(ctx context.Context, record targetRecord, snapshot SourceSnapshot, throughputMiBps int) error {
+func (m *Manager) receiveSnapshot(ctx context.Context, record destinationRecord, snapshot SourceSnapshot, throughputMiBps int) error {
 	resumeToken, err := m.disks.ReceiveResumeToken(ctx, record.VirtualMachineID)
 	if err != nil {
 		return err
 	}
 	if resumeToken == "" && snapshot.Sequence == 1 {
-		exists, err := m.disks.TargetDatasetExists(ctx, record.VirtualMachineID)
+		exists, err := m.disks.DestinationDatasetExists(ctx, record.VirtualMachineID)
 		if err != nil {
 			return err
 		}
 		if exists {
-			return m.failTransfer(ctx, record, "unrelated target dataset already exists")
+			return m.failTransfer(ctx, record, "unrelated destination dataset already exists")
 		}
 	}
 
@@ -284,7 +284,7 @@ func (m *Manager) receiveSnapshot(ctx context.Context, record targetRecord, snap
 	if err != nil {
 		return err
 	}
-	if record.State != targetCopying && record.State != targetStopping {
+	if record.State != destinationCopying && record.State != destinationStopping {
 		return nil
 	}
 	estimatedBytes, err := m.streamInterval(ctx, record, snapshot, resumeToken, throughputMiBps)
@@ -303,7 +303,7 @@ func (m *Manager) receiveSnapshot(ctx context.Context, record targetRecord, snap
 	return m.completeInterval(ctx, record, snapshot.Sequence, estimatedBytes, receivedGUID)
 }
 
-func (m *Manager) streamInterval(ctx context.Context, record targetRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
+func (m *Manager) streamInterval(ctx context.Context, record destinationRecord, snapshot SourceSnapshot, resumeToken string, throughputMiBps int) (int64, error) {
 	if err := m.source.StartSnapshotStream(
 		ctx, record.Source, record.ID, record.VirtualMachineID,
 		snapshot.Sequence, resumeToken, throughputMiBps,
@@ -316,12 +316,12 @@ func (m *Manager) streamInterval(ctx context.Context, record targetRecord, snaps
 	return snapshot.SizeBytes, nil
 }
 
-func (m *Manager) beginInterval(ctx context.Context, record targetRecord, snapshot SourceSnapshot, throughputMiBps int) (targetRecord, error) {
-	return m.mutateTarget(ctx, record.VirtualMachineID, func(target *targetRecord) {
-		if hasInterval(target.Intervals, snapshot.Sequence) {
+func (m *Manager) beginInterval(ctx context.Context, record destinationRecord, snapshot SourceSnapshot, throughputMiBps int) (destinationRecord, error) {
+	return m.mutateDestination(ctx, record.VirtualMachineID, func(destination *destinationRecord) {
+		if hasInterval(destination.Intervals, snapshot.Sequence) {
 			return
 		}
-		target.Intervals = append(target.Intervals, TransferProgress{
+		destination.Intervals = append(destination.Intervals, TransferProgress{
 			Sequence:        snapshot.Sequence,
 			StartedAt:       m.now(),
 			TotalBytes:      snapshot.SizeBytes,
@@ -330,16 +330,16 @@ func (m *Manager) beginInterval(ctx context.Context, record targetRecord, snapsh
 	})
 }
 
-func (m *Manager) completeInterval(ctx context.Context, record targetRecord, sequence int, bytesReceived int64, guid string) error {
+func (m *Manager) completeInterval(ctx context.Context, record destinationRecord, sequence int, bytesReceived int64, guid string) error {
 	// The snapshot is already on the dataset. An unrecorded interval makes the
 	// next pass ask for it again, which zfs receive then rejects.
 	finishedAt := m.now()
-	_, err := m.mutateTarget(context.WithoutCancel(ctx), record.VirtualMachineID, func(target *targetRecord) {
-		for index := range target.Intervals {
-			if target.Intervals[index].Sequence != sequence {
+	_, err := m.mutateDestination(context.WithoutCancel(ctx), record.VirtualMachineID, func(destination *destinationRecord) {
+		for index := range destination.Intervals {
+			if destination.Intervals[index].Sequence != sequence {
 				continue
 			}
-			interval := &target.Intervals[index]
+			interval := &destination.Intervals[index]
 			interval.BytesTransferred = bytesReceived
 			interval.GUID = guid
 			interval.Completed = true
@@ -358,15 +358,15 @@ func isWorkerCancelled(ctx context.Context, err error) bool {
 }
 
 // failTransfer marks the migration failed and keeps the dataset and snapshots.
-func (m *Manager) failTransfer(ctx context.Context, record targetRecord, message string) error {
+func (m *Manager) failTransfer(ctx context.Context, record destinationRecord, message string) error {
 	// A cancelled worker must still leave the reason on the record.
-	if _, err := m.mutateTarget(context.WithoutCancel(ctx), record.VirtualMachineID, func(target *targetRecord) {
-		if target.State != targetCopying && target.State != targetStopping &&
-			target.State != targetCreatingNetwork && target.State != targetApplyingState {
+	if _, err := m.mutateDestination(context.WithoutCancel(ctx), record.VirtualMachineID, func(destination *destinationRecord) {
+		if destination.State != destinationCopying && destination.State != destinationStopping &&
+			destination.State != destinationCreatingNetwork && destination.State != destinationApplyingState {
 			return
 		}
-		target.State = targetFailed
-		target.Error = &vm.OperationError{Code: "transfer_failed", Message: message, UpdatedAt: m.now()}
+		destination.State = destinationFailed
+		destination.Error = &vm.OperationError{Code: "transfer_failed", Message: message, UpdatedAt: m.now()}
 	}); err != nil {
 		return err
 	}
@@ -374,7 +374,7 @@ func (m *Manager) failTransfer(ctx context.Context, record targetRecord, message
 }
 
 // transferLimitReached reports whether the copy hit the interval or time limit.
-func (m *Manager) transferLimitReached(record targetRecord) bool {
+func (m *Manager) transferLimitReached(record destinationRecord) bool {
 	completed := 0
 	for _, interval := range record.Intervals {
 		if interval.Completed {
@@ -387,7 +387,7 @@ func (m *Manager) transferLimitReached(record targetRecord) bool {
 	return !record.CopyStartedAt.IsZero() && m.now().Sub(record.CopyStartedAt) > maxTransferDuration
 }
 
-func lastCompletedSequence(record targetRecord) int {
+func lastCompletedSequence(record destinationRecord) int {
 	last := 0
 	for _, interval := range record.Intervals {
 		if interval.Completed && interval.Sequence > last {

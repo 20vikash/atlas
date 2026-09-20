@@ -10,10 +10,10 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
-// errInvalidMigrationRequest reports a target request missing a field.
+// errInvalidMigrationRequest reports a destination request missing a field.
 var errInvalidMigrationRequest = errors.New("virtual_machine_id and source are required")
 
-// createMigrationRequest is Atlas's target-pull request.
+// createMigrationRequest is Atlas's destination-pull request.
 type createMigrationRequest struct {
 	VirtualMachineID string `json:"virtual_machine_id"`
 	Source           string `json:"source"`
@@ -55,7 +55,7 @@ type migrationErrorResponse struct {
 	Message string `json:"message"`
 }
 
-// createMigration creates or resumes a target migration and starts its worker.
+// createMigration creates or resumes a destination migration and starts its worker.
 func (s *Server) createMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *Server) createMigration(c echo.Context) error {
 		return badRequest(err.Error())
 	}
 
-	record, err := s.migrationManager.CreateTarget(c.Request().Context(), identifier, request.VirtualMachineID, request.Source)
+	record, err := s.migrationManager.CreateDestination(c.Request().Context(), identifier, request.VirtualMachineID, request.Source)
 	if err != nil {
 		return err
 	}
@@ -77,21 +77,21 @@ func (s *Server) createMigration(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, toMigration(record))
 }
 
-// getMigration returns target migration status.
+// getMigration returns destination migration status.
 func (s *Server) getMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
 		return err
 	}
-	record, err := s.migrationManager.TargetStatus(c.Request().Context(), identifier)
+	record, err := s.migrationManager.DestinationStatus(c.Request().Context(), identifier)
 	if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusOK, toMigration(record))
 }
 
-// finishMigration records the target's finish request. Atlas calls it with the
-// static token. The target then destroys the source over the mesh.
+// finishMigration records the destination's finish request. Atlas calls it with the
+// static token. The destination then destroys the source over the mesh.
 func (s *Server) finishMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
@@ -104,13 +104,13 @@ func (s *Server) finishMigration(c echo.Context) error {
 	return c.NoContent(http.StatusAccepted)
 }
 
-// abortMigration removes an unfinished target migration.
+// abortMigration removes an unfinished destination migration.
 func (s *Server) abortMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {
 		return err
 	}
-	if err := s.migrationManager.AbortTarget(c.Request().Context(), identifier); err != nil {
+	if err := s.migrationManager.AbortDestination(c.Request().Context(), identifier); err != nil {
 		return err
 	}
 	s.wakeReconciler()
@@ -118,7 +118,7 @@ func (s *Server) abortMigration(c echo.Context) error {
 }
 
 // toMigration maps migration progress to its public response.
-func toMigration(record migration.TargetProgress) migrationResponse {
+func toMigration(record migration.DestinationProgress) migrationResponse {
 	response := migrationResponse{
 		ID:               record.ID,
 		VirtualMachineID: record.VirtualMachineID,

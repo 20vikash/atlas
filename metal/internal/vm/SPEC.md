@@ -50,7 +50,7 @@ desired destroyed -> remove runtime, network, storage, and records
 
 The manager checks traffic only after normal running reconciliation completes. It starts event observation before the final sample. A sample error before state creation keeps the VM running. New traffic or a sample error after state creation restores the VM.
 
-An automatically stopped VM keeps desired state `running` and reports observed state `stopped`. New traffic enters the same per-VM lock, validates the target and runtime, and restores the saved state. A stale or duplicate event has no effect.
+An automatically stopped VM keeps desired state `running` and reports observed state `stopped`. New traffic enters the same per-VM lock, validates the destination and runtime, and restores the saved state. A stale or duplicate event has no effect.
 
 A positive timeout can change while the VM stays stopped. A change to `0` restores it. A restart or machine shape change deletes the saved state and uses a normal start.
 
@@ -62,9 +62,9 @@ The phase and operation ID are written before each host call. A failure stores a
 
 The migration lifecycle lives in [internal/vm/migration/SPEC.md](migration/SPEC.md). This package supports migration without importing that package.
 
-The manager exposes the operations migration needs: VM records, ID allocation, locks, storage release, and migration runtime and network operations. These operations stop the source, create the target network, apply state with a cold start, remove the target runtime, and limit or refresh the source disk.
+The manager exposes the operations migration needs: VM records, ID allocation, locks, storage release, and migration runtime and network operations. These operations stop the source, create the destination network, apply state with a cold start, remove the destination runtime, and limit or refresh the source disk.
 
-The manager reads migration lock state through an injected `MigrationGuard`. A source lock blocks VM changes and reconciliation. A target reservation hides the VM from get and list and pauses reconciliation. Without a guard, no VM is migrating. The daemon injects the guard with `SetMigrationGuard`.
+The manager reads migration lock state through an injected `MigrationGuard`. A source lock blocks VM changes and reconciliation. A destination reservation hides the VM from get and list and pauses reconciliation. Without a guard, no VM is migrating. The daemon injects the guard with `SetMigrationGuard`.
 
 ## Boundaries
 

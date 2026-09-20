@@ -59,29 +59,29 @@ POST   /v1/snapshots/:id/upload
 GET    /v1/snapshots/:id
 DELETE /v1/snapshots/:id
 
-PUT    /v1/migrations/:id          Atlas creates or resumes a target
-GET    /v1/migrations/:id          Atlas reads target status
-POST   /v1/migrations/:id/abort    Atlas aborts a target
-POST   /v1/migrations/:id/finish   Atlas records the target finish
+PUT    /v1/migrations/:id          Atlas creates or resumes a destination
+GET    /v1/migrations/:id          Atlas reads destination status
+POST   /v1/migrations/:id/abort    Atlas aborts a destination
+POST   /v1/migrations/:id/finish   Atlas records the destination finish
 ```
 
 The coordination server on port 9001 has these routes:
 
 ```text
-PUT    /v1/migrations/:id/source   the target locks the source
-POST   /v1/migrations/:id/snapshot the target asks for the next snapshot
-POST   /v1/migrations/:id/stream   the target starts the one-shot snapshot server
-POST   /v1/migrations/:id/stop     the target acknowledges its last snapshot and stops the source
-POST   /v1/migrations/:id/start    the target restores the source during rollback
-POST   /v1/migrations/:id/destroy  the target destroys the stopped source
-DELETE /v1/migrations/:id          the target unlocks the source
+PUT    /v1/migrations/:id/source   the destination locks the source
+POST   /v1/migrations/:id/snapshot the destination asks for the next snapshot
+POST   /v1/migrations/:id/stream   the destination starts the one-shot snapshot server
+POST   /v1/migrations/:id/stop     the destination acknowledges its last snapshot and stops the source
+POST   /v1/migrations/:id/start    the destination restores the source during rollback
+POST   /v1/migrations/:id/destroy  the destination destroys the stopped source
+DELETE /v1/migrations/:id          the destination unlocks the source
 ```
 
-Atlas drives create, get, abort, and finish on port 9000 with its client certificate. A target host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS connection on port 9002. See [internal/vm/migration/SPEC.md](../vm/migration/SPEC.md).
+Atlas drives create, get, abort, and finish on port 9000 with its client certificate. A destination host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS connection on port 9002. See [internal/vm/migration/SPEC.md](../vm/migration/SPEC.md).
 
 The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
-The finish route records the target finish request and returns `202`. The target then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
+The finish route records the destination finish request and returns `202`. The destination then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 

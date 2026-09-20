@@ -84,8 +84,8 @@ func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	dependencies := &testHostDependencies{
 		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, CPUMillicores: 1500}},
 	}
-	reservations := func(context.Context) ([]migration.TargetReservation, error) {
-		return []migration.TargetReservation{{VirtualMachineID: "vm-00002", CPUMillicores: 2500, MemoryMiB: 1024, DiskMiB: 2048}}, nil
+	reservations := func(context.Context) ([]migration.DestinationReservation, error) {
+		return []migration.DestinationReservation{{VirtualMachineID: "vm-00002", CPUMillicores: 2500, MemoryMiB: 1024, DiskMiB: 2048}}, nil
 	}
 	service, err := NewService(Dependencies{
 		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,
@@ -106,7 +106,7 @@ func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	if capacity.AvailableStorageMiB != 3072-2048 {
 		t.Fatalf("available storage = %d, want 1024", capacity.AvailableStorageMiB)
 	}
-	// Migration targets are not running VMs.
+	// Migration destinations are not running VMs.
 	if capacity.VirtualMachineCount != 1 {
 		t.Fatalf("VM count = %d, want 1", capacity.VirtualMachineCount)
 	}

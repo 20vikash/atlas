@@ -574,7 +574,7 @@ func TestExpireSourceReleasesAnIdlePreStopLock(t *testing.T) {
 func TestExpireSourceKeepsAStoppedSource(t *testing.T) {
 	manager, _, _ := newMigrationManager(t)
 	record := expirableSourceRecord(manager, "vm-1")
-	// The target may have started a stopped source VM.
+	// The destination may have started a stopped source VM.
 	record.State = sourceStopped
 	if err := manager.store.writeSource(record); err != nil {
 		t.Fatal(err)

@@ -69,8 +69,8 @@ func TestNormalizeSourceToStoppedRefusesFailedState(t *testing.T) {
 	}
 }
 
-// seedTargetVM writes reconstructed target records in the original state.
-func seedTargetVM(t *testing.T, machines *Manager, desiredState State) {
+// seedDestinationVM writes reconstructed destination records in the original state.
+func seedDestinationVM(t *testing.T, machines *Manager, desiredState State) {
 	t.Helper()
 	desired := DesiredRecord{
 		ID: "vm-1", UserID: 1000, GroupID: 1000, State: desiredState,
@@ -88,7 +88,7 @@ func seedTargetVM(t *testing.T, machines *Manager, desiredState State) {
 
 func TestEnsureMigrationNetworkRecordsTheInterface(t *testing.T) {
 	machines, _, network, _ := newTestManager(t)
-	seedTargetVM(t, machines, StateRunning)
+	seedDestinationVM(t, machines, StateRunning)
 
 	if err := NewMigrationHost(machines).EnsureMigrationNetwork(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestEnsureMigrationNetworkRecordsTheInterface(t *testing.T) {
 	}
 }
 
-func TestApplyMigratedTargetState(t *testing.T) {
+func TestApplyMigratedDestinationState(t *testing.T) {
 	cases := []struct {
 		name           string
 		desiredState   State
@@ -120,9 +120,9 @@ func TestApplyMigratedTargetState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			machines, runtime, _, _ := newTestManager(t)
 			runtime.state = StateStopped
-			seedTargetVM(t, machines, tc.desiredState)
+			seedDestinationVM(t, machines, tc.desiredState)
 
-			if err := NewMigrationHost(machines).ApplyMigratedTargetState(context.Background(), "vm-1"); err != nil {
+			if err := NewMigrationHost(machines).ApplyMigratedDestinationState(context.Background(), "vm-1"); err != nil {
 				t.Fatal(err)
 			}
 			if runtime.coldStarts != tc.wantColdStarts || runtime.pauses != tc.wantPauses {
@@ -139,13 +139,13 @@ func TestApplyMigratedTargetState(t *testing.T) {
 	}
 }
 
-func TestApplyMigratedTargetStateReportsAStartFailure(t *testing.T) {
+func TestApplyMigratedDestinationStateReportsAStartFailure(t *testing.T) {
 	machines, runtime, _, _ := newTestManager(t)
 	runtime.state = StateStopped
 	runtime.coldStartError = errors.New("boot failed")
-	seedTargetVM(t, machines, StateRunning)
+	seedDestinationVM(t, machines, StateRunning)
 
-	if err := NewMigrationHost(machines).ApplyMigratedTargetState(context.Background(), "vm-1"); err == nil {
+	if err := NewMigrationHost(machines).ApplyMigratedDestinationState(context.Background(), "vm-1"); err == nil {
 		t.Fatal("want a cold-start failure")
 	}
 	observed, err := machines.store.readObserved("vm-1")

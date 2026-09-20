@@ -18,7 +18,7 @@ func TestBeginIntervalReturnsARecordStoreError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(machines.VirtualMachineRecordsDirectory(), "blocked"), []byte("not a directory"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	record := targetRecord{ID: "mig-1", VirtualMachineID: "blocked"}
+	record := destinationRecord{ID: "mig-1", VirtualMachineID: "blocked"}
 
 	_, err := migrationManager.beginInterval(t.Context(), record, SourceSnapshot{Sequence: 1}, 0)
 	if err == nil {
@@ -26,27 +26,27 @@ func TestBeginIntervalReturnsARecordStoreError(t *testing.T) {
 	}
 }
 
-// writeCopyingTarget sets up a copying target.
-func writeCopyingTarget(t *testing.T, machines *fakeMigrationHost, sourceState vm.State) *migrationStore {
+// writeCopyingDestination sets up a copying destination.
+func writeCopyingDestination(t *testing.T, machines *fakeMigrationHost, sourceState vm.State) *migrationStore {
 	t.Helper()
 	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
-	record := targetRecord{
+	record := destinationRecord{
 		ID:                  "mig-1",
 		VirtualMachineID:    "vm-1",
 		Source:              "https://10.0.0.3:9000",
-		State:               targetCopying,
+		State:               destinationCopying,
 		SourceObservedState: sourceState,
 		CopyStartedAt:       time.Now().UTC(),
 		LastControlAt:       time.Now().UTC(),
 	}
-	if err := store.writeTarget(record); err != nil {
+	if err := store.writeDestination(record); err != nil {
 		t.Fatal(err)
 	}
 	return store
 }
 
-// seedTargetVM writes reconstructed target records in the original state.
-func seedTargetVM(t *testing.T, machines *fakeMigrationHost, desiredState vm.State) {
+// seedDestinationVM writes reconstructed destination records in the original state.
+func seedDestinationVM(t *testing.T, machines *fakeMigrationHost, desiredState vm.State) {
 	t.Helper()
 	machines.desired["vm-1"] = vm.DesiredRecord{
 		ID: "vm-1", UserID: 1000, GroupID: 1000, State: desiredState,
@@ -65,11 +65,11 @@ func TestRunTransferCopiesAFullInterval(t *testing.T) {
 	// One queued snapshot stops the loop after the full interval.
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "g"}}
 	transfer.guid = "g"
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +89,11 @@ func TestRunTransferFailsOnGUIDMismatch(t *testing.T) {
 	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "source-guid"}}
 	transfer.guid = "different-guid"
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,11 +107,11 @@ func TestRunTransferRefusesAnUnrelatedDataset(t *testing.T) {
 	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.datasetExists = true
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "g"}}
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,15 +125,15 @@ func TestRunTransferRefusesAnUnrelatedDataset(t *testing.T) {
 
 func TestRunTransferCutsOverAtTheIntervalLimit(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
-	record, err := store.readTarget("vm-1")
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for sequence := 1; sequence <= maxTransferIntervals; sequence++ {
 		record.Intervals = append(record.Intervals, TransferProgress{Sequence: sequence, Completed: true})
 	}
-	if err := store.writeTarget(record); err != nil {
+	if err := store.writeDestination(record); err != nil {
 		t.Fatal(err)
 	}
 	// Fail source stop so the run remains in stopping.
@@ -150,7 +150,7 @@ func TestRunTransferCutsOverAtTheIntervalLimit(t *testing.T) {
 	if source.stopReceived != maxTransferIntervals {
 		t.Fatalf("stop acknowledged sequence = %d, want %d", source.stopReceived, maxTransferIntervals)
 	}
-	record, err = store.readTarget("vm-1")
+	record, err = store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,12 +171,12 @@ func TestRunTransferThrottlesThenCutsOverToReady(t *testing.T) {
 		{Sequence: 3, SizeBytes: 512, GUID: "g"},
 	}
 	source.stopSnapshot = SourceSnapshot{Sequence: 3, SizeBytes: 512, GUID: "g"}
-	seedTargetVM(t, machines, vm.StateRunning)
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	seedDestinationVM(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +190,8 @@ func TestRunTransferThrottlesThenCutsOverToReady(t *testing.T) {
 	if source.stopCalls != 1 || machines.applyStateCalls != 1 {
 		t.Fatalf("stop calls = %d, apply state calls = %d", source.stopCalls, machines.applyStateCalls)
 	}
-	if record.State != targetReady {
-		t.Fatalf("target did not become ready: %+v", record)
+	if record.State != destinationReady {
+		t.Fatalf("destination did not become ready: %+v", record)
 	}
 }
 
@@ -200,12 +200,12 @@ func TestRunTransferStopsANonRunningSourceFirst(t *testing.T) {
 	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.guid = "g"
 	source.stopSnapshot = SourceSnapshot{Sequence: 1, SizeBytes: 4096, GUID: "g"}
-	seedTargetVM(t, machines, vm.StateStopped)
-	store := writeCopyingTarget(t, machines, vm.StateStopped)
+	seedDestinationVM(t, machines, vm.StateStopped)
+	store := writeCopyingDestination(t, machines, vm.StateStopped)
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestRunTransferStopsANonRunningSourceFirst(t *testing.T) {
 	if source.nextCalls != 0 || source.stopCalls != 1 {
 		t.Fatalf("next calls = %d, stop calls = %d", source.nextCalls, source.stopCalls)
 	}
-	// A non-running source cuts over without a copy round and applies target state once.
+	// A non-running source cuts over without a copy round and applies destination state once.
 	if machines.applyStateCalls != 1 {
 		t.Fatalf("apply state calls = %d, want 1", machines.applyStateCalls)
 	}
@@ -224,18 +224,18 @@ func TestRunTransferStopsANonRunningSourceFirst(t *testing.T) {
 	}
 }
 
-func TestRunTransferKeepsLockedOnTargetStartFailure(t *testing.T) {
+func TestRunTransferKeepsLockedOnDestinationStartFailure(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.guid = "g"
 	source.stopSnapshot = SourceSnapshot{Sequence: 1, SizeBytes: 4096, GUID: "g"}
-	seedTargetVM(t, machines, vm.StateRunning)
-	store := writeCopyingTarget(t, machines, vm.StateStopped)
+	seedDestinationVM(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateStopped)
 	machines.applyStateError = errors.New("boot failed")
 
 	migrationManager.runTransfer(context.Background(), "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,20 +248,20 @@ func TestRunTransferKeepsLockedOnTargetStartFailure(t *testing.T) {
 	}
 }
 
-func TestAdvanceTargetResumesACopyingTransfer(t *testing.T) {
+func TestAdvanceDestinationResumesACopyingTransfer(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 800, GUID: "g"}}
 	transfer.guid = "g"
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
 
 	// Reconciliation resumes a copying migration.
-	if err := migrationManager.AdvanceTarget(context.Background(), "vm-1"); err != nil {
+	if err := migrationManager.AdvanceDestination(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
 	}
 	awaitTransfer(t, migrationManager, "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,13 +275,13 @@ func TestStartTransferRunsOnceAndShutdownWaits(t *testing.T) {
 	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 500, GUID: "g"}}
 	transfer.guid = "g"
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
 
 	migrationManager.StartTransfer("vm-1")
 	migrationManager.StartTransfer("vm-1")
 	awaitTransfer(t, migrationManager, "vm-1")
 
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestCancelTransferStopsABlockedWorker(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
 	source.nextQueue = []SourceSnapshot{{Sequence: 1, SizeBytes: 1000, GUID: "g"}}
 	source.streamHang = true
-	writeCopyingTarget(t, machines, vm.StateRunning)
+	writeCopyingDestination(t, machines, vm.StateRunning)
 
 	migrationManager.StartTransfer("vm-1")
 	// Cancellation returns after the blocked stream exits.
@@ -325,12 +325,12 @@ func equalInts(got, want []int) bool {
 	return true
 }
 
-// The worker and the API both write the target record. A worker write must keep
+// The worker and the API both write the destination record. A worker write must keep
 // an abort that arrived while the worker held an older copy.
 func TestAWorkerWriteKeepsAnAbortThatArrivedFirst(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
-	stale, err := store.readTarget("vm-1")
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
+	stale, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,12 +352,12 @@ func TestAWorkerWriteKeepsAnAbortThatArrivedFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	current, err := store.readTarget("vm-1")
+	current, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.State != targetRemovingRuntime {
-		t.Fatalf("state = %q, want %q", current.State, targetRemovingRuntime)
+	if current.State != destinationRemovingRuntime {
+		t.Fatalf("state = %q, want %q", current.State, destinationRemovingRuntime)
 	}
 	if len(current.Intervals) != 1 || !current.Intervals[0].Completed || current.Intervals[0].FinishedAt.IsZero() {
 		t.Fatalf("interval was not completed: %+v", current.Intervals)
@@ -367,8 +367,8 @@ func TestAWorkerWriteKeepsAnAbortThatArrivedFirst(t *testing.T) {
 // A cancelled worker must still record an interval whose snapshot already landed.
 func TestCompleteIntervalOutlivesTheWorkerContext(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	store := writeCopyingTarget(t, machines, vm.StateRunning)
-	record, err := store.readTarget("vm-1")
+	store := writeCopyingDestination(t, machines, vm.StateRunning)
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestCompleteIntervalOutlivesTheWorkerContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	current, err := store.readTarget("vm-1")
+	current, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestWorkerCancellationIsNotATransferFailure(t *testing.T) {
 	stopped, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if isWorkerCancelled(live, errors.New("create target network: no bridge")) {
+	if isWorkerCancelled(live, errors.New("create destination network: no bridge")) {
 		t.Fatal("a real failure on a live worker must fail the migration")
 	}
 	if isWorkerCancelled(live, context.Canceled) {
@@ -408,7 +408,7 @@ func TestWorkerCancellationIsNotATransferFailure(t *testing.T) {
 	if !isWorkerCancelled(stopped, context.Canceled) {
 		t.Fatal("a shutdown that cancels a step must leave the migration for the next pass")
 	}
-	if !isWorkerCancelled(stopped, fmt.Errorf("apply target state: %w", context.Canceled)) {
+	if !isWorkerCancelled(stopped, fmt.Errorf("apply destination state: %w", context.Canceled)) {
 		t.Fatal("a wrapped cancellation must also leave the migration for the next pass")
 	}
 }

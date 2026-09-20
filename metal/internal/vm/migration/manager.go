@@ -40,7 +40,7 @@ type migrationStorage interface {
 	RemoveSnapshot(ctx context.Context, virtualMachineID, snapshotName string) error
 	SnapshotGUID(ctx context.Context, virtualMachineID, snapshotName string) (string, error)
 	EstimateStreamBytes(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName string) (int64, error)
-	TargetDatasetExists(ctx context.Context, virtualMachineID string) (bool, error)
+	DestinationDatasetExists(ctx context.Context, virtualMachineID string) (bool, error)
 	ReceiveResumeToken(ctx context.Context, virtualMachineID string) (string, error)
 	StartSnapshotServer(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string) (storage.SourceStream, error)
 	ReceiveSnapshotTLS(ctx context.Context, virtualMachineID, sourceAddress string) error
@@ -64,43 +64,43 @@ type migrationHost interface {
 	NormalizeSourceToStopped(ctx context.Context, virtualMachineID string) error
 	RemoveMigrationNetwork(ctx context.Context, virtualMachineID string) error
 	EnsureMigrationNetwork(ctx context.Context, virtualMachineID string) error
-	ApplyMigratedTargetState(ctx context.Context, virtualMachineID string) error
+	ApplyMigratedDestinationState(ctx context.Context, virtualMachineID string) error
 	RestoreRuntimeState(ctx context.Context, virtualMachineID string, desiredState vm.State) error
 	RemoveMigratedRuntime(ctx context.Context, virtualMachineID string) error
 	RefreshSourceDisk(ctx context.Context, virtualMachineID string) error
 	LimitSourceDisk(ctx context.Context, virtualMachineID string, throughputMiBps int) (int, error)
 }
 
-// reservationTimeout releases a target reservation after lost source preparation.
+// reservationTimeout releases a destination reservation after lost source preparation.
 const reservationTimeout = 10 * time.Minute
 
-// targetIdleTimeout rolls back a target whose controller stopped calling. It
+// destinationIdleTimeout rolls back a destination whose controller stopped calling. It
 // sits behind the Atlas visibility timeout, which is also 10 minutes, so it only
 // acts when Atlas has already given the migration up.
-const targetIdleTimeout = 15 * time.Minute
+const destinationIdleTimeout = 15 * time.Minute
 
-// targetControlWriteInterval bounds how often a poll rewrites the record.
-const targetControlWriteInterval = time.Minute
+// destinationControlWriteInterval bounds how often a poll rewrites the record.
+const destinationControlWriteInterval = time.Minute
 
 // defaultFinalDeltaMiB is the default cutover threshold.
 const defaultFinalDeltaMiB = 512
 
-// TargetReservation is capacity held by one migration target.
-type TargetReservation struct {
+// DestinationReservation is capacity held by one migration destination.
+type DestinationReservation struct {
 	VirtualMachineID string
 	CPUMillicores    int
 	MemoryMiB        int
 	DiskMiB          int
 }
 
-// AvailableCapacity is free host capacity checked by a target reservation.
+// AvailableCapacity is free host capacity checked by a destination reservation.
 // CPU entitlement is oversubscribed, so it is not part of the check.
 type AvailableCapacity struct {
 	MemoryMiB  int
 	StorageMiB int
 }
 
-// CapacitySource reports free target-host capacity.
+// CapacitySource reports free destination-host capacity.
 type CapacitySource func(ctx context.Context) (AvailableCapacity, error)
 
 // Manager owns host migration records and reservations.
@@ -115,7 +115,7 @@ type Manager struct {
 	logger        *slog.Logger
 	now           func() time.Time
 
-	targetCreationLocks vm.KeyedLocks
+	destinationCreationLocks vm.KeyedLocks
 
 	// The manager owns one cancellable worker per VM.
 	transfersMutex     sync.Mutex
@@ -170,32 +170,32 @@ func newManager(host migrationHost, source sourceOperations, disks migrationStor
 	}, nil
 }
 
-// CreateTarget reserves a VM ID or returns a matching in-progress record.
-func (m *Manager) CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (TargetProgress, error) {
+// CreateDestination reserves a VM ID or returns a matching in-progress record.
+func (m *Manager) CreateDestination(ctx context.Context, migrationID, virtualMachineID, source string) (DestinationProgress, error) {
 	if !vm.ValidIdentifier(migrationID) || !vm.ValidIdentifier(virtualMachineID) || !validSourceAddress(source) {
-		return TargetProgress{}, vm.ErrConflict
+		return DestinationProgress{}, vm.ErrConflict
 	}
-	unlockCreation, err := m.targetCreationLocks.Lock(ctx, migrationID)
+	unlockCreation, err := m.destinationCreationLocks.Lock(ctx, migrationID)
 	if err != nil {
-		return TargetProgress{}, err
+		return DestinationProgress{}, err
 	}
 	defer unlockCreation()
 
 	unlock, err := m.locks.Lock(ctx, virtualMachineID)
 	if err != nil {
-		return TargetProgress{}, err
+		return DestinationProgress{}, err
 	}
 	defer unlock()
 
-	if otherVirtualMachineID, _, err := m.store.findTarget(migrationID); err == nil {
+	if otherVirtualMachineID, _, err := m.store.findDestination(migrationID); err == nil {
 		if otherVirtualMachineID != virtualMachineID {
-			return TargetProgress{}, vm.ErrConflict
+			return DestinationProgress{}, vm.ErrConflict
 		}
 	} else if !errors.Is(err, vm.ErrNotFound) {
-		return TargetProgress{}, err
+		return DestinationProgress{}, err
 	}
 
-	existing, err := m.store.readTarget(virtualMachineID)
+	existing, err := m.store.readDestination(virtualMachineID)
 	if err == nil {
 		if existing.ID == migrationID {
 			// Return an active retry or a settled result unchanged.
@@ -203,39 +203,39 @@ func (m *Manager) CreateTarget(ctx context.Context, migrationID, virtualMachineI
 				return existing.progress(), nil
 			}
 			if existing.Source != source {
-				return TargetProgress{}, vm.ErrConflict
+				return DestinationProgress{}, vm.ErrConflict
 			}
 			return existing.progress(), nil
 		}
 		// Replace only a clean aborted remnant. Active and completed records conflict.
-		if existing.State != targetAborted {
-			return TargetProgress{}, vm.ErrConflict
+		if existing.State != destinationAborted {
+			return DestinationProgress{}, vm.ErrConflict
 		}
 		if err := m.assertReplaceableAborted(ctx, virtualMachineID); err != nil {
-			return TargetProgress{}, err
+			return DestinationProgress{}, err
 		}
 		if err := m.store.remove(virtualMachineID); err != nil {
-			return TargetProgress{}, err
+			return DestinationProgress{}, err
 		}
 	} else if !errors.Is(err, vm.ErrNotFound) {
-		return TargetProgress{}, err
+		return DestinationProgress{}, err
 	}
 
 	unlockAllocation := m.host.LockUserIDAllocation()
 	defer unlockAllocation()
 	if err := m.assertVirtualMachineIDFree(virtualMachineID); err != nil {
-		return TargetProgress{}, err
+		return DestinationProgress{}, err
 	}
-	record := targetRecord{
+	record := destinationRecord{
 		ID:               migrationID,
 		VirtualMachineID: virtualMachineID,
 		Source:           source,
-		State:            targetPreparing,
+		State:            destinationPreparing,
 		CreatedAt:        m.now(),
 		LastControlAt:    m.now(),
 	}
-	if err := m.store.writeTarget(record); err != nil {
-		return TargetProgress{}, errors.Join(err, m.store.remove(virtualMachineID))
+	if err := m.store.writeDestination(record); err != nil {
+		return DestinationProgress{}, errors.Join(err, m.store.remove(virtualMachineID))
 	}
 	return record.progress(), nil
 }
@@ -246,34 +246,34 @@ func validSourceAddress(address string) bool {
 		parsed.Path == "" && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
-// TargetStatus returns a target record by migration ID.
-func (m *Manager) TargetStatus(ctx context.Context, migrationID string) (TargetProgress, error) {
-	virtualMachineID, record, err := m.store.findTarget(migrationID)
+// DestinationStatus returns a destination record by migration ID.
+func (m *Manager) DestinationStatus(ctx context.Context, migrationID string) (DestinationProgress, error) {
+	virtualMachineID, record, err := m.store.findDestination(migrationID)
 	if err != nil {
-		return TargetProgress{}, err
+		return DestinationProgress{}, err
 	}
-	m.noteTargetControl(ctx, virtualMachineID, record)
+	m.noteDestinationControl(ctx, virtualMachineID, record)
 	return record.progress(), nil
 }
 
-// noteTargetControl records that Atlas called about this migration. It writes
+// noteDestinationControl records that Atlas called about this migration. It writes
 // at most once a minute, because Atlas polls every few seconds and the write
 // takes the migration lock the transfer worker also uses.
-func (m *Manager) noteTargetControl(ctx context.Context, virtualMachineID string, record targetRecord) {
-	if record.State.terminal() || m.now().Sub(record.LastControlAt) < targetControlWriteInterval {
+func (m *Manager) noteDestinationControl(ctx context.Context, virtualMachineID string, record destinationRecord) {
+	if record.State.terminal() || m.now().Sub(record.LastControlAt) < destinationControlWriteInterval {
 		return
 	}
-	if _, err := m.mutateTarget(ctx, virtualMachineID, func(target *targetRecord) {
-		target.LastControlAt = m.now()
+	if _, err := m.mutateDestination(ctx, virtualMachineID, func(destination *destinationRecord) {
+		destination.LastControlAt = m.now()
 	}); err != nil {
 		m.logger.Warn("could not record the migration control time",
 			"migration_id", record.ID, "virtual_machine_id", virtualMachineID, "error", err)
 	}
 }
 
-// AbortTarget records an abort and cancels active transfer. The worker rolls back.
-func (m *Manager) AbortTarget(ctx context.Context, migrationID string) error {
-	virtualMachineID, _, err := m.store.findTarget(migrationID)
+// AbortDestination records an abort and cancels active transfer. The worker rolls back.
+func (m *Manager) AbortDestination(ctx context.Context, migrationID string) error {
+	virtualMachineID, _, err := m.store.findDestination(migrationID)
 	if errors.Is(err, vm.ErrNotFound) {
 		return nil
 	}
@@ -286,27 +286,27 @@ func (m *Manager) AbortTarget(ctx context.Context, migrationID string) error {
 	return m.CancelTransfer(ctx, virtualMachineID)
 }
 
-// mutateTarget applies one change to the target record under the migration lock.
+// mutateDestination applies one change to the destination record under the migration lock.
 // The worker, the API and the reconciler all write this record, so every change
 // reads the stored copy again instead of writing one it read earlier.
-func (m *Manager) mutateTarget(
+func (m *Manager) mutateDestination(
 	ctx context.Context,
 	virtualMachineID string,
-	apply func(record *targetRecord),
-) (targetRecord, error) {
+	apply func(record *destinationRecord),
+) (destinationRecord, error) {
 	unlock, err := m.locks.Lock(ctx, virtualMachineID)
 	if err != nil {
-		return targetRecord{}, err
+		return destinationRecord{}, err
 	}
 	defer unlock()
 
-	record, err := m.store.readTarget(virtualMachineID)
+	record, err := m.store.readDestination(virtualMachineID)
 	if err != nil {
-		return targetRecord{}, err
+		return destinationRecord{}, err
 	}
 	apply(&record)
-	if err := m.store.writeTarget(record); err != nil {
-		return targetRecord{}, err
+	if err := m.store.writeDestination(record); err != nil {
+		return destinationRecord{}, err
 	}
 	return record, nil
 }
@@ -318,48 +318,48 @@ func (m *Manager) requestAbort(ctx context.Context, virtualMachineID string) err
 	}
 	defer unlock()
 
-	record, err := m.store.readTarget(virtualMachineID)
+	record, err := m.store.readDestination(virtualMachineID)
 	if errors.Is(err, vm.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if record.State == targetAborted {
+	if record.State == destinationAborted {
 		return nil
 	}
-	if record.State == targetFinishing || record.State == targetCompleted {
+	if record.State == destinationFinishing || record.State == destinationCompleted {
 		return vm.ErrConflict
 	}
-	if record.State == targetRemovingRuntime || record.State == targetRemovingStorage ||
-		record.State == targetRestoringSource || record.State == targetUnlockingSource {
+	if record.State == destinationRemovingRuntime || record.State == destinationRemovingStorage ||
+		record.State == destinationRestoringSource || record.State == destinationUnlockingSource {
 		return nil
 	}
-	record.State = targetRemovingRuntime
-	return m.store.writeTarget(record)
+	record.State = destinationRemovingRuntime
+	return m.store.writeDestination(record)
 }
 
-// TargetReservations returns capacity held by active targets.
-// A target reserves compute only after the source supplies its VM definition.
-func (m *Manager) TargetReservations(_ context.Context) ([]TargetReservation, error) {
+// DestinationReservations returns capacity held by active destinations.
+// A destination reserves compute only after the source supplies its VM definition.
+func (m *Manager) DestinationReservations(_ context.Context) ([]DestinationReservation, error) {
 	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
 	if err != nil {
 		return nil, err
 	}
-	reservations := make([]TargetReservation, 0, len(virtualMachineIDs))
+	reservations := make([]DestinationReservation, 0, len(virtualMachineIDs))
 	for _, virtualMachineID := range virtualMachineIDs {
-		if !m.store.has(m.store.targetPath(virtualMachineID)) {
+		if !m.store.has(m.store.destinationPath(virtualMachineID)) {
 			continue
 		}
-		record, err := m.store.readTarget(virtualMachineID)
+		record, err := m.store.readDestination(virtualMachineID)
 		if err != nil {
 			return nil, err
 		}
-		if record.Definition == nil || record.State.terminal() || record.State == targetFailed {
+		if record.Definition == nil || record.State.terminal() || record.State == destinationFailed {
 			continue
 		}
 		specification := record.Definition.Specification
-		reservations = append(reservations, TargetReservation{
+		reservations = append(reservations, DestinationReservation{
 			VirtualMachineID: virtualMachineID,
 			CPUMillicores:    specification.CPUMillicores,
 			MemoryMiB:        specification.MemoryMiB,
@@ -370,7 +370,7 @@ func (m *Manager) TargetReservations(_ context.Context) ([]TargetReservation, er
 }
 
 // assertReplaceableAborted confirms an aborted remnant left no VM, source lock,
-// or target dataset.
+// or destination dataset.
 func (m *Manager) assertReplaceableAborted(ctx context.Context, virtualMachineID string) error {
 	if _, err := m.host.ReadDesired(virtualMachineID); err == nil {
 		return vm.ErrConflict
@@ -380,7 +380,7 @@ func (m *Manager) assertReplaceableAborted(ctx context.Context, virtualMachineID
 	if m.IsSourceLocked(virtualMachineID) {
 		return vm.ErrConflict
 	}
-	exists, err := m.disks.TargetDatasetExists(ctx, virtualMachineID)
+	exists, err := m.disks.DestinationDatasetExists(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -402,10 +402,10 @@ func (m *Manager) assertVirtualMachineIDFree(virtualMachineID string) error {
 	return nil
 }
 
-func (m *Manager) removeTargetStaging(virtualMachineID string) error {
+func (m *Manager) removeDestinationStaging(virtualMachineID string) error {
 	for _, path := range []string{m.host.DesiredPath(virtualMachineID), m.host.ObservedPath(virtualMachineID)} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove target staging: %w", err)
+			return fmt.Errorf("remove destination staging: %w", err)
 		}
 	}
 	return nil
@@ -422,19 +422,19 @@ func (m *Manager) IsSourceLocked(virtualMachineID string) bool {
 	}
 	record, err := m.store.readSource(virtualMachineID)
 	if err != nil {
-		// An unreadable record keeps the VM locked, like a target reservation.
+		// An unreadable record keeps the VM locked, like a destination reservation.
 		return true
 	}
 	return record.State != sourceExpired
 }
 
-// IsTargetReserved reports whether a migration reserves this VM ID. A terminal
+// IsDestinationReserved reports whether a migration reserves this VM ID. A terminal
 // record releases it; an unreadable record stays reserved.
-func (m *Manager) IsTargetReserved(virtualMachineID string) bool {
-	if !m.store.has(m.store.targetPath(virtualMachineID)) {
+func (m *Manager) IsDestinationReserved(virtualMachineID string) bool {
+	if !m.store.has(m.store.destinationPath(virtualMachineID)) {
 		return false
 	}
-	record, err := m.store.readTarget(virtualMachineID)
+	record, err := m.store.readDestination(virtualMachineID)
 	if err != nil {
 		return true
 	}

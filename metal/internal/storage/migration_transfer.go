@@ -31,7 +31,7 @@ const copyBufferBytes = 1 << 20
 // stallTimeout ends a stream that makes no progress.
 const stallTimeout = 2 * time.Minute
 
-// acceptTimeout releases the fixed transfer port when a target does not connect.
+// acceptTimeout releases the fixed transfer port when a destination does not connect.
 const acceptTimeout = 2 * time.Minute
 
 // MigrationTLSConfig configures the one-shot mutual-TLS snapshot transport.
@@ -64,7 +64,7 @@ func (server *SnapshotServer) Wait() error {
 }
 
 // StartSnapshotServer starts a one-way mutual-TLS source stream after binding its listener.
-// It must stay one way: the target never writes, so any read of the connection blocks for ever.
+// It must stay one way: the destination never writes, so any read of the connection blocks for ever.
 func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virtualMachineID, snapshotName, baseSnapshotName, resumeToken string) (SourceStream, error) {
 	if err := transfer.validateTLS(); err != nil {
 		return nil, err
@@ -110,7 +110,7 @@ func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virt
 		// Cancel after the send process exits.
 		defer cancel()
 
-		relayError := relaySnapshotToTarget(streamContext, listener, pipeReader)
+		relayError := relaySnapshotToDestination(streamContext, listener, pipeReader)
 
 		// Close the pipe so an early relay failure stops zfs send.
 		pipeReader.Close()
@@ -124,8 +124,8 @@ func (transfer *MigrationTransfer) StartSnapshotServer(ctx context.Context, virt
 	return server, nil
 }
 
-// relaySnapshotToTarget accepts one target and relays the stream to it.
-func relaySnapshotToTarget(ctx context.Context, listener net.Listener, stream io.Reader) error {
+// relaySnapshotToDestination accepts one destination and relays the stream to it.
+func relaySnapshotToDestination(ctx context.Context, listener net.Listener, stream io.Reader) error {
 	closed := make(chan struct{})
 	defer close(closed)
 
@@ -147,7 +147,7 @@ func relaySnapshotToTarget(ctx context.Context, listener net.Listener, stream io
 			return fmt.Errorf("accept migration stream: %w", ctx.Err())
 		}
 		if acceptContext.Err() != nil {
-			return fmt.Errorf("no target connected to the migration stream within %s", acceptTimeout)
+			return fmt.Errorf("no destination connected to the migration stream within %s", acceptTimeout)
 		}
 		return fmt.Errorf("accept migration stream: %w", err)
 	}
@@ -195,7 +195,7 @@ func (transfer *MigrationTransfer) ReceiveSnapshotTLS(ctx context.Context, virtu
 
 	pipeReader, pipeWriter, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("create target transfer pipe: %w", err)
+		return fmt.Errorf("create destination transfer pipe: %w", err)
 	}
 	receiveError := &strings.Builder{}
 	receiveCommand := exec.CommandContext(ctx, "zfs", "recv", "-s", transfer.pool.virtualMachineDataset(virtualMachineID))
@@ -362,8 +362,8 @@ func (transfer *MigrationTransfer) EstimateStreamBytes(ctx context.Context, virt
 	return parseSendSizeBytes(output)
 }
 
-// TargetDatasetExists reports whether the target dataset exists.
-func (transfer *MigrationTransfer) TargetDatasetExists(ctx context.Context, virtualMachineID string) (bool, error) {
+// DestinationDatasetExists reports whether the destination dataset exists.
+func (transfer *MigrationTransfer) DestinationDatasetExists(ctx context.Context, virtualMachineID string) (bool, error) {
 	// zfs list succeeds only when the dataset exists.
 	err := transfer.runner.Run(ctx, "zfs", "list", transfer.pool.virtualMachineDataset(virtualMachineID))
 	if err == nil {
@@ -372,7 +372,7 @@ func (transfer *MigrationTransfer) TargetDatasetExists(ctx context.Context, virt
 	if strings.Contains(err.Error(), "does not exist") {
 		return false, nil
 	}
-	return false, fmt.Errorf("check target dataset: %w", err)
+	return false, fmt.Errorf("check destination dataset: %w", err)
 }
 
 // ReceiveResumeToken returns an interrupted receive token, or an empty string.
@@ -401,17 +401,17 @@ func (transfer *MigrationTransfer) AbortReceive(ctx context.Context, virtualMach
 		!strings.Contains(err.Error(), "does not have any resumable") {
 		return fmt.Errorf("abort partial receive: %w", err)
 	}
-	// zfs destroy -r removes the target dataset and migration snapshots.
+	// zfs destroy -r removes the destination dataset and migration snapshots.
 	if err := transfer.runner.Run(ctx, "zfs", "destroy", "-r", dataset); err != nil &&
 		!strings.Contains(err.Error(), "does not exist") {
-		return fmt.Errorf("remove target dataset: %w", err)
+		return fmt.Errorf("remove destination dataset: %w", err)
 	}
 	return nil
 }
 
 // verifyResumeToken rejects tokens for another migration snapshot.
 func (transfer *MigrationTransfer) verifyResumeToken(ctx context.Context, virtualMachineID, snapshotName, resumeToken string) error {
-	// zfs send -nvt reports the snapshot targeted by the resume token.
+	// zfs send -nvt reports the snapshot the resume token names.
 	output, err := transfer.runner.CombinedOutput(ctx, "zfs", "send", "-nvt", resumeToken)
 	if err != nil {
 		return fmt.Errorf("validate resume token: %w", err)

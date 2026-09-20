@@ -120,8 +120,8 @@ func (s *Server) deleteMigrationSource(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// migrationSourceIdentifiers reads the migration ID and the VM ID the target
-// sends. The target and source hold the same VM ID across a migration.
+// migrationSourceIdentifiers reads the migration ID and the VM ID the destination
+// sends. The destination and source hold the same VM ID across a migration.
 func migrationSourceIdentifiers(c echo.Context) (string, string, error) {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {

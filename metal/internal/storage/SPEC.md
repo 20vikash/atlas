@@ -94,11 +94,11 @@ The prune pass keeps staging data while an upload goroutine uses it. The pass re
 
 ## Migration transfer
 
-`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>` and estimates the full or incremental stream. A one-shot mutual-TLS listener relays `zfs send` to the one target that connects, in that direction only. The target verifies the source WireGuard IP and pipes the received stream into `zfs recv -s`. The receive saves a resume token when it stops early. The target compares the received snapshot GUID with the source GUID, so only a verified copy counts.
+`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>` and estimates the full or incremental stream. A one-shot mutual-TLS listener relays `zfs send` to the one destination that connects, in that direction only. The destination verifies the source WireGuard IP and pipes the received stream into `zfs recv -s`. The receive saves a resume token when it stops early. The destination compares the received snapshot GUID with the source GUID, so only a verified copy counts.
 
 Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send and receive commands use `exec`, and the stream itself moves through a `crypto/tls` connection. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
 
-`AbortReceive` cancels an interrupted resumable receive and removes the target dataset. An abort calls it before it removes the target VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
+`AbortReceive` cancels an interrupted resumable receive and removes the destination dataset. An abort calls it before it removes the destination VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
 
 ## Concurrency
 

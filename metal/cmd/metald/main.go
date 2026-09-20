@@ -324,11 +324,11 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			migrationReconciler.Wake()
 		}
 	}
-	migrationReservations := func(ctx context.Context) ([]migration.TargetReservation, error) {
+	migrationReservations := func(ctx context.Context) ([]migration.DestinationReservation, error) {
 		if migrationManager == nil {
 			return nil, nil
 		}
-		return migrationManager.TargetReservations(ctx)
+		return migrationManager.DestinationReservations(ctx)
 	}
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,

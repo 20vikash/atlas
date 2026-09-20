@@ -22,7 +22,7 @@ type SourceSnapshot struct {
 	GUID      string `json:"guid"`
 }
 
-// SnapshotAcknowledgement acknowledges the last snapshot that the target received.
+// SnapshotAcknowledgement acknowledges the last snapshot that the destination received.
 type SnapshotAcknowledgement struct {
 	ReceivedSequence int `json:"received_sequence,omitempty"`
 }
@@ -39,7 +39,7 @@ func migrationSnapshotName(migrationID string, sequence int) string {
 	return fmt.Sprintf("migration-%s-%d", migrationID, sequence)
 }
 
-// sourceIdleTimeout follows Atlas's 10-minute target visibility timeout.
+// sourceIdleTimeout follows Atlas's 10-minute destination visibility timeout.
 const sourceIdleTimeout = 15 * time.Minute
 
 func (m *Manager) writeSourceContact(record sourceRecord) error {
@@ -54,7 +54,7 @@ func (m *Manager) hasSourceStream(virtualMachineID string) bool {
 }
 
 // isSourceExpirable reports whether the host can safely release the source lock.
-// A stopped source can have a running target, so it always needs an operator.
+// A stopped source can have a running destination, so it always needs an operator.
 func (m *Manager) isSourceExpirable(record sourceRecord) bool {
 	if record.State != sourceLocked {
 		return false
@@ -306,7 +306,7 @@ func (m *Manager) assertNoSourceRemnant(ctx context.Context, virtualMachineID st
 	} else if !errors.Is(err, vm.ErrNotFound) {
 		return err
 	}
-	exists, err := m.disks.TargetDatasetExists(ctx, virtualMachineID)
+	exists, err := m.disks.DestinationDatasetExists(ctx, virtualMachineID)
 	if err != nil {
 		return err
 	}
@@ -473,7 +473,7 @@ func (m *Manager) StartSourceStream(ctx context.Context, migrationID, virtualMac
 		return vm.ErrConflict
 	}
 
-	// The stream outlives its request, so a target that never connects cannot hold the port.
+	// The stream outlives its request, so a destination that never connects cannot hold the port.
 	streamContext, cancel := context.WithTimeout(m.rootContext, maxTransferDuration)
 	handle := &backgroundOperation{cancel: cancel, done: make(chan struct{})}
 	m.sourceStreams[virtualMachineID] = handle

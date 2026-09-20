@@ -54,7 +54,7 @@ The host service receives an optional mesh service, WireGuard, image, VM, storag
 
 Both servers require a client certificate from the regional authority. The Atlas API also pins `tls.atlas_common_name`, because a node certificate is valid for client use on the coordination API.
 
-The source starts a one-shot mutual-TLS listener on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The target verifies the source WireGuard IP before it receives the stream.
+The source starts a one-shot mutual-TLS listener on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The destination verifies the source WireGuard IP before it receives the stream.
 
 `connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 
@@ -82,7 +82,7 @@ The source starts a one-shot mutual-TLS listener on `migration.transfer_port` fo
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
 | `wg_mesh.uplink` | none | Discovery uplink. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
-| `migration.final_delta_mib` | `512` | Incremental size at or below which the target stops the source and takes the final snapshot. |
+| `migration.final_delta_mib` | `512` | Incremental size at or below which the destination stops the source and takes the final snapshot. |
 | `migration.transfer_port` | `9002` | Mutual-TLS snapshot stream port. Use the same value on every host in the region. |
 
 See `config.example.toml` for the complete file format.

@@ -65,7 +65,7 @@ func (host *MigrationHost) LimitSourceDisk(ctx context.Context, virtualMachineID
 	return throughputMiBps, nil
 }
 
-// RemoveMigrationNetwork releases the source network before target setup.
+// RemoveMigrationNetwork releases the source network before destination setup.
 func (host *MigrationHost) RemoveMigrationNetwork(ctx context.Context, virtualMachineID string) error {
 	manager := host.manager
 	desired, err := manager.store.readDesired(virtualMachineID)
@@ -79,7 +79,7 @@ func (host *MigrationHost) RemoveMigrationNetwork(ctx context.Context, virtualMa
 	})
 }
 
-// EnsureMigrationNetwork creates and records the target network for cold start.
+// EnsureMigrationNetwork creates and records the destination network for cold start.
 func (host *MigrationHost) EnsureMigrationNetwork(ctx context.Context, virtualMachineID string) error {
 	manager := host.manager
 	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
@@ -94,8 +94,8 @@ func (host *MigrationHost) EnsureMigrationNetwork(ctx context.Context, virtualMa
 	return manager.store.writeObserved(virtualMachineID, observed)
 }
 
-// ApplyMigratedTargetState applies the original state with a cold start.
-func (host *MigrationHost) ApplyMigratedTargetState(ctx context.Context, virtualMachineID string) error {
+// ApplyMigratedDestinationState applies the original state with a cold start.
+func (host *MigrationHost) ApplyMigratedDestinationState(ctx context.Context, virtualMachineID string) error {
 	manager := host.manager
 	desired, err := manager.store.readDesired(virtualMachineID)
 	if err != nil {

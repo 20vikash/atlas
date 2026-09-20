@@ -23,13 +23,13 @@ func newRecordingDriver(ids ...string) *recordingDriver {
 	return &recordingDriver{ids: ids, seen: map[string]int{}, expired: map[string]int{}, done: make(chan string, 16)}
 }
 
-func (driver *recordingDriver) ActiveTargetVirtualMachineIDs(context.Context) ([]string, error) {
+func (driver *recordingDriver) ActiveDestinationVirtualMachineIDs(context.Context) ([]string, error) {
 	driver.mu.Lock()
 	defer driver.mu.Unlock()
 	return driver.ids, driver.listErr
 }
 
-func (driver *recordingDriver) AdvanceTarget(_ context.Context, virtualMachineID string) error {
+func (driver *recordingDriver) AdvanceDestination(_ context.Context, virtualMachineID string) error {
 	driver.mu.Lock()
 	driver.seen[virtualMachineID]++
 	driver.mu.Unlock()

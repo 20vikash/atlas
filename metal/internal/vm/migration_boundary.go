@@ -6,8 +6,8 @@ import "context"
 type MigrationGuard interface {
 	// IsSourceLocked reports whether a migration holds the VM as a source.
 	IsSourceLocked(virtualMachineID string) bool
-	// IsTargetReserved reports whether a migration reserves this VM ID.
-	IsTargetReserved(virtualMachineID string) bool
+	// IsDestinationReserved reports whether a migration reserves this VM ID.
+	IsDestinationReserved(virtualMachineID string) bool
 }
 
 // MigrationHost exposes the VM operations that the migration lifecycle owns.

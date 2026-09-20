@@ -144,7 +144,7 @@ func (f *fakeMigrationHost) EnsureMigrationNetwork(context.Context, string) erro
 	return nil
 }
 
-func (f *fakeMigrationHost) ApplyMigratedTargetState(context.Context, string) error {
+func (f *fakeMigrationHost) ApplyMigratedDestinationState(context.Context, string) error {
 	f.applyStateCalls++
 	return f.applyStateError
 }
@@ -217,7 +217,7 @@ func (f *fakeMigrationStorage) EstimateStreamBytes(_ context.Context, _, _, _ st
 	return f.sizeBytes, nil
 }
 
-func (f *fakeMigrationStorage) TargetDatasetExists(_ context.Context, _ string) (bool, error) {
+func (f *fakeMigrationStorage) DestinationDatasetExists(_ context.Context, _ string) (bool, error) {
 	return f.datasetExists, nil
 }
 
@@ -387,27 +387,27 @@ func TestNewManagerRejectsACorruptRecord(t *testing.T) {
 	}
 }
 
-func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
+func TestCreateDestinationReservesAndAcceptsARetry(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
 
-	record, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000")
+	record, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if record.Status != StatusRunning || record.Phase != PhasePreparing {
 		t.Fatalf("record = %+v", record)
 	}
-	if !migrationManager.IsTargetReserved("vm-1") {
+	if !migrationManager.IsDestinationReserved("vm-1") {
 		t.Fatal("VM ID was not reserved")
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatalf("idempotent retry = %v", err)
 	}
 }
 
-func TestCreateTargetSerializesOneMigrationID(t *testing.T) {
+func TestCreateDestinationSerializesOneMigrationID(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -415,7 +415,7 @@ func TestCreateTargetSerializesOneMigrationID(t *testing.T) {
 	for _, virtualMachineID := range []string{"vm-1", "vm-2"} {
 		go func() {
 			<-start
-			_, err := migrationManager.CreateTarget(t.Context(), "mig-1", virtualMachineID, "https://10.0.0.3:9000")
+			_, err := migrationManager.CreateDestination(t.Context(), "mig-1", virtualMachineID, "https://10.0.0.3:9000")
 			results <- err
 		}()
 	}
@@ -429,7 +429,7 @@ func TestCreateTargetSerializesOneMigrationID(t *testing.T) {
 		case errors.Is(err, vm.ErrConflict):
 			conflicted++
 		default:
-			t.Fatalf("create target = %v", err)
+			t.Fatalf("create destination = %v", err)
 		}
 	}
 	if succeeded != 1 || conflicted != 1 {
@@ -437,103 +437,103 @@ func TestCreateTargetSerializesOneMigrationID(t *testing.T) {
 	}
 }
 
-func TestCreateTargetRejectsAPlaintextSource(t *testing.T) {
+func TestCreateDestinationRejectsAPlaintextSource(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 
-	_, err := migrationManager.CreateTarget(context.Background(), "mig-1", "vm-1", "http://10.0.0.3:9001")
+	_, err := migrationManager.CreateDestination(context.Background(), "mig-1", "vm-1", "http://10.0.0.3:9001")
 	if !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("plaintext source = %v, want ErrConflict", err)
 	}
 }
 
-func TestCreateTargetRejectsChangedValues(t *testing.T) {
+func TestCreateDestinationRejectsChangedValues(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.9:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.9:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("changed source = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-2", "vm-1", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-2", "vm-1", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("changed migration ID = %v, want ErrConflict", err)
 	}
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-2", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-2", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("reused migration ID for another VM = %v, want ErrConflict", err)
 	}
 }
 
-func TestCreateTargetRejectsALiveVirtualMachineID(t *testing.T) {
+func TestCreateDestinationRejectsALiveVirtualMachineID(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
 	machines.create("vm-1", testSpecification())
 
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("reserve a live VM ID = %v, want ErrConflict", err)
 	}
 }
 
-func TestTargetStatusResolvesTheMigrationID(t *testing.T) {
+func TestDestinationStatusResolvesTheMigrationID(t *testing.T) {
 	migrationManager, _, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	record, err := migrationManager.TargetStatus(ctx, "mig-1")
+	record, err := migrationManager.DestinationStatus(ctx, "mig-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if record.VirtualMachineID != "vm-1" {
 		t.Fatalf("status = %+v", record)
 	}
-	if _, err := migrationManager.TargetStatus(ctx, "mig-missing"); !errors.Is(err, vm.ErrNotFound) {
+	if _, err := migrationManager.DestinationStatus(ctx, "mig-missing"); !errors.Is(err, vm.ErrNotFound) {
 		t.Fatalf("missing status = %v, want ErrNotFound", err)
 	}
 }
 
-func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
+func TestAbortDestinationUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := migrationManager.AbortTarget(ctx, "mig-1"); err != nil {
+	if err := migrationManager.AbortDestination(ctx, "mig-1"); err != nil {
 		t.Fatal(err)
 	}
 	// Let the worker roll back, then wait for it.
-	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
+	if err := migrationManager.AdvanceDestination(ctx, "vm-1"); err != nil {
 		t.Fatal(err)
 	}
 	awaitTransfer(t, migrationManager, "vm-1")
 	if source.removeCalls != 1 {
 		t.Fatalf("RemoveSource calls = %d, want 1", source.removeCalls)
 	}
-	if migrationManager.IsTargetReserved("vm-1") {
+	if migrationManager.IsDestinationReserved("vm-1") {
 		t.Fatal("reservation still present after abort")
 	}
 }
 
-func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
+func TestAbortDestinationKeepsRecordsWhenRollbackFails(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.removeError = errors.New("source unreachable")
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := migrationManager.AbortTarget(ctx, "mig-1"); err != nil {
+	if err := migrationManager.AbortDestination(ctx, "mig-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
+	if err := migrationManager.AdvanceDestination(ctx, "vm-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrationManager.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !migrationManager.IsTargetReserved("vm-1") {
+	if !migrationManager.IsDestinationReserved("vm-1") {
 		t.Fatal("reservation was cleared despite a rollback failure")
 	}
 }
@@ -555,7 +555,7 @@ func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait until the stream holds the snapshot, like a target that stalled.
+	// Wait until the stream holds the snapshot, like a destination that stalled.
 	select {
 	case <-transfer.sendStarted:
 	case <-time.After(5 * time.Second):
@@ -574,14 +574,14 @@ func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
 	}
 }
 
-func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
+func TestDestinationReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
-	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+	if _, err := migrationManager.CreateDestination(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
-	reservations, err := migrationManager.TargetReservations(ctx)
+	reservations, err := migrationManager.DestinationReservations(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,17 +590,17 @@ func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 	}
 
 	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
-	record, err := store.readTarget("vm-1")
+	record, err := store.readDestination("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.State = targetCopying
+	record.State = destinationCopying
 	record.Definition = &VirtualMachineDefinition{Specification: vm.Specification{CPUMillicores: 3000, MemoryMiB: 3072, DiskMiB: 8192}}
-	if err := store.writeTarget(record); err != nil {
+	if err := store.writeDestination(record); err != nil {
 		t.Fatal(err)
 	}
 
-	reservations, err = migrationManager.TargetReservations(ctx)
+	reservations, err = migrationManager.DestinationReservations(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
