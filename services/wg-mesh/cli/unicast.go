@@ -72,15 +72,27 @@ func runUnicastDaemon(peersPath string) error {
 	}
 	defer unlock()
 
+	// keepUnicast stays false on every path that leaves the uplink without a
+	// working transport. A failed multicast restore sets it: the unicast
+	// hooks keep serving NDP instead of leaving the uplink with no hook at
+	// all, and the next synchronization attaches them again and retries the
+	// swap.
+	keepUnicast := false
+	defer func() {
+		if keepUnicast {
+			return
+		}
+		detachUnicastHookWarning(uplinkName, "egress")
+		detachUnicastHookWarning(uplinkName, "ingress")
+	}()
+
 	if err := attachUnicastHook(uplinkName, ndpUnicastIngressProgram, "ingress", unicastIngressFilterPriority); err != nil {
 		return err
 	}
-	defer detachUnicastHookWarning(uplinkName, "ingress")
 
 	if err := attachUnicastHook(uplinkName, ndpUnicastEgressProgram, "egress", unicastEgressFilterPriority); err != nil {
 		return err
 	}
-	defer detachUnicastHookWarning(uplinkName, "egress")
 
 	// The unicast hooks own the uplink now. A failure here leaves both hook
 	// sets attached, which is safe: the unicast hooks skip work that the
@@ -98,9 +110,11 @@ func runUnicastDaemon(peersPath string) error {
 
 	// Restore the multicast filters first. Both hook sets then run together
 	// until the deferred unicast detachments finish, which is safe for the
-	// same reason as above.
+	// same reason as above. A failed restore keeps the unicast hooks: the
+	// daemon reports the failure instead of stripping the working transport.
 	if err := attachMulticastNeighbourHook(uplinkName); err != nil {
-		fmt.Fprintf(os.Stderr, "atlas-wg-mesh: warning: restore multicast NDP: %v\n", err)
+		keepUnicast = true
+		return fmt.Errorf("restore multicast NDP: %w", err)
 	}
 	return nil
 }

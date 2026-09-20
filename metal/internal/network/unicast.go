@@ -3,9 +3,11 @@ package network
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // UnicastConfig identifies the daemon binary and the peer state of one host.
@@ -16,6 +18,11 @@ type UnicastConfig struct {
 	WireGuardStatePath string
 }
 
+// defaultUnicastStartupGrace bounds how long Enable waits for a fresh daemon
+// to stay alive: long enough for its filter swap, short enough to keep a
+// failing sync fast.
+const defaultUnicastStartupGrace = 2 * time.Second
+
 // UnicastManager runs the unicast NDP transport daemon as a supervised child
 // process. metald owns the lifecycle: Enable starts the daemon, Disable stops
 // it cleanly, and the next synchronization restarts a crashed daemon.
@@ -24,6 +31,9 @@ type UnicastManager struct {
 	spawner       unicastSpawner
 	mutex         sync.Mutex
 	process       unicastProcess
+	// startupGrace is how long Enable waits for a fresh daemon to stay alive.
+	// Tests shrink it.
+	startupGrace time.Duration
 }
 
 // unicastSpawner starts one daemon process. Tests replace it.
@@ -48,7 +58,7 @@ func NewUnicastManager(configuration UnicastConfig) (*UnicastManager, error) {
 		return nil, fmt.Errorf("WireGuard peer state path is required")
 	}
 
-	return &UnicastManager{configuration: configuration, spawner: hostUnicastSpawner{}}, nil
+	return &UnicastManager{configuration: configuration, spawner: hostUnicastSpawner{}, startupGrace: defaultUnicastStartupGrace}, nil
 }
 
 // Enable starts the daemon when the managed peer set holds a peer. A host
@@ -75,8 +85,30 @@ func (manager *UnicastManager) Enable(ctx context.Context) error {
 	if spawnErr != nil {
 		return fmt.Errorf("start unicast daemon: %w", spawnErr)
 	}
+	// A daemon that exits inside the grace window never owned the uplink, so
+	// fail the sync loudly instead of recording a dead process and looping
+	// silently. Its output went to the metald log through the spawner.
+	if exitedDuringStartup(process, manager.startupGrace) {
+		return fmt.Errorf("unicast daemon exited during startup: see the metald log for its output")
+	}
 	manager.process = process
 	return nil
+}
+
+// exitedDuringStartup reports whether the process exits inside the grace
+// window. A process that is already dead reports at once, so tests need no
+// grace.
+func exitedDuringStartup(process unicastProcess, grace time.Duration) bool {
+	deadline := time.Now().Add(grace)
+	for {
+		if process.Exited() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // Disable stops the daemon, which restores the multicast NDP filters.
@@ -104,8 +136,12 @@ func (manager *UnicastManager) stop(ctx context.Context) error {
 type hostUnicastSpawner struct{}
 
 // Start launches the daemon with a parent-death signal, so a metald crash also stops the daemon cleanly.
+// The daemon inherits metald's standard output and error, so a daemon that
+// exits early leaves its reason in the metald log instead of vanishing.
 func (hostUnicastSpawner) Start(configuration UnicastConfig) (unicastProcess, error) {
 	command := exec.Command(configuration.BinaryPath, "unicast", "start", configuration.WireGuardStatePath)
+	command.Stdout = os.Stderr
+	command.Stderr = os.Stderr
 	command.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
 
 	if err := command.Start(); err != nil {

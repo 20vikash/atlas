@@ -330,12 +330,16 @@ func detachHook(interfaceName string) error {
 }
 
 // deleteMissing reports whether a delete error only means that the entry was
-// already absent.
+// already absent. tc reports a missing filter as "Cannot find specified
+// filter chain" when the chain holds no filter, and as "Filter with specified
+// priority/protocol not found" once another filter holds the chain, so both
+// wordings must read as absent.
 func deleteMissing(err error) bool {
 	message := strings.ToLower(err.Error())
 
 	return strings.Contains(message, "no such file or directory") ||
-		strings.Contains(message, "cannot find")
+		strings.Contains(message, "cannot find") ||
+		strings.Contains(message, "not found")
 }
 
 // setProxyNeighbour makes the host answer neighbour solicitations for a VM

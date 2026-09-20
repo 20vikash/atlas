@@ -9,13 +9,14 @@ import (
 )
 
 type testUnicastSpawner struct {
-	starts    int
-	processes []*testUnicastProcess
+	starts          int
+	processes       []*testUnicastProcess
+	exitImmediately bool
 }
 
 func (spawner *testUnicastSpawner) Start(UnicastConfig) (unicastProcess, error) {
 	spawner.starts++
-	process := &testUnicastProcess{}
+	process := &testUnicastProcess{exited: spawner.exitImmediately}
 	spawner.processes = append(spawner.processes, process)
 	return process, nil
 }
@@ -55,6 +56,8 @@ func newTestUnicastManager(t *testing.T, peers []WireGuardPeer) (*UnicastManager
 
 	spawner := &testUnicastSpawner{}
 	manager.spawner = spawner
+	// Skip the startup grace: the mock reports its state at once.
+	manager.startupGrace = 0
 	return manager, spawner
 }
 
@@ -101,6 +104,28 @@ func TestEnableRestartsACrashedDaemon(t *testing.T) {
 
 	if err := manager.Enable(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if spawner.starts != 2 {
+		t.Fatalf("daemon starts = %d, want 2", spawner.starts)
+	}
+}
+
+func TestEnableReportsDaemonThatExitsDuringStartup(t *testing.T) {
+	manager, spawner := newTestUnicastManager(t, testDaemonPeers)
+	spawner.exitImmediately = true
+
+	err := manager.Enable(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "exited during startup") {
+		t.Fatalf("error = %v, want a startup failure", err)
+	}
+	if spawner.starts != 1 {
+		t.Fatalf("daemon starts = %d, want 1", spawner.starts)
+	}
+
+	// The dead process is not recorded, so the next synchronization retries
+	// the start instead of watching a corpse.
+	if err := manager.Enable(t.Context()); err == nil {
+		t.Fatal("expected a startup failure on the retry")
 	}
 	if spawner.starts != 2 {
 		t.Fatalf("daemon starts = %d, want 2", spawner.starts)
