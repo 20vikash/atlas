@@ -32,7 +32,7 @@ class TestMetalClientRetries(UnitTestCase):
 		client = build_client()
 		responses = [requests.ReadTimeout("read timed out"), build_response(200, {"state": "running"})]
 
-		with patch("atlas.vm.core.metal_client.requests.request", side_effect=responses) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", side_effect=responses) as request:
 			body = client._request("GET", "/v1/vms/VM-00001", attempts=client.status_attempts)
 
 		self.assertEqual(body, {"state": "running"})
@@ -50,7 +50,7 @@ class TestMetalClientRetries(UnitTestCase):
 
 		with (
 			patch("atlas.vm.core.metal_client.monotonic", lambda: next(clock) * 10),
-			patch("atlas.vm.core.metal_client.requests.request", side_effect=record),
+			patch("atlas.vm.core.metal_client.requests.Session.request", side_effect=record),
 		):
 			with self.assertRaises(MetalClientError):
 				client._request("GET", "/v1/vms/VM-00001", timeout=(5, 30), attempts=3, budget_seconds=30)
@@ -64,7 +64,7 @@ class TestMetalClientRetries(UnitTestCase):
 		client = build_client()
 		responses = [requests.ConnectionError("refused"), build_response(200, {"state": "running"})]
 
-		with patch("atlas.vm.core.metal_client.requests.request", side_effect=responses) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", side_effect=responses) as request:
 			body = client._request("GET", "/v1/vms/VM-00001", timeout=(5, 30), attempts=3, budget_seconds=30)
 
 		self.assertEqual(body, {"state": "running"})
@@ -75,7 +75,7 @@ class TestMetalClientRetries(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			side_effect=requests.ReadTimeout("read timed out"),
 		) as request:
 			with self.assertRaises(MetalClientError):
@@ -87,7 +87,7 @@ class TestMetalClientRetries(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			side_effect=requests.ReadTimeout("read timed out"),
 		) as request:
 			with self.assertRaises(MetalClientError):
@@ -99,7 +99,7 @@ class TestMetalClientRetries(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request", return_value=build_response(404)
+			"atlas.vm.core.metal_client.requests.Session.request", return_value=build_response(404)
 		) as request:
 			with self.assertRaises(MetalClientError):
 				client.get_virtual_machine("VM-00001")
@@ -110,7 +110,7 @@ class TestMetalClientRetries(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			side_effect=requests.ReadTimeout("read timed out"),
 		) as request:
 			with self.assertRaises(MetalClientError):
@@ -124,7 +124,7 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			side_effect=requests.ConnectionError("refused"),
 		):
 			with self.assertRaises(MetalClientError) as caught:
@@ -138,7 +138,7 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			side_effect=requests.ConnectionError("timeout"),
 		):
 			with self.assertRaises(MetalClientError) as caught:
@@ -150,7 +150,9 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 		body = {"error": {"message": "shutting down", "code": "unavailable", "retryable": False}}
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=build_response(503, body)):
+		with patch(
+			"atlas.vm.core.metal_client.requests.Session.request", return_value=build_response(503, body)
+		):
 			with self.assertRaises(MetalClientError) as caught:
 				client.get_virtual_machine("VM-00001")
 
@@ -161,7 +163,9 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 		body = {"error": {"message": "bad request", "code": "invalid_request"}}
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=build_response(400, body)):
+		with patch(
+			"atlas.vm.core.metal_client.requests.Session.request", return_value=build_response(400, body)
+		):
 			with self.assertRaises(MetalClientError) as caught:
 				client.get_virtual_machine("VM-00001")
 
@@ -171,7 +175,7 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(500, {"error": {"message": "boom"}}),
 		):
 			with self.assertRaises(MetalClientError) as caught:
@@ -184,7 +188,7 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(404, {"error": {"message": "gone"}}),
 		):
 			with self.assertRaises(MetalClientError) as caught:
@@ -197,7 +201,7 @@ class TestMetalClientErrors(UnitTestCase):
 		response = build_response(502)
 		response.json.side_effect = ValueError("not json")
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response):
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response):
 			with self.assertRaises(MetalClientError) as caught:
 				client.get_virtual_machine("VM-00001")
 
@@ -208,7 +212,7 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(200, ["not", "an", "object"], content=b"[]"),
 		):
 			with self.assertRaises(MetalClientError):
@@ -218,7 +222,7 @@ class TestMetalClientErrors(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(204, content=b""),
 		):
 			self.assertIsNone(client.delete_snapshot("SNAP-1"))
@@ -230,7 +234,7 @@ class TestMetalClientPaths(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(204, content=b""),
 		) as request:
 			client.delete_snapshot("a/b")
@@ -243,7 +247,7 @@ class TestMetalClientPaths(UnitTestCase):
 		client = build_client()
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(202, content=b""),
 		) as request:
 			client.start_snapshot_upload("SNAP-1", {"rootfs": {"parts": []}})
@@ -259,7 +263,7 @@ class TestMetalClientMigrations(UnitTestCase):
 		migration = {"status": "running"}
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(202, migration),
 		) as request:
 			result = client.put_migration("mig-00001", "vm-00001", "http://10.0.0.3:9000")
@@ -277,7 +281,7 @@ class TestMetalClientMigrations(UnitTestCase):
 		progress = {"status": "running", "phase": "copying"}
 
 		with patch(
-			"atlas.vm.core.metal_client.requests.request",
+			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(200, progress),
 		) as request:
 			result = client.get_migration("mig-00001")
@@ -290,7 +294,7 @@ class TestMetalClientMigrations(UnitTestCase):
 
 		for method_name, suffix in (("abort_migration", "abort"), ("finish_migration", "finish")):
 			with patch(
-				"atlas.vm.core.metal_client.requests.request",
+				"atlas.vm.core.metal_client.requests.Session.request",
 				return_value=build_response(202, content=b""),
 			) as request:
 				getattr(client, method_name)("mig-00001")
@@ -310,7 +314,7 @@ class TestMetalClientMigrations(UnitTestCase):
 			lambda: client.finish_migration("mig-00001"),
 		):
 			with patch(
-				"atlas.vm.core.metal_client.requests.request",
+				"atlas.vm.core.metal_client.requests.Session.request",
 				side_effect=requests.ConnectionError("timeout"),
 			):
 				with self.assertRaises(MetalClientError) as caught:

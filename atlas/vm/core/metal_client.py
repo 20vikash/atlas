@@ -6,6 +6,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+import frappe
 import requests
 
 from atlas.atlas.core.tls.metal import ca_file, client_certificate_files
@@ -339,6 +340,19 @@ class MetalClient:
 		connect, read = timeout
 		return (connect, max(0.1, min(read, deadline - monotonic())))
 
+	@property
+	def session(self) -> requests.Session:
+		"""Return this request's reusable mutual-TLS session for the host."""
+		sessions = getattr(frappe.local, "metal_client_sessions", None)
+		if sessions is None:
+			sessions = {}
+			frappe.local.metal_client_sessions = sessions
+		session = sessions.get(self.base_url)
+		if session is None:
+			session = requests.Session()
+			sessions[self.base_url] = session
+		return session
+
 	def _send(
 		self,
 		method: str,
@@ -350,7 +364,7 @@ class MetalClient:
 	) -> dict[str, Any]:
 		timeout = kwargs.pop("timeout", self.timeout_seconds)
 		try:
-			response = requests.request(
+			response = self.session.request(
 				method,
 				f"{self.base_url}{path}",
 				timeout=timeout,
