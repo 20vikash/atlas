@@ -472,6 +472,40 @@ class TestMigrationRecovery(UnitTestCase):
 		self.assertEqual(status, {"status": "missing"})
 		service.migration.db_set.assert_not_called()
 
+	def test_poll_treats_an_unreachable_target_as_missing(self) -> None:
+		"""A host that is down must run the visibility timeout, not end the worker."""
+		service = MigrationService(migration_doc())
+		service.record_error = Mock()
+		client = Mock()
+		client.get_migration.side_effect = MetalClientError("connection refused", retryable=True)
+
+		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
+			status = service.poll()
+
+		self.assertEqual(status, {"status": "missing"})
+		service.record_error.assert_called_once()
+
+	def test_poll_raises_a_failure_the_worker_cannot_retry(self) -> None:
+		service = MigrationService(migration_doc())
+		client = Mock()
+		client.get_migration.side_effect = MetalClientError("bad request", status=400)
+
+		with (
+			patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client),
+			self.assertRaises(MetalClientError),
+		):
+			service.poll()
+
+	def test_missing_target_keeps_polling_when_the_request_cannot_be_sent(self) -> None:
+		service = MigrationService(migration_doc())
+		service.send_request = Mock(side_effect=MetalClientError("connection refused", retryable=True))
+		service.record_error = Mock()
+
+		with patch.object(MigrationService, "is_expired", new_callable=PropertyMock, return_value=False):
+			self.assertFalse(service.advance({"status": "missing"}))
+
+		service.record_error.assert_called_once()
+
 	def test_poll_commits_progress_for_live_visibility(self) -> None:
 		service = MigrationService(migration_doc())
 		client = Mock()

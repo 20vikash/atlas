@@ -168,7 +168,11 @@ class MigrationService:
 		if self.is_expired:
 			self.expire()
 			return True
-		self.send_request()
+		try:
+			self.send_request()
+		except MetalClientError as error:
+			# Let the visibility timeout handle an unreachable target.
+			self.record_error(error)
 		return False
 
 	def expire(self) -> None:
@@ -199,6 +203,10 @@ class MigrationService:
 			status = self.target_client.get_migration(cast(str, self.migration.name))
 		except MetalClientError as error:
 			if error.is_not_found:
+				return {"status": "missing"}
+			if error.retryable:
+				# A down target is invisible until the visibility timeout expires.
+				self.record_error(error)
 				return {"status": "missing"}
 			raise
 		self.store_progress(status, commit=True)
