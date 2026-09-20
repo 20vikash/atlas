@@ -38,6 +38,7 @@ func writeCopyingTarget(t *testing.T, machines *fakeMachines, sourceState vm.Sta
 		Phase:               PhaseCopying,
 		SourceObservedState: sourceState,
 		CopyStartedAt:       time.Now().UTC(),
+		LastControlAt:       time.Now().UTC(),
 	}
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)

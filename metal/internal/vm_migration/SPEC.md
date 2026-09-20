@@ -111,6 +111,10 @@ Rollback removes the target runtime, network, dataset, and staging records. It a
 
 The source stops any active disk stream before it unlocks or destroys the VM. This releases the migration snapshot before unlock removes it.
 
+A source lock that the target stopped using for 15 minutes releases itself. The reconciler expires it only when the source never stopped, no stream is in flight, and no source control call arrived in that window. An age alone is not enough, because one long interval makes no control call. The release runs the same cleanup as an unlock and leaves the record as a tombstone with `expired`, which frees the VM but refuses the same migration ID, so a target that comes back cannot resume against a VM the operator has since changed. A source that already stopped is never released here: the target may have started the guest, and two hosts must never own one disk.
+
+A nonterminal target that Atlas stops calling for 15 minutes rolls itself back. It records the time of each Atlas control call, and Atlas gives a target up after its own 10 minute visibility timeout, so nothing else would ever release the reservation, the dataset, and the hidden VM ID on that host. A `ready` target is never released this way, because Atlas may already point the VM at it.
+
 A success or abort keeps a terminal record with the schema version, migration ID, VM ID, status, and finish time. It has no phase, hides no VM, and reserves no capacity. Every nonterminal record, including failed, hides the VM and reserves capacity. A new target migration can replace an aborted record only after all VM, source-lock, and target-dataset records are gone.
 
 The daemon removes and logs a migration record that it cannot decode. One corrupt or old record cannot block startup.

@@ -9,10 +9,13 @@ import (
 // defaultMigrationOperationTimeout bounds one handshake and record write.
 const defaultMigrationOperationTimeout = 5 * time.Minute
 
-// MigrationDriver lists and advances active target migrations.
+// MigrationDriver advances active target migrations and releases source locks
+// whose target stopped answering.
 type MigrationDriver interface {
 	ActiveTargetVirtualMachineIDs(ctx context.Context) ([]string, error)
 	AdvanceTarget(ctx context.Context, virtualMachineID string) error
+	ExpiredSourceVirtualMachineIDs(ctx context.Context) ([]string, error)
+	ExpireSource(ctx context.Context, virtualMachineID string) error
 }
 
 // MigrationConfig controls one migration reconcile pass.
@@ -48,14 +51,18 @@ func NewMigrationReconciler(driver MigrationDriver, interval time.Duration, conf
 
 // Run advances migrations until ctx is canceled.
 func (r *MigrationReconciler) Run(ctx context.Context) {
-	r.run(ctx, r.advanceAll)
+	r.run(ctx, r.pass)
+}
+
+// pass advances every target migration, then releases every expired source lock.
+func (r *MigrationReconciler) pass(ctx context.Context) {
+	r.advanceAll(ctx)
+	r.expireAll(ctx)
 }
 
 // advanceAll advances every active target migration once.
 func (r *MigrationReconciler) advanceAll(ctx context.Context) {
-	listContext, cancelList := context.WithTimeout(ctx, r.operationTimeout)
-	virtualMachineIDs, err := r.driver.ActiveTargetVirtualMachineIDs(listContext)
-	cancelList()
+	virtualMachineIDs, err := r.list(ctx, r.driver.ActiveTargetVirtualMachineIDs)
 	if err != nil {
 		r.logFailure(ctx, "migration reconciler list failed", err)
 		return
@@ -67,6 +74,34 @@ func (r *MigrationReconciler) advanceAll(ctx context.Context) {
 		}
 		r.advance(ctx, virtualMachineID)
 	}
+}
+
+// expireAll releases the source locks whose target stopped answering.
+func (r *MigrationReconciler) expireAll(ctx context.Context) {
+	virtualMachineIDs, err := r.list(ctx, r.driver.ExpiredSourceVirtualMachineIDs)
+	if err != nil {
+		r.logFailure(ctx, "migration reconciler source list failed", err)
+		return
+	}
+
+	for _, virtualMachineID := range virtualMachineIDs {
+		if ctx.Err() != nil {
+			return
+		}
+		operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
+		err := r.driver.ExpireSource(operationContext, virtualMachineID)
+		cancel()
+		if err != nil {
+			r.logFailure(ctx, "migration source expiry failed", err, "virtual_machine_id", virtualMachineID)
+		}
+	}
+}
+
+// list runs one bounded listing.
+func (r *MigrationReconciler) list(ctx context.Context, read func(context.Context) ([]string, error)) ([]string, error) {
+	listContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
+	defer cancel()
+	return read(listContext)
 }
 
 // advance runs one migration handshake step under the operation timeout.

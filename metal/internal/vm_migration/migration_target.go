@@ -31,9 +31,22 @@ func (m *VMMigration) AdvanceTarget(ctx context.Context, virtualMachineID string
 		return nil
 	}
 	if record.Status == MigrationReady {
+		// Atlas alone releases a ready target because it may own the VM.
 		if record.FinishRequested {
 			m.StartTransfer(virtualMachineID)
 		}
+		return nil
+	}
+	if m.isTargetAbandoned(record) {
+		m.logger.Warn("rolling back a migration target whose controller stopped calling",
+			"migration_id", record.ID, "virtual_machine_id", virtualMachineID,
+			"status", record.Status, "phase", record.Phase,
+			"idle_seconds", int(m.now().Sub(record.LastControlAt).Seconds()))
+		record.AbortRequested = true
+		if err := m.store.writeTarget(record); err != nil {
+			return err
+		}
+		m.StartTransfer(virtualMachineID)
 		return nil
 	}
 	if record.Status != MigrationRunning {
@@ -105,6 +118,15 @@ func (m *VMMigration) ActiveTargetVirtualMachineIDs(_ context.Context) ([]string
 		}
 	}
 	return active, nil
+}
+
+// isTargetAbandoned reports whether Atlas stopped driving this migration.
+// Its caller excludes ready targets because Atlas can already own their VM.
+func (m *VMMigration) isTargetAbandoned(record TargetMigrationRecord) bool {
+	if isTerminalStatus(record.Status) || record.AbortRequested || record.FinishRequested {
+		return false
+	}
+	return m.now().Sub(record.LastControlAt) > targetIdleTimeout
 }
 
 // reserveShape rejects migrations that exceed host capacity.

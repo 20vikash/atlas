@@ -116,7 +116,7 @@ func TestSourceRecordRoundTrips(t *testing.T) {
 		VirtualMachineID: "vm-1",
 		OriginalDesired:  vm.StateRunning,
 		OriginalObserved: vm.StateRunning,
-		LockedAt:         time.Now().UTC(),
+		LastContactAt:    time.Now().UTC(),
 	}
 	if err := store.writeSource(record); err != nil {
 		t.Fatal(err)

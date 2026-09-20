@@ -468,3 +468,127 @@ func TestUnlockSourceClearsTheLock(t *testing.T) {
 		t.Fatalf("repeat unlock = %v, want nil", err)
 	}
 }
+
+// expirableSourceRecord returns a pre-stop lock that has been idle past the timeout.
+func expirableSourceRecord(manager *VMMigration, virtualMachineID string) SourceMigrationRecord {
+	return SourceMigrationRecord{
+		ID:               "mig-idle",
+		VirtualMachineID: virtualMachineID,
+		OriginalDesired:  vm.StateRunning,
+		OriginalObserved: vm.StateRunning,
+		LastContactAt:    manager.now().Add(-sourceIdleTimeout - time.Minute),
+	}
+}
+
+func TestExpireSourceReleasesAnIdlePreStopLock(t *testing.T) {
+	manager, machines, _ := newMigrationManager(t)
+	record := expirableSourceRecord(manager, "vm-1")
+	record.TemporaryDiskLimitMiBps = 8
+	if err := manager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+
+	if !manager.IsSourceLocked("vm-1") {
+		t.Fatal("a live record must hold the VM")
+	}
+	if err := manager.ExpireSource(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if manager.IsSourceLocked("vm-1") {
+		t.Fatal("an expired record must release the VM")
+	}
+	if machines.refreshDiskCalls == 0 {
+		t.Fatal("the transfer disk limit must be removed with the lock")
+	}
+	stored, err := manager.store.readSource("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Expired {
+		t.Fatal("the tombstone must stay on disk")
+	}
+}
+
+func TestExpireSourceKeepsAStoppedSource(t *testing.T) {
+	manager, _, _ := newMigrationManager(t)
+	record := expirableSourceRecord(manager, "vm-1")
+	// The target may have started a stopped source VM.
+	record.Stopped = true
+	if err := manager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.ExpireSource(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !manager.IsSourceLocked("vm-1") {
+		t.Fatal("a stopped source must stay locked")
+	}
+}
+
+func TestExpireSourceKeepsARecentLock(t *testing.T) {
+	manager, _, _ := newMigrationManager(t)
+	record := expirableSourceRecord(manager, "vm-1")
+	record.LastContactAt = manager.now()
+	if err := manager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+
+	expirable, err := manager.ExpiredSourceVirtualMachineIDs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expirable) != 0 {
+		t.Fatalf("expirable = %v, want none", expirable)
+	}
+}
+
+func TestExpireSourceKeepsALockWithBytesInFlight(t *testing.T) {
+	manager, _, _ := newMigrationManager(t)
+	if err := manager.store.writeSource(expirableSourceRecord(manager, "vm-1")); err != nil {
+		t.Fatal(err)
+	}
+	// An active stream keeps an otherwise idle lock alive.
+	manager.sourceStreamsMutex.Lock()
+	manager.sourceStreams["vm-1"] = &transferHandle{cancel: func() {}, done: make(chan struct{})}
+	manager.sourceStreamsMutex.Unlock()
+
+	expirable, err := manager.ExpiredSourceVirtualMachineIDs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expirable) != 0 {
+		t.Fatalf("expirable = %v, want none", expirable)
+	}
+}
+
+func TestATombstoneRefusesItsOwnMigrationAndAcceptsANewOne(t *testing.T) {
+	manager, machines, _ := newMigrationManager(t)
+	machines.create("vm-1", testSpecification())
+	setObservedState(t, machines, "vm-1", vm.StateRunning)
+	record := expirableSourceRecord(manager, "vm-1")
+	record.Expired = true
+	if err := manager.store.writeSource(record); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := manager.LockSource(context.Background(), "mig-idle", "vm-1"); !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("resurrecting the expired migration = %v, want a conflict", err)
+	}
+	if _, err := manager.StopSource(context.Background(), "mig-idle", "vm-1", 0); !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("stop against a tombstone = %v, want a conflict", err)
+	}
+
+	if _, err := manager.LockSource(context.Background(), "mig-new", "vm-1"); err != nil {
+		t.Fatalf("a new migration must replace the tombstone: %v", err)
+	}
+	stored, err := manager.store.readSource("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ID != "mig-new" || stored.Expired {
+		t.Fatalf("stored = %+v", stored)
+	}
+}

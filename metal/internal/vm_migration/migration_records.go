@@ -145,25 +145,30 @@ type TargetMigrationRecord struct {
 	Error      *vm.OperationError `json:"error,omitempty"`
 	CreatedAt  time.Time          `json:"created_at"`
 	FinishedAt time.Time          `json:"finished_at,omitempty"`
+	// LastControlAt lets an abandoned target release its reservation and data.
+	LastControlAt time.Time `json:"last_control_at,omitempty"`
 }
 
 // SourceMigrationRecord is the source lock for one migration.
 type SourceMigrationRecord struct {
-	SchemaVersion           int       `json:"schema_version"`
-	ID                      string    `json:"id"`
-	VirtualMachineID        string    `json:"virtual_machine_id"`
-	OriginalDesired         vm.State  `json:"original_desired"`
-	OriginalObserved        vm.State  `json:"original_observed"`
-	Sequence                int       `json:"sequence,omitempty"`
-	AcknowledgedSequence    int       `json:"acknowledged_sequence,omitempty"`
-	Stopped                 bool      `json:"stopped,omitempty"`
-	NetworkRemoved          bool      `json:"network_removed,omitempty"`
-	FinalSequence           int       `json:"final_sequence,omitempty"`
-	TemporaryDiskLimitMiBps int       `json:"temporary_disk_limit_mibps,omitempty"`
-	RollbackComplete        bool      `json:"rollback_complete,omitempty"`
-	DestroyRuntimeComplete  bool      `json:"destroy_runtime_complete,omitempty"`
-	DestroyStorageComplete  bool      `json:"destroy_storage_complete,omitempty"`
-	LockedAt                time.Time `json:"locked_at"`
+	SchemaVersion           int      `json:"schema_version"`
+	ID                      string   `json:"id"`
+	VirtualMachineID        string   `json:"virtual_machine_id"`
+	OriginalDesired         vm.State `json:"original_desired"`
+	OriginalObserved        vm.State `json:"original_observed"`
+	Sequence                int      `json:"sequence,omitempty"`
+	AcknowledgedSequence    int      `json:"acknowledged_sequence,omitempty"`
+	Stopped                 bool     `json:"stopped,omitempty"`
+	NetworkRemoved          bool     `json:"network_removed,omitempty"`
+	FinalSequence           int      `json:"final_sequence,omitempty"`
+	TemporaryDiskLimitMiBps int      `json:"temporary_disk_limit_mibps,omitempty"`
+	RollbackComplete        bool     `json:"rollback_complete,omitempty"`
+	DestroyRuntimeComplete  bool     `json:"destroy_runtime_complete,omitempty"`
+	DestroyStorageComplete  bool     `json:"destroy_storage_complete,omitempty"`
+	// LastContactAt lets an idle source lock expire.
+	LastContactAt time.Time `json:"last_contact_at"`
+	// Expired keeps a tombstone so the old migration cannot revive the lock.
+	Expired bool `json:"expired,omitempty"`
 }
 
 // migrationStore reads migration records under each VM directory.

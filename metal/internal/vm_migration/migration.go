@@ -77,6 +77,14 @@ type Machines interface {
 // reservationTimeout releases a target reservation after a lost handshake.
 const reservationTimeout = 10 * time.Minute
 
+// targetIdleTimeout rolls back a target whose controller stopped calling. It
+// sits behind the Atlas visibility timeout, which is also 10 minutes, so it only
+// acts when Atlas has already given the migration up.
+const targetIdleTimeout = 15 * time.Minute
+
+// targetControlWriteInterval bounds how often a poll rewrites the record.
+const targetControlWriteInterval = time.Minute
+
 // defaultFinalDeltaMiB is the default cutover threshold.
 const defaultFinalDeltaMiB = 512
 
@@ -219,6 +227,7 @@ func (m *VMMigration) CreateTarget(ctx context.Context, migrationID, virtualMach
 		Status:           MigrationRunning,
 		Phase:            PhasePreparing,
 		CreatedAt:        m.now(),
+		LastControlAt:    m.now(),
 	}
 	if err := m.store.writeTarget(record); err != nil {
 		return TargetMigrationRecord{}, errors.Join(err, m.store.remove(virtualMachineID))
@@ -233,9 +242,28 @@ func validSourceAddress(address string) bool {
 }
 
 // TargetStatus returns a target record by migration ID.
-func (m *VMMigration) TargetStatus(_ context.Context, migrationID string) (TargetMigrationRecord, error) {
-	_, record, err := m.store.findTarget(migrationID)
-	return record, err
+func (m *VMMigration) TargetStatus(ctx context.Context, migrationID string) (TargetMigrationRecord, error) {
+	virtualMachineID, record, err := m.store.findTarget(migrationID)
+	if err != nil {
+		return record, err
+	}
+	m.noteTargetControl(ctx, virtualMachineID, record)
+	return record, nil
+}
+
+// noteTargetControl records that Atlas called about this migration. It writes
+// at most once a minute, because Atlas polls every few seconds and the write
+// takes the migration lock the transfer worker also uses.
+func (m *VMMigration) noteTargetControl(ctx context.Context, virtualMachineID string, record TargetMigrationRecord) {
+	if isTerminalStatus(record.Status) || m.now().Sub(record.LastControlAt) < targetControlWriteInterval {
+		return
+	}
+	if _, err := m.mutateTarget(ctx, virtualMachineID, func(target *TargetMigrationRecord) {
+		target.LastControlAt = m.now()
+	}); err != nil {
+		m.logger.Warn("could not record the migration control time",
+			"migration_id", record.ID, "virtual_machine_id", virtualMachineID, "error", err)
+	}
 }
 
 // AbortTarget records an abort and cancels active transfer. The worker rolls back.
@@ -386,7 +414,15 @@ func (m *VMMigration) removeTargetStaging(virtualMachineID string) error {
 
 // IsSourceLocked reports whether a migration holds the VM as a source.
 func (m *VMMigration) IsSourceLocked(virtualMachineID string) bool {
-	return m.store.has(m.store.sourcePath(virtualMachineID))
+	if !m.store.has(m.store.sourcePath(virtualMachineID)) {
+		return false
+	}
+	record, err := m.store.readSource(virtualMachineID)
+	if err != nil {
+		// An unreadable record keeps the VM locked, like a target reservation.
+		return true
+	}
+	return !record.Expired
 }
 
 // IsTargetReserved reports whether a migration reserves this VM ID. A terminal

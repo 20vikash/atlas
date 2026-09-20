@@ -393,3 +393,62 @@ func TestRunTransferKeepsLockedWhenRollbackFails(t *testing.T) {
 		t.Fatal("the abort request must be preserved for a retry")
 	}
 }
+
+func TestAdvanceTargetRollsBackAnAbandonedTarget(t *testing.T) {
+	migrationManager, machines, source := newMigrationManager(t)
+	ctx := context.Background()
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+		t.Fatal(err)
+	}
+	store := newMigrationStore(machines.MachinesDirectory())
+	record, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Atlas stopped calling, so the target must release its reservation.
+	record.Phase = PhaseCopying
+	record.LastControlAt = time.Now().Add(-targetIdleTimeout - time.Minute).UTC()
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	awaitTransfer(t, migrationManager, "vm-1")
+
+	if source.removeCalls != 1 {
+		t.Fatalf("RemoveSource calls = %d, want 1", source.removeCalls)
+	}
+	if migrationManager.IsTargetReserved("vm-1") {
+		t.Fatal("an abandoned target must release its reservation")
+	}
+}
+
+func TestAdvanceTargetKeepsAReadyTarget(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	ctx := context.Background()
+	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
+		t.Fatal(err)
+	}
+	store := newMigrationStore(machines.MachinesDirectory())
+	record, err := store.readTarget("vm-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A ready target may already own the VM.
+	record.Status = MigrationReady
+	record.Phase = PhaseStarting
+	record.LastControlAt = time.Now().Add(-targetIdleTimeout - time.Hour).UTC()
+	if err := store.writeTarget(record); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !migrationManager.IsTargetReserved("vm-1") {
+		t.Fatal("a ready target must keep its reservation")
+	}
+}

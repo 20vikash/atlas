@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/frappe/atlas/metal/internal/vm"
 )
@@ -26,6 +27,95 @@ func migrationSnapshotName(migrationID string, sequence int) string {
 	return fmt.Sprintf("migration-%s-%d", migrationID, sequence)
 }
 
+// sourceIdleTimeout follows Atlas's 10-minute target visibility timeout.
+const sourceIdleTimeout = 15 * time.Minute
+
+// writeSourceContact records the latest source control call.
+func (m *VMMigration) writeSourceContact(record SourceMigrationRecord) error {
+	record.LastContactAt = m.now()
+	return m.store.writeSource(record)
+}
+
+// hasSourceStream reports whether this VM is sending snapshot bytes right now.
+func (m *VMMigration) hasSourceStream(virtualMachineID string) bool {
+	m.sourceStreamsMutex.Lock()
+	defer m.sourceStreamsMutex.Unlock()
+	return m.sourceStreams[virtualMachineID] != nil
+}
+
+// isSourceExpirable reports whether the host can safely release the source lock.
+// A stopped source can have a running target, so it always needs an operator.
+func (m *VMMigration) isSourceExpirable(record SourceMigrationRecord) bool {
+	if record.Expired || record.Stopped {
+		return false
+	}
+	if m.hasSourceStream(record.VirtualMachineID) {
+		return false
+	}
+	return m.now().Sub(record.LastContactAt) > sourceIdleTimeout
+}
+
+// ExpiredSourceVirtualMachineIDs returns the VMs whose source lock can be released.
+func (m *VMMigration) ExpiredSourceVirtualMachineIDs(_ context.Context) ([]string, error) {
+	virtualMachineIDs, err := m.store.listVirtualMachineIDs()
+	if err != nil {
+		return nil, err
+	}
+	expirable := make([]string, 0, len(virtualMachineIDs))
+	for _, virtualMachineID := range virtualMachineIDs {
+		if !m.store.has(m.store.sourcePath(virtualMachineID)) {
+			continue
+		}
+		record, err := m.store.readSource(virtualMachineID)
+		if err != nil {
+			return nil, err
+		}
+		if m.isSourceExpirable(record) {
+			expirable = append(expirable, virtualMachineID)
+		}
+	}
+	return expirable, nil
+}
+
+// ExpireSource releases an idle pre-stop source lock and leaves a tombstone.
+func (m *VMMigration) ExpireSource(ctx context.Context, virtualMachineID string) error {
+	unlock, err := m.machines.LockOperation(ctx, virtualMachineID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// Re-read under the lock because StopSource uses the same lock.
+	record, err := m.store.readSource(virtualMachineID)
+	if errors.Is(err, vm.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !m.isSourceExpirable(record) {
+		return nil
+	}
+
+	if err := m.removeMigrationSnapshots(ctx, record); err != nil {
+		return err
+	}
+	if record.TemporaryDiskLimitMiBps > 0 {
+		if err := m.machines.RefreshSourceDisk(ctx, virtualMachineID); err != nil {
+			return err
+		}
+	}
+
+	record.Expired = true
+	if err := m.store.writeSource(record); err != nil {
+		return err
+	}
+	m.logger.Warn("released an idle migration source lock",
+		"migration_id", record.ID, "virtual_machine_id", virtualMachineID,
+		"idle_seconds", int(m.now().Sub(record.LastContactAt).Seconds()))
+	return nil
+}
+
 // LockSource locks the source and returns portable config and observed state.
 // Missing, failed, unknown, or already-migrating VMs are rejected.
 func (m *VMMigration) LockSource(ctx context.Context, migrationID, virtualMachineID string) (SourceHandshake, error) {
@@ -39,10 +129,16 @@ func (m *VMMigration) LockSource(ctx context.Context, migrationID, virtualMachin
 	defer unlock()
 
 	if existing, err := m.store.readSource(virtualMachineID); err == nil {
-		if existing.ID != migrationID {
-			return SourceHandshake{}, vm.ErrConflict
+		// A new migration replaces an expired lock. Its old migration cannot revive it.
+		if !existing.Expired || existing.ID == migrationID {
+			if existing.Expired || existing.ID != migrationID {
+				return SourceHandshake{}, vm.ErrConflict
+			}
+			if err := m.writeSourceContact(existing); err != nil {
+				return SourceHandshake{}, err
+			}
+			return m.sourceHandshake(virtualMachineID)
 		}
-		return m.sourceHandshake(virtualMachineID)
 	} else if !errors.Is(err, vm.ErrNotFound) {
 		return SourceHandshake{}, err
 	}
@@ -64,9 +160,8 @@ func (m *VMMigration) LockSource(ctx context.Context, migrationID, virtualMachin
 		VirtualMachineID: virtualMachineID,
 		OriginalDesired:  desired.State,
 		OriginalObserved: observed.State,
-		LockedAt:         m.now(),
 	}
-	if err := m.store.writeSource(record); err != nil {
+	if err := m.writeSourceContact(record); err != nil {
 		return SourceHandshake{}, err
 	}
 	return m.sourceHandshake(virtualMachineID)
@@ -133,7 +228,7 @@ func (m *VMMigration) StartSourceRollback(ctx context.Context, migrationID, virt
 		return err
 	}
 	record.RollbackComplete = true
-	return m.store.writeSource(record)
+	return m.writeSourceContact(record)
 }
 
 // DestroySource removes a stopped source and its migration state. It requires a
@@ -167,7 +262,7 @@ func (m *VMMigration) DestroySource(ctx context.Context, migrationID, virtualMac
 			return err
 		}
 		record.DestroyRuntimeComplete = true
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return err
 		}
 	}
@@ -176,7 +271,7 @@ func (m *VMMigration) DestroySource(ctx context.Context, migrationID, virtualMac
 			return err
 		}
 		record.DestroyStorageComplete = true
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return err
 		}
 	}
@@ -224,10 +319,15 @@ func (m *VMMigration) NextSourceSnapshot(ctx context.Context, migrationID, virtu
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
+	// A repeat of the same request changes nothing else, so stamp the contact
+	// here rather than only on the paths that advance the sequence.
+	if err := m.writeSourceContact(record); err != nil {
+		return SourceSnapshot{}, err
+	}
 
 	if receivedSequence > record.AcknowledgedSequence {
 		record.AcknowledgedSequence = receivedSequence
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return SourceSnapshot{}, err
 		}
 		if receivedSequence >= 2 {
@@ -241,7 +341,7 @@ func (m *VMMigration) NextSourceSnapshot(ctx context.Context, migrationID, virtu
 			return SourceSnapshot{}, err
 		}
 		record.Sequence = next
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return SourceSnapshot{}, err
 		}
 	}
@@ -270,7 +370,7 @@ func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachin
 			return SourceSnapshot{}, err
 		}
 		record.Stopped = true
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return SourceSnapshot{}, err
 		}
 	}
@@ -279,7 +379,7 @@ func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachin
 			return SourceSnapshot{}, err
 		}
 		record.NetworkRemoved = true
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return SourceSnapshot{}, err
 		}
 	}
@@ -295,17 +395,20 @@ func (m *VMMigration) StopSource(ctx context.Context, migrationID, virtualMachin
 		}
 		record.Sequence = final
 		record.FinalSequence = final
-		if err := m.store.writeSource(record); err != nil {
+		if err := m.writeSourceContact(record); err != nil {
 			return SourceSnapshot{}, err
 		}
 	}
 	return m.describeSnapshot(ctx, virtualMachineID, migrationID, record.FinalSequence)
 }
 
-// StartSourceStream starts one OpenSSL process that sends the requested ZFS stream.
+// StartSourceStream starts one mutual-TLS listener that sends the requested ZFS stream.
 func (m *VMMigration) StartSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error {
 	record, err := m.boundSourceRecord(virtualMachineID, migrationID)
 	if err != nil {
+		return err
+	}
+	if err := m.writeSourceContact(record); err != nil {
 		return err
 	}
 	if sequence != record.Sequence {
@@ -416,7 +519,7 @@ func (m *VMMigration) applySourceDiskLimit(ctx context.Context, migrationID, vir
 		return nil
 	}
 	record.TemporaryDiskLimitMiBps = applied
-	return m.store.writeSource(record)
+	return m.writeSourceContact(record)
 }
 
 // describeSnapshot returns the sequence, estimated size, and GUID of one snapshot.
@@ -443,7 +546,7 @@ func (m *VMMigration) boundSourceRecord(virtualMachineID, migrationID string) (S
 	if err != nil {
 		return SourceMigrationRecord{}, err
 	}
-	if record.ID != migrationID {
+	if record.ID != migrationID || record.Expired {
 		return SourceMigrationRecord{}, vm.ErrConflict
 	}
 	return record, nil
