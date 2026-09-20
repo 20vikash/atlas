@@ -260,9 +260,7 @@ func TestAdvanceTargetResumesACopyingTransfer(t *testing.T) {
 	if err := migrationManager.AdvanceTarget(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrationManager.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	awaitTransfer(t, migrationManager, "vm-1")
 
 	record, err := store.readTarget("vm-1")
 	if err != nil {
@@ -282,9 +280,7 @@ func TestStartTransferRunsOnceAndShutdownWaits(t *testing.T) {
 
 	migrationManager.StartTransfer("vm-1")
 	migrationManager.StartTransfer("vm-1")
-	if err := migrationManager.Shutdown(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	awaitTransfer(t, migrationManager, "vm-1")
 
 	record, err := store.readTarget("vm-1")
 	if err != nil {

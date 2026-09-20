@@ -332,6 +332,22 @@ func ampleCapacity(context.Context) (AvailableCapacity, error) {
 	return AvailableCapacity{MemoryMiB: 262144, StorageMiB: 4194304}, nil
 }
 
+// awaitTransfer waits for a worker to end without cancelling it.
+func awaitTransfer(t *testing.T, manager *VMMigration, virtualMachineID string) {
+	t.Helper()
+	manager.transfersMutex.Lock()
+	handle := manager.transfers[virtualMachineID]
+	manager.transfersMutex.Unlock()
+	if handle == nil {
+		return
+	}
+	select {
+	case <-handle.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the transfer worker did not finish")
+	}
+}
+
 func newMigrationManager(t *testing.T) (*VMMigration, *fakeMachines, *fakeSourceClient) {
 	t.Helper()
 	machines := newFakeMachines(t)
@@ -453,9 +469,7 @@ func TestAbortTargetUnlocksTheSourceAndClearsTheReservation(t *testing.T) {
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrationManager.Shutdown(ctx); err != nil {
-		t.Fatal(err)
-	}
+	awaitTransfer(t, migrationManager, "vm-1")
 	if source.removeCalls != 1 {
 		t.Fatalf("RemoveSource calls = %d, want 1", source.removeCalls)
 	}

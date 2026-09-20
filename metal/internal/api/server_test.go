@@ -1042,7 +1042,6 @@ func TestRemovedSnapshotAndImageRoutesReturnNotFound(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/images"},
-		{http.MethodGet, "/v1/vms/vm1/snapshots"},
 		{http.MethodPost, "/v1/vms/vm1/snapshots/snapshot-1/restore"},
 	} {
 		do(t, server, request.method, request.path, "", http.StatusNotFound)

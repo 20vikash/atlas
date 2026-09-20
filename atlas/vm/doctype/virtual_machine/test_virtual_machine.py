@@ -394,18 +394,27 @@ class TestVirtualMachineService(UnitTestCase):
 
 
 class TestMetalClient(UnitTestCase):
-	@patch("atlas.vm.core.metal_client.get_decrypted_password", return_value="token")
-	def test_client_uses_the_validated_public_ipv4_address(self, _get_password: Mock) -> None:
+	@patch("atlas.vm.core.metal_client.client_certificate_files", return_value=("atlas.crt", "atlas.key"))
+	@patch("atlas.vm.core.metal_client.ca_file", return_value="ca.crt")
+	def test_client_uses_the_validated_public_ipv4_address(
+		self, _ca_file: Mock, _certificate_files: Mock
+	) -> None:
 		client = MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="203.0.113.8"))
 
-		self.assertEqual(client.base_url, "http://203.0.113.8:9000")
+		self.assertEqual(client.base_url, "https://203.0.113.8:9000")
+		self.assertEqual(client.ca_file, "ca.crt")
+		self.assertEqual(client.client_certificate, ("atlas.crt", "atlas.key"))
 
-	@patch("atlas.vm.core.metal_client.get_decrypted_password")
-	def test_client_rejects_an_invalid_public_ipv4_address(self, get_password: Mock) -> None:
+	@patch("atlas.vm.core.metal_client.client_certificate_files")
+	@patch("atlas.vm.core.metal_client.ca_file")
+	def test_client_rejects_an_invalid_public_ipv4_address(
+		self, ca_file_mock: Mock, certificate_files: Mock
+	) -> None:
 		with self.assertRaisesRegex(MetalClientError, "invalid public IPv4 address"):
 			MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="not-an-address"))
 
-		get_password.assert_not_called()
+		ca_file_mock.assert_not_called()
+		certificate_files.assert_not_called()
 
 	def test_error_keeps_contract_fields(self) -> None:
 		error = MetalClientError("busy", status=503, code="host_busy", retryable=True, uncertain=True)
@@ -419,10 +428,11 @@ class TestMetalClient(UnitTestCase):
 	def test_put_uses_the_atlas_vm_name(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = metal_virtual_machine_response(202)
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			client.put_virtual_machine("VM-00001", {"cpu_millicores": 1000})
 
 		self.assertEqual(request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001"))
@@ -430,10 +440,11 @@ class TestMetalClient(UnitTestCase):
 	def test_client_uses_versioned_mutation_paths(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = metal_virtual_machine_response(202)
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			client.set_virtual_machine_power_state("VM-00001", "running")
 			client.request_virtual_machine_restart("VM-00001")
 			client.set_virtual_machine_disk("VM-00001", {"size_mib": 2048, "throughput_mibps": 0, "iops": 0})
@@ -459,23 +470,24 @@ class TestMetalClient(UnitTestCase):
 
 	def test_console_connection_builds_websocket_url(self) -> None:
 		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.base_url = "https://10.0.0.2:9000"
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 
 		connection = client.get_console_connection("VM-00001")
 		ssh_connection = client.get_console_connection("VM-00001", "ssh")
 
-		self.assertEqual(connection["url"], "ws://10.0.0.2:9000/v1/vms/VM-00001/console?mode=tty")
-		self.assertEqual(ssh_connection["url"], "ws://10.0.0.2:9000/v1/vms/VM-00001/console?mode=ssh")
-		self.assertEqual(connection["authorization"], "Bearer token")
+		self.assertEqual(connection["url"], "wss://10.0.0.2:9000/v1/vms/VM-00001/console?mode=tty")
+		self.assertEqual(ssh_connection["url"], "wss://10.0.0.2:9000/v1/vms/VM-00001/console?mode=ssh")
 
 	def test_replace_ssh_keys_uses_vm_subresource(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = metal_virtual_machine_response()
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			client.replace_virtual_machine_ssh_keys("VM-00001", ["ssh-ed25519 AAAA"])
 
 		self.assertEqual(
@@ -487,10 +499,11 @@ class TestMetalClient(UnitTestCase):
 	def test_replace_metadata_uses_vm_subresource(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = metal_virtual_machine_response()
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			client.replace_virtual_machine_metadata("VM-00001", {"env": "prod"})
 
 		self.assertEqual(
@@ -502,11 +515,12 @@ class TestMetalClient(UnitTestCase):
 	def test_set_disk_uses_vm_subresource(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = metal_virtual_machine_response(202)
 		disk = {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000}
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			client.set_virtual_machine_disk("VM-00001", disk)
 
 		self.assertEqual(
@@ -518,7 +532,8 @@ class TestMetalClient(UnitTestCase):
 	def test_set_network_uses_vm_subresource(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = metal_virtual_machine_response(202)
 		network = {
 			"egress": "uplink",
@@ -528,7 +543,7 @@ class TestMetalClient(UnitTestCase):
 			"public_network_throughput_mibps": 50,
 		}
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			client.set_virtual_machine_network("VM-00001", network)
 
 		self.assertEqual(
@@ -540,7 +555,8 @@ class TestMetalClient(UnitTestCase):
 	def test_snapshot_calls_use_unified_image_paths(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		responses = [
 			SimpleNamespace(status_code=201, content=b"{}", json=lambda: {}),
 			SimpleNamespace(status_code=202, content=b""),
@@ -550,7 +566,7 @@ class TestMetalClient(UnitTestCase):
 			SimpleNamespace(status_code=204, content=b""),
 		]
 
-		with patch("atlas.vm.core.metal_client.requests.request", side_effect=responses) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", side_effect=responses) as request:
 			client.create_snapshot("VM-00001")
 			client.start_snapshot_upload("image-1", {"rootfs": {"parts": []}, "kernel": {"parts": []}})
 			client.get_snapshot("image-1")
@@ -571,10 +587,11 @@ class TestMetalClient(UnitTestCase):
 	def test_sync_sends_wireguard_peers_images_and_privileged_addresses(self) -> None:
 		client = MetalClient.__new__(MetalClient)
 		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = SimpleNamespace(status_code=200, content=b"{}", json=lambda: {"capacity": {}})
 
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
+		with patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response) as request:
 			result = client.sync([{"node": "node-1"}], [{"ref": "sha256:image"}], ["fdaa:1::1"])
 
 		self.assertEqual(result, {"capacity": {}})
@@ -590,12 +607,14 @@ class TestMetalClient(UnitTestCase):
 
 	def test_snapshot_transport_error_is_uncertain(self) -> None:
 		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {}
+		client.base_url = "https://10.0.0.2:9000"
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 
 		with (
 			patch(
-				"atlas.vm.core.metal_client.requests.request", side_effect=requests.ConnectionError("lost")
+				"atlas.vm.core.metal_client.requests.Session.request",
+				side_effect=requests.ConnectionError("lost"),
 			),
 			self.assertRaises(MetalClientError) as raised,
 		):
@@ -605,8 +624,9 @@ class TestMetalClient(UnitTestCase):
 
 	def test_transport_error_marks_virtual_machine_writes_as_uncertain(self) -> None:
 		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {}
+		client.base_url = "https://10.0.0.2:9000"
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 
 		write_operations = {
 			"create": lambda: client.put_virtual_machine("VM-00001", {}),
@@ -625,7 +645,7 @@ class TestMetalClient(UnitTestCase):
 			with (
 				self.subTest(operation=operation_name),
 				patch(
-					"atlas.vm.core.metal_client.requests.request",
+					"atlas.vm.core.metal_client.requests.Session.request",
 					side_effect=requests.ConnectionError("lost"),
 				),
 				self.assertRaises(MetalClientError) as raised,
@@ -636,8 +656,9 @@ class TestMetalClient(UnitTestCase):
 
 	def test_error_uses_the_metal_retryable_value(self) -> None:
 		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {}
+		client.base_url = "https://10.0.0.2:9000"
+		client.ca_file = "ca.crt"
+		client.client_certificate = ("atlas.crt", "atlas.key")
 		response = SimpleNamespace(
 			status_code=500,
 			content=b"{}",
@@ -645,7 +666,7 @@ class TestMetalClient(UnitTestCase):
 		)
 
 		with (
-			patch("atlas.vm.core.metal_client.requests.request", return_value=response),
+			patch("atlas.vm.core.metal_client.requests.Session.request", return_value=response),
 			self.assertRaises(MetalClientError) as raised,
 		):
 			client.get_virtual_machine("VM-00001")

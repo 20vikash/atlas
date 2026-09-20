@@ -53,12 +53,16 @@ class TestRegionalCredentials(UnitTestCase):
 		with (
 			patch("atlas.auth.issuer.initialize_signing_key") as initialize_signing_key,
 			patch("atlas.atlas.core.tls.metal.ensure_certificate_authority") as ensure_certificate_authority,
+			patch(
+				"atlas.atlas.core.tls.metal.ensure_atlas_client_certificate"
+			) as ensure_atlas_client_certificate,
 		):
 			AtlasSettings.before_save(settings)
 
 		settings.initialize_proxy_cluster_password.assert_called_once_with()
 		initialize_signing_key.assert_called_once_with(settings)
 		ensure_certificate_authority.assert_called_once_with(settings)
+		ensure_atlas_client_certificate.assert_called_once_with(settings)
 
 
 class TestRegionID(UnitTestCase):
