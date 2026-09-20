@@ -50,6 +50,8 @@ class AtlasSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		atlas_tls_certificate: DF.Password | None
+		atlas_tls_private_key: DF.Password | None
 		auto_spawn_metal_server: DF.Check
 		aws_access_key_id: DF.Data | None
 		aws_availability_zone: DF.Data | None
@@ -79,8 +81,6 @@ class AtlasSettings(Document):
 		jwt_signing_private_key: DF.Password | None
 		letsencrypt_config_directory: DF.Data | None
 		letsencrypt_email: DF.Data
-		atlas_tls_certificate: DF.Password | None
-		atlas_tls_private_key: DF.Password | None
 		metal_tls_ca_certificate: DF.Password | None
 		metal_tls_ca_private_key: DF.Password | None
 		metald_binary_x86_64_file: DF.Link | None
