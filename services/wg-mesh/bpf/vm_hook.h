@@ -4,6 +4,7 @@
 #define ATLAS_VM_HOOK_H
 
 #include "debug.h"
+#include "discovery_limit.h"
 #include "state.h"
 
 /* Replace the packet with a bare IPv6 dummy that carries no payload. Routing it through the discovery interface makes the kernel resolve the destination with its own neighbour solicitation. */
@@ -152,6 +153,13 @@ int handle_vm_packet(struct __sk_buff *packet)
 
 	if (!remote_host)
 	{
+		/* Cap discovery so one guest cannot flood the shared link. */
+		if (!discovery_allowed(&src))
+		{
+			emit_packet_debug_event(DEBUG_VM, DEBUG_DROP, &src, &dst);
+
+			return TC_ACT_SHOT;
+		}
 		/* The remote VM is unknown locally: hand a dummy packet to the host stack, so the kernel resolves the destination with its own neighbour solicitation. */
 		if (send_discovery_probe(packet, local_config, &dst))
 		{
