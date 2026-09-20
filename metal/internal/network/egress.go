@@ -59,6 +59,31 @@ func setMasquerade(ctx context.Context, namespace, guestVirtualEthernet string, 
 	return platform.Run(ctx, command[0], command[1:]...)
 }
 
+// maximumSegmentSizeRule clamps TCP MSS for SYN packets to the guest.
+func maximumSegmentSizeRule(guestVirtualEthernet string) []string {
+	return []string{
+		"FORWARD", "-o", guestVirtualEthernet,
+		"-p", "tcp", "--tcp-flags", "SYN,RST", "SYN",
+		"-j", "TCPMSS", "--clamp-mss-to-pmtu",
+	}
+}
+
+// ensureMaximumSegmentSizeClamp protects TCP from a guest MTU larger than the veth MTU.
+func ensureMaximumSegmentSizeClamp(ctx context.Context, virtualMachineID string, userID uint32) error {
+	prefix := namespaceCommandPrefix(namespaceName(virtualMachineID))
+	_, guestVirtualEthernet := virtualEthernetNames(userID)
+	rule := maximumSegmentSizeRule(guestVirtualEthernet)
+
+	check := commandWithPrefix(prefix, "iptables", append([]string{"-t", "mangle", "-C"}, rule...)...)
+	exists, err := ruleExists(ctx, check)
+	if err != nil || exists {
+		return err
+	}
+
+	command := commandWithPrefix(prefix, "iptables", append([]string{"-t", "mangle", "-A"}, rule...)...)
+	return platform.Run(ctx, command[0], command[1:]...)
+}
+
 // ruleExists runs an iptables check. Exit code 1 means absent. Any other failure
 // is an error, so a broken check does not read as absent.
 func ruleExists(ctx context.Context, check []string) (bool, error) {

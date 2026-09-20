@@ -74,6 +74,12 @@ Every rule carries the comment `metal-public-ipv4-<vm-id>`. Cleanup finds rules 
 
 `iptables` fails on a duplicate add and on a delete of an absent rule, so each change tests with `-C` first. Exit code 1 means absent; any other failure is an error, so a broken check never reads as absent.
 
+## Maximum segment size
+
+The namespace clamps TCP MSS in the `mangle` table. The rule matches the outgoing veth, so it covers a SYN and a SYN-ACK to the guest.
+
+The guest image sets `eth0` to the veth MTU. The clamp protects TCP from older or custom images that use 1500. UDP still depends on ICMP `fragmentation needed`.
+
 ## Traffic control
 
 Policers go on the namespace end of the veth. The host end belongs to Atlas WG Mesh and its terminating direct-action program, so each component owns one end and neither can displace the other.

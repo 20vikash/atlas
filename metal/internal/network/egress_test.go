@@ -45,3 +45,16 @@ func TestPublicIPv4StepsMapHostOriginatedTraffic(t *testing.T) {
 		t.Fatalf("steps = %v, want one matching %v", steps, want)
 	}
 }
+
+func TestMaximumSegmentSizeRuleClampsBothDirections(t *testing.T) {
+	rule := maximumSegmentSizeRule("vg-100000")
+
+	want := []string{
+		"FORWARD", "-o", "vg-100000",
+		"-p", "tcp", "--tcp-flags", "SYN,RST", "SYN",
+		"-j", "TCPMSS", "--clamp-mss-to-pmtu",
+	}
+	if !slices.Equal(rule, want) {
+		t.Fatalf("rule = %v, want %v", rule, want)
+	}
+}

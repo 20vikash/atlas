@@ -24,6 +24,8 @@ The guest address is `172.16.0.2`, the gateway `172.16.0.1`, and the guest MAC `
 
 For `uplink` and `mesh`, Metal derives one transit `/30` from the VM user ID, which removes the need for a persisted address allocator.
 
+The veth MTU is 1380, so the guest image sets `eth0` to 1380. A larger guest MTU depends on ICMP `fragmentation needed`, which some paths discard. The namespace clamps TCP MSS. UDP still depends on path MTU discovery.
+
 ## Egress modes
 
 Egress controls internet reachability. It does not control mesh reachability. The veth pair is the private network attachment.

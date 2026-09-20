@@ -287,6 +287,11 @@ func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request)
 	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.Egress.HasVirtualEthernet()); err != nil {
 		return err
 	}
+	if request.Egress.HasVirtualEthernet() {
+		if err := ensureMaximumSegmentSizeClamp(ctx, request.VirtualMachineID, request.UserID); err != nil {
+			return err
+		}
+	}
 	if request.Egress.HasInternetPath() {
 		if err := addInternetPath(ctx, request.VirtualMachineID, request.UserID); err != nil {
 			return err
