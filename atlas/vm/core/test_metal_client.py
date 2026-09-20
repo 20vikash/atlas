@@ -258,6 +258,44 @@ class TestMetalClientPaths(UnitTestCase):
 		)
 
 
+def virtual_machine_response() -> dict:
+	"""Return the virtual machine body that every mutation route answers with."""
+	return {
+		"id": "VM-00001",
+		"desired": {
+			"generation": 1,
+			"restart_generation": 0,
+			"state": "running",
+			"compute": {"cpu_millicores": 2000, "memory_mib": 2048, "sleep_after_idle_seconds": 0},
+			"disk": {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000},
+			"image": {
+				"ref": "ubuntu",
+				"architecture": "amd64",
+				"rootfs": {"sha256": "a" * 64},
+				"kernel": {"sha256": "b" * 64},
+				"cache_image": False,
+				"memory_snapshot": False,
+			},
+			"network": {
+				"egress": "uplink",
+				"wireguard_mesh_ipv6": "",
+				"private_network_throughput_mibps": 0,
+				"public_network_throughput_mibps": 0,
+				"firewall": {"enabled": False, "inbound": [], "outbound": []},
+			},
+			"guest": {"hostname": "", "ssh_keys": [], "metadata": {}},
+		},
+		"observed": {
+			"generation": 0,
+			"restart_generation": 0,
+			"state": "unknown",
+			"updated_at": "2026-09-06T10:00:00Z",
+			"disk": {"used_mib": 0},
+			"network": {},
+		},
+	}
+
+
 COMPUTE_REQUEST = {
 	"cpu_millicores": 2000,
 	"memory_mib": 2048,
@@ -304,7 +342,7 @@ class TestMetalClientVirtualMachineRoutes(UnitTestCase):
 
 		with patch(
 			"atlas.vm.core.metal_client.requests.Session.request",
-			return_value=build_response(202, content=b""),
+			return_value=build_response(202, virtual_machine_response()),
 		) as request:
 			client.put_virtual_machine("VM-00001", {"cpu_millicores": 1000})
 
@@ -323,7 +361,7 @@ class TestMetalClientVirtualMachineRoutes(UnitTestCase):
 
 		with patch(
 			"atlas.vm.core.metal_client.requests.Session.request",
-			return_value=build_response(202, content=b""),
+			return_value=build_response(202, virtual_machine_response()),
 		) as request:
 			client.set_virtual_machine_power_state("VM-00001", "running")
 			client.request_virtual_machine_restart("VM-00001")
