@@ -106,7 +106,12 @@ func upgradeBPF(force bool) error {
 		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
 	}
 
-	if err := attachHookPath(interfaces.uplinkName, filepath.Join(release, ndpProgram), "ingress"); err != nil {
+	if err := attachUplinkHook(
+		interfaces.uplinkName,
+		filepath.Join(release, ndpProgram),
+		filepath.Join(release, ndpUnicastIngressProgram),
+		filepath.Join(release, ndpUnicastEgressProgram),
+	); err != nil {
 		return err
 	}
 
@@ -180,7 +185,12 @@ func forceUpgrade(config hostConfig) error {
 		return err
 	}
 
-	if err := attachHook(interfaces.uplinkName, ndpProgram, "ingress"); err != nil {
+	if err := attachUplinkHook(
+		interfaces.uplinkName,
+		filepath.Join(pinDirectory, ndpProgram),
+		filepath.Join(pinDirectory, ndpUnicastIngressProgram),
+		filepath.Join(pinDirectory, ndpUnicastEgressProgram),
+	); err != nil {
 		return err
 	}
 
@@ -208,6 +218,21 @@ func forceUpgrade(config hostConfig) error {
 	fmt.Printf("Atlas WG Mesh BPF force-upgraded to %x; run peers sync to refill the peer state\n", hash[:6])
 
 	return nil
+}
+
+// attachUplinkHook attaches the NDP hook on the uplink from pinned program
+// paths. A host in unicast mode keeps its unicast filters, refreshed from the
+// new pins; the multicast hook must not run next to them.
+func attachUplinkHook(uplinkName, multicastPath, unicastIngressPath, unicastEgressPath string) error {
+	if unicastTransportActive(uplinkName) {
+		if err := attachUnicastHookPath(uplinkName, unicastIngressPath, "ingress", unicastIngressFilterPriority); err != nil {
+			return err
+		}
+
+		return attachUnicastHookPath(uplinkName, unicastEgressPath, "egress", unicastEgressFilterPriority)
+	}
+
+	return attachHookPath(uplinkName, multicastPath, "ingress")
 }
 
 // virtualMachineInterfaces maps every registered VM to its host interface. It

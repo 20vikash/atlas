@@ -115,6 +115,54 @@ func TestPackPeerMAC(t *testing.T) {
 	}
 }
 
+func TestFilterPriorityPresent(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		priority string
+		want     bool
+	}{
+		{
+			name:     "unicast ingress filter",
+			output:   "filter protocol all pref 5 bpf chain 0 handle 0x1 handle_ndp_unicast_ingress direct-action",
+			priority: unicastIngressFilterPriority,
+			want:     true,
+		},
+		{
+			name:     "unicast egress filter",
+			output:   "filter protocol all pref 15 bpf chain 0 handle 0x1 handle_ndp_unicast_egress direct-action",
+			priority: unicastEgressFilterPriority,
+			want:     true,
+		},
+		{
+			name:     "multicast filter only",
+			output:   "filter protocol all pref 10 bpf chain 0 handle 0x1 handle_ndp_packet direct-action",
+			priority: unicastIngressFilterPriority,
+			want:     false,
+		},
+		{
+			name:     "older tc prints prio",
+			output:   "filter protocol all prio 5 bpf handle 0x1 handle_ndp_unicast_ingress o",
+			priority: unicastIngressFilterPriority,
+			want:     true,
+		},
+		{
+			name:     "no filters",
+			output:   "",
+			priority: unicastIngressFilterPriority,
+			want:     false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := filterPriorityPresent(test.output, test.priority); got != test.want {
+				t.Fatalf("filterPriorityPresent(%q, %q) = %t, want %t", test.output, test.priority, got, test.want)
+			}
+		})
+	}
+}
+
 func itoa(value int) string {
 	if value == 0 {
 		return "0"

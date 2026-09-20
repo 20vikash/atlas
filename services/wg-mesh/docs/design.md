@@ -221,7 +221,7 @@ atlas-wg-mesh debug inspect --address fdaa:1:0:2::20
 
 Hosts without a shared Layer-2 VLAN use the [unicast mode](unicast-network.md). The same NDP packets travel inside an outer IPv4 header between configured peers, so Linux neighbour discovery, proxy NDP, and the WireGuard datapath stay unchanged.
 
-The unicast hooks and `handle_ndp_packet` never run together. A host runs either the multicast NDP hook on the uplink, or the two unicast hooks, never both. The `unicast start` daemon owns the choice: it attaches the unicast hooks and removes the multicast filter, and a clean stop reverses the swap.
+The unicast hooks and `handle_ndp_packet` never run together. A host runs either the multicast NDP hook on the uplink, or the two unicast hooks, never both. The `unicast start` daemon owns the choice: it attaches the unicast hooks and removes the multicast filter, and a clean stop reverses the swap. An upgrade keeps the active choice: it refreshes the unicast hooks in unicast mode, or the multicast hook otherwise.
 
 The egress unicast hook owns the whole advertisement path. For a solicitation, it wraps the packet in IPv4 and sends one clone per peer with `bpf_clone_redirect`, which is copy on write. For an answer, it wraps the packet and returns it to the requester recorded in `ndp_requesters`.
 

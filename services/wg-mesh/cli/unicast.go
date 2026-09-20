@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -132,8 +133,51 @@ func attachUnicastHook(interfaceName, program, direction, priority string) error
 	if err != nil {
 		return err
 	}
+
+	return attachUnicastHookPath(interfaceName, path, direction, priority)
+}
+
+// attachUnicastHookPath attaches one pinned unicast program path at its own
+// filter priority. The upgrade path uses it to move a running transport to
+// the programs of a new release.
+func attachUnicastHookPath(interfaceName, path, direction, priority string) error {
 	_ = runCommand("tc", "qdisc", "add", "dev", interfaceName, "clsact")
 	return runCommand("tc", "filter", "replace", "dev", interfaceName, direction, "prio", priority, "handle", "1", "bpf", "direct-action", "object-pinned", path)
+}
+
+// unicastTransportActive reports whether the uplink holds a unicast NDP
+// filter. A running daemon holds them, and so do the leftover filters of a
+// crashed one, so the upgrade path must refresh the unicast hooks instead of
+// stacking the multicast hook next to them.
+func unicastTransportActive(uplinkName string) bool {
+	return unicastFilterAttached(uplinkName, "ingress", unicastIngressFilterPriority) ||
+		unicastFilterAttached(uplinkName, "egress", unicastEgressFilterPriority)
+}
+
+// unicastFilterAttached reports whether one direction of an interface holds a
+// TC filter at a unicast priority.
+func unicastFilterAttached(interfaceName, direction, priority string) bool {
+	output, err := commandOutput("tc", "filter", "show", "dev", interfaceName, direction)
+	if err != nil {
+		return false
+	}
+
+	return filterPriorityPresent(output, priority)
+}
+
+// filterPriorityPresent reports whether tc filter output lists a filter at a
+// priority. tc prints each filter with its priority as a "pref <n>" field
+// pair, and older versions print "prio <n>".
+func filterPriorityPresent(output, priority string) bool {
+	fields := strings.Fields(output)
+
+	for index := 0; index+1 < len(fields); index++ {
+		if (fields[index] == "pref" || fields[index] == "prio") && fields[index+1] == priority {
+			return true
+		}
+	}
+
+	return false
 }
 
 // detachUnicastHook removes one unicast filter. A missing filter is not an

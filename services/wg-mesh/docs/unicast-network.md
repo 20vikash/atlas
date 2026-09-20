@@ -69,4 +69,4 @@ A host that would keep no peer after metald drops its own entry does not run the
 
 A solicitation always fans out to every peer, and only the owner answers, so the requester learns the current location. Discovery is rare: a solicitation leaves a host only after NOT_HERE removed a stale location or a guest contacts an unknown VM.
 
-Run `atlas-wg-mesh upgrade` normally while the daemon is running, then let the next synchronization restart the daemon so it attaches the programs from the new release. The upgrade preserves the unicast maps; a release that changes the peer map layouts rebuilds them through `peers sync`.
+Run `atlas-wg-mesh upgrade` normally while the daemon is running. The upgrade detects the unicast filters on the uplink, refreshes the two unicast hooks from the new release, and leaves the multicast hook off. The upgrade preserves the unicast maps; a release that changes the peer map layouts rebuilds them through `peers sync`.
