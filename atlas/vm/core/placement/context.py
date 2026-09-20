@@ -186,7 +186,8 @@ class PlacementContext:
 	def _host_has_capacity(self, host_name: str) -> bool:
 		"""Check current host state and capacity while holding its placement lock."""
 		sleepy_host_filter = self._sleepy_host_filter()
-		rows = frappe.db.sql(
+		# The interpolated filter is a literal fragment. No caller value reaches the query.
+		rows = frappe.db.sql(  # nosemgrep
 			f"""
 				SELECT server.name
 				FROM `tabMetal Server` AS server
@@ -284,7 +285,8 @@ class PlacementContext:
 	def _load_snapshot_rows(self) -> list[frappe._dict]:
 		"""Load current capacity and rank data for the required host pool."""
 		sleepy_host_filter = self._sleepy_host_filter()
-		rows = frappe.db.sql(
+		# The interpolated filter is a literal fragment. No caller value reaches the query.
+		rows = frappe.db.sql(  # nosemgrep
 			f"""
 			WITH eligible_servers AS (
 				SELECT server.name, server.architecture, server.is_sleepy_vm_host

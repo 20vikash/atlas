@@ -383,7 +383,7 @@ class LiveTrial:
 					time.sleep(self.arguments.poll_seconds)
 					continue
 				server.archive_server()
-				frappe.db.commit()
+				frappe.db.commit()  # nosemgrep
 				self.report["hosts"][name]["status"] = "Deleted"
 				self.report["events"].append({"at": timestamp(), "kind": "host_deleted", "name": name})
 				self.save()

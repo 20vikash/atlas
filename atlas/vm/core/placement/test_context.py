@@ -525,7 +525,7 @@ class TestPlacementLockCommit(IntegrationTestCase):
 			with self.secondary_connection():
 				self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((0,),))
 
-			frappe.db.commit()
+			frappe.db.commit()  # nosemgrep
 
 			with self.secondary_connection():
 				try:

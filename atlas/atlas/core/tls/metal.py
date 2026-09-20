@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import frappe
+from frappe import _
 from frappe.utils import convert_utc_to_system_timezone
 
 from atlas.atlas.core.tls.certificate import (
@@ -39,7 +40,7 @@ def ensure_certificate_authority(settings: "AtlasSettings") -> bool:
 			frappe.throw(str(error))
 		return False
 	if certificate or private_key:
-		frappe.throw("Set both Metal TLS certificate authority fields or clear both fields.")
+		frappe.throw(_("Set both Metal TLS certificate authority fields or clear both fields."))
 	if not settings.region_name or not settings.wildcard_domain:
 		return False
 
@@ -58,7 +59,7 @@ def ensure_server_certificate(server: "MetalServer") -> tuple[str, str, str]:
 	ca_certificate = settings.get_password("metal_tls_ca_certificate", raise_exception=False)
 	ca_private_key = settings.get_password("metal_tls_ca_private_key", raise_exception=False)
 	if not ca_certificate or not ca_private_key:
-		frappe.throw("Atlas Settings has no Metal TLS certificate authority.")
+		frappe.throw(_("Atlas Settings has no Metal TLS certificate authority."))
 
 	addresses = _server_addresses(server)
 	identity = f"{server.name}.{settings.wildcard_domain}"
@@ -117,7 +118,7 @@ def ca_file() -> str:
 		"metal_tls_ca_certificate", raise_exception=False
 	)
 	if not certificate:
-		frappe.throw("Atlas Settings has no Metal TLS certificate authority.")
+		frappe.throw(_("Atlas Settings has no Metal TLS certificate authority."))
 	return _write_private_file("ca.crt", certificate)
 
 
@@ -129,7 +130,7 @@ def client_certificate_files() -> tuple[str, str]:
 	certificate = settings.get_password("atlas_tls_certificate", raise_exception=False)
 	private_key = settings.get_password("atlas_tls_private_key", raise_exception=False)
 	if not certificate or not private_key:
-		frappe.throw("Atlas Settings has no Atlas client certificate.")
+		frappe.throw(_("Atlas Settings has no Atlas client certificate."))
 
 	return _write_private_file("atlas.crt", certificate), _write_private_file("atlas.key", private_key)
 
@@ -143,7 +144,8 @@ def _write_private_file(name: str, content: str) -> str:
 	directory.mkdir(mode=0o700, parents=True, exist_ok=True)
 	with tempfile.NamedTemporaryFile(mode="w", dir=directory, prefix=f"{name}.", delete=False) as temporary:
 		temporary.write(content)
-		temporary_path = temporary.name
+	temporary_path = temporary.name
+
 	try:
 		os.chmod(temporary_path, 0o600)
 		os.replace(temporary_path, path)
