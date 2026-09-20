@@ -43,3 +43,17 @@ The root has no `go.mod` or `go.work`. Run Go commands inside the matching compo
 ## Ownership
 
 Keep component code inside its component. Use a clear API or contract for cross-component work.
+
+## Continuous integration
+
+`.github/workflows/` holds one workflow for each component. No workflow uses a trigger path filter, so each one starts on every pull request and reports a result. A required check then never waits for a workflow that did not start.
+
+Each job calls `.github/scripts/changed-paths.sh` with one regular expression and guards its later steps with the result, so a job with nothing to run still passes. Add the workflow file and the script to the pattern of each job.
+
+| Workflow | Job | Runs for |
+|---|---|---|
+| `atlas-ci.yml` | Server | Every pull request. The complete Atlas app test suite. |
+| `metal-tests.yml` | test | `metal/` |
+| `metal-tests.yml` | WG Mesh | `services/wg-mesh/` |
+| `http-proxy-tests.yml` | test | `services/http-proxy/` and the proxy API client |
+| `linter.yml` | Frappe Linter, Vulnerable Dependency Check | Every pull request. |

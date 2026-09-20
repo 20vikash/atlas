@@ -2,22 +2,16 @@ name: Atlas HTTP proxy tests
 
 on:
   pull_request:
-    paths:
-      - "services/http-proxy/**"
-      - "scripts/generate-api-client.py"
-      - "clients/atlas-proxy-client/**"
-      - "clients/openapi/atlas-proxy-client.json"
   push:
     branches:
       - develop
-    paths:
-      - "services/http-proxy/**"
-      - "scripts/generate-api-client.py"
-      - "clients/atlas-proxy-client/**"
-      - "clients/openapi/atlas-proxy-client.json"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -28,22 +22,34 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Find the changed paths
+        id: changes
+        working-directory: ${{ github.workspace }}
+        run: .github/scripts/changed-paths.sh '^(services/http-proxy/|scripts/generate-api-client\.py$|clients/atlas-proxy-client/|clients/openapi/atlas-proxy-client\.json$|\.github/(workflows/http-proxy-tests\.yml|scripts/changed-paths\.sh)$)'
 
       - name: Set up Python
+        if: steps.changes.outputs.matched == 'true'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
 
       - name: Install control daemon unit test dependencies
+        if: steps.changes.outputs.matched == 'true'
         run: python -m pip install -e "control[test]"
 
       - name: Lint Python
+        if: steps.changes.outputs.matched == 'true'
         run: python -m ruff check control tests
 
       - name: Run control daemon unit tests
+        if: steps.changes.outputs.matched == 'true'
         run: python -m pytest -q control/tests
 
       - name: Check the generated API client
+        if: steps.changes.outputs.matched == 'true'
         working-directory: ${{ github.workspace }}
         run: |
           control_python="$(command -v python)"
@@ -56,11 +62,13 @@ jobs:
             || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-proxy-client and commit clients/."; exit 1; }
 
       - name: Start test stack
+        if: steps.changes.outputs.matched == 'true'
         run: docker compose -f tests/docker/docker-compose.yml up --build -d
 
       - name: Run integration tests
+        if: steps.changes.outputs.matched == 'true'
         run: python -m pytest -q tests
 
       - name: Stop test stack
-        if: always()
+        if: always() && steps.changes.outputs.matched == 'true'
         run: docker compose -f tests/docker/docker-compose.yml down -v
