@@ -94,6 +94,13 @@ class VirtualMachine(Document):
 			frappe.delete_doc(
 				"Virtual Machine State", self.name, ignore_permissions=True, delete_permanently=True
 			)
+		# Migration records link to the VM and must be deleted with it.
+		for migration in frappe.get_all(
+			"Virtual Machine Migration", filters={"virtual_machine": self.name}, pluck="name"
+		):
+			frappe.delete_doc(
+				"Virtual Machine Migration", migration, ignore_permissions=True, delete_permanently=True
+			)
 
 	@property
 	def current_state(self) -> str:

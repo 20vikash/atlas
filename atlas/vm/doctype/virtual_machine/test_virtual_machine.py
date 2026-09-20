@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import frappe
 import requests
@@ -987,7 +987,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 class TestVirtualMachineTrash(UnitTestCase):
 	"""Cover the cleanup that lets a terminated VM record be deleted."""
 
-	def _trash(self, state_exists: bool) -> Mock:
+	def _trash(self, state_exists: bool, migrations: list[str] | None = None) -> Mock:
 		virtual_machine = Mock(doctype="Virtual Machine")
 		virtual_machine.name = "vm-00003"
 
@@ -995,6 +995,7 @@ class TestVirtualMachineTrash(UnitTestCase):
 			patch.object(virtual_machine_module, "VirtualMachineService") as service,
 			patch.object(virtual_machine_module, "delete_tasks_for_target") as delete_tasks,
 			patch.object(virtual_machine_module.frappe.db, "exists", return_value=state_exists),
+			patch.object(virtual_machine_module.frappe, "get_all", return_value=migrations or []),
 			patch.object(virtual_machine_module.frappe, "delete_doc") as delete_doc,
 		):
 			virtual_machine_module.VirtualMachine.on_trash(virtual_machine)
@@ -1014,6 +1015,28 @@ class TestVirtualMachineTrash(UnitTestCase):
 	def test_trash_skips_a_missing_state(self) -> None:
 		"""A virtual machine that never reported a state still deletes."""
 		self._trash(state_exists=False).assert_not_called()
+
+	def test_trash_removes_the_migration_history(self) -> None:
+		"""A migration links to its VM, so the history must go with the VM."""
+		delete_doc = self._trash(state_exists=False, migrations=["mig-00001", "mig-00002"])
+
+		self.assertEqual(
+			delete_doc.call_args_list,
+			[
+				call(
+					"Virtual Machine Migration",
+					"mig-00001",
+					ignore_permissions=True,
+					delete_permanently=True,
+				),
+				call(
+					"Virtual Machine Migration",
+					"mig-00002",
+					ignore_permissions=True,
+					delete_permanently=True,
+				),
+			],
+		)
 
 
 class TestReconcileTerminating(UnitTestCase):
