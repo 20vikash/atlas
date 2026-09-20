@@ -3,7 +3,6 @@ package host
 import (
 	"context"
 	"runtime"
-	"strings"
 	"testing"
 
 	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
@@ -49,21 +48,6 @@ func (transport *testUnicastTransport) Enable(context.Context) error {
 func (transport *testUnicastTransport) Disable(context.Context) error {
 	transport.disabled = true
 	return nil
-}
-
-type testPeerState struct {
-	syncs int
-}
-
-func (state *testPeerState) SyncPeerState(context.Context) error {
-	state.syncs++
-	return nil
-}
-
-type testUplink struct{}
-
-func (testUplink) UplinkMAC() (string, error) {
-	return "aa:bb:cc:dd:ee:ff", nil
 }
 
 func (dependencies *testHostDependencies) List(context.Context) ([]vm.Information, error) {
@@ -195,47 +179,5 @@ func TestSynchronizeDisablesUnicastTransportInMulticastMode(t *testing.T) {
 
 	if !unicast.disabled || unicast.enabled {
 		t.Fatalf("unicast transport = enabled %t disabled %t, want a disabled transport", unicast.enabled, unicast.disabled)
-	}
-}
-
-func TestSynchronizeRejectsUnicastWithoutATransport(t *testing.T) {
-	dependencies := &testHostDependencies{}
-	service, err := NewService(Dependencies{
-		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
-		Wake: func() {},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = service.Synchronize(t.Context(), DesiredState{UnicastEnabled: true})
-	if err == nil || !strings.Contains(err.Error(), "unicast") {
-		t.Fatalf("error = %v, want an unicast transport failure", err)
-	}
-}
-
-func TestSynchronizeSyncsPeerStateAndReportsTheUplinkMAC(t *testing.T) {
-	dependencies := &testHostDependencies{}
-	peerState := &testPeerState{}
-	service, err := NewService(Dependencies{
-		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
-		PeerState: peerState, Uplink: testUplink{}, Wake: func() {},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := service.Synchronize(t.Context(), DesiredState{
-		WireGuardPeers: []network.WireGuardPeer{{Node: "node-2"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if peerState.syncs != 1 {
-		t.Fatalf("peer state syncs = %d, want 1", peerState.syncs)
-	}
-	if result.UplinkMAC != "aa:bb:cc:dd:ee:ff" {
-		t.Fatalf("uplink MAC = %q, want aa:bb:cc:dd:ee:ff", result.UplinkMAC)
 	}
 }

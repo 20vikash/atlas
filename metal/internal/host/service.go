@@ -17,7 +17,7 @@ type DesiredState struct {
 	WireGuardPeers                    []network.WireGuardPeer
 	Images                            []vm.Image
 	PrivilegedVirtualMachineAddresses []string
-	// UnicastEnabled selects the unicast NDP transport. The transport reads its peer set from the WireGuard peer state.
+	// UnicastEnabled selects the unicast NDP transport.
 	UnicastEnabled bool
 }
 
@@ -25,7 +25,7 @@ type DesiredState struct {
 type SyncResult struct {
 	Capacity             Capacity
 	VirtualMachineStates map[string]vm.State
-	// UplinkMAC is the discovery uplink MAC of this host. It is empty when the mesh is disabled.
+	// UplinkMAC is the discovery uplink MAC of this host.
 	UplinkMAC string
 }
 
@@ -189,7 +189,7 @@ func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (
 	return result, nil
 }
 
-// applyUnicast switches the unicast NDP transport. An enabled transport without a manager is an error, because the host must not silently stay in multicast mode.
+// applyUnicast switches the unicast NDP transport.
 func (service *Service) applyUnicast(ctx context.Context, enabled bool) error {
 	if service.unicast == nil {
 		if enabled {

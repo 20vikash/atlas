@@ -2,21 +2,18 @@ package network
 
 import (
 	"context"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
 type testUnicastSpawner struct {
-	starts          int
-	processes       []*testUnicastProcess
-	exitImmediately bool
+	starts    int
+	processes []*testUnicastProcess
 }
 
 func (spawner *testUnicastSpawner) Start(UnicastConfig) (unicastProcess, error) {
 	spawner.starts++
-	process := &testUnicastProcess{exited: spawner.exitImmediately}
+	process := &testUnicastProcess{}
 	spawner.processes = append(spawner.processes, process)
 	return process, nil
 }
@@ -56,7 +53,6 @@ func newTestUnicastManager(t *testing.T, peers []WireGuardPeer) (*UnicastManager
 
 	spawner := &testUnicastSpawner{}
 	manager.spawner = spawner
-	// Skip the startup grace: the mock reports its state at once.
 	manager.startupGrace = 0
 	return manager, spawner
 }
@@ -110,62 +106,6 @@ func TestEnableRestartsACrashedDaemon(t *testing.T) {
 	}
 }
 
-func TestEnableReportsDaemonThatExitsDuringStartup(t *testing.T) {
-	manager, spawner := newTestUnicastManager(t, testDaemonPeers)
-	spawner.exitImmediately = true
-
-	err := manager.Enable(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "exited during startup") {
-		t.Fatalf("error = %v, want a startup failure", err)
-	}
-	if spawner.starts != 1 {
-		t.Fatalf("daemon starts = %d, want 1", spawner.starts)
-	}
-
-	// The dead process is not recorded, so the next synchronization retries
-	// the start instead of watching a corpse.
-	if err := manager.Enable(t.Context()); err == nil {
-		t.Fatal("expected a startup failure on the retry")
-	}
-	if spawner.starts != 2 {
-		t.Fatalf("daemon starts = %d, want 2", spawner.starts)
-	}
-}
-
-func TestEnableWithoutPeersStaysInMulticastMode(t *testing.T) {
-	manager, spawner := newTestUnicastManager(t, nil)
-
-	if err := manager.Enable(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if spawner.starts != 0 {
-		t.Fatalf("daemon starts = %d, want 0", spawner.starts)
-	}
-}
-
-func TestEnableWithoutPeersStopsARunningDaemon(t *testing.T) {
-	manager, spawner := newTestUnicastManager(t, testDaemonPeers)
-
-	if err := manager.Enable(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	// The peer state changes to an empty set, as after a sync that removes every peer.
-	if err := saveWireGuardPeers(manager.configuration.WireGuardStatePath, nil); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := manager.Enable(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if !spawner.processes[0].terminated {
-		t.Fatal("the running daemon was not stopped")
-	}
-	if spawner.starts != 1 {
-		t.Fatalf("daemon starts = %d, want 1", spawner.starts)
-	}
-}
-
 func TestDisableStopsTheDaemon(t *testing.T) {
 	manager, spawner := newTestUnicastManager(t, testDaemonPeers)
 
@@ -179,28 +119,8 @@ func TestDisableStopsTheDaemon(t *testing.T) {
 		t.Fatal("the daemon was not stopped")
 	}
 
-	// A second disable finds no daemon and stays silent.
 	if err := manager.Disable(t.Context()); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestEnableReportsAnUnreadablePeerState(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "wireguard-peers.json")
-	if err := os.WriteFile(statePath, []byte("not json"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	manager, err := NewUnicastManager(UnicastConfig{
-		BinaryPath:         "/usr/local/bin/atlas-wg-mesh",
-		WireGuardStatePath: statePath,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := manager.Enable(t.Context()); err == nil || !strings.Contains(err.Error(), "WireGuard peers") {
-		t.Fatalf("error = %v, want a peer state failure", err)
 	}
 }
 

@@ -18,9 +18,7 @@ const unicastPeerLimit = 256
 
 const unicastLockPath = "/run/lock/atlas-wg-mesh-unicast.lock"
 
-// Filter priorities on the uplink. A start or stop passes through a short
-// window with both hook sets attached: ingress unicast decaps before the
-// multicast hook at priority 10, and egress unicast wraps after it.
+// Filter priorities on the uplink; ingress unicast runs before, egress after, the multicast hook.
 const (
 	unicastIngressFilterPriority = "5"
 	unicastEgressFilterPriority  = "15"
@@ -42,14 +40,7 @@ var unicastStartCommand = &cobra.Command{
 	},
 }
 
-// runUnicastDaemon switches the discovery interface to unicast NDP transport
-// and waits for a stop signal. The BPF hooks do the packet processing, and the
-// peer maps come from the WireGuard peer state through peers sync.
-//
-// On start, the daemon attaches the unicast hooks and removes the multicast
-// NDP filters from the uplink. On a clean stop, it restores the multicast
-// filters first, so neighbour discovery never stops. A failed start leaves
-// the multicast filters in place.
+// runUnicastDaemon attaches the unicast hooks and serves NDP until a stop signal.
 func runUnicastDaemon(peersPath string) error {
 	config, err := readPinnedConfig()
 	if err != nil {
@@ -73,11 +64,6 @@ func runUnicastDaemon(peersPath string) error {
 	}
 	defer unlock()
 
-	// keepUnicast stays false on every path that leaves the uplink without a
-	// working transport. A failed multicast restore sets it: the unicast
-	// hooks keep serving NDP instead of leaving the uplink with no hook at
-	// all, and the next synchronization attaches them again and retries the
-	// swap.
 	keepUnicast := false
 	defer func() {
 		if keepUnicast {
@@ -95,9 +81,6 @@ func runUnicastDaemon(peersPath string) error {
 		return err
 	}
 
-	// The unicast hooks own the uplink now. A failure here leaves both hook
-	// sets attached, which is safe: the unicast hooks skip work that the
-	// multicast hook already did.
 	if err := detachHook(uplinkName); err != nil {
 		return err
 	}
@@ -109,10 +92,6 @@ func runUnicastDaemon(peersPath string) error {
 	defer signal.Stop(interrupted)
 	<-interrupted
 
-	// Restore the multicast filters first. Both hook sets then run together
-	// until the deferred unicast detachments finish, which is safe for the
-	// same reason as above. A failed restore keeps the unicast hooks: the
-	// daemon reports the failure instead of stripping the working transport.
 	if err := attachMulticastNeighbourHook(uplinkName); err != nil {
 		keepUnicast = true
 		return fmt.Errorf("restore multicast NDP: %w", err)
@@ -120,14 +99,12 @@ func runUnicastDaemon(peersPath string) error {
 	return nil
 }
 
-// attachMulticastNeighbourHook restores the multicast NDP filter on the
-// uplink, returning the host to multicast behaviour.
+// attachMulticastNeighbourHook restores the multicast NDP filter on the uplink.
 func attachMulticastNeighbourHook(uplinkName string) error {
 	return attachHook(uplinkName, ndpProgram, "ingress")
 }
 
-// attachUnicastHook attaches one pinned unicast program at its own filter
-// priority, separate from the multicast hook at priority 10.
+// attachUnicastHook attaches one pinned unicast program at its filter priority.
 func attachUnicastHook(interfaceName, program, direction, priority string) error {
 	path, err := programPath(program)
 	if err != nil {
@@ -137,25 +114,19 @@ func attachUnicastHook(interfaceName, program, direction, priority string) error
 	return attachUnicastHookPath(interfaceName, path, direction, priority)
 }
 
-// attachUnicastHookPath attaches one pinned unicast program path at its own
-// filter priority. The upgrade path uses it to move a running transport to
-// the programs of a new release.
+// attachUnicastHookPath attaches one pinned unicast program path at its filter priority.
 func attachUnicastHookPath(interfaceName, path, direction, priority string) error {
 	_ = runCommand("tc", "qdisc", "add", "dev", interfaceName, "clsact")
 	return runCommand("tc", "filter", "replace", "dev", interfaceName, direction, "prio", priority, "handle", "1", "bpf", "direct-action", "object-pinned", path)
 }
 
-// unicastTransportActive reports whether the uplink holds a unicast NDP
-// filter. A running daemon holds them, and so do the leftover filters of a
-// crashed one, so the upgrade path must refresh the unicast hooks instead of
-// stacking the multicast hook next to them.
+// unicastTransportActive reports whether the uplink holds a unicast NDP filter.
 func unicastTransportActive(uplinkName string) bool {
 	return unicastFilterAttached(uplinkName, "ingress", unicastIngressFilterPriority) ||
 		unicastFilterAttached(uplinkName, "egress", unicastEgressFilterPriority)
 }
 
-// unicastFilterAttached reports whether one direction of an interface holds a
-// TC filter at a unicast priority.
+// unicastFilterAttached reports whether one direction holds a unicast-priority TC filter.
 func unicastFilterAttached(interfaceName, direction, priority string) bool {
 	output, err := commandOutput("tc", "filter", "show", "dev", interfaceName, direction)
 	if err != nil {
@@ -165,9 +136,7 @@ func unicastFilterAttached(interfaceName, direction, priority string) bool {
 	return filterPriorityPresent(output, priority)
 }
 
-// filterPriorityPresent reports whether tc filter output lists a filter at a
-// priority. tc prints each filter with its priority as a "pref <n>" field
-// pair, and older versions print "prio <n>".
+// filterPriorityPresent reports whether tc filter output lists a filter at a priority.
 func filterPriorityPresent(output, priority string) bool {
 	fields := strings.Fields(output)
 
@@ -180,8 +149,7 @@ func filterPriorityPresent(output, priority string) bool {
 	return false
 }
 
-// detachUnicastHook removes one unicast filter. A missing filter is not an
-// error, so a crashed daemon can be cleaned up safely.
+// detachUnicastHook removes one unicast filter; a missing filter is not an error.
 func detachUnicastHook(interfaceName, direction, priority string) error {
 	err := runCommand("tc", "filter", "del", "dev", interfaceName, direction, "prio", priority, "handle", "1", "bpf")
 	if err != nil && !deleteMissing(err) {
@@ -200,7 +168,7 @@ func detachUnicastHookWarning(interfaceName, direction string) {
 	}
 }
 
-// lockUnicastDaemon allows one daemon and releases automatically on a crash.
+// lockUnicastDaemon allows one daemon; the lock releases on crash.
 func lockUnicastDaemon() (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(unicastLockPath), 0755); err != nil {
 		return nil, err
@@ -213,7 +181,6 @@ func lockUnicastDaemon() (func(), error) {
 		file.Close()
 		return nil, fmt.Errorf("unicast daemon is already running: %w", err)
 	}
-	// Make the deferred unlock safe after an early release.
 	var once sync.Once
 	return func() {
 		once.Do(func() {

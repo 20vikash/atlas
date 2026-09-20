@@ -21,7 +21,7 @@ type peerEntry struct {
 	WG          [16]byte
 }
 
-// wireGuardPeerFileEntry is one entry of the WireGuard peer state file that metald writes.
+// wireGuardPeerFileEntry is one entry of the WireGuard peer state file.
 type wireGuardPeerFileEntry struct {
 	Node           string `json:"node"`
 	NodeID         uint32 `json:"node_id"`
@@ -47,7 +47,7 @@ var peersSyncCommand = &cobra.Command{
 	},
 }
 
-// syncPeers reloads the peer maps from the WireGuard peer state. Run it after every change to the state file.
+// syncPeers reloads the peer maps from the WireGuard peer state.
 func syncPeers(peersPath string) error {
 	config, err := readPinnedConfig()
 	if err != nil {
@@ -70,7 +70,7 @@ func syncPeers(peersPath string) error {
 	return nil
 }
 
-// readMeshPeers converts the WireGuard peer state into mesh peers. An entry without an IPv4 endpoint or a MAC is skipped, because no hook can use it. An absent file holds no peers.
+// readMeshPeers converts the WireGuard peer state into mesh peers.
 func readMeshPeers(peersPath string, config hostConfig) ([]peerEntry, error) {
 	contents, err := os.ReadFile(peersPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -123,7 +123,6 @@ func meshPeer(entry wireGuardPeerFileEntry, config hostConfig) (peerEntry, bool)
 	copy(peer.MAC[:], mac)
 	peer.WG = peerWireGuardAddress(config.WireGuardIPv6, entry.NodeID)
 
-	// A private address is optional: the unicast hooks use it only when they run on the private interface.
 	if entry.PrivateAddress != "" {
 		private, err := netip.ParseAddr(entry.PrivateAddress)
 		if err != nil || !private.Is4() {
@@ -137,7 +136,7 @@ func meshPeer(entry wireGuardPeerFileEntry, config hostConfig) (peerEntry, bool)
 	return peer, true
 }
 
-// peerWireGuardAddress builds the peer WireGuard address from the local prefix and the node ID: the first 4 bytes are kept, and the node ID becomes the last 4.
+// peerWireGuardAddress builds the peer address from the local prefix and node ID.
 func peerWireGuardAddress(local [16]byte, nodeID uint32) [16]byte {
 	var address [16]byte
 
@@ -147,7 +146,7 @@ func peerWireGuardAddress(local [16]byte, nodeID uint32) [16]byte {
 	return address
 }
 
-// packPeerMAC packs a MAC into the low 6 bytes of a u64, as the peers_by_mac key expects.
+// packPeerMAC packs a MAC into the low 6 bytes of a u64 key.
 func packPeerMAC(mac [6]byte) uint64 {
 	var packed [8]byte
 
@@ -156,7 +155,7 @@ func packPeerMAC(mac [6]byte) uint64 {
 	return binary.LittleEndian.Uint64(packed[:])
 }
 
-// fillPeerList rewrites the whole peer_list map, so removed peers cannot stay behind in a slot.
+// fillPeerList rewrites the whole peer_list map.
 func fillPeerList(peers []peerEntry) error {
 	peerMap, err := openMap("peer_list")
 	if err != nil {
@@ -176,7 +175,7 @@ func fillPeerList(peers []peerEntry) error {
 	return nil
 }
 
-// fillPeersByMAC replaces the MAC index, so removed peers cannot stay behind.
+// fillPeersByMAC replaces the MAC index.
 func fillPeersByMAC(peers []peerEntry) error {
 	peerMap, err := openMap("peers_by_mac")
 	if err != nil {
@@ -210,7 +209,7 @@ func fillPeersByMAC(peers []peerEntry) error {
 	return nil
 }
 
-// meshPeerCount counts the peers in the peer_list map. The list ends at the first zero IPv4 address.
+// meshPeerCount counts the peers in the peer_list map.
 func meshPeerCount() (int, error) {
 	peerMap, err := openMap("peer_list")
 	if err != nil {

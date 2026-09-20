@@ -139,7 +139,7 @@ func (request syncRequest) imagePolicies() []vm.Image {
 	return images
 }
 
-// validateUnicastEndpoints rejects a peer endpoint that the unicast transport cannot use: it must carry an IPv4 host address.
+// validateUnicastEndpoints rejects a peer endpoint without an IPv4 host address.
 func (request syncRequest) validateUnicastEndpoints() error {
 	for _, peer := range request.WireGuardPeers {
 		host, _, err := net.SplitHostPort(peer.Address)

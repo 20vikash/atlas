@@ -97,9 +97,7 @@ func installHost(uplinkName, wireGuardName string) error {
 	return nil
 }
 
-// rollbackInstall removes the VLAN route, detaches the hooks on the uplink and
-// the WireGuard interface, and removes the pinned BPF state. A hook that was
-// not attached yet is not an error.
+// rollbackInstall removes the VLAN route, hooks, and partial BPF state.
 func rollbackInstall(cause error, uplinkName, wireGuardName string) error {
 	if err := removeMeshRoute(uplinkName); err != nil {
 		return errors.Join(cause, fmt.Errorf("remove VLAN route: %w", err))
@@ -158,8 +156,6 @@ func removeHost(force bool) error {
 			if err := detachHook(name); err != nil {
 				return err
 			}
-			// A host that ran the unicast daemon also holds the
-			// unicast filters on its uplink.
 			if name == interfaces.uplinkName {
 				detachUnicastHookWarning(name, "ingress")
 				detachUnicastHookWarning(name, "egress")
@@ -168,7 +164,6 @@ func removeHost(force bool) error {
 		}
 	}
 	if interfaces.uplinkName != "" {
-		// Every VM entry is cleared with force, so no proxy entry may remain.
 		if force {
 			for _, virtualMachine := range virtualMachines {
 				_ = removeProxyNeighbour(virtualMachine.address.String(), interfaces.uplinkName)
@@ -224,7 +219,7 @@ func addVirtualMachine(interfaceName, addressText string, mtu uint32) error {
 	if err := runCommand("ip", "-6", "route", "replace", addressText+"/128", "dev", interfaceName); err != nil {
 		return err
 	}
-	// Proxy NDP first, so the host answers for the VM as soon as it is claimed.
+	// Proxy NDP first, so the host answers at once.
 	if err := setProxyNeighbour(addressText, uplinkName); err != nil {
 		return err
 	}

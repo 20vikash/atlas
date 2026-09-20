@@ -67,7 +67,7 @@ func upgradeBPF(force bool) error {
 	}
 	defer collection.Close()
 
-	// This release changed the peer map and config layouts: drop their old pins, so the new maps pin cleanly. A peers sync refills the peer maps.
+	// Drop old pins; a peers sync refills the peer maps.
 	for _, name := range []string{"peer_list", "remote_vms", "vm_peer_map", "config"} {
 		_ = os.Remove(filepath.Join(pinDirectory, name))
 	}
@@ -81,7 +81,7 @@ func upgradeBPF(force bool) error {
 		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
 	}
 
-	// An old configuration holds no underlay ifindexes, so re-derive them from the uplink.
+	// Re-derive underlay ifindexes missing from an old configuration.
 	uplinkInterface, err := net.InterfaceByName(interfaces.uplinkName)
 	if err != nil {
 		return err
@@ -99,7 +99,7 @@ func upgradeBPF(force bool) error {
 		}
 	}
 
-	// Fill the rebuilt configuration before any hook attaches, so no hook runs against an empty config.
+	// Fill the rebuilt configuration before any hook attaches.
 	if err := collection.Maps["config"].Put(uint32(0), config); err != nil {
 		return err
 	}
@@ -147,8 +147,7 @@ func upgradeBPF(force bool) error {
 		}
 	}
 
-	// The new release owns these programs, so remove the top level pins
-	// of a previous install.
+	// Remove the top level pins of a previous install.
 	for _, program := range []string{
 		vmBPFProgram,
 		ndpProgram,
@@ -178,7 +177,7 @@ func forceUpgrade(config hostConfig) error {
 		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
 	}
 
-	// An old configuration holds no underlay ifindexes, so re-derive them from the uplink.
+	// Re-derive underlay ifindexes missing from an old configuration.
 	uplinkInterface, err := net.InterfaceByName(interfaces.uplinkName)
 	if err != nil {
 		return err
@@ -237,9 +236,7 @@ func forceUpgrade(config hostConfig) error {
 	return nil
 }
 
-// attachUplinkHook attaches the NDP hook on the uplink from pinned program
-// paths. A host in unicast mode keeps its unicast filters, refreshed from the
-// new pins; the multicast hook must not run next to them.
+// attachUplinkHook attaches the NDP hook on the uplink from pinned program paths.
 func attachUplinkHook(uplinkName, multicastPath, unicastIngressPath, unicastEgressPath string) error {
 	if unicastTransportActive(uplinkName) {
 		if err := attachUnicastHookPath(uplinkName, unicastIngressPath, "ingress", unicastIngressFilterPriority); err != nil {

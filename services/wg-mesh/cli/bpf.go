@@ -28,13 +28,7 @@ const (
 //go:embed atlas-wg-mesh.bpf.o
 var bpfObject []byte
 
-// Must match struct config in bpf/state.h. DiscoveryIndex is the discovery
-// interface for NDP, UplinkIPv4 sources the unicast transport on that
-// interface, WireGuardIPv6 addresses this host in tunnels, and UplinkIPv6
-// sources the kernel neighbour solicitation. The unicast hooks pick the
-// public or the private peer address and emit ifindex by the interface they
-// run on. The interior padding keeps the Go layout aligned with the BPF
-// struct.
+// Must match struct config in bpf/state.h.
 type hostConfig struct {
 	DiscoveryIndex uint32
 	UplinkIPv4     [4]byte
@@ -46,8 +40,7 @@ type hostConfig struct {
 	PrivateIfIndex uint32
 }
 
-// programPath returns the pin for a program: the installed release first,
-// then the top level pin of a fresh install.
+// programPath returns the pin for a program.
 func programPath(program string) (string, error) {
 	if hash, err := readInstalledHash(); err == nil {
 		release := filepath.Join(pinDirectory, "releases", hex.EncodeToString(hash[:]), program)
@@ -129,8 +122,7 @@ func readInstalledHash() ([32]byte, error) {
 	return hash, nil
 }
 
-// openMap opens one pinned map. The error carries the map name, because the
-// pinned-object syscall reports a missing pin as a bare errno.
+// openMap opens one pinned map.
 func openMap(name string) (*ebpf.Map, error) {
 	bpfMap, err := ebpf.LoadPinnedMap(filepath.Join(pinDirectory, name), nil)
 	if err != nil {
@@ -162,9 +154,6 @@ func readPinnedConfig() (hostConfig, error) {
 	}
 	defer configMap.Close()
 
-	// Read through a raw buffer sized to the map itself, so a value layout
-	// change degrades to zero fields instead of failing the forced
-	// migration that must read the old configuration.
 	var raw []byte
 	if err := configMap.Lookup(uint32(0), &raw); err != nil {
 		return hostConfig{}, err

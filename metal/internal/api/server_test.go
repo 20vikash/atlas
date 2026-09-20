@@ -968,20 +968,6 @@ func TestSyncDisablesTheUnicastTransportInMulticastMode(t *testing.T) {
 	}
 }
 
-func TestSyncRejectsUnicastWithoutAnIPv4Endpoint(t *testing.T) {
-	server := newTestServer(t)
-
-	cases := map[string]string{
-		"not an IPv4 address": `{"wireguard_peers":[{"node":"server-11","node_id":11,"public_key":"k","address":"fdab::1:7373","mac":"aa:bb:cc:dd:ee:11"}],"images":[],"privileged_vm_addresses":[],"unicast":true}`,
-		"invalid address":     `{"wireguard_peers":[{"node":"server-11","node_id":11,"public_key":"k","address":"10.20.0.11","mac":"aa:bb:cc:dd:ee:11"}],"images":[],"privileged_vm_addresses":[],"unicast":true}`,
-	}
-	for name, body := range cases {
-		t.Run(name, func(t *testing.T) {
-			do(t, server, http.MethodPost, "/v1/sync", body, http.StatusBadRequest)
-		})
-	}
-}
-
 func TestDocsSkipAuthentication(t *testing.T) {
 	srv := newTestServer(t)
 

@@ -29,9 +29,9 @@ type WireGuardPeer struct {
 	NodeID    uint32 `json:"node_id"`
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
-	// PrivateAddress is the peer address on the private network. The unicast NDP transport uses it when its hook runs on the private interface.
+	// PrivateAddress is the peer address on the private network.
 	PrivateAddress string `json:"private_address,omitempty"`
-	// MAC is the discovery uplink MAC of the peer host. The mesh uses it to identify the sender of an NDP advertisement.
+	// MAC is the discovery uplink MAC of the peer host.
 	MAC string `json:"mac"`
 }
 
@@ -103,9 +103,7 @@ func newWireGuardManager(configuration WireGuardConfig, commands wireGuardComman
 
 // reconcile removes peers that changed or disappeared, then configures every
 // desired peer. A changed peer is removed first, because `wg set` cannot move a
-// node to a new public key in place. Runtime `wg set` installs no system
-// routes, so the manager also owns one /128 route per peer: the encapsulated
-// tunnel traffic from the mesh reaches wg0 only through these routes.
+// node to a new public key in place.
 func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired []WireGuardPeer, localAddress netip.Addr) error {
 	currentByNode := wireGuardPeersByNode(current)
 	desiredByNode := wireGuardPeersByNode(desired)
@@ -147,10 +145,7 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 	return nil
 }
 
-// replacePeerRoute points one peer address at the WireGuard interface, so the
-// encapsulated mesh traffic from the BPF hooks enters the interface that
-// WireGuard encrypts. Replace is idempotent, so a rebooted host with a
-// surviving peer state regains its routes on the next Apply.
+// replacePeerRoute points one peer address at the WireGuard interface.
 func (manager *WireGuardManager) replacePeerRoute(ctx context.Context, address netip.Addr) error {
 	if err := manager.commands.Run(ctx, "ip", "-6", "route", "replace", address.String()+"/128", "dev", manager.configuration.InterfaceName); err != nil {
 		return fmt.Errorf("route WireGuard peer %s: %w", address, err)
@@ -158,9 +153,7 @@ func (manager *WireGuardManager) replacePeerRoute(ctx context.Context, address n
 	return nil
 }
 
-// removePeerRoute drops the route of a removed peer. A route that is already
-// absent is not an error: routes do not survive a reboot, but the managed
-// peer state does, so the removal must tolerate finding nothing.
+// removePeerRoute drops the route of a removed peer.
 func (manager *WireGuardManager) removePeerRoute(ctx context.Context, localAddress netip.Addr, peer WireGuardPeer) error {
 	address := peerWireGuardAddress(localAddress, peer.NodeID)
 

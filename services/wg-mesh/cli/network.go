@@ -23,8 +23,7 @@ const (
 	meshAnnouncementAttempts = 3
 	meshAnnouncementInterval = 50 * time.Millisecond
 
-	// The shared VLAN route. Route lookup for a VM destination selects the
-	// VLAN interface, so Linux runs NDP on that link.
+	// The shared VLAN route for VM destinations.
 	meshRoutePrefix = "fdaa::/16"
 )
 
@@ -101,10 +100,7 @@ func readHostConfig(uplinkName, wireGuardName string) (hostConfig, error) {
 	return config, nil
 }
 
-// underlayIfIndexes returns the ifindexes of the public and the private
-// underlay interface. The public interface owns the default route, and the
-// uplink is the private interface whenever it is not the public one. The
-// unicast hooks pick their underlay by that split.
+// underlayIfIndexes returns the public and private underlay ifindexes.
 func underlayIfIndexes(uplink *net.Interface) (uint32, uint32) {
 	publicName := defaultRouteInterface()
 	if publicName == "" || publicName == uplink.Name {
@@ -119,7 +115,7 @@ func underlayIfIndexes(uplink *net.Interface) (uint32, uint32) {
 	return uint32(public.Index), uint32(uplink.Index)
 }
 
-// defaultRouteInterface names the interface that owns the first IPv4 default route.
+// defaultRouteInterface names the interface owning the IPv4 default route.
 func defaultRouteInterface() string {
 	output, err := commandOutput("ip", "-4", "-o", "route", "show", "default")
 	if err != nil {
@@ -149,9 +145,7 @@ func findNetworkInterface(name string) (net.Interface, bool, error) {
 	return net.Interface{}, false, nil
 }
 
-// configuredInterfaces names the configured uplink and WireGuard interfaces
-// from an already-read host configuration. It must not read pinned state
-// itself: the upgrade path drops pins before it re-derives them.
+// configuredInterfaces names the configured uplink and WireGuard interfaces.
 func configuredInterfaces(config hostConfig) (hostInterfaces, error) {
 	interfaces := hostInterfaces{}
 
@@ -326,7 +320,6 @@ func mountBPFFileSystem() error {
 }
 
 // attachHook attaches one pinned program to a TC direction of an interface.
-// The direction is "ingress" or "egress".
 func attachHook(interfaceName, program, direction string) error {
 	path, err := programPath(program)
 	if err != nil {
@@ -342,8 +335,7 @@ func attachHookPath(interfaceName, programPath, direction string) error {
 	return runCommand("tc", "filter", "replace", "dev", interfaceName, direction, "prio", "10", "handle", "1", "bpf", "direct-action", "object-pinned", programPath)
 }
 
-// detachHook removes the TC filters of both directions from an interface. A
-// missing filter or qdisc is not an error.
+// detachHook removes the TC filters of both directions from an interface.
 func detachHook(interfaceName string) error {
 	for _, direction := range []string{
 		"ingress",
@@ -359,11 +351,7 @@ func detachHook(interfaceName string) error {
 	return nil
 }
 
-// deleteMissing reports whether a delete error only means that the entry was
-// already absent. tc reports a missing filter as "Cannot find specified
-// filter chain" when the chain holds no filter, and as "Filter with specified
-// priority/protocol not found" once another filter holds the chain, so both
-// wordings must read as absent.
+// deleteMissing reports whether a delete error only means the entry was absent.
 func deleteMissing(err error) bool {
 	message := strings.ToLower(err.Error())
 
@@ -372,14 +360,12 @@ func deleteMissing(err error) bool {
 		strings.Contains(message, "not found")
 }
 
-// setProxyNeighbour makes the host answer neighbour solicitations for a VM
-// address on the shared VLAN interface.
+// setProxyNeighbour makes the host answer solicitations for a VM address.
 func setProxyNeighbour(addressText, uplinkName string) error {
 	return runCommand("ip", "-6", "neigh", "replace", "proxy", addressText, "dev", uplinkName)
 }
 
-// removeProxyNeighbour stops the host from answering for a VM address. An
-// absent entry is not an error.
+// removeProxyNeighbour stops the host from answering for a VM address.
 func removeProxyNeighbour(addressText, uplinkName string) error {
 	err := runCommand("ip", "-6", "neigh", "del", "proxy", addressText, "dev", uplinkName)
 
@@ -390,8 +376,7 @@ func removeProxyNeighbour(addressText, uplinkName string) error {
 	return nil
 }
 
-// setMeshRoute points VM destinations at the shared VLAN interface, so Linux
-// runs neighbour discovery for them on that link. It is not a WireGuard route.
+// setMeshRoute points VM destinations at the shared VLAN interface.
 func setMeshRoute(uplinkName string) error {
 	return runCommand("ip", "-6", "route", "replace", meshRoutePrefix, "dev", uplinkName)
 }
