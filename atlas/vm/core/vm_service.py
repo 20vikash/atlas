@@ -136,6 +136,7 @@ class VirtualMachineService:
 				"disk_mib": request.disk_mib,
 				"tenant_id": request.tenant_id,
 				"is_privileged": request.is_privileged,
+				"is_termination_protected": request.is_termination_protected,
 				"sleep_after_idle_seconds": request.sleep_after_idle_seconds,
 			}
 		)

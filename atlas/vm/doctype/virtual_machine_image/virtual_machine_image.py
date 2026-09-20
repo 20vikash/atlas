@@ -11,6 +11,7 @@ from frappe.utils import add_to_date, now_datetime
 
 from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.atlas.core.parsing import strict_bool
 from atlas.atlas.core.tags import validate_tags
 from atlas.vm.core.models import MAXIMUM_CPU_MILLICORES
 
@@ -59,6 +60,7 @@ class VirtualMachineImage(Document):
 		image_sha256: DF.Data | None
 		image_size_mib: DF.Int
 		image_type: DF.Literal["system", "machine"]
+		is_termination_protected: DF.Check
 		kernel_file: DF.Link | None
 		kernel_multipart_upload_id: DF.Data | None
 		kernel_object_key: DF.Data | None
@@ -99,8 +101,14 @@ class VirtualMachineImage(Document):
 		if self.status == "Available":
 			self.validate_artifacts()
 
+	def before_insert(self) -> None:
+		"""Protect a System image, because the Atlas services boot from one."""
+		if self.image_type == "system":
+			self.is_termination_protected = 1
+
 	def on_trash(self) -> None:
 		"""Remove the public site files this image owns."""
+		self.ensure_not_termination_protected()
 		for file_name in (self.image_file, self.kernel_file):
 			if file_name:
 				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
@@ -290,3 +298,18 @@ class VirtualMachineImage(Document):
 		from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
 
 		return VirtualMachineImageDeletionService().request(self)
+
+	@frappe.whitelist(methods=["POST"])
+	def set_termination_protection(self, is_protected: bool | int | str) -> None:
+		"""Set or clear termination protection."""
+		self.check_permission("write")
+		self.is_termination_protected = strict_bool(is_protected, "is_protected")
+		self.save()
+
+	def ensure_not_termination_protected(self) -> None:
+		"""Reject removal while termination protection holds this image."""
+		if self.is_termination_protected:
+			frappe.throw(
+				_("Virtual Machine Image {0} is termination protected.").format(self.title),
+				exc=AtlasUserError,
+			)

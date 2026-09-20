@@ -140,12 +140,42 @@ frappe.ui.form.on("Virtual Machine", {
 			);
 		}
 		frm.add_custom_button(
+			frm.doc.is_termination_protected
+				? __("Disable Termination Protection")
+				: __("Enable Termination Protection"),
+			() => setTerminationProtection(frm),
+			__("Dangerous Actions")
+		);
+		frm.add_custom_button(
 			__("Terminate VM"),
 			() => terminateVirtualMachine(frm),
 			__("Dangerous Actions")
 		);
 	},
 });
+
+function setTerminationProtection(frm) {
+	const protecting = !frm.doc.is_termination_protected;
+	const message = protecting
+		? __("Protect {0}? Termination and deletion are refused until you disable this.", [
+				frm.doc.name.bold(),
+		  ])
+		: __("Unprotect {0}? Anyone with write access can then terminate it.", [
+				frm.doc.name.bold(),
+		  ]);
+
+	frappe.confirm(message, () =>
+		frm
+			.call({
+				method: "set_termination_protection",
+				doc: frm.doc,
+				args: { is_protected: protecting },
+				freeze: true,
+				freeze_message: __("Saving..."),
+			})
+			.then(() => frm.reload_doc())
+	);
+}
 
 function terminateVirtualMachine(frm) {
 	frappe.confirm(
@@ -281,6 +311,12 @@ function showCreateMachineImageDialog(frm) {
 				fieldtype: "Check",
 				label: __("Memory Snapshot"),
 				description: __("Uses this VM's current CPU, memory, and disk."),
+			},
+			{
+				fieldname: "is_termination_protected",
+				fieldtype: "Check",
+				label: __("Termination Protection"),
+				description: __("The image cannot be deleted until this is disabled."),
 			},
 		],
 		(values) =>

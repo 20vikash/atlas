@@ -32,6 +32,7 @@ class SnapshotPayload:
             title (str):
             cache_image (bool | Unset):  Default: False.
             image_type (SnapshotPayloadImageType | Unset):  Default: SnapshotPayloadImageType.MACHINE.
+            is_termination_protected (bool | Unset):  Default: False.
             memory_snapshot (bool | Unset):  Default: False.
             memory_snapshot_configuration (MemorySnapshotConfigurationPayload | Unset): The virtual machine shape that a
                 warm artifact serves.
@@ -41,6 +42,7 @@ class SnapshotPayload:
     title: str
     cache_image: bool | Unset = False
     image_type: SnapshotPayloadImageType | Unset = SnapshotPayloadImageType.MACHINE
+    is_termination_protected: bool | Unset = False
     memory_snapshot: bool | Unset = False
     memory_snapshot_configuration: MemorySnapshotConfigurationPayload | Unset = UNSET
     tags: SnapshotPayloadTags | Unset = UNSET
@@ -60,6 +62,8 @@ class SnapshotPayload:
         if not isinstance(self.image_type, Unset):
             image_type = self.image_type.value
 
+
+        is_termination_protected = self.is_termination_protected
 
         memory_snapshot = self.memory_snapshot
 
@@ -81,6 +85,8 @@ class SnapshotPayload:
             field_dict["cache_image"] = cache_image
         if image_type is not UNSET:
             field_dict["image_type"] = image_type
+        if is_termination_protected is not UNSET:
+            field_dict["is_termination_protected"] = is_termination_protected
         if memory_snapshot is not UNSET:
             field_dict["memory_snapshot"] = memory_snapshot
         if memory_snapshot_configuration is not UNSET:
@@ -111,6 +117,8 @@ class SnapshotPayload:
 
 
 
+        is_termination_protected = d.pop("is_termination_protected", UNSET)
+
         memory_snapshot = d.pop("memory_snapshot", UNSET)
 
         _memory_snapshot_configuration = d.pop("memory_snapshot_configuration", UNSET)
@@ -137,6 +145,7 @@ class SnapshotPayload:
             title=title,
             cache_image=cache_image,
             image_type=image_type,
+            is_termination_protected=is_termination_protected,
             memory_snapshot=memory_snapshot,
             memory_snapshot_configuration=memory_snapshot_configuration,
             tags=tags,

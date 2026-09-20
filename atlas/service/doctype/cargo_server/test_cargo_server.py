@@ -76,6 +76,7 @@ class TestCargoServerProvisionRequest(UnitTestCase):
 		self.assertEqual(server.virtual_machine, "vm-00001")
 		self.assertEqual(request["tenant_id"], 0)
 		self.assertTrue(request["is_privileged"])
+		self.assertTrue(request["is_termination_protected"])
 		self.assertEqual(request["egress"], "uplink")
 		self.assertEqual(request["hostname"], "cargo")
 		self.assertEqual(request["server_ip_address"], "203.0.113.9")
@@ -109,6 +110,9 @@ class TestCargoServerArchive(UnitTestCase):
 		server = MagicMock(status="Active", virtual_machine="vm-00001")
 		virtual_machine = MagicMock()
 		virtual_machine.terminate.side_effect = lambda: events.append("terminate")
+		virtual_machine.set_termination_protection.side_effect = lambda value: events.append(
+			f"unprotect:{value}"
+		)
 		provisioner = MagicMock()
 		provisioner.remove_proxy_routes.side_effect = lambda: events.append("routes")
 		with (
@@ -122,7 +126,7 @@ class TestCargoServerArchive(UnitTestCase):
 		):
 			CargoServer.archive(server)
 
-		self.assertEqual(events, ["routes", "terminate"])
+		self.assertEqual(events, ["routes", "unprotect:False", "terminate"])
 		self.assertEqual(server.status, "Archived")
 		self.assertIsNone(server.virtual_machine)
 		self.assertIsNone(server.installation_task)

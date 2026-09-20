@@ -28,6 +28,7 @@ from atlas.api.models import (
 	NetworkUpdatePayload,
 	SnapshotPayload,
 	SSHKeysReplacementPayload,
+	TerminationProtectionPayload,
 	VirtualMachineDetailResponse,
 	VirtualMachineListResponse,
 	VirtualMachineResponse,
@@ -124,6 +125,8 @@ def create_virtual_machine(
 	"""Create VM.
 
 	Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.
+
+	Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route changes it later.
 	"""
 	image = get_owned_image(payload.image_id)
 	ip_address = get_available_ip_address(payload.ip_address_id) if payload.ip_address_id else None
@@ -168,6 +171,7 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 			"sleep_after_idle_seconds",
 			"is_draft",
 			"is_terminating",
+			"is_termination_protected",
 			"creation",
 		],
 		order_by="creation desc",
@@ -206,6 +210,8 @@ def delete_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachineR
 	"""Delete VM.
 
 	Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.
+
+	A VM with `is_termination_protected` returns `400`. Clear the protection first.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.terminate()
@@ -282,6 +288,7 @@ def restart_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachine
 		"cache_image": False,
 		"memory_snapshot": False,
 		"memory_snapshot_configuration": {"virtual_cpu_count": 2, "memory_mib": 4096},
+		"is_termination_protected": False,
 		"tags": {"purpose": "pilot"},
 	},
 	responses={201: {"description": "The Machine image record is created."}},
@@ -297,6 +304,8 @@ def create_virtual_machine_snapshot(
 
 	Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source VM value. The request needs `memory_snapshot`.
 
+	Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always protected.
+
 	Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and `?tag=purpose:pilot`.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
@@ -306,6 +315,7 @@ def create_virtual_machine_snapshot(
 		cache_image=payload.cache_image,
 		memory_snapshot=payload.memory_snapshot,
 		memory_snapshot_configuration=payload.memory_snapshot_configuration.model_dump(exclude_none=True),
+		is_termination_protected=payload.is_termination_protected,
 		tags=payload.tags,
 	)
 	image: VirtualMachineImage = frappe.get_doc("Virtual Machine Image", image_name)
@@ -354,6 +364,23 @@ def update_virtual_machine_compute(
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.update_compute(payload.to_domain_changes())
+	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
+
+
+@virtual_machine_configuration.patch("<virtual_machine_id>/termination-protection")
+@api_docs(
+	request_example={"is_termination_protected": True},
+	responses=ACCEPTED_RESPONSE,
+)
+def update_virtual_machine_termination_protection(
+	virtual_machine_id: str, payload: TerminationProtectionPayload
+) -> ApiResult[VirtualMachineResponse]:
+	"""Update termination protection.
+
+	Sets or clears termination protection. Termination and deletion of a protected VM are refused until a later request clears it.
+	"""
+	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
+	virtual_machine.set_termination_protection(payload.is_termination_protected)
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 

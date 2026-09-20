@@ -217,6 +217,7 @@ class ImageResponse(BaseModel):
 					"enabled": True,
 					"cache_image": False,
 					"memory_snapshot": False,
+					"is_termination_protected": False,
 					"rootfs_size_mib": 20480,
 					"kernel_size_mib": 8,
 					"transfer_progress": 100,
@@ -237,6 +238,7 @@ class ImageResponse(BaseModel):
 	enabled: bool
 	cache_image: bool
 	memory_snapshot: bool
+	is_termination_protected: bool
 	rootfs_size_mib: int
 	kernel_size_mib: int
 	transfer_progress: int
@@ -257,6 +259,7 @@ class ImageResponse(BaseModel):
 			enabled=bool(image.enabled),
 			cache_image=bool(image.cache_image),
 			memory_snapshot=bool(image.memory_snapshot),
+			is_termination_protected=bool(image.is_termination_protected),
 			rootfs_size_mib=image.image_size_mib,
 			kernel_size_mib=image.kernel_size_mib,
 			transfer_progress=image.transfer_progress,
@@ -377,6 +380,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	ip_address_id: str | None = None
 	egress: EgressMode = "uplink"
 	is_privileged: bool = False
+	is_termination_protected: bool = False
 	sleep_after_idle_seconds: int = Field(default=0, ge=0, le=9_223_372_036)
 	disk_throughput_mibps: int = Field(default=0, ge=0)
 	disk_iops: int = Field(default=0, ge=0)
@@ -400,6 +404,7 @@ class CreateVirtualMachinePayload(StrictModel):
 			metadata=self.metadata,
 			egress=self.egress,
 			is_privileged=self.is_privileged,
+			is_termination_protected=self.is_termination_protected,
 			sleep_after_idle_seconds=self.sleep_after_idle_seconds,
 			disk_throughput_mibps=self.disk_throughput_mibps,
 			disk_iops=self.disk_iops,
@@ -485,7 +490,14 @@ class SnapshotPayload(StrictModel):
 	memory_snapshot_configuration: MemorySnapshotConfigurationPayload = Field(
 		default_factory=MemorySnapshotConfigurationPayload
 	)
+	is_termination_protected: bool = False
 	tags: dict[str, str] = Field(default_factory=dict)
+
+
+class TerminationProtectionPayload(StrictModel):
+	"""The termination protection state to store."""
+
+	is_termination_protected: bool
 
 
 class ConsoleTokenPayload(StrictModel):
@@ -518,6 +530,7 @@ class VirtualMachineResponse(BaseModel):
 					"memory_mib": 2048,
 					"disk_mib": 20480,
 					"sleep_after_idle_seconds": 0,
+					"is_termination_protected": False,
 					"tags": {"env": "prod"},
 					"created_at": 1788834165,
 				}
@@ -533,6 +546,7 @@ class VirtualMachineResponse(BaseModel):
 	memory_mib: int
 	disk_mib: int
 	sleep_after_idle_seconds: int
+	is_termination_protected: bool
 	tags: dict[str, str]
 	created_at: int
 
@@ -550,6 +564,7 @@ class VirtualMachineResponse(BaseModel):
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
+			is_termination_protected=bool(virtual_machine.is_termination_protected),
 			tags=read_tags(virtual_machine) if tags is None else tags,
 			created_at=to_unix_timestamp(virtual_machine.creation),
 		)

@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.termination_protection_payload import TerminationProtectionPayload
 from ...models.virtual_machine_response import VirtualMachineResponse
 from typing import cast
 
@@ -16,6 +17,7 @@ from typing import cast
 def _get_kwargs(
     virtual_machine_id: str,
     *,
+    body: TerminationProtectionPayload,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -30,10 +32,13 @@ def _get_kwargs(
     
 
     _kwargs: dict[str, Any] = {
-        "method": "delete",
-        "url": "/api/atlas/virtual-machines/{virtual_machine_id}".format(virtual_machine_id=quote(str(virtual_machine_id), safe=""),),
+        "method": "patch",
+        "url": "/api/atlas/virtual-machines/{virtual_machine_id}/termination-protection".format(virtual_machine_id=quote(str(virtual_machine_id), safe=""),),
     }
 
+    _kwargs["json"] = body.to_dict()
+
+    headers["Content-Type"] = "application/json"
 
     _kwargs["headers"] = headers
     return _kwargs
@@ -67,19 +72,19 @@ def sync_detailed(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: TerminationProtectionPayload,
     x_tenant_id: int,
 
 ) -> Response[VirtualMachineResponse]:
-    """ Delete VM
+    """ Update termination protection
 
-     Starts VM termination and detaches its public IP address without releasing the tenant reservation.
-    Poll the VM until cleanup removes the record and this route returns 404.
-
-    A VM with `is_termination_protected` returns `400`. Clear the protection first.
+     Sets or clears termination protection. Termination and deletion of a protected VM are refused until
+    a later request clears it.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
+        body (TerminationProtectionPayload): The termination protection state to store.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -92,6 +97,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         virtual_machine_id=virtual_machine_id,
+body=body,
 x_tenant_id=x_tenant_id,
 
     )
@@ -106,19 +112,19 @@ def sync(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: TerminationProtectionPayload,
     x_tenant_id: int,
 
 ) -> VirtualMachineResponse | None:
-    """ Delete VM
+    """ Update termination protection
 
-     Starts VM termination and detaches its public IP address without releasing the tenant reservation.
-    Poll the VM until cleanup removes the record and this route returns 404.
-
-    A VM with `is_termination_protected` returns `400`. Clear the protection first.
+     Sets or clears termination protection. Termination and deletion of a protected VM are refused until
+    a later request clears it.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
+        body (TerminationProtectionPayload): The termination protection state to store.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -132,6 +138,7 @@ def sync(
     return sync_detailed(
         virtual_machine_id=virtual_machine_id,
 client=client,
+body=body,
 x_tenant_id=x_tenant_id,
 
     ).parsed
@@ -140,19 +147,19 @@ async def asyncio_detailed(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: TerminationProtectionPayload,
     x_tenant_id: int,
 
 ) -> Response[VirtualMachineResponse]:
-    """ Delete VM
+    """ Update termination protection
 
-     Starts VM termination and detaches its public IP address without releasing the tenant reservation.
-    Poll the VM until cleanup removes the record and this route returns 404.
-
-    A VM with `is_termination_protected` returns `400`. Clear the protection first.
+     Sets or clears termination protection. Termination and deletion of a protected VM are refused until
+    a later request clears it.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
+        body (TerminationProtectionPayload): The termination protection state to store.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -165,6 +172,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         virtual_machine_id=virtual_machine_id,
+body=body,
 x_tenant_id=x_tenant_id,
 
     )
@@ -179,19 +187,19 @@ async def asyncio(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: TerminationProtectionPayload,
     x_tenant_id: int,
 
 ) -> VirtualMachineResponse | None:
-    """ Delete VM
+    """ Update termination protection
 
-     Starts VM termination and detaches its public IP address without releasing the tenant reservation.
-    Poll the VM until cleanup removes the record and this route returns 404.
-
-    A VM with `is_termination_protected` returns `400`. Clear the protection first.
+     Sets or clears termination protection. Termination and deletion of a protected VM are refused until
+    a later request clears it.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
+        body (TerminationProtectionPayload): The termination protection state to store.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -205,6 +213,7 @@ async def asyncio(
     return (await asyncio_detailed(
         virtual_machine_id=virtual_machine_id,
 client=client,
+body=body,
 x_tenant_id=x_tenant_id,
 
     )).parsed

@@ -11,6 +11,7 @@
   "desired_state",
   "tenant_id",
   "is_privileged",
+  "is_termination_protected",
   "column_break_status",
   "server",
   "virtual_machine_image",
@@ -180,6 +181,14 @@
    "fieldname": "is_privileged",
    "fieldtype": "Check",
    "label": "Is Privileged",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "description": "Termination and deletion are refused while this is set.",
+   "fieldname": "is_termination_protected",
+   "fieldtype": "Check",
+   "label": "Is Termination Protected",
    "read_only": 1,
    "show_description_on_click": 1
   },

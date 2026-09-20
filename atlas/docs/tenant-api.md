@@ -68,6 +68,8 @@ Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token wit
 
 A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snapshot` only from tenant `0`. Any other tenant that sends one receives `400`, and its snapshot becomes a `machine` image. These values cannot change after the image exists.
 
+A protected resource refuses removal. `is_termination_protected` on a virtual machine refuses `DELETE /virtual-machines/{id}`, and on an image it refuses `DELETE /images/{id}`. Both return `400`. A create request and a snapshot request accept the value, the termination protection route changes it later, and a `system` image is protected when it is created.
+
 A snapshot request with `memory_snapshot` can carry `memory_snapshot_configuration` to record a different warm start shape. It accepts `virtual_cpu_count`, `memory_mib`, and `disk_mib`. Each absent value keeps the source VM value. A configuration without `memory_snapshot` returns `400`.
 
 ## Conventions

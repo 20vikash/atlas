@@ -45,6 +45,7 @@ from .snapshot_payload import SnapshotPayload
 from .snapshot_payload_image_type import SnapshotPayloadImageType
 from .snapshot_payload_tags import SnapshotPayloadTags
 from .ssh_keys_replacement_payload import SSHKeysReplacementPayload
+from .termination_protection_payload import TerminationProtectionPayload
 from .virtual_machine_compute import VirtualMachineCompute
 from .virtual_machine_detail_response import VirtualMachineDetailResponse
 from .virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags
@@ -104,6 +105,7 @@ __all__ = (
     "SnapshotPayloadImageType",
     "SnapshotPayloadTags",
     "SSHKeysReplacementPayload",
+    "TerminationProtectionPayload",
     "VirtualMachineCompute",
     "VirtualMachineDetailResponse",
     "VirtualMachineDetailResponseTags",

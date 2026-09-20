@@ -103,6 +103,7 @@ class IntegrationTestProxyServer(IntegrationTestCase):
 		):
 			proxy_server.archive()
 
+		virtual_machine.set_termination_protection.assert_called_once_with(False)
 		virtual_machine.terminate.assert_called_once()
 		self.assertIsNone(proxy_server.virtual_machine)
 
@@ -215,6 +216,7 @@ class TestProxyServerCreate(UnitTestCase):
 		self.assertEqual(proxy_server.virtual_machine, "vm-00001")
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["tenant_id"], 0)
 		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_privileged"])
+		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_termination_protected"])
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["hostname"], "proxy-001")
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["server_ip_address"], "203.0.113.9")
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["cpu_millicores"], 2000)

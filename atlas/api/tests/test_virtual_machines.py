@@ -49,6 +49,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"disk_mib": 20480,
 		"sleep_after_idle_seconds": 0,
 		"is_privileged": 0,
+		"is_termination_protected": 0,
 		"is_draft": 0,
 		"is_terminating": 0,
 		"creation": "2026-09-08T10:00:00+05:30",
@@ -60,6 +61,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"attach_ip_address": Mock(),
 		"detach_ip_address": Mock(),
 		"update_network": Mock(),
+		"set_termination_protection": Mock(),
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)

@@ -46,12 +46,33 @@ class TestVirtualMachineImage(UnitTestCase):
 			"memory_snapshot_virtual_cpu_count": 0,
 			"memory_snapshot_memory_mib": 0,
 			"memory_snapshot_disk_mib": 0,
+			"is_termination_protected": 0,
 		}
 		defaults.update(values)
 		image = object.__new__(VirtualMachineImage)
 		for key, value in defaults.items():
 			setattr(image, key, value)
 		return image
+
+	def test_a_system_image_is_protected_when_it_is_created(self) -> None:
+		image = self.make_image(image_type="system")
+
+		image.before_insert()
+
+		self.assertTrue(image.is_termination_protected)
+
+	def test_a_machine_image_keeps_the_requested_protection(self) -> None:
+		image = self.make_image(image_type="machine")
+
+		image.before_insert()
+
+		self.assertFalse(image.is_termination_protected)
+
+	def test_a_protected_image_refuses_removal(self) -> None:
+		image = self.make_image(is_termination_protected=1)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.ensure_not_termination_protected()
 
 	def test_an_archived_image_cannot_boot_a_virtual_machine(self) -> None:
 		image = self.make_image(status="Archived")

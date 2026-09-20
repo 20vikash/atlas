@@ -253,6 +253,11 @@
             "title": "Is Privileged",
             "type": "boolean"
           },
+          "is_termination_protected": {
+            "default": false,
+            "title": "Is Termination Protected",
+            "type": "boolean"
+          },
           "memory_mib": {
             "exclusiveMinimum": 0,
             "title": "Memory Mib",
@@ -681,6 +686,7 @@
             "enabled": true,
             "id": "8f1c2d3e4b5a6978",
             "image_type": "machine",
+            "is_termination_protected": false,
             "kernel_size_mib": 8,
             "memory_snapshot": false,
             "rootfs_size_mib": 20480,
@@ -719,6 +725,10 @@
           "image_type": {
             "title": "Image Type",
             "type": "string"
+          },
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
           },
           "kernel_size_mib": {
             "title": "Kernel Size Mib",
@@ -777,6 +787,7 @@
           "enabled",
           "cache_image",
           "memory_snapshot",
+          "is_termination_protected",
           "rootfs_size_mib",
           "kernel_size_mib",
           "transfer_progress",
@@ -1211,6 +1222,11 @@
             "title": "Image Type",
             "type": "string"
           },
+          "is_termination_protected": {
+            "default": false,
+            "title": "Is Termination Protected",
+            "type": "boolean"
+          },
           "memory_snapshot": {
             "default": false,
             "title": "Memory Snapshot",
@@ -1236,6 +1252,21 @@
           "title"
         ],
         "title": "SnapshotPayload",
+        "type": "object"
+      },
+      "TerminationProtectionPayload": {
+        "additionalProperties": false,
+        "description": "The termination protection state to store.",
+        "properties": {
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_termination_protected"
+        ],
+        "title": "TerminationProtectionPayload",
         "type": "object"
       },
       "VirtualMachineCompute": {
@@ -1482,6 +1513,7 @@
             "disk_mib": 20480,
             "id": "vm-00001",
             "image_id": "8f1c2d3e4b5a6978",
+            "is_termination_protected": false,
             "last_known_state": "running",
             "memory_mib": 2048,
             "sleep_after_idle_seconds": 0,
@@ -1516,6 +1548,10 @@
           "image_id": {
             "title": "Image Id",
             "type": "string"
+          },
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
           },
           "last_known_state": {
             "title": "Last Known State",
@@ -1561,6 +1597,7 @@
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
+          "is_termination_protected",
           "tags",
           "created_at",
           "last_known_state",
@@ -1650,6 +1687,7 @@
             "disk_mib": 20480,
             "id": "vm-00001",
             "image_id": "8f1c2d3e4b5a6978",
+            "is_termination_protected": false,
             "memory_mib": 2048,
             "sleep_after_idle_seconds": 0,
             "tags": {
@@ -1683,6 +1721,10 @@
             "title": "Image Id",
             "type": "string"
           },
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
+          },
           "memory_mib": {
             "title": "Memory Mib",
             "type": "integer"
@@ -1712,6 +1754,7 @@
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
+          "is_termination_protected",
           "tags",
           "created_at"
         ],
@@ -1882,7 +1925,7 @@
     },
     "/api/atlas/images/{image_id}": {
       "delete": {
-        "description": "Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status and answers again.",
+        "description": "Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status and answers again.\n\nAn image with `is_termination_protected` returns `400`. Clear the protection first.",
         "operationId": "delete_image",
         "parameters": [
           {
@@ -2018,6 +2061,62 @@
           }
         },
         "summary": "Download image",
+        "tags": [
+          "Images"
+        ]
+      }
+    },
+    "/api/atlas/images/{image_id}/termination-protection": {
+      "patch": {
+        "description": "Sets or clears termination protection. Deletion of a protected image is refused until a later request clears it. A `system` image is protected when it is created.",
+        "operationId": "update_image_termination_protection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "is_termination_protected": true
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TerminationProtectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResponse"
+                }
+              }
+            },
+            "description": "The termination protection state is stored."
+          }
+        },
+        "summary": "Update termination protection",
         "tags": [
           "Images"
         ]
@@ -2336,7 +2435,7 @@
         ]
       },
       "post": {
-        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.",
+        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.\n\nSet `is_termination_protected` to refuse deletion of the new VM. The termination protection route changes it later.",
         "operationId": "create_virtual_machine",
         "parameters": [
           {
@@ -2409,7 +2508,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}": {
       "delete": {
-        "description": "Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.",
+        "description": "Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.\n\nA VM with `is_termination_protected` returns `400`. Clear the protection first.",
         "operationId": "delete_virtual_machine",
         "parameters": [
           {
@@ -2678,7 +2777,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/actions/snapshot": {
       "post": {
-        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nUse `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source VM value. The request needs `memory_snapshot`.\n\nUse tags to label the image and filter it later, for example, `{\"purpose\": \"pilot\"}` and `?tag=purpose:pilot`.",
+        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nUse `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source VM value. The request needs `memory_snapshot`.\n\nSet `is_termination_protected` to refuse deletion of the new image. A `system` image is always protected.\n\nUse tags to label the image and filter it later, for example, `{\"purpose\": \"pilot\"}` and `?tag=purpose:pilot`.",
         "operationId": "create_virtual_machine_snapshot",
         "parameters": [
           {
@@ -2707,6 +2806,7 @@
               "example": {
                 "cache_image": false,
                 "image_type": "machine",
+                "is_termination_protected": false,
                 "memory_snapshot": false,
                 "memory_snapshot_configuration": {
                   "memory_mib": 4096,
@@ -3220,6 +3320,62 @@
           }
         },
         "summary": "Replace SSH keys",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/termination-protection": {
+      "patch": {
+        "description": "Sets or clears termination protection. Termination and deletion of a protected VM are refused until a later request clears it.",
+        "operationId": "update_virtual_machine_termination_protection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "is_termination_protected": true
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TerminationProtectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Update termination protection",
         "tags": [
           "VM Configuration"
         ]

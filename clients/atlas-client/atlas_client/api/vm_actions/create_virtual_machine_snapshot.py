@@ -87,6 +87,9 @@ def sync_detailed(
     Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
     VM value. The request needs `memory_snapshot`.
 
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
+
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.
 
@@ -136,6 +139,9 @@ def sync(
     Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
     VM value. The request needs `memory_snapshot`.
 
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
+
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.
 
@@ -179,6 +185,9 @@ async def asyncio_detailed(
 
     Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
     VM value. The request needs `memory_snapshot`.
+
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
 
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.
@@ -228,6 +237,9 @@ async def asyncio(
 
     Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
     VM value. The request needs `memory_snapshot`.
+
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
 
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.

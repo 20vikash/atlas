@@ -46,6 +46,7 @@ class VirtualMachine(Document):
 		is_draft: DF.Check
 		is_privileged: DF.Check
 		is_terminating: DF.Check
+		is_termination_protected: DF.Check
 		memory_mib: DF.Int
 		metadata: DF.Code | None
 		server: DF.Link
@@ -88,6 +89,7 @@ class VirtualMachine(Document):
 
 	def on_trash(self) -> None:
 		"""Delete only after Metal confirms that the VM is absent."""
+		self.ensure_not_termination_protected()
 		VirtualMachineService(self).validate_deletion()
 		delete_tasks_for_target(self.doctype, self.name)
 		if frappe.db.exists("Virtual Machine State", self.name):
@@ -246,8 +248,26 @@ class VirtualMachine(Document):
 	def terminate(self) -> None:
 		"""Ask Metal to remove this VM and release its IP address."""
 		self.check_permission("write")
+		self.ensure_not_termination_protected()
 		self.ensure_not_migrating()
 		VirtualMachineService(self).terminate()
+
+	@frappe.whitelist(methods=["POST"])
+	def set_termination_protection(self, is_protected: bool | int | str) -> None:
+		"""Set or clear termination protection."""
+		self.check_permission("write")
+		if self.is_terminating:
+			frappe.throw(_("Virtual Machine {0} is terminating.").format(self.name), exc=AtlasUserError)
+
+		self.is_termination_protected = strict_bool(is_protected, "is_protected")
+		self.save()
+
+	def ensure_not_termination_protected(self) -> None:
+		"""Reject removal while termination protection holds this VM."""
+		if self.is_termination_protected:
+			frappe.throw(
+				_("Virtual Machine {0} is termination protected.").format(self.name), exc=AtlasUserError
+			)
 
 	@frappe.whitelist(methods=["POST"])
 	def migrate(self, target_server: str | None = None) -> str:
@@ -271,6 +291,7 @@ class VirtualMachine(Document):
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
 		memory_snapshot_configuration: dict[str, int] | None = None,
+		is_termination_protected: bool = False,
 		tags: dict[str, str] | None = None,
 	) -> str:
 		"""Queue an image transfer from this VM. A System image needs tenant 0. An absent
@@ -312,6 +333,7 @@ class VirtualMachine(Document):
 			cache_image=cache_image,
 			memory_snapshot=memory_snapshot,
 			memory_snapshot_configuration=memory_snapshot_configuration,
+			is_termination_protected=strict_bool(is_termination_protected, "is_termination_protected"),
 			tags=tags,
 		)
 

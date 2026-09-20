@@ -1099,6 +1099,69 @@ class TestReconcileTerminating(UnitTestCase):
 		)
 
 
+class TestVirtualMachineTerminationProtection(UnitTestCase):
+	"""Cover the flag that refuses removal of a virtual machine."""
+
+	def build_virtual_machine(self, *, is_termination_protected: int = 0) -> VirtualMachine:
+		virtual_machine = VirtualMachine.__new__(VirtualMachine)
+		virtual_machine.name = "VM-00001"
+		virtual_machine.is_terminating = 0
+		virtual_machine.is_termination_protected = is_termination_protected
+		virtual_machine.active_migration = None
+		virtual_machine.check_permission = Mock()
+		virtual_machine.save = Mock()
+		return virtual_machine
+
+	def test_a_protected_virtual_machine_is_not_terminated(self) -> None:
+		virtual_machine = self.build_virtual_machine(is_termination_protected=1)
+
+		with (
+			patch.object(virtual_machine_module, "VirtualMachineService") as service,
+			self.assertRaises(AtlasUserError),
+		):
+			virtual_machine.terminate()
+
+		service.return_value.terminate.assert_not_called()
+
+	def test_a_protected_virtual_machine_is_not_deleted(self) -> None:
+		"""The guard must also stop a direct delete, not only the terminate action."""
+		virtual_machine = self.build_virtual_machine(is_termination_protected=1)
+		virtual_machine.doctype = "Virtual Machine"
+
+		with (
+			patch.object(virtual_machine_module, "VirtualMachineService") as service,
+			self.assertRaises(AtlasUserError),
+		):
+			virtual_machine.on_trash()
+
+		service.return_value.validate_deletion.assert_not_called()
+
+	def test_an_unprotected_virtual_machine_is_terminated(self) -> None:
+		virtual_machine = self.build_virtual_machine()
+
+		with patch.object(virtual_machine_module, "VirtualMachineService") as service:
+			virtual_machine.terminate()
+
+		service.return_value.terminate.assert_called_once()
+
+	def test_protection_is_set_and_cleared(self) -> None:
+		virtual_machine = self.build_virtual_machine()
+
+		virtual_machine.set_termination_protection("true")
+		self.assertTrue(virtual_machine.is_termination_protected)
+
+		virtual_machine.set_termination_protection(False)
+		self.assertFalse(virtual_machine.is_termination_protected)
+		self.assertEqual(virtual_machine.save.call_count, 2)
+
+	def test_a_terminating_virtual_machine_rejects_the_change(self) -> None:
+		virtual_machine = self.build_virtual_machine()
+		virtual_machine.is_terminating = 1
+
+		with self.assertRaises(AtlasUserError):
+			virtual_machine.set_termination_protection(True)
+
+
 class TestVirtualMachinePrivilege(UnitTestCase):
 	"""Cover the Atlas WG Mesh privilege flag."""
 

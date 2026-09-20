@@ -32,6 +32,7 @@ class ImageResponse:
             enabled (bool):
             id (str):
             image_type (str):
+            is_termination_protected (bool):
             kernel_size_mib (int):
             memory_snapshot (bool):
             rootfs_size_mib (int):
@@ -49,6 +50,7 @@ class ImageResponse:
     enabled: bool
     id: str
     image_type: str
+    is_termination_protected: bool
     kernel_size_mib: int
     memory_snapshot: bool
     rootfs_size_mib: int
@@ -77,6 +79,8 @@ class ImageResponse:
         id = self.id
 
         image_type = self.image_type
+
+        is_termination_protected = self.is_termination_protected
 
         kernel_size_mib = self.kernel_size_mib
 
@@ -107,6 +111,7 @@ class ImageResponse:
             "enabled": enabled,
             "id": id,
             "image_type": image_type,
+            "is_termination_protected": is_termination_protected,
             "kernel_size_mib": kernel_size_mib,
             "memory_snapshot": memory_snapshot,
             "rootfs_size_mib": rootfs_size_mib,
@@ -137,6 +142,8 @@ class ImageResponse:
         id = d.pop("id")
 
         image_type = d.pop("image_type")
+
+        is_termination_protected = d.pop("is_termination_protected")
 
         kernel_size_mib = d.pop("kernel_size_mib")
 
@@ -172,6 +179,7 @@ class ImageResponse:
             enabled=enabled,
             id=id,
             image_type=image_type,
+            is_termination_protected=is_termination_protected,
             kernel_size_mib=kernel_size_mib,
             memory_snapshot=memory_snapshot,
             rootfs_size_mib=rootfs_size_mib,

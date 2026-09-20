@@ -88,6 +88,9 @@ def sync_detailed(
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
 
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
+
     Args:
         x_tenant_id (int):
         body (CreateVirtualMachinePayload): Values that create one virtual machine.
@@ -126,6 +129,9 @@ def sync(
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
 
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
+
     Args:
         x_tenant_id (int):
         body (CreateVirtualMachinePayload): Values that create one virtual machine.
@@ -158,6 +164,9 @@ async def asyncio_detailed(
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
+
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
 
     Args:
         x_tenant_id (int):
@@ -196,6 +205,9 @@ async def asyncio(
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
+
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
 
     Args:
         x_tenant_id (int):

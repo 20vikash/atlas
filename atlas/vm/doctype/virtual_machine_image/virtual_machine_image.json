@@ -13,6 +13,7 @@
   "image_type",
   "architecture",
   "transfer_progress",
+  "is_termination_protected",
   "cache_image",
   "memory_snapshot",
   "section_break_memory_snapshot_config",
@@ -96,6 +97,14 @@
   {
    "fieldname": "column_break_identity",
    "fieldtype": "Column Break"
+  },
+  {
+   "description": "Deletion is refused while this is set.",
+   "fieldname": "is_termination_protected",
+   "fieldtype": "Check",
+   "label": "Is Termination Protected",
+   "read_only": 1,
+   "show_description_on_click": 1
   },
   {
    "default": "0",

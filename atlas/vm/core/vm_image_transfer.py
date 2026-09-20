@@ -36,6 +36,7 @@ class VirtualMachineImageTransferService:
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
 		memory_snapshot_configuration: dict[str, int] | None = None,
+		is_termination_protected: bool = False,
 		tags: dict[str, str] | None = None,
 	) -> str:
 		"""Create a snapshot record and enqueue its transfer. An absent memory snapshot
@@ -66,6 +67,7 @@ class VirtualMachineImageTransferService:
 				"enabled": 1,
 				"architecture": virtual_machine.architecture,
 				"tags": [{"key": key, "value": value} for key, value in (tags or {}).items()],
+				"is_termination_protected": int(is_termination_protected),
 				"cache_image": int(cache_image),
 				"memory_snapshot": int(memory_snapshot),
 				"memory_snapshot_virtual_cpu_count": shape.get("virtual_cpu_count", 0),

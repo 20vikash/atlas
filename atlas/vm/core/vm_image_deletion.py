@@ -35,6 +35,8 @@ class VirtualMachineImageDeletionService:
 		if image.status in ("Deleting", "Archived"):
 			return cast(str, image.status)
 
+		image.ensure_not_termination_protected()
+
 		if image.status not in ("Available", "Failed"):
 			frappe.throw(_("Only an Available or Failed image can be deleted."), exc=AtlasUserError)
 

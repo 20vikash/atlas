@@ -150,7 +150,9 @@ class CargoServer(Document):
 
 				CargoServerProvisioner(cargo_server).remove_proxy_routes()
 				if frappe.db.exists("Virtual Machine", cargo_server.virtual_machine):
-					frappe.get_doc("Virtual Machine", cargo_server.virtual_machine).terminate()
+					virtual_machine = frappe.get_doc("Virtual Machine", cargo_server.virtual_machine)
+					virtual_machine.set_termination_protection(False)
+					virtual_machine.terminate()
 			except Exception as error:
 				cargo_server.status = "Failed"
 				cargo_server.failure_message = f"archive: {error}"
@@ -216,6 +218,7 @@ class CargoServer(Document):
 			"disk_mib": values.get("disk_mib"),
 			"tenant_id": 0,
 			"is_privileged": True,
+			"is_termination_protected": True,
 			"hostname": "cargo",
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",

@@ -192,6 +192,8 @@ The image record keeps the source server, upload IDs, status, and errors. Atlas 
 
 `vm_image_deletion.py` owns Machine image removal. The request marks the image `Deleting`, disables it, and queues a repeatable cleanup job.
 
+`is_termination_protected` refuses the request and the document delete. A System image is protected when it is created, because the Atlas services boot from one. A snapshot request can protect a Machine image, and the termination protection action changes it later.
+
 A live virtual machine holds its image. A virtual machine is live when it is a draft, because Metal can still pull the artifacts, or when its host reports `running`, `stopped`, or `paused`. A terminating virtual machine, and one with no reported state, does not hold the image. While an image is held, the request archives the image instead of deleting it. A job every 30 seconds reclaims an archived image after its last live virtual machine is gone.
 
 The job aborts every incomplete multipart upload, deletes both stored objects, removes the remaining Metal staging data, and then deletes the record. If a Metal or object storage cleanup operation fails, Atlas keeps the image in `Deleting`, records the error, and queues it again every 30 seconds.
@@ -287,6 +289,8 @@ The Edit Disk Limits action sends the size and both limits with `PUT /v1/vms/{na
 ## Termination and deletion
 
 The Terminate action sends `DELETE /v1/vms/{name}`. Atlas keeps the request metadata. Delete the document after Metal confirms that the VM is absent.
+
+`is_termination_protected` refuses the Terminate action and the document delete. A virtual machine request can set it, and the termination protection action changes it later. Cargo Server and Proxy Server set it on their virtual machine, and their Archive action clears it before it terminates the virtual machine.
 
 ## Related
 
