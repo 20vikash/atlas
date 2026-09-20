@@ -5,12 +5,13 @@ set -eu
 netplan_file=/etc/netplan/51-private-network.yaml
 
 if ! command -v netplan >/dev/null; then
-	echo "netplan is required to configure the private network" >&2
-	exit 1
+    echo "netplan is required to configure the private network" >&2
+    exit 1
 fi
 
 mkdir -p /etc/netplan
 umask 077
+
 cat > "$netplan_file" <<EOF
 network:
   version: 2
@@ -27,13 +28,21 @@ network:
       addresses:
         - $ADDRESS
 EOF
+
 chmod 600 "$netplan_file"
 
 netplan generate
 
+mkdir -p "/etc/systemd/network/10-netplan-$DEVICE.network.d"
+cat > "/etc/systemd/network/10-netplan-$DEVICE.network.d/20-atlas-proxy-ndp.conf" <<EOF
+[Network]
+IPv6ProxyNDP=yes
+EOF
+
 if ! ip link show "$DEVICE" >/dev/null 2>&1; then
-	ip link add link "$PARENT_INTERFACE" name "$DEVICE" type vlan id "$VLAN"
+    ip link add link "$PARENT_INTERFACE" name "$DEVICE" type vlan id "$VLAN"
 fi
+
 ip link set dev "$DEVICE" mtu "$MTU" up
 ip addr replace "$ADDRESS" dev "$DEVICE"
 
