@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -122,7 +123,8 @@ func transferListenAddress(coordinationAddress string, transferPort int) (string
 	if err != nil {
 		return "", fmt.Errorf("parse metald.coordination_listen %q: %w", coordinationAddress, err)
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
+	address, err := netip.ParseAddr(host)
+	if err != nil || address.IsUnspecified() {
 		return "", fmt.Errorf("metald.coordination_listen needs a node IP address, not %q", coordinationAddress)
 	}
 	return net.JoinHostPort(host, strconv.Itoa(transferPort)), nil
