@@ -1,10 +1,10 @@
-# vm_migration
+# VM migration
 
-The `vmmigration` package owns VM live migration on a Metal host. It owns the lifecycle, records, and host transport. The `VMMigration` struct is the public entry point.
+The `migration` package owns VM live migration on a Metal host. `Manager` is the public lifecycle entry point.
 
 ## Ownership
 
-`VMMigration` stores migration records beside VM records and runs one worker per VM. It uses the `Machines` interface, which `vm.Manager` implements. Tests can use a fake. See [Boundary](#boundary).
+`Manager` stores migration records beside VM records and runs one worker per VM. `vm.MigrationHost` owns the VM operations that migration can use. `storage.MigrationTransfer` owns snapshot and dataset transfer operations. See [Boundary](#boundary).
 
 ```text
 machines/<vm-id>/config.json            the VM's own records (vm package)
@@ -21,20 +21,20 @@ One VM ID locates all VM state. A source record blocks VM changes and reconcilia
 Atlas PUT -> target record (preparing), reserve the VM ID
                  |
                  v
-           lock the source and read its portable config (over the mesh)
+           lock the source and read its VM definition over the mesh
                  |
                  v
            check capacity -> allocate local IDs -> reconstruct records
                  |
                  v
-           phase copying
+           state copying
 ```
 
-The target reserves compute only after the handshake supplies the config. One host allocation lock covers the capacity check and the saved reservation. Host capacity subtracts that reservation while the target stays out of the VM list. A target that stays in preparing for 10 minutes expires. The target then aborts the source and releases the reservation.
+The target reserves compute only after the source supplies the VM definition. One host allocation lock covers the capacity check and the saved reservation. Host capacity subtracts that reservation while the target stays out of the VM list. A target that stays in `preparing` for 10 minutes expires. The target then aborts the source and releases the reservation.
 
 ## Copying
 
-During copying, `VMMigration` runs one disk transfer per VM and waits for transfers at shutdown. The reconciler starts or resumes it through `AdvanceTarget`; it does not move data. The transfer holds no VM lock while data moves and drives copying, stopping, and starting from the saved phase.
+During copying, `Manager` runs one disk transfer per VM and waits for transfers at shutdown. The reconciler starts or resumes it through `AdvanceTarget`. The reconciler does not move data. The transfer holds no VM lock while data moves. It continues from the saved target state.
 
 An HTTP request, the transfer worker, and the reconciler all change the target record. Every read-modify-write of that record holds the migration lock of its VM. A caller that already holds the lock writes through `writeTarget`. Every other caller uses `mutateTarget`, which takes the lock, reads the stored record again, applies the change, and writes it. The worker therefore cannot write a copy it read before a long operation and drop an abort that arrived in the meantime. The lock is held only for the read and the write, so an abort stays available while data moves. The lock is not reentrant, so a locked caller must not call `mutateTarget`. An interval completion and a transfer failure detach the context, because the snapshot or the reason is already real when the worker stops.
 
@@ -100,14 +100,14 @@ finish (Atlas, target ready) -> destroy source -> remove received snapshots -> c
 abort  (Atlas, nonterminal)  -> cancel transfer -> rollback -> aborted
 ```
 
-A finish and an abort are mutually exclusive: the first request wins, and the other returns a conflict. A finish is valid only after the target reports ready.
+A finish and an abort are mutually exclusive. The first request wins. A finish is valid only after the target reports ready.
 
 ```text
 abort, source not stopped -> clean target -> unlock the still-available source
 abort, source stopped     -> clean target -> restore the source -> unlock the source
 ```
 
-Rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before removing the dataset. It creates the target network only after the source network is gone. A stopped source is restored with a cold start, then unlocked. A rollback failure keeps both records, locks, and the source disk, and sets phase `rollback`.
+Rollback removes the target runtime, network, dataset, and staging records. It aborts a partial receive before it removes the dataset. It creates the target network only after the source network is gone. A stopped source is restored with a cold start and then unlocked. A rollback failure keeps both records, locks, and the source disk in a rollback state.
 
 The source stops any active disk stream before it unlocks or destroys the VM. This releases the migration snapshot before unlock removes it.
 
@@ -115,9 +115,9 @@ A source lock that the target stopped using for 15 minutes releases itself. The 
 
 A nonterminal target that Atlas stops calling for 15 minutes rolls itself back. It records the time of each Atlas control call, and Atlas gives a target up after its own 10 minute visibility timeout, so nothing else would ever release the reservation, the dataset, and the hidden VM ID on that host. A `ready` target is never released this way, because Atlas may already point the VM at it.
 
-A success or abort keeps a terminal record with the schema version, migration ID, VM ID, status, and finish time. It has no phase, hides no VM, and reserves no capacity. Every nonterminal record, including failed, hides the VM and reserves capacity. A new target migration can replace an aborted record only after all VM, source-lock, and target-dataset records are gone.
+A success or abort keeps a terminal record with the schema version, migration ID, VM ID, state, and finish time. It hides no VM and reserves no capacity. Every nonterminal record holds its VM ID. Active target states reserve capacity after the source supplies the VM definition. A failed target does not reserve capacity. A new target migration can replace an aborted record only after all VM, source lock, and target dataset records are gone.
 
-The daemon removes and logs a migration record that it cannot decode. One corrupt or old record cannot block startup.
+The daemon refuses to start when it cannot decode a migration record. It keeps the record for inspection and manual recovery.
 
 ## Transport
 
@@ -139,16 +139,16 @@ The transport must stay one direction. A two-way relay on this connection deadlo
 
 The source permits one outbound snapshot stream at a time because all source streams use the fixed port. A second stream request returns a conflict. This limit does not affect Atlas API calls or migration work on target hosts.
 
-The source stream is not bound to its control request, so it ends at the daemon root context, at an unlock, or at the 30 minute transfer limit. A target that never connects releases the port after 2 minutes, because the accept wait is bounded: otherwise it would hold the fixed port, and make the source lock look busy, until the transfer limit ran out.
+The source stream is not bound to its control request. It ends at daemon shutdown, at an unlock, or at the 30 minute transfer limit. A target that does not connect releases the listener after 2 minutes. The source holds the VM operation lock until the listener is ready. An unlock therefore cannot remove the source record while a stream starts.
 
 ## Boundary
 
-`VMMigration` calls the VM manager only through `Machines`. The interface reads and writes VM records, allocates IDs, takes locks, releases storage, and runs migration runtime and network operations. `vm.Manager` implements it.
+The daemon gives `Manager` a concrete `vm.MigrationHost` and `storage.MigrationTransfer`. `vm.MigrationHost` limits migration access to VM records, locks, runtime, network, and storage release operations. Private interfaces provide test seams inside the migration package.
 
-The `vm` package never imports this package. `vm.Manager` reads lock state through the injected `vm.MigrationGuard`. `VMMigration` implements the guard, and the daemon injects it with `(*vm.Manager).SetMigrationGuard`.
+The `vm` package does not import this package. `vm.Manager` reads lock state through the injected `vm.MigrationGuard`. `migration.Manager` implements the guard. The daemon injects it with `(*vm.Manager).SetMigrationGuard`.
 
 ## Related
 
-- [internal/vm/SPEC.md](../vm/SPEC.md) owns the VM records, state transitions, and the migration runtime and network operations this package drives.
-- [internal/api/SPEC.md](../api/SPEC.md) owns the control routes.
-- [cmd/metald/SPEC.md](../../cmd/metald/SPEC.md) wires the manager, the migration, the guard, and the transfer listener.
+- [internal/vm/SPEC.md](../SPEC.md) owns VM records, state transitions, and the runtime and network operations that migration uses.
+- [internal/api/SPEC.md](../../api/SPEC.md) owns the control routes.
+- [cmd/metald/SPEC.md](../../../cmd/metald/SPEC.md) wires the VM manager, migration manager, guard, and transfer listener.

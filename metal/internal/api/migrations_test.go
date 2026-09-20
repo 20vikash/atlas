@@ -9,46 +9,46 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/vm"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
 type stubMigrationManager struct {
-	record           vmmigration.TargetMigrationRecord
-	createErr        error
-	statusErr        error
-	abortErr         error
-	handshake        vmmigration.SourceHandshake
-	lockErr          error
-	unlockErr        error
-	snapshot         vmmigration.SourceSnapshot
-	snapshotErr      error
-	createArgs       []string
-	lockArgs         []string
-	unlockArgs       []string
-	snapshotArgs     []string
-	streamArgs       []string
-	streamSequence   int
-	streamResume     string
-	streamThroughput int
-	abortedID        string
-	finishedID       string
-	finishErr        error
-	receivedSequence int
-	stopReceived     int
-	stopArgs         []string
-	stopErr          error
-	startArgs        []string
-	startErr         error
-	destroyArgs      []string
-	destroyErr       error
+	record            migration.TargetProgress
+	createErr         error
+	statusErr         error
+	abortErr          error
+	sourceDescription migration.SourceDescription
+	lockErr           error
+	unlockErr         error
+	snapshot          migration.SourceSnapshot
+	snapshotErr       error
+	createArgs        []string
+	lockArgs          []string
+	unlockArgs        []string
+	snapshotArgs      []string
+	streamArgs        []string
+	streamSequence    int
+	streamResume      string
+	streamThroughput  int
+	abortedID         string
+	finishedID        string
+	finishErr         error
+	receivedSequence  int
+	stopReceived      int
+	stopArgs          []string
+	stopErr           error
+	startArgs         []string
+	startErr          error
+	destroyArgs       []string
+	destroyErr        error
 }
 
-func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source string) (vmmigration.TargetMigrationRecord, error) {
+func (m *stubMigrationManager) CreateTarget(_ context.Context, migrationID, virtualMachineID, source string) (migration.TargetProgress, error) {
 	m.createArgs = []string{migrationID, virtualMachineID, source}
 	return m.record, m.createErr
 }
 
-func (m *stubMigrationManager) TargetStatus(context.Context, string) (vmmigration.TargetMigrationRecord, error) {
+func (m *stubMigrationManager) TargetStatus(context.Context, string) (migration.TargetProgress, error) {
 	return m.record, m.statusErr
 }
 
@@ -62,12 +62,12 @@ func (m *stubMigrationManager) AbortTarget(_ context.Context, migrationID string
 	return m.abortErr
 }
 
-func (m *stubMigrationManager) LockSource(_ context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error) {
+func (m *stubMigrationManager) LockSource(_ context.Context, migrationID, virtualMachineID string) (migration.SourceDescription, error) {
 	m.lockArgs = []string{migrationID, virtualMachineID}
-	return m.handshake, m.lockErr
+	return m.sourceDescription, m.lockErr
 }
 
-func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error) {
+func (m *stubMigrationManager) NextSourceSnapshot(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (migration.SourceSnapshot, error) {
 	m.receivedSequence = receivedSequence
 	m.snapshotArgs = []string{migrationID, virtualMachineID}
 	return m.snapshot, m.snapshotErr
@@ -81,7 +81,7 @@ func (m *stubMigrationManager) StartSourceStream(_ context.Context, migrationID,
 	return m.startErr
 }
 
-func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error) {
+func (m *stubMigrationManager) StopSource(_ context.Context, migrationID, virtualMachineID string, receivedSequence int) (migration.SourceSnapshot, error) {
 	m.stopArgs = []string{migrationID, virtualMachineID}
 	m.stopReceived = receivedSequence
 	return m.snapshot, m.stopErr
@@ -141,7 +141,7 @@ func newCoordinationTestServer(t *testing.T, migrations MigrationManager) http.H
 }
 
 func TestCreateMigrationDrivesTheTarget(t *testing.T) {
-	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationRunning, Phase: vmmigration.PhasePreparing}}
+	stub := &stubMigrationManager{record: migration.TargetProgress{ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusRunning, Phase: migration.PhasePreparing}}
 	server := newMigrationTestServer(t, stub)
 
 	body := `{"virtual_machine_id":"vm-1","source":"https://10.0.0.3:9000"}`
@@ -165,7 +165,7 @@ func TestCreateMigrationRejectsAMissingField(t *testing.T) {
 }
 
 func TestGetAndAbortMigration(t *testing.T) {
-	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationReady, Phase: vmmigration.PhaseCopying}}
+	stub := &stubMigrationManager{record: migration.TargetProgress{ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusReady, Phase: migration.PhaseCopying}}
 	wakeCalls := 0
 	server := newMigrationTestServerWithWake(t, stub, func() { wakeCalls++ })
 
@@ -189,9 +189,9 @@ func TestGetAndAbortMigration(t *testing.T) {
 
 func TestGetMigrationReportsTransferProgress(t *testing.T) {
 	finishedAt := time.Date(2026, time.September, 20, 12, 0, 42, 0, time.UTC)
-	stub := &stubMigrationManager{record: vmmigration.TargetMigrationRecord{
-		ID: "mig-1", VirtualMachineID: "vm-1", Status: vmmigration.MigrationRunning, Phase: vmmigration.PhaseCopying,
-		Intervals: []vmmigration.IntervalProgress{
+	stub := &stubMigrationManager{record: migration.TargetProgress{
+		ID: "mig-1", VirtualMachineID: "vm-1", Status: migration.StatusRunning, Phase: migration.PhaseCopying,
+		Intervals: []migration.TransferProgress{
 			{Sequence: 1, StartedAt: time.Date(2026, time.September, 20, 12, 0, 0, 0, time.UTC), FinishedAt: finishedAt, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, Completed: true},
 			{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024, ThroughputMiBps: 64},
 		},
@@ -223,8 +223,8 @@ func TestGetMigrationReportsTransferProgress(t *testing.T) {
 }
 
 func TestPrepareMigrationSourceLocksTheSource(t *testing.T) {
-	stub := &stubMigrationManager{handshake: vmmigration.SourceHandshake{
-		Config:        vmmigration.PortableConfig{VirtualMachineID: "vm-00001"},
+	stub := &stubMigrationManager{sourceDescription: migration.SourceDescription{
+		Definition:    migration.VirtualMachineDefinition{VirtualMachineID: "vm-00001"},
 		ObservedState: vm.StateRunning,
 	}}
 	server := newCoordinationTestServer(t, stub)
@@ -234,11 +234,11 @@ func TestPrepareMigrationSourceLocksTheSource(t *testing.T) {
 	if want := []string{"mig-1", "vm-00001"}; !equalStrings(stub.lockArgs, want) {
 		t.Fatalf("lock args = %v", stub.lockArgs)
 	}
-	var response migrationSourceResponse
+	var response migration.SourceDescription
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Config.VirtualMachineID != "vm-00001" || response.ObservedState != vm.StateRunning {
+	if response.Definition.VirtualMachineID != "vm-00001" || response.ObservedState != vm.StateRunning {
 		t.Fatalf("response = %+v", response)
 	}
 }
@@ -250,7 +250,7 @@ func TestPrepareMigrationSourceRequiresTheVirtualMachineID(t *testing.T) {
 }
 
 func TestCreateMigrationSnapshotReturnsTheNextSnapshot(t *testing.T) {
-	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 2, SizeBytes: 1048576, GUID: "g2"}}
+	stub := &stubMigrationManager{snapshot: migration.SourceSnapshot{Sequence: 2, SizeBytes: 1048576, GUID: "g2"}}
 	server := newCoordinationTestServer(t, stub)
 
 	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/snapshot?virtual_machine_id=vm-00001", `{"received_sequence":1}`, http.StatusOK)
@@ -261,7 +261,7 @@ func TestCreateMigrationSnapshotReturnsTheNextSnapshot(t *testing.T) {
 	if want := []string{"mig-1", "vm-00001"}; !equalStrings(stub.snapshotArgs, want) {
 		t.Fatalf("snapshot args = %v", stub.snapshotArgs)
 	}
-	var response snapshotResponse
+	var response migration.SourceSnapshot
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
@@ -271,12 +271,19 @@ func TestCreateMigrationSnapshotReturnsTheNextSnapshot(t *testing.T) {
 }
 
 func TestCreateMigrationSnapshotAcceptsNoBody(t *testing.T) {
-	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 1}}
+	stub := &stubMigrationManager{snapshot: migration.SourceSnapshot{Sequence: 1}}
 	server := newCoordinationTestServer(t, stub)
 
 	do(t, server, http.MethodPost, "/v1/migrations/mig-1/snapshot?virtual_machine_id=vm-00001", "", http.StatusOK)
 	if stub.receivedSequence != 0 {
 		t.Fatalf("received %d, want 0", stub.receivedSequence)
+	}
+}
+
+func TestSourceRoutesRejectANegativeAcknowledgement(t *testing.T) {
+	server := newCoordinationTestServer(t, &stubMigrationManager{})
+	for _, suffix := range []string{"snapshot", "stop"} {
+		do(t, server, http.MethodPost, "/v1/migrations/mig-1/"+suffix+"?virtual_machine_id=vm-00001", `{"received_sequence":-1}`, http.StatusBadRequest)
 	}
 }
 
@@ -302,7 +309,7 @@ func TestStartMigrationStreamPassesTheTransferRequest(t *testing.T) {
 }
 
 func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
-	stub := &stubMigrationManager{snapshot: vmmigration.SourceSnapshot{Sequence: 3, SizeBytes: 2048, GUID: "final"}}
+	stub := &stubMigrationManager{snapshot: migration.SourceSnapshot{Sequence: 3, SizeBytes: 2048, GUID: "final"}}
 	server := newCoordinationTestServer(t, stub)
 
 	recorder := do(t, server, http.MethodPost, "/v1/migrations/mig-1/stop?virtual_machine_id=vm-00001", `{"received_sequence":2}`, http.StatusOK)
@@ -313,7 +320,7 @@ func TestStopMigrationSourceReturnsFinalSnapshot(t *testing.T) {
 	if stub.stopReceived != 2 {
 		t.Fatalf("stop received sequence = %d, want 2", stub.stopReceived)
 	}
-	var response snapshotResponse
+	var response migration.SourceSnapshot
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}

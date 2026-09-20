@@ -2,13 +2,13 @@ package host
 
 import (
 	"context"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"runtime"
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
 type testHostDependencies struct {
@@ -84,8 +84,8 @@ func TestCapacitySubtractsMigrationReservations(t *testing.T) {
 	dependencies := &testHostDependencies{
 		virtualMachines: []vm.Information{{ID: "vm-00001", State: vm.StateRunning, CPUMillicores: 1500}},
 	}
-	reservations := func(context.Context) ([]vmmigration.TargetReservation, error) {
-		return []vmmigration.TargetReservation{{VirtualMachineID: "vm-00002", CPUMillicores: 2500, MemoryMiB: 1024, DiskMiB: 2048}}, nil
+	reservations := func(context.Context) ([]migration.TargetReservation, error) {
+		return []migration.TargetReservation{{VirtualMachineID: "vm-00002", CPUMillicores: 2500, MemoryMiB: 1024, DiskMiB: 2048}}, nil
 	}
 	service, err := NewService(Dependencies{
 		Mesh: dependencies, WireGuard: dependencies, Images: dependencies,

@@ -32,7 +32,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
 const (
@@ -316,7 +316,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconciler.ImageConfig{Logger: logger},
 	)
 	var migrationReconciler *reconciler.MigrationReconciler
-	var migrationManager *vmmigration.VMMigration
+	var migrationManager *migration.Manager
 	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
@@ -324,7 +324,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			migrationReconciler.Wake()
 		}
 	}
-	migrationReservations := func(ctx context.Context) ([]vmmigration.TargetReservation, error) {
+	migrationReservations := func(ctx context.Context) ([]migration.TargetReservation, error) {
 		if migrationManager == nil {
 			return nil, nil
 		}
@@ -338,19 +338,19 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
-	migrationCapacity := func(ctx context.Context) (vmmigration.AvailableCapacity, error) {
+	migrationCapacity := func(ctx context.Context) (migration.AvailableCapacity, error) {
 		capacity, err := hostService.Capacity(ctx)
 		if err != nil {
-			return vmmigration.AvailableCapacity{}, err
+			return migration.AvailableCapacity{}, err
 		}
-		return vmmigration.AvailableCapacity{
+		return migration.AvailableCapacity{
 			MemoryMiB:  capacity.AvailableMemoryMiB,
 			StorageMiB: capacity.AvailableStorageMiB,
 		}, nil
 	}
-	migrationManager, err = vmmigration.NewVMMigration(
-		virtualMachineManager,
-		vmmigration.NewSourceClient(0, tlsConfigurations.client),
+	migrationManager, err = migration.NewManager(
+		vm.NewMigrationHost(virtualMachineManager),
+		migration.NewSourceClient(0, tlsConfigurations.client),
 		storage.NewMigrationTransfer(stores.Pool, storage.MigrationTLSConfig{
 			CAFile: options.tls.caFile, CertificateFile: options.tls.certificateFile,
 			PrivateKeyFile: options.tls.privateKeyFile,
@@ -358,7 +358,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			TransferPort:   options.migration.transferPort,
 		}),
 		migrationCapacity,
-		vmmigration.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
+		options.migration.finalDeltaMiB,
 		logger,
 	)
 	if err != nil {

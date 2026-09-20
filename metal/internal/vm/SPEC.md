@@ -60,7 +60,7 @@ The phase and operation ID are written before each host call. A failure stores a
 
 ## Migration
 
-The migration lifecycle lives in [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md). This package supports migration without importing that package.
+The migration lifecycle lives in [internal/vm/migration/SPEC.md](migration/SPEC.md). This package supports migration without importing that package.
 
 The manager exposes the operations migration needs: VM records, ID allocation, locks, storage release, and migration runtime and network operations. These operations stop the source, create the target network, apply state with a cold start, remove the target runtime, and limit or refresh the source disk.
 
@@ -79,4 +79,4 @@ The manager reads migration lock state through an injected `MigrationGuard`. A s
 - [internal/network/SPEC.md](../network/SPEC.md) implements `Network`.
 - [internal/network/traffic/SPEC.md](../network/traffic/SPEC.md) owns packet tracking.
 - [internal/reconciler/SPEC.md](../reconciler/SPEC.md) drives reconciliation and traffic events.
-- [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md) owns the migration lifecycle this package supports.
+- [internal/vm/migration/SPEC.md](migration/SPEC.md) owns the migration lifecycle this package supports.

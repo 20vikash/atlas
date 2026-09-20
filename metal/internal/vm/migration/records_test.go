@@ -1,8 +1,7 @@
-package vmmigration
+package migration
 
 import (
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,13 +10,12 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-func newTargetRecord() TargetMigrationRecord {
-	return TargetMigrationRecord{
+func newTargetRecord() targetRecord {
+	return targetRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
 		Source:           "https://10.0.0.3:9000",
-		Status:           MigrationRunning,
-		Phase:            PhasePreparing,
+		State:            targetPreparing,
 		CreatedAt:        time.Now().UTC(),
 	}
 }
@@ -25,9 +23,7 @@ func newTargetRecord() TargetMigrationRecord {
 func TestTargetRecordRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	record := newTargetRecord()
-	record.Config = &PortableConfig{VirtualMachineID: "vm-1", Specification: vm.Specification{CPUMillicores: 2000, MemoryMiB: 2048}}
-	record.UserID = 100001
-	record.GroupID = 100001
+	record.Definition = &VirtualMachineDefinition{VirtualMachineID: "vm-1", Specification: vm.Specification{CPUMillicores: 2000, MemoryMiB: 2048}}
 
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
@@ -36,7 +32,7 @@ func TestTargetRecordRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "mig-1" || got.Config == nil || got.Config.Specification.MemoryMiB != 2048 || got.UserID != 100001 {
+	if got.ID != "mig-1" || got.Definition == nil || got.Definition.Specification.MemoryMiB != 2048 {
 		t.Fatalf("target record = %+v", got)
 	}
 }
@@ -44,8 +40,7 @@ func TestTargetRecordRoundTrips(t *testing.T) {
 func TestTerminalRecordNeedsNoPhase(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	record := newTargetRecord()
-	record.Status = MigrationCompleted
-	record.Phase = ""
+	record.State = targetCompleted
 	record.FinishedAt = time.Now().UTC()
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
@@ -54,20 +49,20 @@ func TestTerminalRecordNeedsNoPhase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a completed record with no phase must read back: %v", err)
 	}
-	if got.Status != MigrationCompleted || got.Phase != "" {
+	if got.State != targetCompleted {
 		t.Fatalf("record = %+v", got)
 	}
 }
 
-func TestRunningRecordRequiresAPhase(t *testing.T) {
+func TestTargetRecordRequiresAState(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
 	record := newTargetRecord()
-	record.Phase = ""
+	record.State = ""
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.readTarget("vm-1"); err == nil {
-		t.Fatal("a running record with no phase must be rejected")
+		t.Fatal("a target record with no state must be rejected")
 	}
 }
 
@@ -76,20 +71,19 @@ func TestTransferStateRoundTrips(t *testing.T) {
 	startedAt := time.Now().UTC().Add(-42 * time.Second)
 	finishedAt := time.Now().UTC()
 	target := newTargetRecord()
-	target.Phase = PhaseCopying
+	target.State = targetCopying
 	target.SourceObservedState = vm.StateRunning
 	target.CopyStartedAt = time.Now().UTC()
-	target.ActiveSequence = 2
-	target.Intervals = []IntervalProgress{
+	target.Intervals = []TransferProgress{
 		{Sequence: 1, StartedAt: startedAt, FinishedAt: finishedAt, DurationSeconds: 42, BytesTransferred: 1024, TotalBytes: 1024, GUID: "g1", Completed: true},
 		{Sequence: 2, BytesTransferred: 256, TotalBytes: 1024},
 	}
 	if err := store.writeTarget(target); err != nil {
 		t.Fatal(err)
 	}
-	source := SourceMigrationRecord{
+	source := sourceRecord{
 		ID: "mig-1", VirtualMachineID: "vm-2",
-		Sequence: 2, AcknowledgedSequence: 1,
+		State: sourceLocked, Sequence: 2, AcknowledgedSequence: 1,
 	}
 	if err := store.writeSource(source); err != nil {
 		t.Fatal(err)
@@ -99,7 +93,7 @@ func TestTransferStateRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotTarget.ActiveSequence != 2 || len(gotTarget.Intervals) != 2 || !gotTarget.Intervals[0].Completed || !gotTarget.Intervals[0].FinishedAt.Equal(finishedAt) {
+	if len(gotTarget.Intervals) != 2 || !gotTarget.Intervals[0].Completed || !gotTarget.Intervals[0].FinishedAt.Equal(finishedAt) {
 		t.Fatalf("target = %+v", gotTarget)
 	}
 	gotSource, err := store.readSource("vm-2")
@@ -113,11 +107,11 @@ func TestTransferStateRoundTrips(t *testing.T) {
 
 func TestSourceRecordRoundTrips(t *testing.T) {
 	store := newMigrationStore(t.TempDir())
-	record := SourceMigrationRecord{
+	record := sourceRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
 		OriginalDesired:  vm.StateRunning,
-		OriginalObserved: vm.StateRunning,
+		State:            sourceLocked,
 		LastContactAt:    time.Now().UTC(),
 	}
 	if err := store.writeSource(record); err != nil {
@@ -154,7 +148,7 @@ func TestListVirtualMachineIDsFindsTargetAndSource(t *testing.T) {
 	if err := store.writeTarget(newTargetRecord()); err != nil {
 		t.Fatal(err)
 	}
-	source := SourceMigrationRecord{ID: "mig-2", VirtualMachineID: "vm-2"}
+	source := sourceRecord{ID: "mig-2", VirtualMachineID: "vm-2", State: sourceLocked}
 	if err := store.writeSource(source); err != nil {
 		t.Fatal(err)
 	}
@@ -167,23 +161,23 @@ func TestListVirtualMachineIDsFindsTargetAndSource(t *testing.T) {
 	}
 }
 
-func TestDropUnreadableRecordsRemovesACorruptRecord(t *testing.T) {
+func TestValidateRejectsACorruptRecord(t *testing.T) {
 	directory := t.TempDir()
 	migrationDirectory := filepath.Join(directory, "vm-1", migrationSubdirectory)
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	// A record missing required fields cannot drive a migration.
-	if err := os.WriteFile(filepath.Join(migrationDirectory, targetFileName), []byte(`{"schema_version":1,"id":"mig-1"}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(migrationDirectory, targetFileName), []byte(`{"schema_version":2,"id":"mig-1"}`), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	store := newMigrationStore(directory)
 
-	if err := store.dropUnreadableRecords(slog.New(slog.DiscardHandler)); err != nil {
-		t.Fatalf("startup cleanup failed instead of removing the record: %v", err)
+	if err := store.validate(); err == nil {
+		t.Fatal("startup accepted a corrupt migration record")
 	}
-	if store.has(store.targetPath("vm-1")) {
-		t.Fatal("the corrupt migration record was not removed at startup")
+	if !store.has(store.targetPath("vm-1")) {
+		t.Fatal("startup removed the corrupt migration record")
 	}
 }
 
@@ -193,7 +187,7 @@ func TestReadTargetRejectsAnUnknownField(t *testing.T) {
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"schema_version":1,"id":"mig-1","virtual_machine_id":"vm-1","source":"x","status":"running","phase":"preparing","created_at":"2026-01-01T00:00:00Z","caller":"gone"}`
+	body := `{"schema_version":2,"id":"mig-1","virtual_machine_id":"vm-1","source":"x","state":"preparing","created_at":"2026-01-01T00:00:00Z","caller":"gone"}`
 	if err := os.WriteFile(filepath.Join(migrationDirectory, targetFileName), []byte(body), 0o640); err != nil {
 		t.Fatal(err)
 	}

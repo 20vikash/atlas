@@ -1,4 +1,4 @@
-package vmmigration
+package migration
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 )
 
 // writeSourceRecord sets up a source lock for transfer tests.
-func writeSourceRecord(t *testing.T, machines *fakeMachines) {
+func writeSourceRecord(t *testing.T, machines *fakeMigrationHost) {
 	t.Helper()
-	store := newMigrationStore(machines.MachinesDirectory())
-	record := SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1"}
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
+	record := sourceRecord{ID: "mig-1", VirtualMachineID: "vm-1", State: sourceLocked}
 	if err := store.writeSource(record); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func writeSourceRecord(t *testing.T, machines *fakeMachines) {
 
 func TestNextSourceSnapshotWalksSequences(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.guid = "g"
 	transfer.sizeBytes = 1000
 	writeSourceRecord(t, machines)
@@ -51,7 +51,7 @@ func TestNextSourceSnapshotWalksSequences(t *testing.T) {
 
 func TestNextSourceSnapshotIsIdempotent(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	writeSourceRecord(t, machines)
 	ctx := context.Background()
 
@@ -77,11 +77,28 @@ func TestNextSourceSnapshotRejectsAnotherMigration(t *testing.T) {
 	}
 }
 
+func TestSourceRejectsInvalidAcknowledgedSequence(t *testing.T) {
+	migrationManager, machines, _ := newMigrationManager(t)
+	writeSourceRecord(t, machines)
+	if _, err := migrationManager.NextSourceSnapshot(t.Context(), "mig-1", "vm-1", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, receivedSequence := range []int{-1, 2} {
+		if _, err := migrationManager.NextSourceSnapshot(t.Context(), "mig-1", "vm-1", receivedSequence); !errors.Is(err, vm.ErrConflict) {
+			t.Errorf("next snapshot sequence %d = %v, want ErrConflict", receivedSequence, err)
+		}
+		if _, err := migrationManager.StopSource(t.Context(), "mig-1", "vm-1", receivedSequence); !errors.Is(err, vm.ErrConflict) {
+			t.Errorf("stop source sequence %d = %v, want ErrConflict", receivedSequence, err)
+		}
+	}
+}
+
 func TestStartSourceStreamRejectsAnUnknownSequence(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
-	store := newMigrationStore(machines.MachinesDirectory())
-	if err := store.writeSource(SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Sequence: 2}); err != nil {
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
+	if err := store.writeSource(sourceRecord{ID: "mig-1", VirtualMachineID: "vm-1", State: sourceLocked, Sequence: 2}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -97,14 +114,59 @@ func TestStartSourceStreamRejectsAnUnknownSequence(t *testing.T) {
 	}
 }
 
+func TestUnlockWaitsUntilAStartingStreamIsRegistered(t *testing.T) {
+	host := newFakeMigrationHost(t)
+	host.operationCalls = make(chan string, 2)
+	serverRelease := make(chan struct{})
+	storage := &fakeMigrationStorage{sendStarted: make(chan struct{}), serverRelease: serverRelease}
+	manager, err := newManager(host, &fakeSourceOperations{}, storage, ampleCapacity, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.store.writeSource(sourceRecord{
+		ID: "mig-1", VirtualMachineID: "vm-1", State: sourceLocked, Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	streamResult := make(chan error, 1)
+	go func() {
+		streamResult <- manager.StartSourceStream(t.Context(), "mig-1", "vm-1", 1, "", 0)
+	}()
+	<-host.operationCalls
+	<-storage.sendStarted
+
+	unlockResult := make(chan error, 1)
+	go func() {
+		unlockResult <- manager.UnlockSource(t.Context(), "mig-1", "vm-1")
+	}()
+	<-host.operationCalls
+	select {
+	case err := <-unlockResult:
+		t.Fatalf("unlock passed the starting stream: %v", err)
+	default:
+	}
+
+	close(serverRelease)
+	if err := <-streamResult; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-unlockResult; err != nil {
+		t.Fatal(err)
+	}
+	if manager.IsSourceLocked("vm-1") {
+		t.Fatal("source remained locked")
+	}
+}
+
 // seedSourceVM creates a source VM and lock with the given observed state.
-func seedSourceVM(t *testing.T, migrationManager *VMMigration, machines *fakeMachines, state vm.State, acknowledged int) {
+func seedSourceVM(t *testing.T, migrationManager *Manager, machines *fakeMigrationHost, state vm.State, acknowledged int) {
 	t.Helper()
 	machines.create("vm-1", testSpecification())
 	setObservedState(t, machines, "vm-1", state)
-	record := SourceMigrationRecord{
+	record := sourceRecord{
 		ID: "mig-1", VirtualMachineID: "vm-1",
-		Sequence: acknowledged, AcknowledgedSequence: acknowledged,
+		State: sourceLocked, Sequence: acknowledged, AcknowledgedSequence: acknowledged,
 	}
 	if err := migrationManager.store.writeSource(record); err != nil {
 		t.Fatal(err)
@@ -113,7 +175,7 @@ func seedSourceVM(t *testing.T, migrationManager *VMMigration, machines *fakeMac
 
 func TestStopSourceStopsAndCreatesFinalSnapshot(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.guid = "final-guid"
 	transfer.sizeBytes = 500
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 2)
@@ -142,7 +204,7 @@ func TestStopSourceStopsAndCreatesFinalSnapshot(t *testing.T) {
 
 func TestStopSourceAcknowledgesTheLastReceivedSnapshot(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.guid = "final-guid"
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 2)
 
@@ -179,7 +241,7 @@ func TestStopSourceRejectsASequenceTheSourceDidNotCreate(t *testing.T) {
 
 func TestStopSourceIsIdempotent(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 0)
 	ctx := context.Background()
 
@@ -223,11 +285,11 @@ func TestStartSourceStreamAppliesDiskLimit(t *testing.T) {
 
 func TestStartSourceStreamRejectsASecondHostStreamBeforeChangingItsDiskLimit(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.sendHang = true
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 1)
-	if err := migrationManager.store.writeSource(SourceMigrationRecord{
-		ID: "mig-2", VirtualMachineID: "vm-2", Sequence: 1,
+	if err := migrationManager.store.writeSource(sourceRecord{
+		ID: "mig-2", VirtualMachineID: "vm-2", State: sourceLocked, Sequence: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +310,7 @@ func TestStartSourceStreamRejectsASecondHostStreamBeforeChangingItsDiskLimit(t *
 
 func TestShutdownStopsAnActiveSourceStream(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	transfer.sendHang = true
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 1)
 
@@ -267,7 +329,7 @@ func TestShutdownStopsAnActiveSourceStream(t *testing.T) {
 
 func TestUnlockSourceRemovesSnapshotsAndRestoresDiskLimit(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 2)
 	record, _ := migrationManager.store.readSource("vm-1")
 	record.TemporaryDiskLimitMiBps = 32
@@ -293,7 +355,7 @@ func TestUnlockSourceRefusesAStoppedSourceBeforeRollback(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	seedSourceVM(t, migrationManager, machines, vm.StateRunning, 1)
 	record, _ := migrationManager.store.readSource("vm-1")
-	record.Stopped = true
+	record.State = sourceStopped
 	if err := migrationManager.store.writeSource(record); err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +368,7 @@ func TestStartSourceRollbackRestoresNetworkAndState(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	seedSourceVM(t, migrationManager, machines, vm.StateStopped, 1)
 	record, _ := migrationManager.store.readSource("vm-1")
-	record.Stopped = true
+	record.State = sourceStopped
 	record.OriginalDesired = vm.StateRunning
 	if err := migrationManager.store.writeSource(record); err != nil {
 		t.Fatal(err)
@@ -319,7 +381,7 @@ func TestStartSourceRollbackRestoresNetworkAndState(t *testing.T) {
 		t.Fatalf("ensure network = %d, restore state = %d", machines.ensureNetworkCalls, machines.restoreCalls)
 	}
 	restored, _ := migrationManager.store.readSource("vm-1")
-	if !restored.RollbackComplete {
+	if restored.State != sourceRestored {
 		t.Fatal("rollback checkpoint was not written")
 	}
 }
@@ -328,8 +390,7 @@ func TestDestroySourceDestroysAndRemoves(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	seedSourceVM(t, migrationManager, machines, vm.StateStopped, 1)
 	record, _ := migrationManager.store.readSource("vm-1")
-	record.Stopped = true
-	record.NetworkRemoved = true
+	record.State = sourceDetached
 	record.FinalSequence = 1
 	if err := migrationManager.store.writeSource(record); err != nil {
 		t.Fatal(err)
@@ -382,27 +443,27 @@ func equalStringSlices(got, want []string) bool {
 	return true
 }
 
-func setObservedState(t *testing.T, machines *fakeMachines, virtualMachineID string, state vm.State) {
+func setObservedState(t *testing.T, machines *fakeMigrationHost, virtualMachineID string, state vm.State) {
 	t.Helper()
 	machines.observed[virtualMachineID] = vm.ObservedRecord{State: state, Generation: 1, UpdatedAt: time.Now().UTC()}
 }
 
-func TestLockSourceReturnsPortableConfigAndLocks(t *testing.T) {
+func TestLockSourceReturnsVirtualMachineDefinitionAndLocks(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
 	ctx := context.Background()
 	machines.create("vm-1", testSpecification())
 	setObservedState(t, machines, "vm-1", vm.StateRunning)
 
-	handshake, err := migrationManager.LockSource(ctx, "mig-1", "vm-1")
+	description, err := migrationManager.LockSource(ctx, "mig-1", "vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if handshake.ObservedState != vm.StateRunning {
-		t.Fatalf("observed = %s", handshake.ObservedState)
+	if description.ObservedState != vm.StateRunning {
+		t.Fatalf("observed = %s", description.ObservedState)
 	}
-	if handshake.Config.VirtualMachineID != "vm-1" || handshake.Config.CreateFingerprint == "" ||
-		handshake.Config.Specification.MemoryMiB != 2048 {
-		t.Fatalf("config = %+v", handshake.Config)
+	if description.Definition.VirtualMachineID != "vm-1" || description.Definition.CreateFingerprint == "" ||
+		description.Definition.Specification.MemoryMiB != 2048 {
+		t.Fatalf("definition = %+v", description.Definition)
 	}
 	if !migrationManager.IsSourceLocked("vm-1") {
 		t.Fatal("VM was not source locked")
@@ -470,12 +531,12 @@ func TestUnlockSourceClearsTheLock(t *testing.T) {
 }
 
 // expirableSourceRecord returns a pre-stop lock that has been idle past the timeout.
-func expirableSourceRecord(manager *VMMigration, virtualMachineID string) SourceMigrationRecord {
-	return SourceMigrationRecord{
+func expirableSourceRecord(manager *Manager, virtualMachineID string) sourceRecord {
+	return sourceRecord{
 		ID:               "mig-idle",
 		VirtualMachineID: virtualMachineID,
 		OriginalDesired:  vm.StateRunning,
-		OriginalObserved: vm.StateRunning,
+		State:            sourceLocked,
 		LastContactAt:    manager.now().Add(-sourceIdleTimeout - time.Minute),
 	}
 }
@@ -505,7 +566,7 @@ func TestExpireSourceReleasesAnIdlePreStopLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stored.Expired {
+	if stored.State != sourceExpired {
 		t.Fatal("the tombstone must stay on disk")
 	}
 }
@@ -514,7 +575,7 @@ func TestExpireSourceKeepsAStoppedSource(t *testing.T) {
 	manager, _, _ := newMigrationManager(t)
 	record := expirableSourceRecord(manager, "vm-1")
 	// The target may have started a stopped source VM.
-	record.Stopped = true
+	record.State = sourceStopped
 	if err := manager.store.writeSource(record); err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +613,7 @@ func TestExpireSourceKeepsALockWithBytesInFlight(t *testing.T) {
 	}
 	// An active stream keeps an otherwise idle lock alive.
 	manager.sourceStreamsMutex.Lock()
-	manager.sourceStreams["vm-1"] = &transferHandle{cancel: func() {}, done: make(chan struct{})}
+	manager.sourceStreams["vm-1"] = &backgroundOperation{cancel: func() {}, done: make(chan struct{})}
 	manager.sourceStreamsMutex.Unlock()
 
 	expirable, err := manager.ExpiredSourceVirtualMachineIDs(context.Background())
@@ -569,7 +630,7 @@ func TestATombstoneRefusesItsOwnMigrationAndAcceptsANewOne(t *testing.T) {
 	machines.create("vm-1", testSpecification())
 	setObservedState(t, machines, "vm-1", vm.StateRunning)
 	record := expirableSourceRecord(manager, "vm-1")
-	record.Expired = true
+	record.State = sourceExpired
 	if err := manager.store.writeSource(record); err != nil {
 		t.Fatal(err)
 	}
@@ -580,6 +641,9 @@ func TestATombstoneRefusesItsOwnMigrationAndAcceptsANewOne(t *testing.T) {
 	if _, err := manager.StopSource(context.Background(), "mig-idle", "vm-1", 0); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("stop against a tombstone = %v, want a conflict", err)
 	}
+	if err := manager.UnlockSource(context.Background(), "mig-idle", "vm-1"); !errors.Is(err, vm.ErrConflict) {
+		t.Fatalf("unlock against a tombstone = %v, want a conflict", err)
+	}
 
 	if _, err := manager.LockSource(context.Background(), "mig-new", "vm-1"); err != nil {
 		t.Fatalf("a new migration must replace the tombstone: %v", err)
@@ -588,7 +652,7 @@ func TestATombstoneRefusesItsOwnMigrationAndAcceptsANewOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ID != "mig-new" || stored.Expired {
+	if stored.ID != "mig-new" || stored.State == sourceExpired {
 		t.Fatalf("stored = %+v", stored)
 	}
 }

@@ -1,4 +1,4 @@
-package vmmigration
+package migration
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-// fakeMachines implements Machines with in-memory records and call counters.
-type fakeMachines struct {
+// fakeMigrationHost implements migrationHost with in-memory records and call counters.
+type fakeMigrationHost struct {
 	dir      string
 	desired  map[string]vm.DesiredRecord
 	observed map[string]vm.ObservedRecord
@@ -23,6 +23,8 @@ type fakeMachines struct {
 	nextUserID      uint32
 	limitDiskCap    int
 	allocationMutex sync.Mutex
+	operationLocks  vm.KeyedLocks
+	operationCalls  chan string
 
 	normalizeCalls      int
 	removeNetworkCalls  int
@@ -38,9 +40,9 @@ type fakeMachines struct {
 	applyStateError error
 }
 
-func newFakeMachines(t *testing.T) *fakeMachines {
+func newFakeMigrationHost(t *testing.T) *fakeMigrationHost {
 	t.Helper()
-	return &fakeMachines{
+	return &fakeMigrationHost{
 		dir:        t.TempDir(),
 		desired:    make(map[string]vm.DesiredRecord),
 		observed:   make(map[string]vm.ObservedRecord),
@@ -49,7 +51,7 @@ func newFakeMachines(t *testing.T) *fakeMachines {
 }
 
 // create seeds a running source VM with a valid create fingerprint.
-func (f *fakeMachines) create(id string, specification vm.Specification) {
+func (f *fakeMigrationHost) create(id string, specification vm.Specification) {
 	f.desired[id] = vm.DesiredRecord{
 		ID:                id,
 		UserID:            1000,
@@ -62,7 +64,7 @@ func (f *fakeMachines) create(id string, specification vm.Specification) {
 	f.observed[id] = vm.ObservedRecord{State: vm.StateUnknown, UpdatedAt: time.Now().UTC()}
 }
 
-func (f *fakeMachines) ReadDesired(virtualMachineID string) (vm.DesiredRecord, error) {
+func (f *fakeMigrationHost) ReadDesired(virtualMachineID string) (vm.DesiredRecord, error) {
 	record, ok := f.desired[virtualMachineID]
 	if !ok {
 		return vm.DesiredRecord{}, vm.ErrNotFound
@@ -70,7 +72,7 @@ func (f *fakeMachines) ReadDesired(virtualMachineID string) (vm.DesiredRecord, e
 	return record, nil
 }
 
-func (f *fakeMachines) ReadObserved(virtualMachineID string) (vm.ObservedRecord, error) {
+func (f *fakeMigrationHost) ReadObserved(virtualMachineID string) (vm.ObservedRecord, error) {
 	record, ok := f.observed[virtualMachineID]
 	if !ok {
 		return vm.ObservedRecord{}, vm.ErrNotFound
@@ -78,88 +80,91 @@ func (f *fakeMachines) ReadObserved(virtualMachineID string) (vm.ObservedRecord,
 	return record, nil
 }
 
-func (f *fakeMachines) WriteDesired(record vm.DesiredRecord) error {
+func (f *fakeMigrationHost) WriteDesired(record vm.DesiredRecord) error {
 	f.desired[record.ID] = record
 	return nil
 }
 
-func (f *fakeMachines) WriteObserved(virtualMachineID string, record vm.ObservedRecord) error {
+func (f *fakeMigrationHost) WriteObserved(virtualMachineID string, record vm.ObservedRecord) error {
 	f.observed[virtualMachineID] = record
 	return nil
 }
 
-func (f *fakeMachines) RemoveRecords(virtualMachineID string) error {
+func (f *fakeMigrationHost) RemoveVirtualMachineRecords(virtualMachineID string) error {
 	delete(f.desired, virtualMachineID)
 	delete(f.observed, virtualMachineID)
 	return nil
 }
 
-func (f *fakeMachines) DesiredPath(virtualMachineID string) string {
+func (f *fakeMigrationHost) DesiredPath(virtualMachineID string) string {
 	return filepath.Join(f.dir, virtualMachineID, "config.json")
 }
 
-func (f *fakeMachines) ObservedPath(virtualMachineID string) string {
+func (f *fakeMigrationHost) ObservedPath(virtualMachineID string) string {
 	return filepath.Join(f.dir, virtualMachineID, "status.json")
 }
 
-func (f *fakeMachines) AllocateUserID() (uint32, error) {
+func (f *fakeMigrationHost) AllocateUserID() (uint32, error) {
 	userID := f.nextUserID
 	f.nextUserID++
 	return userID, nil
 }
 
-func (f *fakeMachines) LockAllocation() func() {
+func (f *fakeMigrationHost) LockUserIDAllocation() func() {
 	f.allocationMutex.Lock()
 	return f.allocationMutex.Unlock
 }
 
-func (f *fakeMachines) LockOperation(context.Context, string) (func(), error) {
-	return func() {}, nil
+func (f *fakeMigrationHost) LockOperation(ctx context.Context, virtualMachineID string) (func(), error) {
+	if f.operationCalls != nil {
+		f.operationCalls <- virtualMachineID
+	}
+	return f.operationLocks.Lock(ctx, virtualMachineID)
 }
 
-func (f *fakeMachines) ReleaseStorage(context.Context, string) error {
+func (f *fakeMigrationHost) ReleaseStorage(context.Context, string) error {
 	f.releaseStorageCalls++
 	return nil
 }
 
-func (f *fakeMachines) MachinesDirectory() string { return f.dir }
+func (f *fakeMigrationHost) VirtualMachineRecordsDirectory() string { return f.dir }
 
-func (f *fakeMachines) NormalizeSourceToStopped(context.Context, string) error {
+func (f *fakeMigrationHost) NormalizeSourceToStopped(context.Context, string) error {
 	f.normalizeCalls++
 	return nil
 }
 
-func (f *fakeMachines) RemoveMigrationNetwork(context.Context, string) error {
+func (f *fakeMigrationHost) RemoveMigrationNetwork(context.Context, string) error {
 	f.removeNetworkCalls++
 	return nil
 }
 
-func (f *fakeMachines) EnsureMigrationNetwork(context.Context, string) error {
+func (f *fakeMigrationHost) EnsureMigrationNetwork(context.Context, string) error {
 	f.ensureNetworkCalls++
 	return nil
 }
 
-func (f *fakeMachines) ApplyMigratedTargetState(context.Context, string) error {
+func (f *fakeMigrationHost) ApplyMigratedTargetState(context.Context, string) error {
 	f.applyStateCalls++
 	return f.applyStateError
 }
 
-func (f *fakeMachines) RestoreRuntimeState(context.Context, string, vm.State) error {
+func (f *fakeMigrationHost) RestoreRuntimeState(context.Context, string, vm.State) error {
 	f.restoreCalls++
 	return nil
 }
 
-func (f *fakeMachines) RemoveMigratedRuntime(context.Context, string) error {
+func (f *fakeMigrationHost) RemoveMigratedRuntime(context.Context, string) error {
 	f.removeRuntimeCalls++
 	return nil
 }
 
-func (f *fakeMachines) RefreshSourceDisk(context.Context, string) error {
+func (f *fakeMigrationHost) RefreshSourceDisk(context.Context, string) error {
 	f.refreshDiskCalls++
 	return nil
 }
 
-func (f *fakeMachines) LimitSourceDisk(_ context.Context, _ string, throughputMiBps int) (int, error) {
+func (f *fakeMigrationHost) LimitSourceDisk(_ context.Context, _ string, throughputMiBps int) (int, error) {
 	f.limitDiskCalls++
 	if f.limitDiskCap > 0 && throughputMiBps > f.limitDiskCap {
 		throughputMiBps = f.limitDiskCap
@@ -176,7 +181,7 @@ func testSpecification() vm.Specification {
 	}
 }
 
-type fakeTransfer struct {
+type fakeMigrationStorage struct {
 	created       []string
 	removed       []string
 	sent          []string
@@ -191,31 +196,32 @@ type fakeTransfer struct {
 	abortErr      error
 	sendHang      bool
 	sendStarted   chan struct{}
+	serverRelease <-chan struct{}
 }
 
-func (f *fakeTransfer) CreateSnapshot(_ context.Context, _, name string) error {
+func (f *fakeMigrationStorage) CreateSnapshot(_ context.Context, _, name string) error {
 	f.created = append(f.created, name)
 	return nil
 }
 
-func (f *fakeTransfer) RemoveSnapshot(_ context.Context, _, name string) error {
+func (f *fakeMigrationStorage) RemoveSnapshot(_ context.Context, _, name string) error {
 	f.removed = append(f.removed, name)
 	return nil
 }
 
-func (f *fakeTransfer) SnapshotGUID(_ context.Context, _, _ string) (string, error) {
+func (f *fakeMigrationStorage) SnapshotGUID(_ context.Context, _, _ string) (string, error) {
 	return f.guid, nil
 }
 
-func (f *fakeTransfer) EstimateStreamBytes(_ context.Context, _, _, _ string) (int64, error) {
+func (f *fakeMigrationStorage) EstimateStreamBytes(_ context.Context, _, _, _ string) (int64, error) {
 	return f.sizeBytes, nil
 }
 
-func (f *fakeTransfer) TargetDatasetExists(_ context.Context, _ string) (bool, error) {
+func (f *fakeMigrationStorage) TargetDatasetExists(_ context.Context, _ string) (bool, error) {
 	return f.datasetExists, nil
 }
 
-func (f *fakeTransfer) ReceiveResumeToken(_ context.Context, _ string) (string, error) {
+func (f *fakeMigrationStorage) ReceiveResumeToken(_ context.Context, _ string) (string, error) {
 	return f.resumeToken, nil
 }
 
@@ -225,10 +231,13 @@ type fakeSourceStream struct {
 
 func (stream *fakeSourceStream) Wait() error { return <-stream.done }
 
-func (f *fakeTransfer) StartSnapshotServer(ctx context.Context, _, name, base, token string) (storage.SourceStream, error) {
+func (f *fakeMigrationStorage) StartSnapshotServer(ctx context.Context, _, name, base, token string) (storage.SourceStream, error) {
 	f.sent = append(f.sent, name+"|"+base+"|"+token)
 	if f.sendStarted != nil {
 		f.sendStarted <- struct{}{}
+	}
+	if f.serverRelease != nil {
+		<-f.serverRelease
 	}
 	stream := &fakeSourceStream{done: make(chan error, 1)}
 	go func() {
@@ -242,47 +251,47 @@ func (f *fakeTransfer) StartSnapshotServer(ctx context.Context, _, name, base, t
 	return stream, nil
 }
 
-func (f *fakeTransfer) ReceiveSnapshotTLS(_ context.Context, _ string, _ string) error {
+func (f *fakeMigrationStorage) ReceiveSnapshotTLS(_ context.Context, _ string, _ string) error {
 	f.received++
 	return f.receiveErr
 }
 
-func (f *fakeTransfer) AbortReceive(_ context.Context, _ string) error {
+func (f *fakeMigrationStorage) AbortReceive(_ context.Context, _ string) error {
 	f.aborts++
 	return f.abortErr
 }
 
-type fakeSourceClient struct {
-	prepareCalls  int
-	removeCalls   int
-	removeError   error
-	prepareConfig PortableConfig
-	prepareState  vm.State
-	prepareError  error
-	nextSnapshot  SourceSnapshot
-	nextQueue     []SourceSnapshot
-	nextError     error
-	nextCalls     int
-	nextSequences []int
-	streamError   error
-	streamHang    bool
-	streamMiBps   []int
-	stopSnapshot  SourceSnapshot
-	stopError     error
-	stopCalls     int
-	stopReceived  int
-	startCalls    int
-	startError    error
-	finishCalls   int
-	finishError   error
+type fakeSourceOperations struct {
+	prepareCalls      int
+	removeCalls       int
+	removeError       error
+	prepareDefinition VirtualMachineDefinition
+	prepareState      vm.State
+	prepareError      error
+	nextSnapshot      SourceSnapshot
+	nextQueue         []SourceSnapshot
+	nextError         error
+	nextCalls         int
+	nextSequences     []int
+	streamError       error
+	streamHang        bool
+	streamMiBps       []int
+	stopSnapshot      SourceSnapshot
+	stopError         error
+	stopCalls         int
+	stopReceived      int
+	startCalls        int
+	startError        error
+	finishCalls       int
+	finishError       error
 }
 
-func (c *fakeSourceClient) PrepareSource(context.Context, string, string, string) (PortableConfig, vm.State, error) {
+func (c *fakeSourceOperations) PrepareSource(context.Context, string, string, string) (VirtualMachineDefinition, vm.State, error) {
 	c.prepareCalls++
-	return c.prepareConfig, c.prepareState, c.prepareError
+	return c.prepareDefinition, c.prepareState, c.prepareError
 }
 
-func (c *fakeSourceClient) NextSnapshot(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
+func (c *fakeSourceOperations) NextSnapshot(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
 	c.nextSequences = append(c.nextSequences, receivedSequence)
 	index := c.nextCalls
 	c.nextCalls++
@@ -298,7 +307,7 @@ func (c *fakeSourceClient) NextSnapshot(_ context.Context, _, _, _ string, recei
 	return c.nextSnapshot, nil
 }
 
-func (c *fakeSourceClient) StartSnapshotStream(ctx context.Context, _, _, _ string, _ int, _ string, throughputMiBps int) error {
+func (c *fakeSourceOperations) StartSnapshotStream(ctx context.Context, _, _, _ string, _ int, _ string, throughputMiBps int) error {
 	c.streamMiBps = append(c.streamMiBps, throughputMiBps)
 	if c.streamHang {
 		<-ctx.Done()
@@ -307,23 +316,23 @@ func (c *fakeSourceClient) StartSnapshotStream(ctx context.Context, _, _, _ stri
 	return c.streamError
 }
 
-func (c *fakeSourceClient) StopSource(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
+func (c *fakeSourceOperations) StopSource(_ context.Context, _, _, _ string, receivedSequence int) (SourceSnapshot, error) {
 	c.stopCalls++
 	c.stopReceived = receivedSequence
 	return c.stopSnapshot, c.stopError
 }
 
-func (c *fakeSourceClient) StartSource(context.Context, string, string, string) error {
+func (c *fakeSourceOperations) StartSource(context.Context, string, string, string) error {
 	c.startCalls++
 	return c.startError
 }
 
-func (c *fakeSourceClient) FinishSource(context.Context, string, string, string) error {
+func (c *fakeSourceOperations) FinishSource(context.Context, string, string, string) error {
 	c.finishCalls++
 	return c.finishError
 }
 
-func (c *fakeSourceClient) RemoveSource(context.Context, string, string, string) error {
+func (c *fakeSourceOperations) RemoveSource(context.Context, string, string, string) error {
 	c.removeCalls++
 	return c.removeError
 }
@@ -333,7 +342,7 @@ func ampleCapacity(context.Context) (AvailableCapacity, error) {
 }
 
 // awaitTransfer waits for a worker to end without cancelling it.
-func awaitTransfer(t *testing.T, manager *VMMigration, virtualMachineID string) {
+func awaitTransfer(t *testing.T, manager *Manager, virtualMachineID string) {
 	t.Helper()
 	manager.transfersMutex.Lock()
 	handle := manager.transfers[virtualMachineID]
@@ -348,34 +357,33 @@ func awaitTransfer(t *testing.T, manager *VMMigration, virtualMachineID string) 
 	}
 }
 
-func newMigrationManager(t *testing.T) (*VMMigration, *fakeMachines, *fakeSourceClient) {
+func newMigrationManager(t *testing.T) (*Manager, *fakeMigrationHost, *fakeSourceOperations) {
 	t.Helper()
-	machines := newFakeMachines(t)
-	source := &fakeSourceClient{}
-	migrationManager, err := NewVMMigration(machines, source, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil)
+	machines := newFakeMigrationHost(t)
+	source := &fakeSourceOperations{}
+	migrationManager, err := newManager(machines, source, &fakeMigrationStorage{}, ampleCapacity, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return migrationManager, machines, source
 }
 
-func TestNewVMMigrationCleansACorruptRecord(t *testing.T) {
-	machines := newFakeMachines(t)
-	store := newMigrationStore(machines.MachinesDirectory())
+func TestNewManagerRejectsACorruptRecord(t *testing.T) {
+	machines := newFakeMigrationHost(t)
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
 	migrationDirectory := store.migrationDirectory("vm-1")
 	if err := os.MkdirAll(migrationDirectory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	// A record left by a crashed or older-schema migration must not block startup.
-	if err := os.WriteFile(filepath.Join(migrationDirectory, sourceFileName), []byte(`{"schema_version":1,"id":"mig-1"}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(migrationDirectory, sourceFileName), []byte(`{"schema_version":2,"id":"mig-1"}`), 0o640); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := NewVMMigration(machines, &fakeSourceClient{}, &fakeTransfer{}, ampleCapacity, MigrationSettings{}, nil); err != nil {
-		t.Fatalf("manager did not start over a corrupt record: %v", err)
+	if _, err := newManager(machines, &fakeSourceOperations{}, &fakeMigrationStorage{}, ampleCapacity, 0, nil); err == nil {
+		t.Fatal("manager started with a corrupt record")
 	}
-	if store.has(store.sourcePath("vm-1")) {
-		t.Fatal("the corrupt source record was not cleaned at startup")
+	if !store.has(store.sourcePath("vm-1")) {
+		t.Fatal("manager removed the corrupt source record")
 	}
 }
 
@@ -387,7 +395,7 @@ func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Status != MigrationRunning || record.Phase != PhasePreparing {
+	if record.Status != StatusRunning || record.Phase != PhasePreparing {
 		t.Fatalf("record = %+v", record)
 	}
 	if !migrationManager.IsTargetReserved("vm-1") {
@@ -396,6 +404,36 @@ func TestCreateTargetReservesAndAcceptsARetry(t *testing.T) {
 
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatalf("idempotent retry = %v", err)
+	}
+}
+
+func TestCreateTargetSerializesOneMigrationID(t *testing.T) {
+	migrationManager, _, _ := newMigrationManager(t)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+
+	for _, virtualMachineID := range []string{"vm-1", "vm-2"} {
+		go func() {
+			<-start
+			_, err := migrationManager.CreateTarget(t.Context(), "mig-1", virtualMachineID, "https://10.0.0.3:9000")
+			results <- err
+		}()
+	}
+	close(start)
+
+	succeeded, conflicted := 0, 0
+	for range 2 {
+		switch err := <-results; {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, vm.ErrConflict):
+			conflicted++
+		default:
+			t.Fatalf("create target = %v", err)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("succeeded = %d, conflicted = %d", succeeded, conflicted)
 	}
 }
 
@@ -501,15 +539,15 @@ func TestAbortTargetKeepsRecordsWhenRollbackFails(t *testing.T) {
 }
 
 func TestUnlockSourceStopsAnInFlightStream(t *testing.T) {
-	machines := newFakeMachines(t)
-	transfer := &fakeTransfer{sendHang: true, sendStarted: make(chan struct{}, 1)}
-	migrationManager, err := NewVMMigration(machines, &fakeSourceClient{}, transfer, ampleCapacity, MigrationSettings{}, nil)
+	machines := newFakeMigrationHost(t)
+	transfer := &fakeMigrationStorage{sendHang: true, sendStarted: make(chan struct{}, 1)}
+	migrationManager, err := newManager(machines, &fakeSourceOperations{}, transfer, ampleCapacity, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	store := newMigrationStore(machines.MachinesDirectory())
-	if err := store.writeSource(SourceMigrationRecord{ID: "mig-1", VirtualMachineID: "vm-1", Sequence: 1}); err != nil {
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
+	if err := store.writeSource(sourceRecord{ID: "mig-1", VirtualMachineID: "vm-1", State: sourceLocked, Sequence: 1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -551,13 +589,13 @@ func TestTargetReservationsCountOnlyMigrationsWithConfig(t *testing.T) {
 		t.Fatalf("preparing migration reserved capacity: %+v", reservations)
 	}
 
-	store := newMigrationStore(machines.MachinesDirectory())
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
 	record, err := store.readTarget("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.Phase = PhaseCopying
-	record.Config = &PortableConfig{Specification: vm.Specification{CPUMillicores: 3000, MemoryMiB: 3072, DiskMiB: 8192}}
+	record.State = targetCopying
+	record.Definition = &VirtualMachineDefinition{Specification: vm.Specification{CPUMillicores: 3000, MemoryMiB: 3072, DiskMiB: 8192}}
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}

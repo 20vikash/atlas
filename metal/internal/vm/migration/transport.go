@@ -1,6 +1,6 @@
-// Package vmmigration carries VM migration traffic between Metal hosts. The
+// Package migration carries VM migration traffic between Metal hosts. The
 // target host drives the migration through the mutual-TLS coordination API.
-package vmmigration
+package migration
 
 import (
 	"bytes"
@@ -42,25 +42,9 @@ func NewSourceClient(timeout time.Duration, tlsConfiguration *tls.Config) *Sourc
 	}
 }
 
-type nextSnapshotRequest struct {
-	ReceivedSequence int `json:"received_sequence,omitempty"`
-}
-
-type streamSnapshotRequest struct {
-	Sequence        int    `json:"sequence"`
-	ResumeToken     string `json:"resume_token,omitempty"`
-	ThroughputMiBps int    `json:"throughput_mibps,omitempty"`
-}
-
-type nextSnapshotResponse struct {
-	Sequence  int    `json:"sequence"`
-	SizeBytes int64  `json:"size_bytes"`
-	GUID      string `json:"guid"`
-}
-
 // NextSnapshot acknowledges a sequence and asks for the next snapshot.
 func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
-	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
+	body, err := json.Marshal(SnapshotAcknowledgement{ReceivedSequence: receivedSequence})
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -73,7 +57,7 @@ func (c *SourceClient) NextSnapshot(ctx context.Context, address, migrationID, v
 
 // StartSnapshotStream asks the source to start its one-shot snapshot listener.
 func (c *SourceClient) StartSnapshotStream(ctx context.Context, address, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error {
-	body, err := json.Marshal(streamSnapshotRequest{
+	body, err := json.Marshal(SnapshotStreamRequest{
 		Sequence: sequence, ResumeToken: resumeToken, ThroughputMiBps: throughputMiBps,
 	})
 	if err != nil {
@@ -92,27 +76,22 @@ func (c *SourceClient) postJSON(ctx context.Context, client *http.Client, addres
 	return c.do(request, client)
 }
 
-type sourceHandshakeResponse struct {
-	Config        PortableConfig `json:"config"`
-	ObservedState vm.State       `json:"observed_state"`
-}
-
-// PrepareSource asks the source to lock the VM and return portable state.
-func (c *SourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (PortableConfig, vm.State, error) {
+// PrepareSource asks the source to lock the VM and return its definition and state.
+func (c *SourceClient) PrepareSource(ctx context.Context, address, migrationID, virtualMachineID string) (VirtualMachineDefinition, vm.State, error) {
 	body, err := c.call(ctx, http.MethodPut, address, sourcePath(migrationID, virtualMachineID, "/source"))
 	if err != nil {
-		return PortableConfig{}, "", err
+		return VirtualMachineDefinition{}, "", err
 	}
-	var response sourceHandshakeResponse
+	var response SourceDescription
 	if err := json.Unmarshal(body, &response); err != nil {
-		return PortableConfig{}, "", fmt.Errorf("decode source handshake: %w", err)
+		return VirtualMachineDefinition{}, "", fmt.Errorf("decode source description: %w", err)
 	}
-	return response.Config, response.ObservedState, nil
+	return response.Definition, response.ObservedState, nil
 }
 
 // StopSource stops the VM and returns its final snapshot.
 func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, virtualMachineID string, receivedSequence int) (SourceSnapshot, error) {
-	body, err := json.Marshal(nextSnapshotRequest{ReceivedSequence: receivedSequence})
+	body, err := json.Marshal(SnapshotAcknowledgement{ReceivedSequence: receivedSequence})
 	if err != nil {
 		return SourceSnapshot{}, err
 	}
@@ -124,11 +103,11 @@ func (c *SourceClient) StopSource(ctx context.Context, address, migrationID, vir
 }
 
 func decodeSnapshot(body []byte, operation string) (SourceSnapshot, error) {
-	var response nextSnapshotResponse
+	var response SourceSnapshot
 	if err := json.Unmarshal(body, &response); err != nil {
 		return SourceSnapshot{}, fmt.Errorf("decode %s response: %w", operation, err)
 	}
-	return SourceSnapshot{Sequence: response.Sequence, SizeBytes: response.SizeBytes, GUID: response.GUID}, nil
+	return response, nil
 }
 
 // StartSource asks the source to restore its original desired state.

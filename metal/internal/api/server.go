@@ -13,7 +13,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
 // Config contains HTTP server configuration. The TLS listener authenticates the caller.
@@ -58,14 +58,14 @@ type VirtualMachineManager interface {
 
 // MigrationManager owns this host's migration records and reservations.
 type MigrationManager interface {
-	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (vmmigration.TargetMigrationRecord, error)
-	TargetStatus(ctx context.Context, migrationID string) (vmmigration.TargetMigrationRecord, error)
+	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (migration.TargetProgress, error)
+	TargetStatus(ctx context.Context, migrationID string) (migration.TargetProgress, error)
 	RequestFinish(ctx context.Context, migrationID string) error
 	AbortTarget(ctx context.Context, migrationID string) error
-	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error)
-	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
+	LockSource(ctx context.Context, migrationID, virtualMachineID string) (migration.SourceDescription, error)
+	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (migration.SourceSnapshot, error)
 	StartSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error
-	StopSource(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
+	StopSource(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (migration.SourceSnapshot, error)
 	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
 	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error

@@ -1,4 +1,4 @@
-package vmmigration
+package migration
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
-func portableConfig(virtualMachineID string) PortableConfig {
-	return PortableConfig{
+func virtualMachineDefinition(virtualMachineID string) VirtualMachineDefinition {
+	return VirtualMachineDefinition{
 		VirtualMachineID:        virtualMachineID,
 		CreateFingerprint:       strings.Repeat("a", 64),
 		Generation:              1,
@@ -22,9 +22,9 @@ func portableConfig(virtualMachineID string) PortableConfig {
 	}
 }
 
-func TestAdvanceTargetRunsTheHandshake(t *testing.T) {
+func TestAdvanceTargetPreparesTheSource(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
-	source.prepareConfig = portableConfig("vm-1")
+	source.prepareDefinition = virtualMachineDefinition("vm-1")
 	source.prepareState = vm.StateRunning
 	ctx := context.Background()
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
@@ -38,11 +38,11 @@ func TestAdvanceTargetRunsTheHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	record, err := migrationManager.TargetStatus(ctx, "mig-1")
+	record, err := migrationManager.store.readTarget("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Config == nil || record.UserID == 0 {
+	if record.Definition == nil {
 		t.Fatalf("record = %+v", record)
 	}
 
@@ -50,14 +50,14 @@ func TestAdvanceTargetRunsTheHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("placeholder record missing: %v", err)
 	}
-	if desired.Specification.MemoryMiB != 2048 || desired.UserID != record.UserID {
+	if desired.Specification.MemoryMiB != 2048 || desired.UserID == 0 {
 		t.Fatalf("placeholder = %+v", desired)
 	}
 }
 
 func TestAdvanceTargetIsANoOpWhileCopying(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
-	source.prepareConfig = portableConfig("vm-1")
+	source.prepareDefinition = virtualMachineDefinition("vm-1")
 	ctx := context.Background()
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestAdvanceTargetExpiresAStaleReservation(t *testing.T) {
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
-	store := newMigrationStore(machines.MachinesDirectory())
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
 	record, err := store.readTarget("vm-1")
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestAdvanceTargetExpiresAStaleReservation(t *testing.T) {
 	}
 }
 
-func TestAdvanceTargetRecordsHandshakeErrors(t *testing.T) {
+func TestAdvanceTargetRecordsSourcePreparationErrors(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
 	source.prepareError = errors.New("source unreachable")
 	ctx := context.Background()
@@ -115,7 +115,7 @@ func TestAdvanceTargetRecordsHandshakeErrors(t *testing.T) {
 	}
 
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err == nil {
-		t.Fatal("want a handshake error")
+		t.Fatal("want a description error")
 	}
 	record, err := migrationManager.TargetStatus(ctx, "mig-1")
 	if err != nil {
@@ -128,22 +128,22 @@ func TestAdvanceTargetRecordsHandshakeErrors(t *testing.T) {
 
 func TestAdvanceTargetRejectsAWrongConfig(t *testing.T) {
 	migrationManager, _, source := newMigrationManager(t)
-	source.prepareConfig = portableConfig("vm-other")
+	source.prepareDefinition = virtualMachineDefinition("vm-other")
 	ctx := context.Background()
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := migrationManager.AdvanceTarget(ctx, "vm-1"); err == nil {
-		t.Fatal("want a config mismatch error")
+		t.Fatal("want a definition mismatch error")
 	}
 }
 
 func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
-	machines := newFakeMachines(t)
-	source := &fakeSourceClient{prepareConfig: portableConfig("vm-1"), prepareState: vm.StateRunning}
+	machines := newFakeMigrationHost(t)
+	source := &fakeSourceOperations{prepareDefinition: virtualMachineDefinition("vm-1"), prepareState: vm.StateRunning}
 	noCapacity := func(context.Context) (AvailableCapacity, error) { return AvailableCapacity{}, nil }
-	migrationManager, err := NewVMMigration(machines, source, &fakeTransfer{}, noCapacity, MigrationSettings{}, nil)
+	migrationManager, err := newManager(machines, source, &fakeMigrationStorage{}, noCapacity, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +158,8 @@ func TestAdvanceTargetRejectsInsufficientCapacity(t *testing.T) {
 }
 
 func TestTargetCapacityCheckAndReservationAreSerialized(t *testing.T) {
-	machines := newFakeMachines(t)
-	var migrationManager *VMMigration
+	machines := newFakeMigrationHost(t)
+	var migrationManager *Manager
 	capacity := func(ctx context.Context) (AvailableCapacity, error) {
 		reservations, err := migrationManager.TargetReservations(ctx)
 		if err != nil {
@@ -172,15 +172,19 @@ func TestTargetCapacityCheckAndReservationAreSerialized(t *testing.T) {
 		return AvailableCapacity{MemoryMiB: availableMemoryMiB, StorageMiB: 1 << 20}, nil
 	}
 	var err error
-	migrationManager, err = NewVMMigration(machines, &fakeSourceClient{}, &fakeTransfer{}, capacity, MigrationSettings{}, nil)
+	migrationManager, err = newManager(machines, &fakeSourceOperations{}, &fakeMigrationStorage{}, capacity, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
 
-	records := make([]TargetMigrationRecord, 2)
+	records := make([]targetRecord, 2)
 	for index, virtualMachineID := range []string{"vm-1", "vm-2"} {
-		record, err := migrationManager.CreateTarget(ctx, "mig-"+virtualMachineID, virtualMachineID, "https://10.0.0.3:9000")
+		_, err := migrationManager.CreateTarget(ctx, "mig-"+virtualMachineID, virtualMachineID, "https://10.0.0.3:9000")
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err := migrationManager.store.readTarget(virtualMachineID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -191,10 +195,10 @@ func TestTargetCapacityCheckAndReservationAreSerialized(t *testing.T) {
 	var waitGroup sync.WaitGroup
 	for _, record := range records {
 		waitGroup.Add(1)
-		go func(record TargetMigrationRecord) {
+		go func(record targetRecord) {
 			defer waitGroup.Done()
-			config := portableConfig(record.VirtualMachineID)
-			results <- migrationManager.reserveAndReconstructTarget(ctx, record, config, vm.StateRunning)
+			definition := virtualMachineDefinition(record.VirtualMachineID)
+			results <- migrationManager.reserveAndReconstructTarget(ctx, record, definition, vm.StateRunning)
 		}(record)
 	}
 	waitGroup.Wait()
@@ -233,15 +237,14 @@ func TestActiveTargetVirtualMachineIDsListsRunningTargets(t *testing.T) {
 }
 
 // writeReadyTarget writes a ready target record for finish tests.
-func writeReadyTarget(t *testing.T, machines *fakeMachines, mutate func(*TargetMigrationRecord)) *migrationStore {
+func writeReadyTarget(t *testing.T, machines *fakeMigrationHost, mutate func(*targetRecord)) *migrationStore {
 	t.Helper()
-	store := newMigrationStore(machines.MachinesDirectory())
-	record := TargetMigrationRecord{
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
+	record := targetRecord{
 		ID:               "mig-1",
 		VirtualMachineID: "vm-1",
 		Source:           "https://10.0.0.3:9000",
-		Status:           MigrationReady,
-		Phase:            PhaseStarting,
+		State:            targetReady,
 		CreatedAt:        time.Now().UTC(),
 	}
 	if mutate != nil {
@@ -255,11 +258,10 @@ func writeReadyTarget(t *testing.T, machines *fakeMachines, mutate func(*TargetM
 
 func TestRunTransferFinishesToCompleted(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
-	store := writeReadyTarget(t, machines, func(r *TargetMigrationRecord) {
-		r.FinishRequested = true
-		r.FinalSequence = 2
-		r.Intervals = []IntervalProgress{
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
+	store := writeReadyTarget(t, machines, func(r *targetRecord) {
+		r.State = targetFinishing
+		r.Intervals = []TransferProgress{
 			{Sequence: 1, Completed: true},
 			{Sequence: 2, Completed: true},
 		}
@@ -271,7 +273,7 @@ func TestRunTransferFinishesToCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Status != MigrationCompleted || record.Phase != "" || record.FinishedAt.IsZero() {
+	if record.State != targetCompleted || record.FinishedAt.IsZero() {
 		t.Fatalf("record = %+v", record)
 	}
 	if source.finishCalls != 1 {
@@ -291,7 +293,7 @@ func TestRequestFinishRecordsIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	record, _ := store.readTarget("vm-1")
-	if !record.FinishRequested {
+	if record.State != targetFinishing {
 		t.Fatal("finish request was not recorded")
 	}
 }
@@ -307,7 +309,7 @@ func TestRequestFinishRequiresReady(t *testing.T) {
 
 func TestRequestFinishConflictsWithAbort(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	writeReadyTarget(t, machines, func(r *TargetMigrationRecord) { r.AbortRequested = true })
+	writeReadyTarget(t, machines, func(r *targetRecord) { r.State = targetRemovingRuntime })
 
 	if err := migrationManager.RequestFinish(context.Background(), "mig-1"); !errors.Is(err, vm.ErrConflict) {
 		t.Fatalf("finish after abort = %v, want ErrConflict", err)
@@ -316,10 +318,10 @@ func TestRequestFinishConflictsWithAbort(t *testing.T) {
 
 func TestRunTransferAbortsBeforeStop(t *testing.T) {
 	migrationManager, machines, source := newMigrationManager(t)
-	transfer := migrationManager.transfer.(*fakeTransfer)
+	transfer := migrationManager.disks.(*fakeMigrationStorage)
 	store := writeCopyingTarget(t, machines, vm.StateRunning)
 	record, _ := store.readTarget("vm-1")
-	record.AbortRequested = true
+	record.State = targetRemovingRuntime
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +332,7 @@ func TestRunTransferAbortsBeforeStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != MigrationAborted || rec.Phase != "" {
+	if rec.State.status() != StatusAborted || rec.State.phase() != "" {
 		t.Fatalf("record = %+v", rec)
 	}
 	// A source that never stopped is unlocked, not restarted.
@@ -347,8 +349,7 @@ func TestRunTransferAbortsAfterStop(t *testing.T) {
 	store := writeCopyingTarget(t, machines, vm.StateRunning)
 	record, _ := store.readTarget("vm-1")
 	record.SourceStopped = true
-	record.FinalSequence = 2
-	record.AbortRequested = true
+	record.State = targetRemovingRuntime
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}
@@ -359,8 +360,8 @@ func TestRunTransferAbortsAfterStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != MigrationAborted {
-		t.Fatalf("status = %s, want aborted", rec.Status)
+	if rec.State.status() != StatusAborted {
+		t.Fatalf("status = %s, want aborted", rec.State.status())
 	}
 	// A stopped source is restored, then unlocked.
 	if source.startCalls != 1 || source.removeCalls != 1 {
@@ -373,7 +374,7 @@ func TestRunTransferKeepsLockedWhenRollbackFails(t *testing.T) {
 	source.removeError = errors.New("source unreachable")
 	store := writeCopyingTarget(t, machines, vm.StateRunning)
 	record, _ := store.readTarget("vm-1")
-	record.AbortRequested = true
+	record.State = targetRemovingRuntime
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
 	}
@@ -384,10 +385,10 @@ func TestRunTransferKeepsLockedWhenRollbackFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if isTerminalStatus(rec.Status) {
+	if rec.State.terminal() {
 		t.Fatal("a failed rollback must keep the migration locked")
 	}
-	if !rec.AbortRequested {
+	if rec.State != targetUnlockingSource {
 		t.Fatal("the abort request must be preserved for a retry")
 	}
 }
@@ -398,13 +399,13 @@ func TestAdvanceTargetRollsBackAnAbandonedTarget(t *testing.T) {
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
-	store := newMigrationStore(machines.MachinesDirectory())
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
 	record, err := store.readTarget("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Atlas stopped calling, so the target must release its reservation.
-	record.Phase = PhaseCopying
+	record.State = targetCopying
 	record.LastControlAt = time.Now().Add(-targetIdleTimeout - time.Minute).UTC()
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
@@ -429,14 +430,13 @@ func TestAdvanceTargetKeepsAReadyTarget(t *testing.T) {
 	if _, err := migrationManager.CreateTarget(ctx, "mig-1", "vm-1", "https://10.0.0.3:9000"); err != nil {
 		t.Fatal(err)
 	}
-	store := newMigrationStore(machines.MachinesDirectory())
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
 	record, err := store.readTarget("vm-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A ready target may already own the VM.
-	record.Status = MigrationReady
-	record.Phase = PhaseStarting
+	record.State = targetReady
 	record.LastControlAt = time.Now().Add(-targetIdleTimeout - time.Hour).UTC()
 	if err := store.writeTarget(record); err != nil {
 		t.Fatal(err)
@@ -452,11 +452,11 @@ func TestAdvanceTargetKeepsAReadyTarget(t *testing.T) {
 }
 
 // writeTerminalTarget writes a terminal target record.
-func writeTerminalTarget(t *testing.T, machines *fakeMachines, status MigrationStatus) *migrationStore {
+func writeTerminalTarget(t *testing.T, machines *fakeMigrationHost, state targetState) *migrationStore {
 	t.Helper()
-	store := newMigrationStore(machines.MachinesDirectory())
-	record := TargetMigrationRecord{
-		ID: "mig-1", VirtualMachineID: "vm-1", Status: status,
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
+	record := targetRecord{
+		ID: "mig-1", VirtualMachineID: "vm-1", State: state,
 		CreatedAt: time.Now().UTC(), FinishedAt: time.Now().UTC(),
 	}
 	if err := store.writeTarget(record); err != nil {
@@ -466,38 +466,38 @@ func writeTerminalTarget(t *testing.T, machines *fakeMachines, status MigrationS
 }
 
 func TestTerminalTargetDoesNotHideOrReserve(t *testing.T) {
-	for _, status := range []MigrationStatus{MigrationCompleted, MigrationAborted} {
+	for _, state := range []targetState{targetCompleted, targetAborted} {
 		migrationManager, machines, _ := newMigrationManager(t)
-		writeTerminalTarget(t, machines, status)
+		writeTerminalTarget(t, machines, state)
 		if migrationManager.IsTargetReserved("vm-1") {
-			t.Fatalf("%s record still reserves the VM", status)
+			t.Fatalf("%s record still reserves the VM", state)
 		}
 		reservations, err := migrationManager.TargetReservations(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(reservations) != 0 {
-			t.Fatalf("%s record still reserves capacity: %+v", status, reservations)
+			t.Fatalf("%s record still reserves capacity: %+v", state, reservations)
 		}
 	}
 }
 
 func TestCreateTargetReplacesACleanAbortedRemnant(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	writeTerminalTarget(t, machines, MigrationAborted)
+	writeTerminalTarget(t, machines, targetAborted)
 
 	record, err := migrationManager.CreateTarget(context.Background(), "mig-2", "vm-1", "https://10.0.0.9:9000")
 	if err != nil {
 		t.Fatalf("replace a clean aborted remnant = %v", err)
 	}
-	if record.ID != "mig-2" || record.Status != MigrationRunning || record.Phase != PhasePreparing {
+	if record.ID != "mig-2" || record.Status != StatusRunning || record.Phase != PhasePreparing {
 		t.Fatalf("record = %+v", record)
 	}
 }
 
 func TestCreateTargetRefusesReplacingACompletedRecord(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	writeTerminalTarget(t, machines, MigrationCompleted)
+	writeTerminalTarget(t, machines, targetCompleted)
 
 	if _, err := migrationManager.CreateTarget(context.Background(), "mig-2", "vm-1", "https://10.0.0.9:9000"); err == nil {
 		t.Fatal("a completed migration must not be replaced")
@@ -506,21 +506,19 @@ func TestCreateTargetRefusesReplacingACompletedRecord(t *testing.T) {
 
 func TestActiveTargetsIncludeFinishAndAbortWork(t *testing.T) {
 	migrationManager, machines, _ := newMigrationManager(t)
-	store := newMigrationStore(machines.MachinesDirectory())
+	store := newMigrationStore(machines.VirtualMachineRecordsDirectory())
 	// Ready finish and failed abort requests are both requeued.
-	if err := store.writeTarget(TargetMigrationRecord{
-		ID: "mig-1", VirtualMachineID: "vm-1", Status: MigrationReady, Phase: PhaseStarting,
-		FinishRequested: true, CreatedAt: time.Now().UTC(),
+	if err := store.writeTarget(targetRecord{
+		ID: "mig-1", VirtualMachineID: "vm-1", State: targetFinishing, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.writeTarget(TargetMigrationRecord{
-		ID: "mig-2", VirtualMachineID: "vm-2", Status: MigrationFailed, Phase: PhaseRollback,
-		AbortRequested: true, CreatedAt: time.Now().UTC(),
+	if err := store.writeTarget(targetRecord{
+		ID: "mig-2", VirtualMachineID: "vm-2", State: targetRemovingRuntime, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.writeTarget(terminalTargetRecord(TargetMigrationRecord{ID: "mig-3", VirtualMachineID: "vm-3"}, MigrationCompleted, time.Now().UTC())); err != nil {
+	if err := store.writeTarget(terminalTargetRecord(targetRecord{ID: "mig-3", VirtualMachineID: "vm-3"}, targetCompleted, time.Now().UTC())); err != nil {
 		t.Fatal(err)
 	}
 

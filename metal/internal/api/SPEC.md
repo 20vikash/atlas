@@ -77,7 +77,7 @@ POST   /v1/migrations/:id/destroy  the target destroys the stopped source
 DELETE /v1/migrations/:id          the target unlocks the source
 ```
 
-Atlas drives create, get, abort, and finish on port 9000 with its client certificate. A target host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS connection on port 9002. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
+Atlas drives create, get, abort, and finish on port 9000 with its client certificate. A target host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS connection on port 9002. See [internal/vm/migration/SPEC.md](../vm/migration/SPEC.md).
 
 The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
@@ -153,5 +153,5 @@ A response omits what the controller must not see or cannot use: transport URLs,
 - [docs/api.md](../../docs/api.md) gives request and response details.
 - [internal/vm/SPEC.md](../vm/SPEC.md) defines the VM contracts and the generation model.
 - [internal/console/SPEC.md](../console/SPEC.md) owns the serial console the tty mode attaches to.
-- [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md) owns the host-to-host migration transport.
+- [internal/vm/migration/SPEC.md](../vm/migration/SPEC.md) owns the host-to-host migration transport.
 - [cmd/metald/SPEC.md](../../cmd/metald/SPEC.md) injects server dependencies.

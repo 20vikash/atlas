@@ -1,7 +1,7 @@
 package vm
 
 // A source record blocks mutation and reconciliation; a target record reserves
-// an incoming VM ID. The vm_migration package owns those records and answers
+// an incoming VM ID. The migration package owns those records and answers
 // through the injected MigrationGuard. Without a guard, no VM is migrating.
 
 // isSourceLocked reports whether a migration holds the VM as a source.
