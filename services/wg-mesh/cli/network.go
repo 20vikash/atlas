@@ -149,12 +149,10 @@ func findNetworkInterface(name string) (net.Interface, bool, error) {
 	return net.Interface{}, false, nil
 }
 
-func configuredInterfaces() (hostInterfaces, error) {
-	config, err := readPinnedConfig()
-	if err != nil {
-		return hostInterfaces{}, err
-	}
-
+// configuredInterfaces names the configured uplink and WireGuard interfaces
+// from an already-read host configuration. It must not read pinned state
+// itself: the upgrade path drops pins before it re-derives them.
+func configuredInterfaces(config hostConfig) (hostInterfaces, error) {
 	interfaces := hostInterfaces{}
 
 	interfaces.uplinkName = interfaceWithIPv4(config.UplinkIPv4)

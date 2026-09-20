@@ -129,8 +129,15 @@ func readInstalledHash() ([32]byte, error) {
 	return hash, nil
 }
 
+// openMap opens one pinned map. The error carries the map name, because the
+// pinned-object syscall reports a missing pin as a bare errno.
 func openMap(name string) (*ebpf.Map, error) {
-	return ebpf.LoadPinnedMap(filepath.Join(pinDirectory, name), nil)
+	bpfMap, err := ebpf.LoadPinnedMap(filepath.Join(pinDirectory, name), nil)
+	if err != nil {
+		return nil, fmt.Errorf("open pinned map %s: %w", name, err)
+	}
+
+	return bpfMap, nil
 }
 
 func clearPinDirectory() error {

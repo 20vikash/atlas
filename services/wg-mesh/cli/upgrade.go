@@ -72,7 +72,7 @@ func upgradeBPF(force bool) error {
 		_ = os.Remove(filepath.Join(pinDirectory, name))
 	}
 
-	interfaces, err := configuredInterfaces()
+	interfaces, err := configuredInterfaces(config)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func forceUpgrade(config hostConfig) error {
 		return err
 	}
 
-	interfaces, err := configuredInterfaces()
+	interfaces, err := configuredInterfaces(config)
 	if err != nil {
 		return err
 	}

@@ -135,7 +135,11 @@ func removeHost(force bool) error {
 	if count != 0 && !force {
 		return fmt.Errorf("remove every VM first; %d local VM entries remain", count)
 	}
-	interfaces, err := configuredInterfaces()
+	config, err := readPinnedConfig()
+	if err != nil {
+		return err
+	}
+	interfaces, err := configuredInterfaces(config)
 	if err != nil {
 		return err
 	}
