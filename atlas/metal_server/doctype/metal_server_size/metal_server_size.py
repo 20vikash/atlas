@@ -25,6 +25,4 @@ class MetalServerSize(Document):
 		memory_mib: DF.Int
 		monthly_pricing_usd_cents: DF.Int
 		provider_metadata: DF.Code | None
-		provider_type: DF.Literal["Scaleway"]
-		size: DF.Data
 	# end: auto-generated types

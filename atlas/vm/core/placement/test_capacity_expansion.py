@@ -19,12 +19,11 @@ class TestCapacityExpansion(UnitTestCase):
 		size = SimpleNamespace(
 			name="large",
 			enabled=True,
-			provider_type="AWS",
 			architecture="amd64",
 			memory_mib=8192,
 			disk_gib=100,
 		)
-		image = SimpleNamespace(name="ubuntu", enabled=True, provider_type="AWS")
+		image = SimpleNamespace(name="ubuntu", enabled=True)
 
 		with (
 			patch("atlas.vm.core.placement.capacity_expansion.frappe.get_single", return_value=settings),
@@ -59,12 +58,11 @@ class TestCapacityExpansion(UnitTestCase):
 		size = SimpleNamespace(
 			name="large",
 			enabled=True,
-			provider_type="AWS",
 			architecture="amd64",
 			memory_mib=8192,
 			disk_gib=100,
 		)
-		image = SimpleNamespace(name="ubuntu", enabled=True, provider_type="AWS")
+		image = SimpleNamespace(name="ubuntu", enabled=True)
 
 		@contextmanager
 		def lock(key: str):

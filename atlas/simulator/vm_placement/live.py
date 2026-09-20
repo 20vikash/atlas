@@ -159,8 +159,8 @@ class LiveTrial:
 		for tenant_id in self.arguments.tenant_ids[1:]:
 			VirtualMachineService.get_image(self.arguments.image, tenant_id)
 		image.validate_compatibility(self.arguments.disk_mib)
-		if not size.enabled or size.provider_type != settings.server_provider:
-			raise ValueError("The host type is disabled or belongs to another provider.")
+		if not size.enabled:
+			raise ValueError("The host type is disabled.")
 		if size.architecture != image.architecture:
 			raise ValueError("The host type and VM image architectures differ.")
 		if size.memory_mib < self.arguments.memory_mib or size.disk_gib * 1024 < self.arguments.disk_mib:

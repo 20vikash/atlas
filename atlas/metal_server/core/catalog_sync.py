@@ -43,28 +43,30 @@ class CatalogSynchronizer:
 		frappe.get_doc(
 			{
 				"doctype": "Metal Server Size",
-				"provider_type": self.provider.provider_type,
-				"size": size.name,
+				"name": size.name,
 				**values,
 			}
 		).insert(ignore_permissions=True)
 
 	def save_server_image(self, image: ServerImageData) -> None:
 		"""Create or update one Metal Server Image record."""
-		metadata = frappe.as_json(image.provider_metadata)
+		values = {
+			"os": image.os,
+			"os_version": image.version,
+			"provider_metadata": frappe.as_json(image.provider_metadata),
+		}
 		if frappe.db.exists("Metal Server Image", image.name):
 			document = frappe.get_doc("Metal Server Image", image.name)
-			if document.provider_metadata == metadata:
+			if all(document.get(field) == value for field, value in values.items()):
 				return
-			document.provider_metadata = metadata
+			document.update(values)
 			document.save(ignore_permissions=True)
 			return
 
 		frappe.get_doc(
 			{
 				"doctype": "Metal Server Image",
-				"provider_type": self.provider.provider_type,
-				"image": image.name,
-				"provider_metadata": metadata,
+				"name": image.name,
+				**values,
 			}
 		).insert(ignore_permissions=True)

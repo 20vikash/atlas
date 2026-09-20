@@ -50,12 +50,10 @@ def ensure_capacity(architecture: str, memory_mib: int, disk_mib: int, *, is_sle
 	image = frappe.get_doc("Metal Server Image", image_name)
 	if (
 		not size.enabled
-		or size.provider_type != settings.server_provider
 		or size.architecture != architecture
 		or size.memory_mib < memory_mib
 		or size.disk_gib * 1024 < disk_mib
 		or not image.enabled
-		or image.provider_type != settings.server_provider
 	):
 		frappe.log_error(
 			"Default Metal Machine Size or Image cannot provide the requested capacity.",

@@ -20,9 +20,9 @@ class MetalServerImage(Document):
 		from frappe.types import DF
 
 		enabled: DF.Check
-		image: DF.Data
+		os: DF.Data | None
+		os_version: DF.Data | None
 		provider_metadata: DF.Code | None
-		provider_type: DF.Literal["Scaleway"]
 	# end: auto-generated types
 
 	def get_provider_metadata(self, key: str) -> str:

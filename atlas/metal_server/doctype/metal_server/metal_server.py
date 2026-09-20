@@ -82,7 +82,6 @@ class MetalServer(Document):
 	def before_validate(self) -> None:
 		"""Fill values that depend on the selected size and image."""
 		self.settings.server_provider_controller.validate_settings()
-		self._validate_provider_catalog()
 		if self.provider_server_id:
 			return
 
@@ -111,8 +110,7 @@ class MetalServer(Document):
 		self.provider_metadata = frappe.as_json(provider_server.provider_metadata)
 
 	def validate(self) -> None:
-		"""Reject a server whose size, image, or region do not agree."""
-		self._validate_provider_catalog()
+		"""Fill the disks and the mesh address once the server runs."""
 		self._sync_disks_if_running()
 		self._set_wireguard_ip_address_if_not_set()
 
@@ -348,24 +346,6 @@ class MetalServer(Document):
 	def _setup_server(self) -> None:
 		ServerProvisioner(self).run()
 
-	@staticmethod
-	def _find_default_server_size(provider_type: str) -> str:
-		sizes = frappe.get_all(
-			"Metal Server Size",
-			filters={
-				"enabled": 1,
-				"provider_type": provider_type,
-				"cpu_count": [">", 2],
-				"memory_mib": [">=", 32768],
-			},
-			fields=["name"],
-			order_by="memory_mib asc, cpu_count asc, disk_gib asc",
-			limit=1,
-		)
-		if not sizes:
-			frappe.throw(_("No enabled Metal Server Size has more than 2 CPUs and at least 32 GiB of memory"))
-		return sizes[0].name
-
 	def _install_metald(self) -> None:
 		"""Install metald and its host dependencies."""
 		HostInstallation(self).install_metal()
@@ -403,15 +383,6 @@ class MetalServer(Document):
 	def _parse_disks(self, lsblk_output: str) -> list[dict[str, str]]:
 		"""Return one row for each mounted device and the raw storage pool device."""
 		return DiskInventory(self).parse(lsblk_output)
-
-	def _validate_provider_catalog(self) -> None:
-		provider_type = self.settings.server_provider
-		for doctype, name in (
-			("Metal Server Size", self.server_size),
-			("Metal Server Image", self.server_image),
-		):
-			if name and frappe.db.get_value(doctype, name, "provider_type") != provider_type:
-				frappe.throw(_("{0} must belong to the configured server provider").format(doctype))
 
 	def _validate_power_action(self) -> None:
 		"""Check that a power action can run for this Server."""

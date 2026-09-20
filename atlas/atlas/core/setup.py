@@ -306,7 +306,7 @@ class AtlasSetup:
 			frappe.throw(_("Atlas Settings setup is not complete."))
 		if not self.settings.wildcard_tls_expires_on:
 			frappe.throw(_("Atlas Settings has no wildcard TLS certificate."))
-		if not frappe.db.exists("Metal Server Size", {"provider_type": self.settings.server_provider}):
-			frappe.throw(_("Atlas has no Metal Server Size for the configured provider."))
-		if not frappe.db.exists("Metal Server Image", {"provider_type": self.settings.server_provider}):
-			frappe.throw(_("Atlas has no Metal Server Image for the configured provider."))
+		if not frappe.db.count("Metal Server Size"):
+			frappe.throw(_("Atlas has no Metal Server Size."))
+		if not frappe.db.count("Metal Server Image"):
+			frappe.throw(_("Atlas has no Metal Server Image."))
