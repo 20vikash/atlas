@@ -2,6 +2,7 @@ import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import uuid7
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -430,7 +431,8 @@ class TestPlacementLockQuery(IntegrationTestCase):
 		with self.secondary_connection():
 			secondary_connection_id = frappe.db.sql("SELECT CONNECTION_ID()")[0][0]
 
-		self.host_name = f"test-placement-{frappe.generate_hash(length=8)}"
+		# A Metal Server name column is a UUID, so it rejects any other value.
+		self.host_name = str(uuid7())
 		self.sample_name = f"test-usage-{frappe.generate_hash(length=8)}"
 		with self.primary_connection():
 			primary_connection_id = frappe.db.sql("SELECT CONNECTION_ID()")[0][0]

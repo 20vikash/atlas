@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from uuid import uuid7
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -110,7 +111,7 @@ class TestLiveVirtualMachineLookup(IntegrationTestCase):
 		virtual_machine.update(
 			{
 				"name": frappe.generate_hash(length=10),
-				"server": "metal-test",
+				"server": str(uuid7()),
 				"virtual_machine_image": self.image_name,
 				"architecture": "amd64",
 				"cpu_millicores": 1000,
