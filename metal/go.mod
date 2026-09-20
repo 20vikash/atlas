@@ -10,6 +10,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/uuid v1.6.0
+	github.com/klauspost/compress v1.20.0
 	github.com/labstack/echo/v4 v4.15.4
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0

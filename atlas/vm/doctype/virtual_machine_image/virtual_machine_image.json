@@ -27,11 +27,13 @@
   "image_file",
   "image_sha256",
   "image_size_mib",
+  "image_stored_size_mib",
   "column_break_files",
   "kernel_object_key",
   "kernel_file",
   "kernel_sha256",
   "kernel_size_mib",
+  "kernel_stored_size_mib",
   "site_file_retention_until",
   "section_break_source",
   "source_virtual_machine",
@@ -327,6 +329,19 @@
    "label": "Site Files Kept Until",
    "read_only": 1,
    "show_description_on_click": 1
+  },
+  {
+   "fieldname": "image_stored_size_mib",
+   "fieldtype": "Int",
+   "label": "Image Stored Size (MiB)",
+   "read_only": 1,
+   "description": "Bytes the object store holds. The artifact is compressed, so this is smaller than the image size."
+  },
+  {
+   "fieldname": "kernel_stored_size_mib",
+   "fieldtype": "Int",
+   "label": "Kernel Stored Size (MiB)",
+   "read_only": 1
   }
  ],
  "links": [],

@@ -46,6 +46,30 @@ type stagedSnapshotMetadata struct {
 	UploadState  string                `json:"upload_state,omitempty"`
 	UploadError  string                `json:"upload_error,omitempty"`
 	UploadResult *SnapshotUploadResult `json:"upload_result,omitempty"`
+
+	RootfsProgress *artifactProgress `json:"rootfs_progress,omitempty"`
+	KernelProgress *artifactProgress `json:"kernel_progress,omitempty"`
+}
+
+// artifactProgress records parts already stored for a resumable upload.
+type artifactProgress struct {
+	UploadID string       `json:"upload_id"`
+	Parts    []storedPart `json:"parts,omitempty"`
+}
+
+// storedPart records a stored part and the compressed length used to validate reuse.
+type storedPart struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag"`
+	SizeBytes  int64  `json:"size_bytes"`
+}
+
+// storedParts returns progress for this multipart upload ID.
+func (progress *artifactProgress) storedParts(uploadID string) []storedPart {
+	if progress == nil || progress.UploadID == "" || progress.UploadID != uploadID {
+		return nil
+	}
+	return progress.Parts
 }
 
 // Stage creates a staged snapshot for the VM manager.

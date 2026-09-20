@@ -74,9 +74,19 @@ A successful VM start records image use. Metal keeps an image when a dependent V
 
 `Stage` creates a UUIDv7 value and stages a VM disk and kernel for the VM manager.
 
-`StartUpload` validates that the parts cover the artifact exactly and starts an asynchronous upload. The part size is fixed, because the controller signs each part against it. Uploads use a store-owned root context and wait group. Shutdown cancels new and active uploads and waits up to the daemon deadline.
+`StartUpload` checks the signed parts and starts an asynchronous upload. The part size is fixed, because the controller signs each part against it. The part count is an upper bound rather than an exact figure, because the artifact is stored compressed and its part count is known only once it is written. Uploads use a store-owned root context and wait group. Shutdown cancels new and active uploads and waits up to the daemon deadline.
 
-Durable upload state lives in the staging metadata. Live byte progress stays in memory. An upload recorded as running with no goroutine behind it did not survive a restart, so `UploadStatus` reports it as pending and the controller starts it again.
+Each artifact is stored compressed with zstd at its fastest level and one encoder thread. A VM disk is mostly unwritten blocks, so the stored object is a small fraction of the provisioned volume. One thread is deliberate: more threads did not compress faster in measurement, and the host runs customer VMs whose CPU this would take. `UploadedArtifact` reports `SizeBytes` for the uncompressed image and `StoredSizeBytes` for what the object store holds. The SHA-256 covers the uncompressed image, so one image keeps one digest whether it is stored raw or compressed.
+
+Parts are cut from the compressed stream, so each one is buffered to a file in the snapshot directory before it is sent. No more than one part is held at a time, and the buffer is removed as soon as the part is stored. `StartUpload` removes buffers a crashed upload left behind.
+
+Durable upload state lives in the staging metadata, including the parts the object store already holds and the multipart upload they belong to. An upload that restarts sends only the missing parts. A stored part is reused only when this pass produced the same length for it, because part boundaries come from the compressor; a part that differs is uploaded again over its part number. A different multipart upload ID discards the stored parts, so a replaced upload never reuses an ETag.
+
+One part that the object store refuses is repeated up to three times before the artifact fails, and each attempt sends the part again from the start.
+
+Live byte progress stays in memory and counts uncompressed bytes, which is the size the controller shows. An upload recorded as running with no goroutine behind it did not survive a restart, so `UploadStatus` reports it as pending and the controller starts it again.
+
+A download detects the artifact format from its content. A zstd artifact begins with the frame magic `28 B5 2F FD` and a raw artifact does not, so the controller can serve either form with no agreement between the two. The digest covers the decoded bytes, so a wrong guess fails the download instead of writing a bad disk.
 
 `DeleteSnapshot` cancels a running upload and waits for it to stop before it removes the data that upload is reading. It removes the staging clone before the source snapshot, because ZFS keeps a snapshot alive while a clone of it exists.
 

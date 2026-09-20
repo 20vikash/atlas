@@ -408,8 +408,12 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 		request = MultipartUploadService(image, object_storage_client).get_upload_request()
 
-		self.assertEqual([part["part_number"] for part in request["rootfs"]["parts"]], [1, 2])
-		self.assertEqual([part["part_number"] for part in request["kernel"]["parts"]], [1])
+		# The count is an upper bound with one spare part, because the stored
+		# artifact is compressed and its part count is not known in advance.
+		self.assertEqual([part["part_number"] for part in request["rootfs"]["parts"]], [1, 2, 3])
+		self.assertEqual([part["part_number"] for part in request["kernel"]["parts"]], [1, 2])
+		self.assertEqual(request["rootfs"]["upload_id"], "rootfs-upload")
+		self.assertEqual(request["kernel"]["upload_id"], "kernel-upload")
 		self.assertTrue(
 			all(
 				call.kwargs["expiry_seconds"] == 86400
@@ -457,8 +461,8 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		metal_client = Mock()
 		metal_client.get_snapshot.return_value = {
 			"state": "completed",
-			"rootfs": {"sha256": "a" * 64},
-			"kernel": {"sha256": "b" * 64},
+			"rootfs": {"sha256": "a" * 64, "stored_size_bytes": 3 * 1024 * 1024},
+			"kernel": {"sha256": "b" * 64, "stored_size_bytes": 1024 * 1024},
 		}
 		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
 		service = VirtualMachineImageTransferService()
@@ -476,6 +480,8 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			service.advance(image)
 			self.assertEqual(image.image_sha256, "a" * 64)
 			self.assertEqual(image.kernel_sha256, "b" * 64)
+			self.assertEqual(image.image_stored_size_mib, 3)
+			self.assertEqual(image.kernel_stored_size_mib, 1)
 			self.assertEqual(image.status, "Completing")
 			metal_client.delete_snapshot.assert_not_called()
 

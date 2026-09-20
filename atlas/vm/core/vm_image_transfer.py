@@ -188,9 +188,11 @@ class VirtualMachineImageTransferService:
 			image.db_set("transfer_progress", max(0, min(100, percent)))
 
 	def record_completed_upload(self, image: VirtualMachineImage, status: dict[str, Any]) -> None:
-		"""Store checksums before finalization removes the snapshot."""
+		"""Store checksums and compressed sizes before finalization removes the snapshot."""
 		image.image_sha256 = self.require_artifact_sha256(status, "rootfs")
 		image.kernel_sha256 = self.require_artifact_sha256(status, "kernel")
+		image.image_stored_size_mib = self.get_stored_size(status, "rootfs")
+		image.kernel_stored_size_mib = self.get_stored_size(status, "kernel")
 		image.status = "Completing"
 		image.transfer_progress = 100
 		image.transfer_error = None
@@ -206,6 +208,15 @@ class VirtualMachineImageTransferService:
 		if any(character not in "0123456789abcdef" for character in sha256):
 			raise VirtualMachineImageTransferError(f"Metal returned an invalid {artifact} SHA-256")
 		return sha256
+
+	@staticmethod
+	def get_stored_size(status: dict[str, Any], artifact: str) -> int:
+		"""Return the size the object store holds for one artifact, in MiB."""
+		value = status.get(artifact)
+		size_bytes = value.get("stored_size_bytes") if isinstance(value, dict) else None
+		if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
+			raise VirtualMachineImageTransferError(f"Metal returned an invalid stored {artifact} size")
+		return bytes_to_mib(size_bytes)
 
 	@staticmethod
 	def get_snapshot_id(response: dict[str, Any]) -> str:
