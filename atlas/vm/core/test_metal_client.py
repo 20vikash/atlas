@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
@@ -255,6 +256,179 @@ class TestMetalClientPaths(UnitTestCase):
 		self.assertEqual(
 			request.call_args.args[:2], ("POST", "https://10.0.0.2:9000/v1/snapshots/SNAP-1/upload")
 		)
+
+
+COMPUTE_REQUEST = {
+	"cpu_millicores": 2000,
+	"memory_mib": 2048,
+	"sleep_after_idle_seconds": 1800,
+}
+
+
+class TestMetalClientConnection(UnitTestCase):
+	@patch("atlas.vm.core.metal_client.client_certificate_files", return_value=("atlas.crt", "atlas.key"))
+	@patch("atlas.vm.core.metal_client.ca_file", return_value="ca.crt")
+	def test_client_uses_the_validated_public_ipv4_address(
+		self, _ca_file: Mock, _certificate_files: Mock
+	) -> None:
+		client = MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="203.0.113.8"))
+
+		self.assertEqual(client.base_url, "https://203.0.113.8:9000")
+		self.assertEqual(client.ca_file, "ca.crt")
+		self.assertEqual(client.client_certificate, ("atlas.crt", "atlas.key"))
+
+	@patch("atlas.vm.core.metal_client.client_certificate_files")
+	@patch("atlas.vm.core.metal_client.ca_file")
+	def test_client_rejects_an_invalid_public_ipv4_address(
+		self, ca_file_mock: Mock, certificate_files: Mock
+	) -> None:
+		with self.assertRaisesRegex(MetalClientError, "invalid public IPv4 address"):
+			MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="not-an-address"))
+
+		ca_file_mock.assert_not_called()
+		certificate_files.assert_not_called()
+
+	def test_console_connection_builds_websocket_url(self) -> None:
+		client = build_client()
+
+		connection = client.get_console_connection("VM-00001")
+		ssh_connection = client.get_console_connection("VM-00001", "ssh")
+
+		self.assertEqual(connection["url"], "wss://10.0.0.2:9000/v1/vms/VM-00001/console?mode=tty")
+		self.assertEqual(ssh_connection["url"], "wss://10.0.0.2:9000/v1/vms/VM-00001/console?mode=ssh")
+
+
+class TestMetalClientVirtualMachineRoutes(UnitTestCase):
+	def test_put_uses_the_atlas_vm_name(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.Session.request",
+			return_value=build_response(202, content=b""),
+		) as request:
+			client.put_virtual_machine("VM-00001", {"cpu_millicores": 1000})
+
+		self.assertEqual(request.call_args.args[:2], ("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001"))
+
+	def test_mutations_use_versioned_subresources(self) -> None:
+		client = build_client()
+		disk = {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000}
+		network = {
+			"egress": "uplink",
+			"public_ipv4": "203.0.113.10",
+			"wireguard_mesh_ipv6": "fdaa:1::1",
+			"private_network_throughput_mibps": 100,
+			"public_network_throughput_mibps": 50,
+		}
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.Session.request",
+			return_value=build_response(202, content=b""),
+		) as request:
+			client.set_virtual_machine_power_state("VM-00001", "running")
+			client.request_virtual_machine_restart("VM-00001")
+			client.set_virtual_machine_disk("VM-00001", disk)
+			client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST)
+			client.set_virtual_machine_network("VM-00001", network)
+			client.replace_virtual_machine_ssh_keys("VM-00001", ["ssh-ed25519 AAAA"])
+			client.replace_virtual_machine_metadata("VM-00001", {"env": "prod"})
+			client.delete_virtual_machine("VM-00001")
+
+		self.assertEqual(
+			[call.args[:2] for call in request.call_args_list],
+			[
+				("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001/power"),
+				("POST", "https://10.0.0.2:9000/v1/vms/VM-00001/restart"),
+				("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001/disk"),
+				("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001/compute"),
+				("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001/network"),
+				("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001/ssh-keys"),
+				("PUT", "https://10.0.0.2:9000/v1/vms/VM-00001/metadata"),
+				("DELETE", "https://10.0.0.2:9000/v1/vms/VM-00001"),
+			],
+		)
+		bodies = [call.kwargs.get("json") for call in request.call_args_list]
+		self.assertEqual(bodies[2], disk)
+		self.assertEqual(bodies[3], COMPUTE_REQUEST)
+		self.assertEqual(bodies[4], network)
+		self.assertEqual(bodies[5], {"ssh_keys": ["ssh-ed25519 AAAA"]})
+		self.assertEqual(bodies[6], {"metadata": {"env": "prod"}})
+
+	def test_snapshot_calls_use_unified_image_paths(self) -> None:
+		client = build_client()
+		responses = [
+			build_response(201),
+			build_response(202, content=b""),
+			build_response(200, {"state": "uploading"}),
+			build_response(204, content=b""),
+		]
+
+		with patch("atlas.vm.core.metal_client.requests.Session.request", side_effect=responses) as request:
+			client.create_snapshot("VM-00001")
+			client.start_snapshot_upload("image-1", {"rootfs": {"parts": []}, "kernel": {"parts": []}})
+			client.get_snapshot("image-1")
+			client.delete_snapshot("image-1")
+
+		self.assertEqual(
+			[call.args[:2] for call in request.call_args_list],
+			[
+				("POST", "https://10.0.0.2:9000/v1/vms/VM-00001/snapshots"),
+				("POST", "https://10.0.0.2:9000/v1/snapshots/image-1/upload"),
+				("GET", "https://10.0.0.2:9000/v1/snapshots/image-1"),
+				("DELETE", "https://10.0.0.2:9000/v1/snapshots/image-1"),
+			],
+		)
+		self.assertEqual(request.call_args_list[0].kwargs["timeout"], client.snapshot_timeout_seconds)
+		self.assertEqual(request.call_args_list[1].kwargs["timeout"], client.snapshot_timeout_seconds)
+
+	def test_sync_sends_wireguard_peers_images_and_privileged_addresses(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.Session.request",
+			return_value=build_response(200, {"capacity": {}}),
+		) as request:
+			result = client.sync([{"node": "node-1"}], [{"ref": "sha256:image"}], ["fdaa:1::1"])
+
+		self.assertEqual(result, {"capacity": {}})
+		self.assertEqual(request.call_args.args[:2], ("POST", "https://10.0.0.2:9000/v1/sync"))
+		self.assertEqual(
+			request.call_args.kwargs["json"],
+			{
+				"wireguard_peers": [{"node": "node-1"}],
+				"images": [{"ref": "sha256:image"}],
+				"privileged_vm_addresses": ["fdaa:1::1"],
+			},
+		)
+
+	def test_transport_error_marks_every_write_as_uncertain(self) -> None:
+		client = build_client()
+		write_operations = {
+			"create": lambda: client.put_virtual_machine("VM-00001", {}),
+			"restart": lambda: client.request_virtual_machine_restart("VM-00001"),
+			"delete": lambda: client.delete_virtual_machine("VM-00001"),
+			"power": lambda: client.set_virtual_machine_power_state("VM-00001", "running"),
+			"ssh_keys": lambda: client.replace_virtual_machine_ssh_keys("VM-00001", []),
+			"metadata": lambda: client.replace_virtual_machine_metadata("VM-00001", {}),
+			"network": lambda: client.set_virtual_machine_network("VM-00001", {}),
+			"disk": lambda: client.set_virtual_machine_disk("VM-00001", {}),
+			"compute": lambda: client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST),
+			"snapshot_upload": lambda: client.start_snapshot_upload("image-1", {}),
+			"sync": lambda: client.sync([], [], []),
+		}
+
+		for operation_name, write_operation in write_operations.items():
+			with (
+				self.subTest(operation=operation_name),
+				patch(
+					"atlas.vm.core.metal_client.requests.Session.request",
+					side_effect=requests.ConnectionError("lost"),
+				),
+				self.assertRaises(MetalClientError) as raised,
+			):
+				write_operation()
+
+			self.assertTrue(raised.exception.uncertain)
 
 
 class TestMetalClientMigrations(UnitTestCase):

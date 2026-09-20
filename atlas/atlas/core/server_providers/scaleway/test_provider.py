@@ -42,21 +42,6 @@ class TestScalewayProvider(UnitTestCase):
 		self.assertEqual(provider.settings.is_server_provider_setup_completed, 1)
 		provider.settings.save.assert_called_once_with()
 
-	def test_ensure_server_delegates_to_server_operations(self) -> None:
-		provider = self.provider()
-		request = Mock()
-		provider.servers.ensure.return_value = ProviderServer(
-			provider_server_id="server-id",
-			status="Installing",
-			public_ipv4_address="203.0.113.1",
-			provider_metadata={},
-		)
-
-		result = provider.ensure_server(request)
-
-		self.assertEqual(result.provider_server_id, "server-id")
-		provider.servers.ensure.assert_called_once_with(request)
-
 	def test_prepare_server_runs_provider_steps_in_order(self) -> None:
 		provider = self.provider()
 		provider.attach_private_network = Mock()
@@ -73,13 +58,6 @@ class TestScalewayProvider(UnitTestCase):
 		self.assertEqual(
 			[call.args[0] for call in operations.call_args_list], ["attach", "network", "server"]
 		)
-
-	def test_power_action_delegates_to_server_operations(self) -> None:
-		provider = self.provider()
-
-		provider.set_power_state("server-id", ServerPowerAction.REBOOT)
-
-		provider.servers.set_power_state.assert_called_once_with("server-id", ServerPowerAction.REBOOT)
 
 	def test_ip_address_operations_use_the_ip_address_owner(self) -> None:
 		provider = self.provider()

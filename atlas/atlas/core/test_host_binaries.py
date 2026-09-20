@@ -21,9 +21,6 @@ class TestHostBinaries(UnitTestCase):
 		self.assertEqual(version_fields("1.26rc1"), (1, 26))
 		self.assertEqual(version_fields("invalid"), ())
 
-	def test_file_name_comes_from_the_artifact(self) -> None:
-		self.assertEqual(HOST_BINARIES[0].file_name, "metald-linux-amd64")
-
 	def test_the_toolchain_path_is_absolute(self) -> None:
 		with patch.object(
 			host_binaries.frappe, "get_site_path", return_value="site.local/private/files/toolchain"

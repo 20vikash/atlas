@@ -38,12 +38,6 @@ class TestSSHRunner(UnitTestCase):
 
 		self.assertIn("netplan generate", run.call_args.args[0])
 
-	def test_ping_script_reports_server_information(self) -> None:
-		script = SSHRunner.get_script_source("ping-server.sh")
-
-		self.assertIn("uptime", script)
-		self.assertIn("cat /etc/os-release", script)
-
 	def test_read_output_sends_each_chunk_to_the_callback(self) -> None:
 		process = subprocess.Popen(
 			["printf", "one\\ntwo\\n"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT

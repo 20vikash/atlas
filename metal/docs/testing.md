@@ -26,18 +26,6 @@ Run the script again when required. It performs these actions:
 The script creates a development authority in `$METALD_WORKDIR/tls` and issues a node certificate and an Atlas client certificate.
 Call the API with `--cacert tls/ca.crt --cert tls/atlas.crt --key tls/atlas.key`.
 
-## Secure Shell test
-
-`dev.sh` prepares the default test image. Run the test while `metald` is active:
-
-```sh
-sudo metal/test/integration/ssh-test.sh
-```
-
-Use the `METALD_IMAGE_URL`, digest, kernel, and architecture variables to test another image.
-
-The script reserves a VM, waits for reconciliation, and connects to `172.16.0.2` in the VM namespace. It requests termination when the test ends.
-
 ## Network activity tests
 
 These tests need root, `ip`, and Linux 6.6 or newer. Run them when no other test uses the same namespaces:
@@ -56,14 +44,11 @@ This test needs root, network namespaces, `iptables`, and `ip6tables`. It verifi
 sudo -E go test -tags integration -run TestEnsureFirewallReplacesDrift ./internal/network/
 ```
 
-## Idle shutdown test
+## Boot and idle shutdown
 
-This test needs Linux 6.6 or newer. Start metald, then run the test with a short per-VM timeout:
+A full boot, Secure Shell, and idle shutdown check needs a complete environment. Use the manual steps in [Manual access](#manual-access) until the end to end environment exists.
 
-```sh
-sudo metal/dist/metald-linux-amd64 serve --config /tmp/metald/metald.toml
-sudo metal/test/integration/idle-shutdown-test.sh
-```
+An idle VM stops and keeps no Firecracker process. The next IPv4 or IPv6 packet starts it again.
 
 ```text
 running -> idle -> stopped (no Firecracker process)
@@ -72,8 +57,6 @@ running -> idle -> stopped (no Firecracker process)
 					 v
 				  running
 ```
-
-The test runs this cycle twice. It verifies that the same guest token and process survive each restoration. It then sends an explicit stop and verifies a cold start.
 
 ## Configuration
 

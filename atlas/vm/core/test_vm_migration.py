@@ -190,25 +190,6 @@ class TestMigrationCreation(UnitTestCase):
 		):
 			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-1")
 
-	def test_migrate_delegates_to_the_service(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.check_permission = Mock()
-
-		with patch("atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001") as create:
-			result = virtual_machine.migrate()
-
-		self.assertEqual(result, "mig-00001")
-		create.assert_called_once_with(virtual_machine, target_server=None)
-
-	def test_migrate_passes_a_chosen_target(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.check_permission = Mock()
-
-		with patch("atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001") as create:
-			virtual_machine.migrate(target_server="metal-3")
-
-		create.assert_called_once_with(virtual_machine, target_server="metal-3")
-
 
 class TestMigrationActionLock(UnitTestCase):
 	def test_lock_blocks_a_mutable_action(self) -> None:

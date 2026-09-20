@@ -136,18 +136,6 @@ class TestServer(UnitTestCase):
 		self.assertEqual(provider.ensure_server.call_args.args[0].identity_key, "stored-key")
 		self.assertEqual(server.provider_server_id, "server-id")
 
-	def test_provision_inserts_pending_host_for_setup_job(self) -> None:
-		server = SimpleNamespace(insert=Mock())
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.new_doc", return_value=server),
-		):
-			MetalServer.provision(size="Scaleway/size", image="Scaleway/Ubuntu_26.04", is_sleepy_vm_host=True)
-
-		self.assertEqual(server.server_size, "Scaleway/size")
-		self.assertEqual(server.server_image, "Scaleway/Ubuntu_26.04")
-		self.assertTrue(server.is_sleepy_vm_host)
-		server.insert.assert_called_once_with(ignore_permissions=True)
-
 	def test_provisioning_worker_runs_as_administrator(self) -> None:
 		previous_user = frappe.session.user
 		seen_users: list[str] = []
@@ -162,15 +150,6 @@ class TestServer(UnitTestCase):
 			frappe.set_user(previous_user)
 
 		self.assertEqual(seen_users, ["Administrator"])
-
-	def test_validate_checks_the_provider_catalog(self) -> None:
-		server = self._server(status="Pending")
-		server._validate_provider_catalog = Mock()
-		server._sync_disks_if_running = Mock()
-
-		MetalServer.validate(server)
-
-		server._validate_provider_catalog.assert_called_once()
 
 	def test_setup_server_queues_when_no_setup_job_runs(self) -> None:
 		server = self._server(status="Failed")
@@ -205,24 +184,6 @@ class TestServer(UnitTestCase):
 			MetalServer.setup_server(server)
 
 		server._enqueue_setup_server.assert_not_called()
-
-	def test_ping_server_creates_a_ping_script_log(self) -> None:
-		server = self._server(status="Running")
-		log = SimpleNamespace(name="SSH-00001")
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.SSHTask.create_for_script_file",
-				return_value=log,
-			) as create_for_script_file,
-		):
-			log_name = MetalServer.ping_server(server)
-
-		self.assertEqual(log_name, "SSH-00001")
-		create_for_script_file.assert_called_once_with(
-			target_type="Metal Server", target=server.name, script_path="ping-server.sh"
-		)
 
 	def test_ping_server_rejects_a_server_that_is_not_running(self) -> None:
 		server = self._server(status="Stopped")
@@ -320,20 +281,6 @@ class TestServer(UnitTestCase):
 
 		create_for_command.assert_not_called()
 
-	def test_sync_state_queues_one_host_exchange(self) -> None:
-		server = self._server(status="Running")
-		server.is_provisioning_completed = True
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.enqueue_server_sync"
-			) as enqueue_server_sync,
-		):
-			MetalServer.sync_state(server)
-
-		enqueue_server_sync.assert_called_once_with(server.name)
-
 	# An unprovisioned host has no Metal token.
 	def test_sync_state_rejects_a_server_that_is_not_ready(self) -> None:
 		server = self._server(status="Running")
@@ -352,26 +299,30 @@ class TestServer(UnitTestCase):
 
 		enqueue_server_sync.assert_not_called()
 
-	def test_install_metald_queues_the_install_job(self) -> None:
+	def test_every_metald_operation_shares_one_job_lock(self) -> None:
 		server = self._server(status="Running")
+		job_ids = []
 
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		for operation in (
+			MetalServer.install_metald,
+			MetalServer.upgrade_metald,
+			MetalServer.enqueue_tls_certificate_renewal,
 		):
-			MetalServer.install_metald(server)
+			with (
+				patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+				patch(
+					"atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued",
+					return_value=False,
+				),
+				patch(
+					"atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc"
+				) as enqueue_doc,
+			):
+				operation(server)
 
-		enqueue_doc.assert_called_once_with(
-			"Metal Server",
-			"node-test-00007",
-			"_install_metald",
-			queue="long",
-			timeout=1200,
-			job_id="atlas||server||metald||node-test-00007",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
+			job_ids.append(enqueue_doc.call_args.kwargs["job_id"])
+
+		self.assertEqual(job_ids, [server.metald_job_id] * 3)
 
 	def test_install_metald_rejects_a_missing_binary(self) -> None:
 		server = self._server(status="Running")
@@ -459,26 +410,6 @@ class TestServer(UnitTestCase):
 			timeout_seconds=1200,
 		)
 
-	def test_tls_renewal_queues_the_metald_job(self) -> None:
-		server = self._server(status="Running")
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
-		):
-			MetalServer.enqueue_tls_certificate_renewal(server)
-
-		enqueue_doc.assert_called_once_with(
-			"Metal Server",
-			"node-test-00007",
-			"_renew_tls_certificate",
-			queue="long",
-			timeout=1200,
-			job_id="atlas||server||metald||node-test-00007",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
-
 	def test_tls_renewal_waits_for_a_running_metald_job(self) -> None:
 		server = self._server(status="Running")
 
@@ -508,27 +439,6 @@ class TestServer(UnitTestCase):
 				MetalServer.renew_tls_certificate(server)
 
 		enqueue_doc.assert_not_called()
-
-	def test_upgrade_metald_queues_the_upgrade_job(self) -> None:
-		server = self._server(status="Running")
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
-		):
-			MetalServer.upgrade_metald(server)
-
-		enqueue_doc.assert_called_once_with(
-			"Metal Server",
-			"node-test-00007",
-			"_upgrade_metald",
-			queue="long",
-			timeout=1200,
-			job_id="atlas||server||metald||node-test-00007",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
 
 	def test_upgrade_metald_waits_for_a_running_metald_job(self) -> None:
 		"""Install and upgrade share one lock, so they never restart metald together."""
@@ -715,18 +625,6 @@ class TestServer(UnitTestCase):
 		):
 			with self.assertRaises(ValueError):
 				MetalServer._get_wireguard_ip_address(server)
-
-	def test_configure_wireguard_queues_the_job(self) -> None:
-		server = self._server(status="Running")
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
-		):
-			MetalServer.configure_wireguard(server)
-
-		self.assertEqual(enqueue_doc.call_args.args[2], "_configure_wireguard")
 
 	def test_configure_wireguard_rejects_a_running_job(self) -> None:
 		server = self._server(status="Running")

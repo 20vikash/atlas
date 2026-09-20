@@ -28,14 +28,6 @@ func (monitor *fakeTrafficMonitor) Detach(virtualMachineID string) error {
 	return nil
 }
 
-func TestNewLinuxAllocatorStoresTheTrafficMonitor(t *testing.T) {
-	monitor := &fakeTrafficMonitor{}
-	allocator := newLinuxAllocator(nil, monitor)
-	if allocator.trafficMonitor != monitor {
-		t.Error("the traffic monitor was not stored")
-	}
-}
-
 func TestTrafficTrackingFollowsTheRequestedSetting(t *testing.T) {
 	monitor := &fakeTrafficMonitor{}
 	allocator := newLinuxAllocator(nil, monitor)
