@@ -10,7 +10,7 @@ The unicast mode transports the same NDP packets over the routed IPv4 underlay. 
 
 - Configure Atlas WG Mesh normally on every host with `atlas-wg-mesh configure`.
 - Permit IPv4 protocol 41 between the participating hosts.
-- Keep the WireGuard peer state on every host complete. It is the single source of truth: each entry needs an IPv4 endpoint and the uplink MAC of that host, because the hooks identify a peer by MAC and reach it by IPv4.
+- Keep the WireGuard peer state on every host complete. It is the single source of truth: each entry needs an IPv4 endpoint and the uplink MAC of that host, because the egress hook frames each copy with that endpoint and MAC, and the ingress hook identifies an answering peer by MAC.
 
 ## Peer identification
 
@@ -28,7 +28,7 @@ metald writes `wireguard-peers.json` under `base_dir` after every synchronizatio
 atlas-wg-mesh peers sync /var/lib/metal/wireguard-peers.json
 ```
 
-Run the same command by hand after a manual edit. It fills the `peer_list` and `peers_by_mac` maps and installs one neighbour entry per peer, which the kernel resolves for the outer transport. Without metald, an operator writes the JSON state file and runs the command.
+Run the same command by hand after a manual edit. It fills the `peer_list` and `peers_by_mac` maps. The peer state carries every peer MAC, so the hooks frame the outer packets directly and no kernel neighbour entries are necessary. Without metald, an operator writes the JSON state file and runs the command.
 
 ## Start the daemon
 

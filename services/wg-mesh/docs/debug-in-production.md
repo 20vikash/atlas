@@ -94,7 +94,7 @@ These lines show, in order: tenant isolation, the host-underlay guard, and sourc
 
 ### Stale location recovery
 
-When a VM moves from `fdab::2` to `fdab::3`, the managed neighbour entry on each sender keeps probing, and the first advertisement from the new owner refreshes the location:
+When a VM moves from `fdab::2` to `fdab::3`, the neighbour entry on each sender keeps probing, and the first advertisement from the new owner refreshes the location:
 
 ```text
 VM        REDIRECT src=fdaa:1:0:2::10 dst=fdaa:1:0:2::20 tenant=2

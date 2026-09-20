@@ -13,9 +13,6 @@
 #define ATLAS_UNICAST_IPV4_DESTINATION_OFFSET 16
 #define ATLAS_UNICAST_IPV4_CHECKSUM_OFFSET 10
 
-/* Address family for IPv4 in bpf_fib_lookup. */
-#define ATLAS_UNICAST_AF_INET 2
-
 enum unicast_debug_operation
 {
 	UNICAST_OPERATION_TX_FAN_OUT = 1,
@@ -37,8 +34,8 @@ static __always_inline __u16 atlas_unicast_csum_fold(__u32 sum)
 	return (__u16)~sum;
 }
 
-/* Check if the given IPv4 address belongs to a configured peer. The map key is a separate stack variable, because its address is taken, so the verifier can bound the loop. */
-static __always_inline int atlas_unicast_is_known_peer(__be32 peer)
+/* The configured peer with the given IPv4 address, or NULL. The map key is a separate stack variable, because its address is taken, so the verifier can bound the loop. */
+static __always_inline struct atlas_peer *atlas_unicast_peer_with_ipv4(__be32 address)
 {
 	__u32 index;
 
@@ -47,12 +44,12 @@ static __always_inline int atlas_unicast_is_known_peer(__be32 peer)
 
 		struct atlas_peer *candidate = bpf_map_lookup_elem(&peer_list, &key);
 
-		if (!candidate || candidate->ipv4 == 0) return 0;
+		if (!candidate || candidate->ipv4 == 0) return NULL;
 
-		if (candidate->ipv4 == peer) return 1;
+		if (candidate->ipv4 == address) return candidate;
 	}
 
-	return 0;
+	return NULL;
 }
 
 /* Wrap a packet in an outer IPv4 header: the header space is added between the Ethernet header and the payload, and the Ethernet type becomes IPv4. The header bytes are stored by the caller per peer. */
@@ -92,45 +89,28 @@ static __always_inline int atlas_unicast_store_base_header(struct __sk_buff *pac
 	return 1;
 }
 
-/* Send one copy of the wrapped packet to a peer: store the peer destination and checksum contribution, resolve the underlay route with bpf_fib_lookup(), and emit the copy with bpf_clone_redirect(). Returns 0 on success. */
-static __always_inline int atlas_unicast_send_to_peer(struct __sk_buff *packet, __be32 *peer_address, __be32 source_address, __u16 wrapped_length, __s64 base_sum)
+/* Send one copy of the wrapped packet to a peer: store the peer IPv4 destination and checksum contribution, frame the copy with the peer MAC and the local uplink MAC, and emit it with bpf_clone_redirect(). Returns 0 on success. */
+static __always_inline int atlas_unicast_send_to_peer(struct __sk_buff *packet, struct atlas_peer *peer, struct config *local_config, __s64 base_sum)
 {
-	struct bpf_fib_lookup route = {};
-
 	__u16 checksum;
 
 	__s64 peer_sum;
 
-	int fib_result;
-
-	peer_sum = bpf_csum_diff(NULL, 0, (__be32 *)peer_address, sizeof(*peer_address), (__wsum)base_sum);
+	peer_sum = bpf_csum_diff(NULL, 0, &peer->ipv4, sizeof(peer->ipv4), (__wsum)base_sum);
 
 	if (peer_sum < 0) return -1;
 
 	checksum = atlas_unicast_csum_fold((__u32)peer_sum);
 
-	if (bpf_skb_store_bytes(packet, ETH_HLEN + ATLAS_UNICAST_IPV4_DESTINATION_OFFSET, peer_address, sizeof(*peer_address), BPF_F_INVALIDATE_HASH)) return -1;
+	if (bpf_skb_store_bytes(packet, ETH_HLEN + ATLAS_UNICAST_IPV4_DESTINATION_OFFSET, &peer->ipv4, sizeof(peer->ipv4), BPF_F_INVALIDATE_HASH)) return -1;
 
 	if (bpf_skb_store_bytes(packet, ETH_HLEN + ATLAS_UNICAST_IPV4_CHECKSUM_OFFSET, &checksum, sizeof(checksum), 0)) return -1;
 
-	if (wrapped_length < sizeof(struct iphdr)) return -1;
+	if (bpf_skb_store_bytes(packet, 0, peer->mac, ETH_ALEN, 0)) return -1;
 
-	/* bpf_fib_lookup() expects tot_len as the host-order L3 length. ifindex is the input L3 device; on success the helper replaces it with the selected egress device. */
-	route.family = ATLAS_UNICAST_AF_INET;
-	route.tot_len = wrapped_length;
-	route.ifindex = packet->ifindex;
-	route.ipv4_src = source_address;
-	route.ipv4_dst = *peer_address;
+	if (bpf_skb_store_bytes(packet, ETH_ALEN, local_config->discovery_mac, ETH_ALEN, 0)) return -1;
 
-	fib_result = bpf_fib_lookup(packet, &route, sizeof(route), BPF_FIB_LOOKUP_OUTPUT);
-
-	if (fib_result) return fib_result;
-
-	if (bpf_skb_store_bytes(packet, 0, route.dmac, ETH_ALEN, 0)) return -1;
-
-	if (bpf_skb_store_bytes(packet, ETH_ALEN, route.smac, ETH_ALEN, 0)) return -1;
-
-	return bpf_clone_redirect(packet, route.ifindex, 0);
+	return bpf_clone_redirect(packet, 2, 0);
 }
 
 /* Attached to TC egress on the discovery interface in a unicast environment. Wrapped packets are IPv4, so clones pass through unchanged.
@@ -152,10 +132,11 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 	struct in6_addr target = {};
 	struct in6_addr destination = {};
 
+	struct atlas_peer *requester_peer;
+
 	struct config *local_config;
 
 	__be32 *requester;
-	__be32 requester_address;
 
 	__s64 base_sum = 0;
 
@@ -206,7 +187,7 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 			if (!peer || peer->ipv4 == 0) continue;
 
-			if (atlas_unicast_send_to_peer(packet, &peer->ipv4, local_config->underlay_ip4, wrapped_length, base_sum)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
+			if (atlas_unicast_send_to_peer(packet, peer, local_config, base_sum)) emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
 		}
 
 		emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAN_OUT, &target, NULL);
@@ -223,6 +204,11 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 
 	if (!requester) return TC_ACT_OK;
 
+	/* The requester is a configured peer, and its entry carries the MAC that frames the answer. */
+	requester_peer = atlas_unicast_peer_with_ipv4(*requester);
+
+	if (!requester_peer) return TC_ACT_OK;
+
 	local_config = get_config();
 
 	if (!local_config) return TC_ACT_OK;
@@ -234,9 +220,7 @@ int handle_ndp_unicast_egress(struct __sk_buff *packet)
 		return TC_ACT_OK;
 	}
 
-	requester_address = *requester;
-
-	if (atlas_unicast_send_to_peer(packet, &requester_address, local_config->underlay_ip4, wrapped_length, base_sum)) {
+	if (atlas_unicast_send_to_peer(packet, requester_peer, local_config, base_sum)) {
 		emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_SEND, UNICAST_OPERATION_TX_FAILED, &target, NULL);
 		return TC_ACT_SHOT;
 	}
@@ -267,6 +251,8 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 	struct in6_addr target = {};
 	struct in6_addr source = {};
 
+	struct atlas_peer *peer;
+
 	struct config *local_config;
 
 	__be16 ethernet_type = bpf_htons(ETH_P_IPV6);
@@ -296,7 +282,9 @@ int handle_ndp_unicast_ingress(struct __sk_buff *packet)
 	if (ip4->daddr != local_config->underlay_ip4) return TC_ACT_OK;
 
 	/* Do not trust an address that is not a configured peer. */
-	if (!atlas_unicast_is_known_peer(ip4->saddr)) {
+	peer = atlas_unicast_peer_with_ipv4(ip4->saddr);
+
+	if (!peer) {
 		emit_protocol_debug_event(DEBUG_UNICAST, DEBUG_RECEIVE, UNICAST_OPERATION_RX_REJECTED, &target, NULL);
 		return TC_ACT_OK;
 	}

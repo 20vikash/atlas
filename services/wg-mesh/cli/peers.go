@@ -45,15 +45,11 @@ var peersSyncCommand = &cobra.Command{
 	},
 }
 
-// syncPeers reloads the peer maps and the transport neighbour entries from the WireGuard peer state. Run it after every change to the state file.
+// syncPeers reloads the peer maps from the WireGuard peer state. Run it after every change to the state file.
 func syncPeers(peersPath string) error {
 	config, err := readPinnedConfig()
 	if err != nil {
 		return err
-	}
-	uplinkName := interfaceWithIPv4(config.UplinkIPv4)
-	if uplinkName == "" {
-		return errors.New("cannot find the configured uplink")
 	}
 
 	peers, err := readMeshPeers(peersPath, config)
@@ -66,13 +62,6 @@ func syncPeers(peersPath string) error {
 	}
 	if err := fillPeersByMAC(peers); err != nil {
 		return err
-	}
-
-	// The unicast egress hook resolves each peer route with bpf_fib_lookup, so every peer needs a neighbour entry without a MAC that the kernel resolves.
-	for _, peer := range peers {
-		if err := installTransportNeighbour(peer, uplinkName); err != nil {
-			return err
-		}
 	}
 
 	fmt.Printf("Atlas WG Mesh holds %d peers\n", len(peers))
@@ -152,16 +141,6 @@ func packPeerMAC(mac [6]byte) uint64 {
 	copy(packed[:], mac[:])
 
 	return binary.LittleEndian.Uint64(packed[:])
-}
-
-// installTransportNeighbour adds one permanent, externally learned, managed neighbour entry for a peer. The entry holds no MAC: the kernel resolves it, which the BPF FIB lookup needs.
-func installTransportNeighbour(peer peerEntry, uplinkName string) error {
-	address := netip.AddrFrom4(peer.IPv4)
-
-	if err := runCommand("ip", "neigh", "replace", address.String(), "dev", uplinkName, "nud", "permanent", "extern_learn", "managed"); err != nil {
-		return fmt.Errorf("install neighbour entry for %s: %w", address, err)
-	}
-	return nil
 }
 
 // fillPeerList rewrites the whole peer_list map, so removed peers cannot stay behind in a slot.
