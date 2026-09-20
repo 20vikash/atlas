@@ -30,15 +30,25 @@ fi
 step() { echo "==> $*"; }
 skip() { echo "    $* is already installed"; }
 
-# kept_binaries lists existing tools that this script leaves in place.
-kept_binaries=""
-
 # reported_version returns a tool version or "unknown".
 reported_version() {
 	local tool_version
 	tool_version=$("$1" version 2>/dev/null | head -1) || tool_version=""
 	[ -n "$tool_version" ] || tool_version=unknown
 	echo "$tool_version"
+}
+
+# service_is_stable checks that the metal service stays active.
+service_is_stable() {
+	local checks_remaining=5
+
+	while [ "$checks_remaining" -gt 0 ]; do
+		systemctl is-active --quiet metal.service || return 1
+		checks_remaining=$((checks_remaining - 1))
+		[ "$checks_remaining" -eq 0 ] || sleep 1
+	done
+
+	return 0
 }
 
 
@@ -83,26 +93,23 @@ else
 fi
 
 
-# install_binary downloads one tool. An existing tool is left alone, because
-# replacing a running daemon is an upgrade and needs its own steps.
+# install_binary replaces the installed binary and keeps the previous copy.
 install_binary() {
 	local destination=$1
 	local source_url=$2
-	local binary_name binary_version download
+	local download
 
-	if [ -x "$destination" ]; then
-		binary_name=$(basename "$destination")
-		binary_version=$(reported_version "$destination")
-		echo "    $binary_name is already installed; it reports: $binary_version"
-		kept_binaries="$kept_binaries$binary_name reports: $binary_version
-"
-		return
-	fi
-	download=$(mktemp)
+	download=$(mktemp "$destination.staged.XXXXXX")
 	trap 'rm -f "$download"' EXIT
 	curl -fsSL -o "$download" "$source_url"
-	install -m 755 "$download" "$destination"
-	rm -f "$download"
+	chmod 0755 "$download"
+
+	if [ -x "$destination" ]; then
+		echo "    replacing $(reported_version "$destination") with $(reported_version "$download")"
+		cp -a "$destination" "$destination.previous"
+	fi
+
+	mv -f "$download" "$destination"
 	trap - EXIT
 }
 
@@ -159,7 +166,10 @@ EOF
 }
 
 step "config ($config_file)"
+# Keep the matching config for rollback.
+previous_config=$config_file.previous
 if [ -f "$config_file" ]; then
+	cp -a "$config_file" "$previous_config"
 	sed -i "s|^listen[[:space:]]*=.*|listen   = \"$listen_address\"|" "$config_file"
 	if grep -q '^coordination_listen[[:space:]]*=' "$config_file"; then
 		sed -i "s|^coordination_listen[[:space:]]*=.*|coordination_listen = \"$COORDINATION_LISTEN_ADDRESS\"|" "$config_file"
@@ -271,15 +281,19 @@ sysctl -q -w net.ipv4.ip_forward=1
 step "enable and start metal service"
 systemctl daemon-reload
 systemctl enable metal.service
-systemctl restart metal.service
-systemctl is-active metal.service
-
-
-if [ -n "$kept_binaries" ]; then
-	step "binaries that this script did not upgrade"
-	printf '%s' "$kept_binaries" | while IFS= read -r kept_binary; do
-		echo "    $kept_binary"
-	done
-	echo "    This script installs a missing binary only. It does not upgrade an installed binary."
-	echo "    A tool that reports unknown has no version command. It can be an old build."
+# Restart preserves console descriptors and running VMs.
+if ! systemctl restart metal.service || ! service_is_stable; then
+	echo "==> metal.service did not stay up; restoring the previous binary and config"
+	if [ -f "$previous_config" ]; then
+		mv -f "$previous_config" "$config_file"
+	fi
+	if [ -x /usr/bin/metald.previous ]; then
+		mv -f /usr/bin/metald.previous /usr/bin/metald
+	fi
+	systemctl restart metal.service || true
+	journalctl -u metal.service -n 20 --no-pager -o cat >&2 || true
+	echo "metal.service did not start with the installed build" >&2
+	exit 1
 fi
+
+step "running metald $(reported_version /usr/bin/metald)"
