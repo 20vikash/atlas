@@ -59,6 +59,7 @@ class VirtualMachineImage(Document):
 		image_object_key: DF.Data | None
 		image_sha256: DF.Data | None
 		image_size_mib: DF.Int
+		image_stored_size_mib: DF.Int
 		image_type: DF.Literal["system", "machine"]
 		is_termination_protected: DF.Check
 		kernel_file: DF.Link | None
@@ -66,6 +67,7 @@ class VirtualMachineImage(Document):
 		kernel_object_key: DF.Data | None
 		kernel_sha256: DF.Data | None
 		kernel_size_mib: DF.Int
+		kernel_stored_size_mib: DF.Int
 		memory_snapshot: DF.Check
 		memory_snapshot_disk_mib: DF.Int
 		memory_snapshot_memory_mib: DF.Int
