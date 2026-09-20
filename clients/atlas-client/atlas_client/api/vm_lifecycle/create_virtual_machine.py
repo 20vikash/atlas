@@ -8,8 +8,8 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.capacity_unavailable_response import CapacityUnavailableResponse
 from ...models.create_virtual_machine_payload import CreateVirtualMachinePayload
-from ...models.out_of_capacity_response import OutOfCapacityResponse
 from ...models.virtual_machine_response import VirtualMachineResponse
 from typing import cast
 
@@ -45,7 +45,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> OutOfCapacityResponse | VirtualMachineResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
     if response.status_code == 201:
         response_201 = VirtualMachineResponse.from_dict(response.json())
 
@@ -54,7 +54,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_201
 
     if response.status_code == 503:
-        response_503 = OutOfCapacityResponse.from_dict(response.json())
+        response_503 = CapacityUnavailableResponse.from_dict(response.json())
 
 
 
@@ -66,7 +66,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[OutOfCapacityResponse | VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -81,7 +81,7 @@ def sync_detailed(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> Response[OutOfCapacityResponse | VirtualMachineResponse]:
+) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -97,7 +97,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[OutOfCapacityResponse | VirtualMachineResponse]
+        Response[CapacityUnavailableResponse | VirtualMachineResponse]
      """
 
 
@@ -119,7 +119,7 @@ def sync(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> OutOfCapacityResponse | VirtualMachineResponse | None:
+) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -135,7 +135,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        OutOfCapacityResponse | VirtualMachineResponse
+        CapacityUnavailableResponse | VirtualMachineResponse
      """
 
 
@@ -152,7 +152,7 @@ async def asyncio_detailed(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> Response[OutOfCapacityResponse | VirtualMachineResponse]:
+) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -168,7 +168,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[OutOfCapacityResponse | VirtualMachineResponse]
+        Response[CapacityUnavailableResponse | VirtualMachineResponse]
      """
 
 
@@ -190,7 +190,7 @@ async def asyncio(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> OutOfCapacityResponse | VirtualMachineResponse | None:
+) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -206,7 +206,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        OutOfCapacityResponse | VirtualMachineResponse
+        CapacityUnavailableResponse | VirtualMachineResponse
      """
 
 

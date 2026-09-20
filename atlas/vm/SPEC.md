@@ -97,7 +97,14 @@ Placement retries up to three times. A capacity rejection caches the shape for 5
 
 The snapshot query limits aggregates to the selected host pool. Placement does not load a Metal Server document while it holds the lock.
 
-If no strategy can select a host, Atlas returns `503 out_of_capacity` and creates no VM draft. When Metal auto-spawn is enabled, Atlas queues a separate capacity expansion job for the required architecture and sleepy-host pool. The job uses Default Metal Machine Size and Default Metal Machine Image. It reuses a matching Pending or Installing host and otherwise provisions one host. The client retries later after a host is Running and has a fresh capacity sample.
+A placement that selects no host answers `503` and creates no VM draft. Two causes share that status and `error.code` separates them.
+
+| Code | Cause | What the caller does |
+|---|---|---|
+| `out_of_capacity` | No ready host can hold the request | Retry later, or add capacity |
+| `placement_busy` | Every candidate host was held by another placement for the whole deadline | Retry at once, guided by `Retry-After` |
+
+Only `out_of_capacity` expands the fleet. Contention is not a capacity limit, so treating it as one would provision a host the fleet has no use for. When Metal auto-spawn is enabled, Atlas queues a separate capacity expansion job for the required architecture and sleepy-host pool. The job uses Default Metal Machine Size and Default Metal Machine Image. It reuses a matching Pending or Installing host and otherwise provisions one host. The client retries later after a host is Running and has a fresh capacity sample.
 
 A site-scoped database lock serializes the Pending host check and insert for each architecture and host pool. The job refreshes its transaction after it acquires the lock and commits the new host before it releases the lock.
 

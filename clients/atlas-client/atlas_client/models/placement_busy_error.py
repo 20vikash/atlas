@@ -18,21 +18,23 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="OutOfCapacityError")
+T = TypeVar("T", bound="PlacementBusyError")
 
 
 
 @_attrs_define
-class OutOfCapacityError:
-    """ No host can accept the VM. The fleet needs more capacity.
+class PlacementBusyError:
+    """ Every candidate host was held by another placement.
+
+    The fleet has room. Retry at once, guided by the `Retry-After` header.
 
         Attributes:
-            code (Literal['out_of_capacity']):
+            code (Literal['placement_busy']):
             fields (list[ApiErrorField]):
             message (str):
      """
 
-    code: Literal['out_of_capacity']
+    code: Literal['placement_busy']
     fields: list[ApiErrorField]
     message: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -71,9 +73,9 @@ class OutOfCapacityError:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.api_error_field import ApiErrorField # noqa: PLC0415
         d = dict(src_dict)
-        code = cast(Literal['out_of_capacity'] , d.pop("code"))
-        if code != 'out_of_capacity':
-            raise ValueError(f"code must match const 'out_of_capacity', got '{code}'")
+        code = cast(Literal['placement_busy'] , d.pop("code"))
+        if code != 'placement_busy':
+            raise ValueError(f"code must match const 'placement_busy', got '{code}'")
 
         fields = []
         _fields = d.pop("fields")
@@ -87,15 +89,15 @@ class OutOfCapacityError:
 
         message = d.pop("message")
 
-        out_of_capacity_error = cls(
+        placement_busy_error = cls(
             code=code,
             fields=fields,
             message=message,
         )
 
 
-        out_of_capacity_error.additional_properties = d
-        return out_of_capacity_error
+        placement_busy_error.additional_properties = d
+        return placement_busy_error
 
     @property
     def additional_keys(self) -> list[str]:

@@ -11,6 +11,7 @@ from atlas.vm.core.placement.strategies.base import (
 	PLACEMENT_DEADLINE_SECONDS,
 	PLACEMENT_PROBE_LIMIT,
 	OutOfCapacity,
+	PlacementBusy,
 	PlacementStrategy,
 )
 from atlas.vm.core.placement.strategies.best_fit import BestFitStrategy
@@ -301,10 +302,30 @@ class TestPlacementRetry(TestCase):
 	def test_pure_contention_never_marks_a_healthy_pool_full(self) -> None:
 		placements = [self._placement_result(contended=True) for _ in range(PLACEMENT_ATTEMPTS)]
 		with self._patched(placements) as (_context, _wait, _expansion, full):
-			with self.assertRaises(OutOfCapacity):
+			with self.assertRaises(PlacementBusy):
 				PlacementStrategy.find_server(self._requirements())
 
 		full.assert_not_called()
+
+	def test_contention_is_reported_as_busy_and_buys_no_capacity(self) -> None:
+		"""The fleet has room. Expanding it here spends money on a lock wait."""
+		placements = [self._placement_result(contended=True) for _ in range(PLACEMENT_ATTEMPTS)]
+		with self._patched(placements) as (_context, _wait, expansion, _full):
+			with self.assertRaises(PlacementBusy) as raised:
+				PlacementStrategy.find_server(self._requirements())
+
+		expansion.assert_not_called()
+		self.assertEqual(raised.exception.code, "placement_busy")
+		self.assertEqual(raised.exception.http_status_code, 503)
+
+	def test_a_full_fleet_is_reported_as_out_of_capacity_and_expands(self) -> None:
+		placements = [self._placement_result(probe_count=0)]
+		with self._patched(placements) as (_context, _wait, expansion, _full):
+			with self.assertRaises(OutOfCapacity) as raised:
+				PlacementStrategy.find_server(self._requirements())
+
+		expansion.assert_called_once()
+		self.assertEqual(raised.exception.code, "out_of_capacity")
 
 	def test_an_expired_deadline_does_not_mark_an_unprobed_pool_full(self) -> None:
 		placements = [self._placement_result(remaining_seconds=0)]
@@ -332,12 +353,12 @@ class TestPlacementRetry(TestCase):
 	def test_find_gives_up_after_the_attempt_limit(self) -> None:
 		placements = [self._placement_result(contended=True) for _ in range(PLACEMENT_ATTEMPTS)]
 		with self._patched(placements) as (context, wait, expansion, _full):
-			with self.assertRaises(OutOfCapacity):
+			with self.assertRaises(PlacementBusy):
 				PlacementStrategy.find_server(self._requirements())
 
 		self.assertEqual(context.call_count, PLACEMENT_ATTEMPTS)
 		self.assertEqual(wait.call_count, PLACEMENT_ATTEMPTS - 1)
-		expansion.assert_called_once()
+		expansion.assert_not_called()
 
 	def test_reserve_retries_a_contended_target_before_it_reports_no_capacity(self) -> None:
 		placements = [self._placement_result(contended=True), self._placement_result("a")]

@@ -20,7 +20,8 @@ from atlas.api.core.docs import DocsConfig, RouteDocs, generate_specification, r
 from atlas.api.core.errors import (
 	InvalidRequest,
 	ResourceNotFound,
-	describe_exception,
+	as_api_error,
+	log_unexpected_error,
 )
 from atlas.atlas.core.tags import find_names_with_tags
 from atlas.auth.identity import (
@@ -384,9 +385,10 @@ class RouteHandler:
 
 	def build_error_response(self, exception: Exception) -> Response:
 		"""Convert an exception into a structured JSON error response."""
-		status, body = describe_exception(exception)
-		response = jsonify(body, status_code=status)
-		for name, value in self.router.default_headers.items():
+		error = as_api_error(exception)
+		log_unexpected_error(error, exception)
+		response = jsonify(error.as_dict(), status_code=error.http_status_code)
+		for name, value in {**self.router.default_headers, **error.headers}.items():
 			response.headers[name] = value
 
 		return response

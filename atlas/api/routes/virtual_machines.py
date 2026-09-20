@@ -16,6 +16,7 @@ from atlas.api.core.docs import api_docs
 from atlas.api.core.errors import ResourceConflict
 from atlas.api.models import (
 	AUTO_IP_ADDRESS,
+	CapacityUnavailableResponse,
 	ComputeUpdatePayload,
 	ConsoleTokenPayload,
 	ConsoleTokenResponse,
@@ -25,7 +26,6 @@ from atlas.api.models import (
 	IPAddressAssignmentPayload,
 	MetadataReplacementPayload,
 	NetworkUpdatePayload,
-	OutOfCapacityResponse,
 	SnapshotPayload,
 	SSHKeysReplacementPayload,
 	VirtualMachineDetailResponse,
@@ -102,8 +102,19 @@ def get_attachable_ip_address_name(ip_address_id: str) -> str:
 	responses={
 		201: {"description": "The virtual machine request is stored."},
 		503: {
-			"description": "No host capacity is available. Retry later.",
-			"model": OutOfCapacityResponse,
+			"description": (
+				"The virtual machine was not placed. `error.code` is `out_of_capacity` when no host "
+				"can hold it, which needs more capacity in the region, or `placement_busy` when "
+				"every candidate host was held by another placement, which only needs a retry. A "
+				"busy response carries `Retry-After` in seconds."
+			),
+			"model": CapacityUnavailableResponse,
+			"headers": {
+				"Retry-After": {
+					"description": "Seconds to wait before retrying a `placement_busy` response.",
+					"schema": {"type": "integer"},
+				}
+			},
 		},
 	},
 )

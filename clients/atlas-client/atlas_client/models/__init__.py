@@ -1,6 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
 from .api_error_field import ApiErrorField
+from .capacity_unavailable_response import CapacityUnavailableResponse
 from .compute_update_payload import ComputeUpdatePayload
 from .configure_webhooks_payload import ConfigureWebhooksPayload
 from .console_token_payload import ConsoleTokenPayload
@@ -34,10 +35,10 @@ from .metadata_replacement_payload_metadata import MetadataReplacementPayloadMet
 from .network_update_payload import NetworkUpdatePayload
 from .network_update_payload_egress_type_0 import NetworkUpdatePayloadEgressType0
 from .out_of_capacity_error import OutOfCapacityError
-from .out_of_capacity_response import OutOfCapacityResponse
 from .page_image_response import PageImageResponse
 from .page_ip_address_response import PageIPAddressResponse
 from .page_virtual_machine_list_response import PageVirtualMachineListResponse
+from .placement_busy_error import PlacementBusyError
 from .reserve_ip_address_payload import ReserveIPAddressPayload
 from .snapshot_payload import SnapshotPayload
 from .snapshot_payload_image_type import SnapshotPayloadImageType
@@ -58,6 +59,7 @@ from .webhook_configuration_response import WebhookConfigurationResponse
 
 __all__ = (
     "ApiErrorField",
+    "CapacityUnavailableResponse",
     "ComputeUpdatePayload",
     "ConfigureWebhooksPayload",
     "ConsoleTokenPayload",
@@ -91,10 +93,10 @@ __all__ = (
     "NetworkUpdatePayload",
     "NetworkUpdatePayloadEgressType0",
     "OutOfCapacityError",
-    "OutOfCapacityResponse",
     "PageImageResponse",
     "PageIPAddressResponse",
     "PageVirtualMachineListResponse",
+    "PlacementBusyError",
     "ReserveIPAddressPayload",
     "SnapshotPayload",
     "SnapshotPayloadImageType",

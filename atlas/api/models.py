@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 import frappe
@@ -40,17 +40,38 @@ class ApiErrorField(BaseModel):
 
 
 class OutOfCapacityError(BaseModel):
-	"""The error returned when no host can accept the VM."""
+	"""No host can accept the VM. The fleet needs more capacity."""
 
 	code: Literal["out_of_capacity"]
 	message: str
 	fields: list[ApiErrorField]
 
 
-class OutOfCapacityResponse(BaseModel):
-	"""The JSON body of an unavailable capacity response."""
+class PlacementBusyError(BaseModel):
+	"""Every candidate host was held by another placement.
 
-	error: OutOfCapacityError
+	The fleet has room. Retry at once, guided by the `Retry-After` header.
+	"""
+
+	code: Literal["placement_busy"]
+	message: str
+	fields: list[ApiErrorField]
+
+
+CapacityError = Annotated[
+	OutOfCapacityError | PlacementBusyError,
+	Field(discriminator="code"),
+]
+
+
+class CapacityUnavailableResponse(BaseModel):
+	"""The JSON body of a 503 from virtual machine creation.
+
+	`error.code` separates a fleet that is full from one that is only busy, so a
+	caller can retry a busy placement at once and escalate a full one.
+	"""
+
+	error: CapacityError
 
 
 def to_unix_timestamp(value: str | datetime) -> int:

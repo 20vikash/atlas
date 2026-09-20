@@ -72,7 +72,14 @@ A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snaps
 
 An error response has `error.code`, `error.message`, and `error.fields`. Validation errors use `400`; missing authentication uses `401`; denied access uses `403`; missing resources use `404`; and invalid resource state uses `409`.
 
-When no host can accept a VM, creation returns `503` with `error.code` set to `out_of_capacity`. Retry later. Atlas can start a host in a separate background job when Metal auto-spawn is enabled.
+Creation returns `503` when it places no VM. Read `error.code` to tell the two causes apart.
+
+| `error.code` | Meaning | Retry |
+|---|---|---|
+| `out_of_capacity` | No host can accept the VM. The region needs more capacity. | Later. Atlas can start a host in a separate background job when Metal auto-spawn is enabled. |
+| `placement_busy` | The fleet has room, but every candidate host was held by another placement. | At once. The response carries `Retry-After` in seconds. |
+
+Do not treat `placement_busy` as a capacity limit. It clears as soon as the competing requests finish, and it becomes rarer as the region grows.
 
 A list response carries `items`, `offset`, `limit`, and `has_more`. The default limit is 20 and the maximum limit is 100.
 

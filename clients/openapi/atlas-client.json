@@ -20,6 +20,34 @@
         "title": "ApiErrorField",
         "type": "object"
       },
+      "CapacityUnavailableResponse": {
+        "description": "The JSON body of a 503 from virtual machine creation.\n\n`error.code` separates a fleet that is full from one that is only busy, so a\ncaller can retry a busy placement at once and escalate a full one.",
+        "properties": {
+          "error": {
+            "discriminator": {
+              "mapping": {
+                "out_of_capacity": "#/components/schemas/OutOfCapacityError",
+                "placement_busy": "#/components/schemas/PlacementBusyError"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutOfCapacityError"
+              },
+              {
+                "$ref": "#/components/schemas/PlacementBusyError"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "CapacityUnavailableResponse",
+        "type": "object"
+      },
       "ComputeUpdatePayload": {
         "additionalProperties": false,
         "description": "New compute configuration.",
@@ -908,7 +936,7 @@
         "type": "object"
       },
       "OutOfCapacityError": {
-        "description": "The error returned when no host can accept the VM.",
+        "description": "No host can accept the VM. The fleet needs more capacity.",
         "properties": {
           "code": {
             "const": "out_of_capacity",
@@ -933,19 +961,6 @@
           "fields"
         ],
         "title": "OutOfCapacityError",
-        "type": "object"
-      },
-      "OutOfCapacityResponse": {
-        "description": "The JSON body of an unavailable capacity response.",
-        "properties": {
-          "error": {
-            "$ref": "#/components/schemas/OutOfCapacityError"
-          }
-        },
-        "required": [
-          "error"
-        ],
-        "title": "OutOfCapacityResponse",
         "type": "object"
       },
       "Page[IPAddressResponse]": {
@@ -1063,6 +1078,34 @@
           "has_more"
         ],
         "title": "Page[VirtualMachineListResponse]",
+        "type": "object"
+      },
+      "PlacementBusyError": {
+        "description": "Every candidate host was held by another placement.\n\nThe fleet has room. Retry at once, guided by the `Retry-After` header.",
+        "properties": {
+          "code": {
+            "const": "placement_busy",
+            "title": "Code",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ApiErrorField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fields"
+        ],
+        "title": "PlacementBusyError",
         "type": "object"
       },
       "ReserveIPAddressPayload": {
@@ -2293,11 +2336,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OutOfCapacityResponse"
+                  "$ref": "#/components/schemas/CapacityUnavailableResponse"
                 }
               }
             },
-            "description": "No host capacity is available. Retry later."
+            "description": "The virtual machine was not placed. `error.code` is `out_of_capacity` when no host can hold it, which needs more capacity in the region, or `placement_busy` when every candidate host was held by another placement, which only needs a retry. A busy response carries `Retry-After` in seconds.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying a `placement_busy` response.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
           }
         },
         "summary": "Create VM",

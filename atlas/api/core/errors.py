@@ -27,10 +27,12 @@ class ApiError(Exception):
 		code: str | None = None,
 		status: int | None = None,
 		fields: list[dict[str, str]] | None = None,
+		headers: dict[str, str] | None = None,
 	) -> None:
 		super().__init__(message)
 		self.message = message
 		self.fields = list(fields or ())
+		self.headers = dict(headers or {})
 		if code:
 			self.code = code
 		if status:
@@ -79,13 +81,19 @@ class ResourceConflict(ApiError):
 def describe_exception(exception: Exception) -> tuple[int, dict[str, Any]]:
 	"""Return the status code and the JSON error body for one exception."""
 	error = as_api_error(exception)
-	if error.http_status_code >= 500 and error.code != "out_of_capacity":
-		frappe.log_error(
-			title=f"Unhandled API error: {type(exception).__name__}",
-			message=frappe.get_traceback(),
-			defer_insert=True,
-		)
+	log_unexpected_error(error, exception)
 	return error.http_status_code, error.as_dict()
+
+
+def log_unexpected_error(error: ApiError, exception: Exception) -> None:
+	"""Log unexpected server failures, but not expected 503 responses."""
+	if error.http_status_code < 500 or error.http_status_code == 503:
+		return
+	frappe.log_error(
+		title=f"Unhandled API error: {type(exception).__name__}",
+		message=frappe.get_traceback(),
+		defer_insert=True,
+	)
 
 
 def as_api_error(exception: Exception) -> ApiError:
@@ -111,10 +119,16 @@ def as_api_error(exception: Exception) -> ApiError:
 
 
 def as_status_error(exception: Exception, message: str | None = None) -> ApiError:
-	"""Return the failure for one exception that carries a supported status code."""
+	"""Return a supported status error, preserving an explicit error code."""
 	status = getattr(exception, "http_status_code", 400)
 	status = status if status in CODE_BY_STATUS else 400
-	return ApiError(message or MESSAGE_BY_STATUS[status], code=CODE_BY_STATUS[status], status=status)
+	code = getattr(exception, "code", None) or CODE_BY_STATUS[status]
+	return ApiError(
+		message or MESSAGE_BY_STATUS[status],
+		code=code,
+		status=status,
+		headers=dict(getattr(exception, "headers", {}) or {}),
+	)
 
 
 def get_validation_fields(exception: PydanticValidationError) -> list[dict[str, str]]:

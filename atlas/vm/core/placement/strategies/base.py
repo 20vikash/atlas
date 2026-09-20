@@ -6,7 +6,7 @@ import random
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import Never, TypeVar
+from typing import ClassVar, Never, TypeVar
 
 import frappe
 from frappe import _
@@ -34,7 +34,17 @@ PLACEMENT_PROBE_LIMIT = 16
 class OutOfCapacity(AtlasUserError):
 	"""No ready Metal Server can hold the requested VM."""
 
+	code = "out_of_capacity"
 	http_status_code = 503
+
+
+class PlacementBusy(AtlasUserError):
+	"""Every candidate host was locked by another placement."""
+
+	code = "placement_busy"
+	http_status_code = 503
+	# Contending placements finish within one deadline.
+	headers: ClassVar[dict[str, str]] = {"Retry-After": "1"}
 
 
 def register(name: str) -> Callable[[type[Strategy]], type[Strategy]]:
@@ -193,6 +203,7 @@ class PlacementStrategy(ABC):
 		strategy_name, overcommit_factor, dedicated_sleepy_hosts = cls._load_settings()
 		deadline = time.monotonic() + PLACEMENT_DEADLINE_SECONDS
 		is_pool_full = False
+		is_contended = False
 		for attempt in range(PLACEMENT_ATTEMPTS):
 			placement = PlacementContext(
 				requirements,
@@ -211,6 +222,7 @@ class PlacementStrategy(ABC):
 				is_pool_full = placement.probe_count == 0 and placement.remaining_seconds > 0
 				break
 
+			is_contended = True
 			remaining = deadline - time.monotonic()
 			if remaining <= 0 or attempt == PLACEMENT_ATTEMPTS - 1:
 				break
@@ -219,6 +231,10 @@ class PlacementStrategy(ABC):
 
 		if is_pool_full:
 			remember_pool_is_full(requirements)
+
+		# Contention must not trigger capacity expansion.
+		if is_contended:
+			cls._report_placement_busy()
 
 		cls._report_out_of_capacity(requirements)
 
@@ -251,6 +267,9 @@ class PlacementStrategy(ABC):
 				break
 
 			cls._wait_before_retry(attempt, remaining)
+
+		if placement.has_contended_hosts:
+			cls._report_placement_busy()
 
 		frappe.throw(
 			_("Metal Server {0} is not ready or has no current capacity for this Virtual Machine.").format(
@@ -291,6 +310,14 @@ class PlacementStrategy(ABC):
 		"""Queue capacity expansion, then tell the caller to retry later."""
 		enqueue_capacity_expansion(requirements)
 		frappe.throw(_("No Metal Server has capacity. Retry later."), exc=OutOfCapacity)
+
+	@staticmethod
+	def _report_placement_busy() -> Never:
+		"""Report contention. The fleet has room, so it is not expanded."""
+		frappe.throw(
+			_("Every candidate Metal Server is busy with another placement. Retry now."),
+			exc=PlacementBusy,
+		)
 
 	@staticmethod
 	def _load_settings() -> tuple[str, float, bool]:

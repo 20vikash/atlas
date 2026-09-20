@@ -11,9 +11,9 @@ from atlas.api.core.errors import (
 	ResourceNotFound,
 	describe_exception,
 )
-from atlas.api.models import OutOfCapacityResponse
+from atlas.api.models import CapacityUnavailableResponse
 from atlas.api.routes.virtual_machines import create_virtual_machine
-from atlas.vm.core.placement import OutOfCapacity
+from atlas.vm.core.placement import OutOfCapacity, PlacementBusy
 
 
 class Machine(BaseModel):
@@ -104,5 +104,20 @@ class TestErrorBody(UnitTestCase):
 		self.assertEqual(response.status_code, 503)
 		self.assertEqual(response.json["error"]["code"], "out_of_capacity")
 		self.assertNotIn("Retry-After", response.headers)
-		self.assertEqual(OutOfCapacityResponse.model_validate(response.json).error.code, "out_of_capacity")
+		self.assertEqual(
+			CapacityUnavailableResponse.model_validate(response.json).error.code, "out_of_capacity"
+		)
+		log_error.assert_not_called()
+
+	def test_placement_busy_is_separate_from_a_full_fleet(self) -> None:
+		"""Contention and a full fleet share a status, so only the code tells them apart."""
+		with patch("atlas.api.core.errors.frappe.log_error") as log_error:
+			response = create_virtual_machine.build_error_response(PlacementBusy("Retry now"))
+
+		self.assertEqual(response.status_code, 503)
+		self.assertEqual(response.json["error"]["code"], "placement_busy")
+		self.assertEqual(response.headers["Retry-After"], "1")
+		self.assertEqual(
+			CapacityUnavailableResponse.model_validate(response.json).error.code, "placement_busy"
+		)
 		log_error.assert_not_called()
