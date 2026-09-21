@@ -282,7 +282,7 @@ def can_enable_pilot_release_tracker() -> bool:
 	return frappe.get_single("Atlas Settings").is_object_storage_configured and not has_site_file_images()
 
 
-def enqueue_pilot_release_tracker_enable(enqueue_after_commit: bool = True) -> None:
+def enqueue_pilot_release_tracker_enable() -> None:
 	"""Queue release tracking when bootstrap image migration makes it possible."""
 	frappe.enqueue(
 		"atlas.service.doctype.cargo_server.cargo_server.enable_pilot_release_tracker_after_migration",
@@ -290,7 +290,7 @@ def enqueue_pilot_release_tracker_enable(enqueue_after_commit: bool = True) -> N
 		timeout=120,
 		job_id="atlas||cargo-server||enable-pilot-release-tracker",
 		deduplicate=True,
-		enqueue_after_commit=enqueue_after_commit,
+		enqueue_after_commit=False,
 	)
 
 
@@ -298,7 +298,7 @@ def enqueue_pending_pilot_release_tracker_enable() -> None:
 	"""Retry automatic release tracking while it remains pending."""
 	cargo_server: CargoServer = frappe.get_single("Cargo Server")
 	if cargo_server.pilot_release_tracker_pending:
-		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+		enqueue_pilot_release_tracker_enable()
 
 
 @run_as_admin

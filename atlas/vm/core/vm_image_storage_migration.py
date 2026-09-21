@@ -64,11 +64,10 @@ class VirtualMachineImageStorageMigration:
 		image.artifact_storage = "Object Storage"
 		image.site_file_retention_until = now_datetime() + SITE_FILE_RETENTION
 		image.save()
-		frappe.db.commit()  # nosemgrep
 
 		from atlas.service.doctype.cargo_server.cargo_server import enqueue_pilot_release_tracker_enable
 
-		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+		enqueue_pilot_release_tracker_enable()
 
 	def delete_site_files(self, image_name: str) -> None:
 		"""Remove the site files that object storage replaced.

@@ -239,12 +239,9 @@ class AtlasSetup:
 
 		try:
 			self.settings.server_provider_controller.setup_infrastructure()
-		except Exception:
-			# Keep IDs for cloud resources that the failed provider call created.
+		finally:
+			# Keep the provider resource IDs whether this phase or a later one fails.
 			frappe.db.commit()  # nosemgrep
-			raise
-		# Keep provider resource IDs when a later external phase fails.
-		frappe.db.commit()  # nosemgrep
 
 	def _setup_dns_provider(self) -> None:
 		provider = self.settings.dns_provider_controller
@@ -268,12 +265,9 @@ class AtlasSetup:
 		self.settings.route53_dns_zone_id = zone_id
 		try:
 			provider.bootstrap()
-		except Exception:
-			# Keep the zone ID and records that the failed provider call created.
+		finally:
+			# Keep the zone ID and records whether this phase or a later one fails.
 			frappe.db.commit()  # nosemgrep
-			raise
-		# Keep DNS state when a later external phase fails.
-		frappe.db.commit()  # nosemgrep
 
 	def _sync_catalogs(self) -> None:
 		catalog = CatalogSynchronizer(self.settings.server_provider_controller)
