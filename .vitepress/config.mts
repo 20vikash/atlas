@@ -11,7 +11,7 @@ export default defineConfig({
 	// A link can point at a script or at a directory that GitHub lists. Neither becomes a page.
 	ignoreDeadLinks: [/\.(sh|go|py|toml)$/, /\/docs\/index$/],
 
-	srcExclude: ['**/CLAUDE.md', '**/AGENTS.md', 'report.md', '.tmp/**', '**/node_modules/**'],
+	srcExclude: ['README.md', '**/CLAUDE.md', '**/AGENTS.md', 'report.md', '.tmp/**', '**/node_modules/**'],
 	markdown: {
 		config(markdown) {
 			const defaultFence = markdown.renderer.rules.fence
@@ -28,7 +28,7 @@ export default defineConfig({
 		},
 	},
 	rewrites: {
-		'README.md': 'index.md',
+		'docs/index.md': 'index.md',
 		':directory(.*)/README.md': ':directory/index.md',
 	},
 
