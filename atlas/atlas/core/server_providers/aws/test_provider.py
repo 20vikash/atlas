@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.aws.catalog import AwsCatalog
@@ -340,10 +341,30 @@ class TestAwsProvider(UnitTestCase):
 		with self.assertRaisesRegex(AwsError, "primary private IPv4 address"):
 			provider.metald_listen_address(server)
 
-	def test_the_host_finds_its_own_storage_pool_device(self) -> None:
+	def test_the_storage_pool_device_names_the_attached_volume(self) -> None:
+		provider = self.provider()
+		server = self.server()
+		server.provider_metadata = frappe.as_json(
+			{
+				"instance": {
+					"BlockDeviceMappings": [
+						{"DeviceName": "/dev/sda1", "Ebs": {"VolumeId": "vol-0c0bcb91d7b5a82eb"}},
+						{"DeviceName": "/dev/sdb", "Ebs": {"VolumeId": "vol-012ac512cc4f05420"}},
+					]
+				}
+			}
+		)
+
+		self.assertEqual(
+			provider.storage_pool_device(server),
+			"/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol012ac512cc4f05420",
+		)
+
+	def test_a_server_without_a_storage_volume_is_refused(self) -> None:
 		provider = self.provider()
 
-		self.assertEqual(provider.storage_pool_device(self.server()), "")
+		with self.assertRaises(AwsError):
+			provider.storage_pool_device(self.server())
 
 	def test_the_security_group_allows_all_inbound_traffic(self) -> None:
 		provider = self.provider()

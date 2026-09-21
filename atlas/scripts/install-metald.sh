@@ -10,6 +10,7 @@ set -eu
 : "${WG_MESH_SHA256:?WG_MESH_SHA256 is required}"
 : "${COORDINATION_LISTEN_ADDRESS:?COORDINATION_LISTEN_ADDRESS is required}"
 : "${ATLAS_COMMON_NAME:?ATLAS_COMMON_NAME is required}"
+: "${STORAGE_POOL_DEVICE:?STORAGE_POOL_DEVICE is required}"
 
 storage_pool_name=${STORAGE_POOL_NAME:-metal}
 firecracker_version=${FIRECRACKER_VERSION:-v1.16.1}
@@ -29,19 +30,6 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # Return whole disks that contain no filesystem or mount.
-free_disks() {
-	local device device_count type
-	while read -r device type; do
-		[ "$type" = "disk" ] || continue
-		device_count=$(lsblk -nrpo NAME "$device" | wc -l)
-		[ "$device_count" -eq 1 ] || continue
-		if lsblk -nro MOUNTPOINT,FSTYPE "$device" | grep -q '[^[:space:]]'; then
-			continue
-		fi
-		printf '%s\n' "$device"
-	done < <(lsblk -dpnro NAME,TYPE)
-}
-
 step() { echo "==> $*"; }
 skip() { echo "    $* is already installed"; }
 
@@ -154,18 +142,12 @@ step "zfs pool ($storage_pool_name)"
 if zpool list "$storage_pool_name" >/dev/null 2>&1; then
 	skip "pool $storage_pool_name"
 else
-	pool_devices=()
-	if [ -n "${STORAGE_POOL_DEVICE:-}" ]; then
-		pool_devices=("$STORAGE_POOL_DEVICE")
-	else
-		mapfile -t pool_devices < <(free_disks)
-	fi
-	if [ "${#pool_devices[@]}" -eq 0 ]; then
-		echo "no free disk for the storage pool" >&2
+	if [ ! -e "$STORAGE_POOL_DEVICE" ]; then
+		echo "$STORAGE_POOL_DEVICE does not exist" >&2
 		exit 1
 	fi
-	echo "    devices: ${pool_devices[*]}"
-	zpool create -m none "$storage_pool_name" "${pool_devices[@]}"
+	echo "    device: $STORAGE_POOL_DEVICE"
+	zpool create -m none "$storage_pool_name" "$STORAGE_POOL_DEVICE"
 fi
 zfs list "$storage_pool_name/images" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/images"
 zfs list "$storage_pool_name/vms" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/vms"
