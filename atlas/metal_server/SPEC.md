@@ -40,7 +40,9 @@ flowchart LR
 
 Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored identity key, so a lost response cannot create a second host. A failed job sets the record to Failed.
 
-Metal listens for the Atlas API on port 9000 and accepts only the Atlas client certificate. `Atlas Settings.use_public_ip_for_metald` selects the public IPv4 address; the default is the private IPv4 address. Node coordination uses the WireGuard address on port 9001. Snapshot data uses port 9002. Host installation configures all three TLS paths before it starts Metal.
+Metal listens for the Atlas API on port 9000 and accepts only the Atlas client certificate. The provider returns an address that Metal can bind. Most providers use the endpoint from `Atlas Settings.use_public_ip_for_metald`. AWS uses the private address of the primary interface because the public address exists only in the internet gateway. Node coordination uses the WireGuard address on port 9001. Snapshot data uses port 9002. Host installation configures all three TLS paths before it starts Metal.
+
+The provider can return a storage pool device. If it returns no device, host installation finds each unused and unpartitioned disk. ZFS uses all selected disks in one striped pool.
 
 ## Certificate renewal
 

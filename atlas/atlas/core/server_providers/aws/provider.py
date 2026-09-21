@@ -171,9 +171,19 @@ class AwsProvider(ServerProvider):
 		self.wait_for_private_address(server)
 
 	@override
-	def get_storage_pool_device(self, server: "MetalServer") -> str:
-		"""Return the raw device for the virtual machine storage pool."""
-		return self.configuration.storage_pool_device
+	def metald_listen_address(self, server: "MetalServer") -> str:
+		"""Return the primary interface address behind the internet gateway."""
+		metadata = frappe.parse_json(server.provider_metadata or "{}")
+		instance = metadata.get("instance") if isinstance(metadata, Mapping) else None
+		address = instance.get("PrivateIpAddress") if isinstance(instance, Mapping) else None
+		if not isinstance(address, str) or not address:
+			raise AwsError("Atlas server has no AWS primary private IPv4 address")
+		return address
+
+	@override
+	def storage_pool_device(self, server: "MetalServer") -> str:
+		"""Let the host find its free storage device."""
+		return ""
 
 	@override
 	def set_power_state(self, provider_server_id: str, action: ServerPowerAction) -> None:

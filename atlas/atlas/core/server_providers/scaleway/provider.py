@@ -141,7 +141,7 @@ class ScalewayProvider(ServerProvider):
 		self.wait_for_private_address(server)
 
 	@override
-	def get_storage_pool_device(self, server: "MetalServer") -> str:
+	def storage_pool_device(self, server: "MetalServer") -> str:
 		"""Return the raw device for the virtual machine storage pool."""
 		return self.partitioning.storage_array
 

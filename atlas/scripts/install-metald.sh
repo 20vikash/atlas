@@ -4,7 +4,6 @@
 set -eu
 
 : "${METALD_DOWNLOAD_URL:?METALD_DOWNLOAD_URL is required}"
-: "${STORAGE_POOL_DEVICE:?STORAGE_POOL_DEVICE is required}"
 : "${MESH_UPLINK_INTERFACE:?MESH_UPLINK_INTERFACE is required}"
 : "${WG_MESH_DOWNLOAD_URL:?WG_MESH_DOWNLOAD_URL is required}"
 : "${COORDINATION_LISTEN_ADDRESS:?COORDINATION_LISTEN_ADDRESS is required}"
@@ -26,6 +25,20 @@ if [ "$(id -u)" -ne 0 ]; then
 	echo "install-metald must run as root" >&2
 	exit 1
 fi
+
+# Return whole disks that contain no filesystem or mount.
+free_disks() {
+	local device device_count type
+	while read -r device type; do
+		[ "$type" = "disk" ] || continue
+		device_count=$(lsblk -nrpo NAME "$device" | wc -l)
+		[ "$device_count" -eq 1 ] || continue
+		if lsblk -nro MOUNTPOINT,FSTYPE "$device" | grep -q '[^[:space:]]'; then
+			continue
+		fi
+		printf '%s\n' "$device"
+	done < <(lsblk -dpnro NAME,TYPE)
+}
 
 step() { echo "==> $*"; }
 skip() { echo "    $* is already installed"; }
@@ -131,7 +144,18 @@ step "zfs pool ($storage_pool_name)"
 if zpool list "$storage_pool_name" >/dev/null 2>&1; then
 	skip "pool $storage_pool_name"
 else
-	zpool create -m none "$storage_pool_name" "$STORAGE_POOL_DEVICE"
+	pool_devices=()
+	if [ -n "${STORAGE_POOL_DEVICE:-}" ]; then
+		pool_devices=("$STORAGE_POOL_DEVICE")
+	else
+		mapfile -t pool_devices < <(free_disks)
+	fi
+	if [ "${#pool_devices[@]}" -eq 0 ]; then
+		echo "no free disk for the storage pool" >&2
+		exit 1
+	fi
+	echo "    devices: ${pool_devices[*]}"
+	zpool create -m none "$storage_pool_name" "${pool_devices[@]}"
 fi
 zfs list "$storage_pool_name/images" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/images"
 zfs list "$storage_pool_name/vms" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/vms"

@@ -20,35 +20,65 @@ def _disk(device: str) -> dict:
 	"""Return one disk from the test RAID layout."""
 	return {
 		"name": f"/dev/{device}",
+		"type": "disk",
 		"uuid": None,
 		"size": 953 * 1024**3,
 		"mountpoint": None,
 		"children": [
-			{"name": f"/dev/{device}1", "uuid": None, "size": 1024**3 // 2, "mountpoint": None},
+			{
+				"name": f"/dev/{device}1",
+				"type": "part",
+				"uuid": None,
+				"size": 1024**3 // 2,
+				"mountpoint": None,
+			},
 			{
 				"name": f"/dev/{device}2",
+				"type": "part",
 				"uuid": "boot-member-uuid",
 				"size": 1024**3,
 				"mountpoint": None,
 				"children": [
-					{"name": "/dev/md0", "uuid": "boot-uuid", "size": 1024**3, "mountpoint": "/boot"}
+					{
+						"name": "/dev/md0",
+						"type": "raid1",
+						"uuid": "boot-uuid",
+						"size": 1024**3,
+						"mountpoint": "/boot",
+					}
 				],
 			},
 			{
 				"name": f"/dev/{device}3",
+				"type": "part",
 				"uuid": "root-member-uuid",
 				"size": 64 * 1024**3,
 				"mountpoint": None,
 				"children": [
-					{"name": "/dev/md1", "uuid": "root-uuid", "size": 64 * 1024**3, "mountpoint": "/"}
+					{
+						"name": "/dev/md1",
+						"type": "raid1",
+						"uuid": "root-uuid",
+						"size": 64 * 1024**3,
+						"mountpoint": "/",
+					}
 				],
 			},
 			{
 				"name": f"/dev/{device}4",
+				"type": "part",
 				"uuid": "data-member-uuid",
 				"size": 888 * 1024**3,
 				"mountpoint": None,
-				"children": [{"name": "/dev/md2", "uuid": None, "size": 888 * 1024**3, "mountpoint": None}],
+				"children": [
+					{
+						"name": "/dev/md2",
+						"type": "raid1",
+						"uuid": None,
+						"size": 888 * 1024**3,
+						"mountpoint": None,
+					}
+				],
 			},
 		],
 	}
@@ -198,6 +228,7 @@ class TestServer(UnitTestCase):
 		server.set.assert_called_once_with(
 			"disks",
 			[
+				{"device": "/dev/sda", "uuid": "", "mount_point": "", "size_gb": "953.00"},
 				{
 					"device": "/dev/md0",
 					"uuid": "boot-uuid",
@@ -206,6 +237,7 @@ class TestServer(UnitTestCase):
 				},
 				{"device": "/dev/md1", "uuid": "root-uuid", "mount_point": "/", "size_gb": "64.00"},
 				{"device": "/dev/md2", "uuid": "", "mount_point": "", "size_gb": "888.00"},
+				{"device": "/dev/sdb", "uuid": "", "mount_point": "", "size_gb": "953.00"},
 			],
 		)
 		server.save.assert_called_once()
@@ -225,6 +257,70 @@ class TestServer(UnitTestCase):
 
 		devices = [disk["device"] for disk in server.set.call_args.args[1]]
 		self.assertEqual(len(devices), len(set(devices)))
+
+	def test_sync_disks_reports_every_whole_disk_and_skips_loop_devices(self) -> None:
+		server = self._server(status="Running")
+		output = json.dumps(
+			{
+				"blockdevices": [
+					{"name": "/dev/loop0", "type": "loop", "size": 28 * 1024**2, "mountpoint": "/snap/core"},
+					{
+						"name": "/dev/nvme1n1",
+						"type": "disk",
+						"uuid": None,
+						"size": 64 * 1024**3,
+						"mountpoint": None,
+						"children": [
+							{
+								"name": "/dev/nvme1n1p1",
+								"type": "part",
+								"uuid": "root-uuid",
+								"size": 62 * 1024**3,
+								"mountpoint": "/",
+							},
+							{
+								"name": "/dev/nvme1n1p14",
+								"type": "part",
+								"uuid": None,
+								"size": 4 * 1024**2,
+								"mountpoint": None,
+							},
+						],
+					},
+					{
+						"name": "/dev/nvme0n1",
+						"type": "disk",
+						"uuid": None,
+						"size": 500 * 1024**3,
+						"mountpoint": None,
+						"children": [
+							{
+								"name": "/dev/nvme0n1p1",
+								"type": "part",
+								"uuid": None,
+								"size": 500 * 1024**3,
+								"mountpoint": None,
+							}
+						],
+					},
+				]
+			}
+		)
+		task = SimpleNamespace(result=SimpleNamespace(output=output, is_success=True))
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.core.disk_inventory.SSHTask.create_for_command",
+				return_value=task,
+			),
+		):
+			MetalServer.sync_disks(server)
+
+		self.assertEqual(
+			[disk["device"] for disk in server.set.call_args.args[1]],
+			["/dev/nvme1n1", "/dev/nvme1n1p1", "/dev/nvme0n1"],
+		)
 
 	def test_sync_disks_rejects_a_failed_lsblk_run(self) -> None:
 		server = self._server(status="Running")
@@ -389,10 +485,10 @@ class TestServer(UnitTestCase):
 			timeout_seconds=1200,
 		)
 
-	def test_install_metald_listens_on_the_public_address_when_configured(self) -> None:
+	def test_install_metald_listens_on_the_address_the_provider_chooses(self) -> None:
 		server = self._server(status="Running")
 		server.settings.metald_binary_x86_64_file = "metald-file"
-		server.settings.use_public_ip_for_metald = True
+		server.settings.server_provider_controller.metald_listen_address = Mock(return_value="203.0.113.7")
 		server.wireguard_ip_address = "fdab:1::7"
 		task = SimpleNamespace(result=SimpleNamespace(is_success=True))
 		tls_result = SimpleNamespace(is_success=True)
@@ -419,11 +515,10 @@ class TestServer(UnitTestCase):
 			create_for_script_file.call_args.kwargs["environment"]["LISTEN_ADDRESS"], "203.0.113.7:9000"
 		)
 
-	def test_install_metald_rejects_a_missing_selected_address(self) -> None:
+	def test_install_metald_rejects_an_address_that_is_not_ipv4(self) -> None:
 		server = self._server(status="Running")
 		server.settings.metald_binary_x86_64_file = "metald-file"
-		server.settings.use_public_ip_for_metald = True
-		server.public_ipv4_address = None
+		server.settings.server_provider_controller.metald_listen_address = Mock(return_value="0.0.0.0/0")
 
 		with (
 			patch("atlas.metal_server.core.host_installation.HostInstallation.install_tls_credentials"),
@@ -866,7 +961,8 @@ class TestServer(UnitTestCase):
 				server_provider_controller=SimpleNamespace(
 					delete_server=Mock(),
 					set_power_state=Mock(),
-					get_storage_pool_device=Mock(return_value="/dev/md2"),
+					storage_pool_device=Mock(return_value="/dev/md2"),
+					metald_listen_address=Mock(return_value="10.0.0.7"),
 				),
 				metald_binary_x86_64_file=None,
 				wg_mesh_binary_x86_64_file="wg-mesh-file",

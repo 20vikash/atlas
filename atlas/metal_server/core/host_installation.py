@@ -71,17 +71,7 @@ class HostInstallation:
 
 		self.install_tls_credentials()
 
-		listen_address = (
-			self.server.public_ipv4_address
-			if settings.use_public_ip_for_metald
-			else self.server.private_ipv4_address
-		)
-		if not listen_address:
-			frappe.throw(
-				_("Metal Server {0} has no address for the selected metald endpoint.").format(
-					self.server.name
-				)
-			)
+		listen_address = settings.server_provider_controller.metald_listen_address(self.server)
 		try:
 			listen_address = str(ipaddress.IPv4Address(listen_address))
 		except ipaddress.AddressValueError:
@@ -100,9 +90,7 @@ class HostInstallation:
 				"LISTEN_ADDRESS": f"{listen_address}:9000",
 				"ATLAS_COMMON_NAME": atlas_client_identity(settings),
 				"COORDINATION_LISTEN_ADDRESS": f"[{self.server.wireguard_ip_address}]:9001",
-				"STORAGE_POOL_DEVICE": settings.server_provider_controller.get_storage_pool_device(
-					self.server
-				),
+				"STORAGE_POOL_DEVICE": settings.server_provider_controller.storage_pool_device(self.server),
 				"MESH_UPLINK_INTERFACE": self.server.private_network_interface,
 			},
 			timeout_seconds=METALD_INSTALL_TIMEOUT_SECONDS,
