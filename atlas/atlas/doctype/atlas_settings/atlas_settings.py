@@ -83,6 +83,7 @@ class AtlasSettings(Document):
 		metal_tls_ca_certificate: DF.Password | None
 		metal_tls_ca_private_key: DF.Password | None
 		metald_binary_x86_64_file: DF.Link | None
+		metald_binary_hash: DF.Data | None
 		metald_source_hash: DF.Data | None
 		object_storage_access_key_id: DF.Data | None
 		object_storage_bucket: DF.Data | None
@@ -126,6 +127,7 @@ class AtlasSettings(Document):
 		use_dedicated_sleepy_vm_hosts: DF.Check
 		use_public_ip_for_metald: DF.Check
 		wg_mesh_binary_x86_64_file: DF.Link | None
+		wg_mesh_binary_hash: DF.Data | None
 		wg_mesh_source_hash: DF.Data | None
 		wildcard_domain: DF.Data
 		wildcard_tls_certificate: DF.Password | None

@@ -4,8 +4,10 @@
 set -eu
 
 : "${METALD_DOWNLOAD_URL:?METALD_DOWNLOAD_URL is required}"
+: "${METALD_SHA256:?METALD_SHA256 is required}"
 : "${MESH_UPLINK_INTERFACE:?MESH_UPLINK_INTERFACE is required}"
 : "${WG_MESH_DOWNLOAD_URL:?WG_MESH_DOWNLOAD_URL is required}"
+: "${WG_MESH_SHA256:?WG_MESH_SHA256 is required}"
 : "${COORDINATION_LISTEN_ADDRESS:?COORDINATION_LISTEN_ADDRESS is required}"
 : "${ATLAS_COMMON_NAME:?ATLAS_COMMON_NAME is required}"
 
@@ -110,11 +112,19 @@ fi
 install_binary() {
 	local destination=$1
 	local source_url=$2
+	local expected_hash=$3
 	local download
 
 	download=$(mktemp "$destination.staged.XXXXXX")
 	trap 'rm -f "$download"' EXIT
 	curl -fsSL -o "$download" "$source_url"
+
+	# The version command below runs this file, so check it before that.
+	download_hash=$(sha256sum "$download" | cut -d' ' -f1)
+	if [ "$download_hash" != "$expected_hash" ]; then
+		echo "the file at $source_url has hash $download_hash, expected $expected_hash" >&2
+		exit 1
+	fi
 	chmod 0755 "$download"
 
 	if [ -x "$destination" ]; then
@@ -128,12 +138,12 @@ install_binary() {
 
 
 step "install metald"
-install_binary /usr/bin/metald "$METALD_DOWNLOAD_URL"
+install_binary /usr/bin/metald "$METALD_DOWNLOAD_URL" "$METALD_SHA256"
 
 
 step "install atlas-wg-mesh"
 install -d -m 0755 "$(dirname "$mesh_binary_path")"
-install_binary "$mesh_binary_path" "$WG_MESH_DOWNLOAD_URL"
+install_binary "$mesh_binary_path" "$WG_MESH_DOWNLOAD_URL" "$WG_MESH_SHA256"
 
 
 step "create directories for metald"

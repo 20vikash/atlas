@@ -4,6 +4,7 @@
 set -eu
 
 : "${METALD_DOWNLOAD_URL:?METALD_DOWNLOAD_URL is required}"
+: "${METALD_SHA256:?METALD_SHA256 is required}"
 
 installed_binary=${METALD_BINARY_PATH:-/usr/bin/metald}
 previous_binary=$installed_binary.previous
@@ -52,6 +53,13 @@ trap 'rm -f "$staged_binary"' EXIT
 
 step "download metald"
 curl -fsSL -o "$staged_binary" "$METALD_DOWNLOAD_URL"
+
+# The version command below runs this file, so check it before that.
+staged_hash=$(sha256sum "$staged_binary" | cut -d' ' -f1)
+if [ "$staged_hash" != "$METALD_SHA256" ]; then
+	echo "the file at $METALD_DOWNLOAD_URL has hash $staged_hash, expected $METALD_SHA256" >&2
+	exit 1
+fi
 chmod 0755 "$staged_binary"
 
 # Run the new binary before it replaces the running one.

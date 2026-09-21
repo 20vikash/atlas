@@ -467,7 +467,9 @@ class TestServer(UnitTestCase):
 			arguments["environment"],
 			{
 				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
+				"METALD_SHA256": "metald-binary-sha256",
 				"WG_MESH_DOWNLOAD_URL": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
+				"WG_MESH_SHA256": "wg-mesh-binary-sha256",
 				"LISTEN_ADDRESS": "10.0.0.7:9000",
 				"ATLAS_COMMON_NAME": "atlas.example.test",
 				"COORDINATION_LISTEN_ADDRESS": "[fdab:1::7]:9001",
@@ -607,7 +609,7 @@ class TestServer(UnitTestCase):
 
 		create_for_script_file.assert_not_called()
 
-	def test_upgrade_metald_worker_sends_only_the_download_url(self) -> None:
+	def test_upgrade_metald_worker_sends_only_the_download_url_and_digest(self) -> None:
 		"""The upgrade replaces the binary. It does not rewrite host configuration."""
 		server = self._server(status="Running")
 		server.settings.metald_binary_x86_64_file = "metald-file"
@@ -629,7 +631,10 @@ class TestServer(UnitTestCase):
 		self.assertEqual(arguments["script_path"], "upgrade-metald.sh")
 		self.assertEqual(
 			arguments["environment"],
-			{"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64"},
+			{
+				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
+				"METALD_SHA256": "metald-binary-sha256",
+			},
 		)
 
 	def test_upgrade_metald_reports_the_reason_the_script_printed(self) -> None:
@@ -981,7 +986,9 @@ class TestServer(UnitTestCase):
 					metald_listen_address=Mock(return_value="10.0.0.7"),
 				),
 				metald_binary_x86_64_file=None,
+				metald_binary_hash="metald-binary-sha256",
 				wg_mesh_binary_x86_64_file="wg-mesh-file",
+				wg_mesh_binary_hash="wg-mesh-binary-sha256",
 				wildcard_domain="example.test",
 				region_id=1,
 				private_network_mtu=1500,

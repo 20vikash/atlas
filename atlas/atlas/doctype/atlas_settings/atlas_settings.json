@@ -29,12 +29,14 @@
   "metald_section",
   "metald_binary_x86_64_file",
   "metald_source_hash",
+  "metald_binary_hash",
   "use_public_ip_for_metald",
   "metal_tls_ca_private_key",
   "metal_tls_ca_certificate",
   "column_break_bgjv",
   "wg_mesh_binary_x86_64_file",
   "wg_mesh_source_hash",
+  "wg_mesh_binary_hash",
   "atlas_tls_private_key",
   "atlas_tls_certificate",
   "jwks_data_section",
@@ -366,6 +368,12 @@
    "read_only": 1
   },
   {
+   "fieldname": "metald_binary_hash",
+   "fieldtype": "Data",
+   "label": "Metald Binary SHA-256",
+   "read_only": 1
+  },
+  {
    "default": "0",
    "description": "Enable when Atlas must reach Metald through the server's public IPv4 address.",
    "fieldname": "use_public_ip_for_metald",
@@ -412,6 +420,12 @@
    "fieldname": "wg_mesh_source_hash",
    "fieldtype": "Data",
    "label": "WG Mesh Source Hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "wg_mesh_binary_hash",
+   "fieldtype": "Data",
+   "label": "WG Mesh Binary SHA-256",
    "read_only": 1
   },
   {

@@ -90,7 +90,9 @@ class HostInstallation:
 			script_path="install-metald.sh",
 			environment={
 				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
+				"METALD_SHA256": settings.metald_binary_hash,
 				"WG_MESH_DOWNLOAD_URL": get_download_url(settings.wg_mesh_binary_x86_64_file),
+				"WG_MESH_SHA256": settings.wg_mesh_binary_hash,
 				"LISTEN_ADDRESS": f"{listen_address}:9000",
 				"ATLAS_COMMON_NAME": atlas_client_identity(settings),
 				"COORDINATION_LISTEN_ADDRESS": f"[{self.server.wireguard_ip_address}]:9001",
@@ -135,6 +137,7 @@ class HostInstallation:
 			script_path="upgrade-metald.sh",
 			environment={
 				"METALD_DOWNLOAD_URL": get_download_url(settings.metald_binary_x86_64_file),
+				"METALD_SHA256": settings.metald_binary_hash,
 			},
 			timeout_seconds=METALD_INSTALL_TIMEOUT_SECONDS,
 			run_in_background=False,
