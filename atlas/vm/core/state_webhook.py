@@ -52,9 +52,12 @@ def configure_state_webhooks(
 			webhook.max_retries = MAXIMUM_RETRIES
 			webhook.enabled = int(enabled)
 
-			headers = [{"key": "Content-Type", "value": "application/json"}]
+			headers = [
+				{"key": "Content-Type", "value": "application/json"},
+				{"key": "X-FC-Source", "value": "atlas"},
+			]
 			if region_name:
-				headers.append({"key": "X-Atlas-Region", "value": region_name})
+				headers.append({"key": "X-FC-Region", "value": region_name})
 			webhook.set("webhook_headers", headers)
 			webhook.save(ignore_permissions=True)
 			names.append(name)
