@@ -84,6 +84,7 @@ class CargoServer(Document):
 			cargo_server.failure_message = None
 			cargo_server.installation_task = None
 			cargo_server.save(ignore_permissions=True)
+			frappe.db.commit()  # nosemgrep
 
 			is_draft = cargo_server._create_virtual_machine(values)
 			cargo_server.save(ignore_permissions=True)

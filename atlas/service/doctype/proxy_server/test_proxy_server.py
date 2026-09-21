@@ -224,6 +224,41 @@ class TestProxyServerCreate(UnitTestCase):
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["disk_mib"], 16384)
 		proxy_server.enqueue_provisioning.assert_called_once()
 
+	def test_the_record_is_committed_before_the_machine_request(self) -> None:
+		proxy_server = MagicMock(name="proxy_server")
+		proxy_server.name = "proxy-001"
+		proxy_server.flags = SimpleNamespace()
+		virtual_machine_service = MagicMock()
+		calls: list[str] = []
+		proxy_server.insert.side_effect = lambda *_, **__: calls.append("insert")
+		virtual_machine_service.create.side_effect = lambda *_, **__: (
+			calls.append("create"),
+			{"name": "vm-00001", "is_draft": False},
+		)[1]
+
+		with (
+			patch.object(proxy_server_module.frappe, "only_for"),
+			patch.object(proxy_server_module.frappe, "new_doc", return_value=proxy_server),
+			patch.object(
+				proxy_server_module.frappe,
+				"get_single",
+				return_value=SimpleNamespace(public_ssh_key="ssh-ed25519 AAAA atlas"),
+			),
+			patch.object(proxy_server_module.frappe.db, "commit", side_effect=lambda: calls.append("commit")),
+			patch("atlas.vm.core.vm_service.VirtualMachineService", virtual_machine_service),
+		):
+			proxy_server_module.create(
+				{
+					"virtual_machine_image": "image-1",
+					"cpu_millicores": 2000,
+					"memory_mib": 4096,
+					"disk_mib": 16384,
+					"server_ip_address": "203.0.113.9",
+				}
+			)
+
+		self.assertEqual(calls[:3], ["insert", "commit", "create"])
+
 	def test_creation_needs_an_allocated_public_ipv4_address(self) -> None:
 		with (
 			patch.object(proxy_server_module.frappe, "only_for"),

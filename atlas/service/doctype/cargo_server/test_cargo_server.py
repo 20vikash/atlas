@@ -84,6 +84,28 @@ class TestCargoServerProvisionRequest(UnitTestCase):
 		self.assertEqual(request["memory_mib"], 4096)
 		self.assertEqual(request["disk_mib"], 16384)
 
+	def test_the_record_is_committed_before_the_machine_request(self) -> None:
+		cargo_server = MagicMock(name="cargo_server", status="Pending")
+		cargo_server.name = "Cargo Server"
+		calls: list[str] = []
+		cargo_server.save.side_effect = lambda *_, **__: calls.append("save")
+		cargo_server._create_virtual_machine.side_effect = lambda *_, **__: (
+			calls.append("create"),
+			False,
+		)[1]
+
+		with (
+			patch.object(cargo_server_module, "_validate_system_manager"),
+			patch.object(cargo_server_module, "cargo_lifecycle_lock", return_value=nullcontext()),
+			patch.object(cargo_server_module, "store_storage_cluster_config"),
+			patch.object(cargo_server_module.frappe, "get_single", return_value=cargo_server),
+			patch.object(cargo_server_module.frappe, "msgprint"),
+			patch.object(cargo_server_module.frappe.db, "commit", side_effect=lambda: calls.append("commit")),
+		):
+			CargoServer.provision(cargo_server, dict(VALID_REQUEST))
+
+		self.assertEqual(calls[:3], ["save", "commit", "create"])
+
 	def test_a_busy_lifecycle_lock_refuses_the_request(self) -> None:
 		with (
 			patch.object(

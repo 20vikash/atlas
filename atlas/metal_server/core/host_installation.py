@@ -35,6 +35,9 @@ class HostInstallation:
 
 	def configure_wireguard(self) -> None:
 		"""Configure WireGuard and store its public key."""
+		if not self.server.private_network_interface:
+			frappe.throw(_("Metal Server {0} needs a private network interface.").format(self.server.name))
+
 		self.set_wireguard_ip_address()
 		result = SSHTask.create_for_script_file(
 			target_type=self.server.doctype,
@@ -43,6 +46,7 @@ class HostInstallation:
 			environment={
 				"WIREGUARD_ADDRESS": self.server.wireguard_ip_address,
 				"WIREGUARD_LISTEN_PORT": self.server.port,
+				"MESH_UPLINK_INTERFACE": self.server.private_network_interface,
 			},
 			timeout_seconds=WIREGUARD_CONFIGURE_TIMEOUT_SECONDS,
 			run_in_background=False,

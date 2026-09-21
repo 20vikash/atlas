@@ -3,6 +3,7 @@
 set -eu
 
 : "${WIREGUARD_ADDRESS:?WIREGUARD_ADDRESS is required}"
+: "${MESH_UPLINK_INTERFACE:?MESH_UPLINK_INTERFACE is required}"
 
 interface=${WIREGUARD_INTERFACE:-wg0}
 listen_port=${WIREGUARD_LISTEN_PORT:-51820}
@@ -26,17 +27,17 @@ esac
 
 step() { echo "==> $*" >&2; }
 
-# The tunnel crosses the uplink, so its MTU sets the WireGuard MTU. The overhead
-# is one IPv4 header, one UDP header, and the WireGuard header.
-uplink=$(ip -4 route show default | awk 'NR == 1 { print $5 }')
-if [ -z "$uplink" ]; then
-	echo "this host has no IPv4 default route" >&2
+# The tunnel crosses the mesh uplink. The overhead is one IPv4 header, one UDP
+# header, and the WireGuard header.
+mtu_file=/sys/class/net/$MESH_UPLINK_INTERFACE/mtu
+if [ ! -r "$mtu_file" ]; then
+	echo "mesh uplink $MESH_UPLINK_INTERFACE has no MTU" >&2
 	exit 1
 fi
-wireguard_mtu=$(($(cat "/sys/class/net/$uplink/mtu") - 20 - 8 - 32))
+wireguard_mtu=$(($(cat "$mtu_file") - 20 - 8 - 32))
 
 if [ "$wireguard_mtu" -lt 1280 ]; then
-	echo "$uplink leaves $wireguard_mtu for WireGuard, below the 1280 IPv6 minimum" >&2
+	echo "$MESH_UPLINK_INTERFACE leaves $wireguard_mtu for WireGuard, below the 1280 IPv6 minimum" >&2
 	exit 1
 fi
 

@@ -68,6 +68,7 @@ class ProxyServer(Document):
 		proxy_server.flags.created_by_proxy_server_api = True
 		proxy_server.flags.skip_initial_provisioning = True
 		proxy_server.insert(ignore_permissions=True)
+		frappe.db.commit()  # nosemgrep
 
 		is_draft = ProxyServer.create_virtual_machine(proxy_server, values)
 		proxy_server.save(ignore_permissions=True)

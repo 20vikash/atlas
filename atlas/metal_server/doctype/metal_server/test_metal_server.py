@@ -769,11 +769,27 @@ class TestServer(UnitTestCase):
 			{
 				"WIREGUARD_ADDRESS": SERVER_MESH_ADDRESS,
 				"WIREGUARD_LISTEN_PORT": 51820,
+				"MESH_UPLINK_INTERFACE": "eno1.1878",
 			},
 		)
 		self.assertFalse(arguments["run_in_background"])
 		server.db_set.assert_any_call("wireguard_ip_address", SERVER_MESH_ADDRESS)
 		server.db_set.assert_called_with("wireguard_public_key", "SGVsbG9XaXJlR3VhcmRQdWJsaWNLZXlIZXJlPQ=")
+
+	def test_configure_wireguard_job_needs_the_mesh_uplink(self) -> None:
+		server = self._server(status="Running")
+		server.private_network_interface = None
+
+		with (
+			patch("atlas.metal_server.core.host_installation.frappe.throw", side_effect=ValueError),
+			patch(
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
+			) as create_for_script_file,
+			self.assertRaises(ValueError),
+		):
+			MetalServer._configure_wireguard(server)
+
+		create_for_script_file.assert_not_called()
 
 	def test_configure_wireguard_job_rejects_output_without_a_public_key(self) -> None:
 		"""A successful run that prints no key must not store a marker as the key."""
