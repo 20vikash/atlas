@@ -4,7 +4,13 @@ from frappe.tests import IntegrationTestCase, UnitTestCase
 from atlas.api.core.base import parse_tag_filter
 from atlas.api.core.errors import InvalidRequest
 from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request
-from atlas.atlas.core.tags import find_names_with_tags, read_tags_for
+from atlas.atlas.core.tags import (
+	MAXIMUM_TAG_KEY_LENGTH,
+	MAXIMUM_TAG_VALUE_LENGTH,
+	MAXIMUM_TAGS,
+	find_names_with_tags,
+	read_tags_for,
+)
 
 
 def insert_image(title: str, tags: list[dict[str, str]], **overrides) -> str:
@@ -29,6 +35,28 @@ class TestTagValidation(IntegrationTestCase):
 	def test_an_empty_key_is_rejected(self) -> None:
 		with self.assertRaises(frappe.ValidationError):
 			insert_image("empty-key", [{"key": "  ", "value": "a"}])
+
+	def test_a_long_key_is_rejected(self) -> None:
+		with self.assertRaises(frappe.ValidationError):
+			insert_image("long-key", [{"key": "k" * (MAXIMUM_TAG_KEY_LENGTH + 1), "value": "a"}])
+
+	def test_a_long_value_is_rejected(self) -> None:
+		with self.assertRaises(frappe.ValidationError):
+			insert_image("long-value", [{"key": "os", "value": "v" * (MAXIMUM_TAG_VALUE_LENGTH + 1)}])
+
+	def test_too_many_tags_are_rejected(self) -> None:
+		tags = [{"key": f"key-{index}", "value": "a"} for index in range(MAXIMUM_TAGS + 1)]
+
+		with self.assertRaises(frappe.ValidationError):
+			insert_image("too-many-tags", tags)
+
+	def test_a_key_and_value_of_the_maximum_length_are_stored(self) -> None:
+		key = "k" * MAXIMUM_TAG_KEY_LENGTH
+		value = "v" * MAXIMUM_TAG_VALUE_LENGTH
+
+		name = insert_image("maximum-lengths", [{"key": key, "value": value}])
+
+		self.assertEqual(read_tags_for("Virtual Machine Image", [name]), {name: {key: value}})
 
 	def test_a_key_and_value_lose_their_surrounding_space(self) -> None:
 		name = insert_image("trimmed", [{"key": " os ", "value": " Ubuntu "}])

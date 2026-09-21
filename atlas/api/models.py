@@ -6,10 +6,15 @@ from zoneinfo import ZoneInfo
 
 import frappe
 from frappe.utils import get_datetime, get_system_timezone
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
-from atlas.atlas.core.tags import read_tags
+from atlas.atlas.core.tags import (
+	MAXIMUM_TAG_KEY_LENGTH,
+	MAXIMUM_TAG_VALUE_LENGTH,
+	MAXIMUM_TAGS,
+	read_tags,
+)
 from atlas.vm.core.models import (
 	MAXIMUM_CPU_MILLICORES,
 	MAXIMUM_FIREWALL_PREFIXES,
@@ -28,6 +33,13 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 EgressMode = Literal["uplink", "mesh", "none"]
+TagMap = Annotated[
+	dict[
+		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_KEY_LENGTH)],
+		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_VALUE_LENGTH)],
+	],
+	Field(max_length=MAXIMUM_TAGS),
+]
 FirewallProtocol = Literal["any", "tcp", "udp", "icmp"]
 AUTO_IP_ADDRESS = "auto"
 
@@ -491,7 +503,7 @@ class SnapshotPayload(StrictModel):
 		default_factory=MemorySnapshotConfigurationPayload
 	)
 	is_termination_protected: bool = False
-	tags: dict[str, str] = Field(default_factory=dict)
+	tags: TagMap = Field(default_factory=dict)
 
 
 class TerminationProtectionPayload(StrictModel):

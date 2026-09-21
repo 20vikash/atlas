@@ -1237,7 +1237,12 @@
           },
           "tags": {
             "additionalProperties": {
+              "maxLength": 1000,
               "type": "string"
+            },
+            "maxProperties": 32,
+            "propertyNames": {
+              "maxLength": 128
             },
             "title": "Tags",
             "type": "object"

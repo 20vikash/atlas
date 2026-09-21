@@ -5,7 +5,7 @@ import frappe
 import orjson
 from frappe.tests import UnitTestCase
 
-from atlas.api.models import VirtualMachineDetailResponse, VirtualMachineResponse
+from atlas.api.models import SnapshotPayload, VirtualMachineDetailResponse, VirtualMachineResponse
 from atlas.api.routes.virtual_machines import (
 	attach_virtual_machine_ip_address,
 	create_virtual_machine,
@@ -25,6 +25,11 @@ from atlas.api.tests.test_support import (
 	api_request,
 	call_route,
 	route_response,
+)
+from atlas.atlas.core.tags import (
+	MAXIMUM_TAG_KEY_LENGTH,
+	MAXIMUM_TAG_VALUE_LENGTH,
+	MAXIMUM_TAGS,
 )
 from atlas.vm.core.metal_models import MetalFirewall, MetalFirewallRule
 from atlas.vm.core.placement import OutOfCapacity
@@ -566,3 +571,26 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		virtual_machine.detach_ip_address.assert_not_called()
+
+
+class TestSnapshotPayload(UnitTestCase):
+	def test_a_tag_map_within_every_limit_is_accepted(self) -> None:
+		tags = {"k" * MAXIMUM_TAG_KEY_LENGTH: "v" * MAXIMUM_TAG_VALUE_LENGTH}
+
+		payload = SnapshotPayload(title="image", tags=tags)
+
+		self.assertEqual(payload.tags, tags)
+
+	def test_a_long_tag_key_is_rejected(self) -> None:
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags={"k" * (MAXIMUM_TAG_KEY_LENGTH + 1): "a"})
+
+	def test_a_long_tag_value_is_rejected(self) -> None:
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags={"os": "v" * (MAXIMUM_TAG_VALUE_LENGTH + 1)})
+
+	def test_too_many_tags_are_rejected(self) -> None:
+		tags = {f"key-{index}": "a" for index in range(MAXIMUM_TAGS + 1)}
+
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags=tags)
