@@ -932,6 +932,9 @@ class TestServer(UnitTestCase):
 		with (
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.db.exists", return_value=False
+			),
 		):
 			MetalServer.archive_server(server)
 
@@ -959,6 +962,22 @@ class TestServer(UnitTestCase):
 		):
 			with self.assertRaises(ValueError):
 				MetalServer.archive_server(server)
+
+	def test_archive_server_rejects_a_server_with_a_virtual_machine(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.db.exists", return_value=True
+			) as exists,
+			self.assertRaises(frappe.ValidationError),
+		):
+			MetalServer.archive_server(server)
+
+		exists.assert_called_once_with("Virtual Machine", {"server": SERVER_NAME})
+		server.settings.server_provider_controller.delete_server.assert_not_called()
 
 	@staticmethod
 	def _server(*, status: str) -> SimpleNamespace:

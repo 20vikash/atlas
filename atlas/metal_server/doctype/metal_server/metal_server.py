@@ -209,6 +209,9 @@ class MetalServer(Document):
 		if is_job_enqueued(self.setup_job_id):
 			frappe.throw(_("Metal Server setup is still running for {0}.").format(self.name))
 
+		if frappe.db.exists("Virtual Machine", {"server": self.name}):
+			frappe.throw(_("Delete or migrate every Virtual Machine on {0} first.").format(self.name))
+
 		self.settings.server_provider_controller.delete_server(
 			self._provider_server_id(), self._provider_metadata(self.provider_metadata)
 		)
