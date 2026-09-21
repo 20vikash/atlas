@@ -514,6 +514,17 @@ class TestAwsServers(UnitTestCase):
 		self.assertEqual(mappings[1]["Ebs"]["VolumeSize"], STORAGE_VOLUME_SIZE_GIB)
 		self.assertTrue(mappings[1]["Ebs"]["DeleteOnTermination"])
 
+	def test_create_turns_off_network_hotplug(self) -> None:
+		servers = self.servers()
+		servers.client.paginate.return_value = []
+		servers.client.call.return_value = {"Instances": [self.instance()]}
+
+		servers.ensure(self.request())
+
+		user_data = servers.client.call.call_args.kwargs["UserData"]
+		self.assertTrue(user_data.startswith("#cloud-config\n"))
+		self.assertIn("when: [boot-new-instance]", user_data)
+
 	def test_create_needs_the_image_root_device_name(self) -> None:
 		servers = self.servers()
 		request = ServerCreateRequest(

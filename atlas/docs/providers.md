@@ -84,6 +84,8 @@ An Atlas host gets a second network interface in the Atlas subnet. That interfac
 
 AWS gives no stable guest device name, so `aws/configure-private-network.sh` finds the interface by its MAC address and renames it to `atlas-mesh`. metald uses that name as its mesh uplink.
 
+The cloud-init network hotplug handler renames an attached interface back to its default name. Atlas launches each instance with user data that limits cloud-init network updates to the first boot, so the handler does not run.
+
 The script sends the IPv4 multicast range through `atlas-mesh`. It writes persistent configuration for Netplan or `systemd-networkd`.
 
 Atlas stores the mesh network interface ID before it starts the attachment. AWS deletion uses only this stored ID. It verifies the interface attachment before it deletes the interface or the instance.
@@ -106,7 +108,7 @@ AWS keeps nested virtualization off until an instance asks for it, so Atlas laun
 
 Atlas creates a 64 GiB `gp3` root volume and a 500 GiB `gp3` storage volume. Both volumes are part of the instance launch request.
 
-The image metadata supplies the root device name. The host finds the unused storage volume because AWS does not give stable NVMe device names.
+The image metadata supplies the root device name. AWS does not give stable NVMe device names, so the provider sends the `/dev/disk/by-id` path of the storage volume. The path holds the volume ID without its dash.
 
 Both volumes have `DeleteOnTermination` enabled. A stop or a hardware change does not remove the storage volume, but instance deletion removes it.
 

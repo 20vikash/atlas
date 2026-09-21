@@ -19,6 +19,13 @@ from atlas.atlas.core.server_providers.base import (
 )
 
 MESH_MULTICAST_GROUP = "239.1.1.1"
+# Cloud-init hotplug renames an attached interface
+# back after Atlas configures it.
+USER_DATA = """#cloud-config
+updates:
+  network:
+    when: [boot-new-instance]
+"""
 
 
 class AwsServers:
@@ -74,6 +81,7 @@ class AwsServers:
 			SubnetId=self.configuration.subnet_id,
 			SecurityGroupIds=[self.configuration.security_group_id],
 			BlockDeviceMappings=[self.root_volume(request), self.storage_volume()],
+			UserData=USER_DATA,
 			TagSpecifications=[
 				{
 					"ResourceType": "instance",
