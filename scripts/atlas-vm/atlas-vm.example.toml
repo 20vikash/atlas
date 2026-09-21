@@ -53,7 +53,6 @@ region = "eu-west-1"
 availability_zone = "eu-west-1a"
 access_key_id = "change-me"
 secret_access_key = "change-me"
-storage_pool_device = "/dev/nvme1n1"
 
 [atlas.route53]
 access_key_id = "change-me"

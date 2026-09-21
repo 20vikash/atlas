@@ -169,7 +169,6 @@ def read_provider_values(atlas: dict) -> dict[str, object]:
 		"aws_availability_zone": aws["availability_zone"],
 		"aws_access_key_id": aws["access_key_id"],
 		"aws_secret_access_key": aws["secret_access_key"],
-		"aws_storage_pool_device": aws["storage_pool_device"],
 	}
 
 

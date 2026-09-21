@@ -70,7 +70,6 @@ class ConfigurationTest(unittest.TestCase):
 		values = guest.atlas_setup_values
 		self.assertEqual(values["server_provider"], "AWS")
 		self.assertEqual(values["aws_availability_zone"], "eu-west-1a")
-		self.assertEqual(values["aws_storage_pool_device"], "/dev/nvme1n1")
 		self.assertNotIn("scaleway_zone", values)
 
 	def test_unselected_provider_table_is_not_validated(self) -> None:
@@ -110,15 +109,17 @@ class ConfigurationTest(unittest.TestCase):
 		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "availability_zone is not in"):
 			atlas_vm.Settings.read(self.path)
 
-	def test_aws_storage_device_must_stay_below_dev(self) -> None:
+	def test_aws_storage_device_is_not_configured(self) -> None:
 		self.path.write_text(
 			as_aws(self.path.read_text()).replace(
-				'storage_pool_device = "/dev/nvme1n1"',
-				'storage_pool_device = "/dev/../etc/passwd"',
+				'secret_access_key = "change-me"\n\n[atlas.route53]',
+				'secret_access_key = "change-me"\nstorage_pool_device = "/dev/nvme1n1"\n\n[atlas.route53]',
 			)
 		)
 
-		with self.assertRaisesRegex(atlas_vm.AtlasVmError, "must be a /dev path"):
+		with self.assertRaisesRegex(
+			atlas_vm.AtlasVmError, "unknown configuration key atlas.aws.storage_pool_device"
+		):
 			atlas_vm.Settings.read(self.path)
 
 	def test_atlas_settings_are_required(self) -> None:

@@ -334,30 +334,12 @@ def _validate_scaleway_configuration(scaleway: dict, path: Path) -> None:
 
 
 def _validate_aws_configuration(aws: dict, path: Path) -> None:
-	_validate_keys(
-		aws,
-		{
-			"region",
-			"availability_zone",
-			"access_key_id",
-			"secret_access_key",
-			"storage_pool_device",
-		},
-		path,
-		"atlas.aws",
-	)
-	for key in ("region", "availability_zone", "access_key_id", "secret_access_key", "storage_pool_device"):
+	keys = ("region", "availability_zone", "access_key_id", "secret_access_key")
+	_validate_keys(aws, set(keys), path, "atlas.aws")
+	for key in keys:
 		_required_string(aws, key, path, "atlas.aws")
 	if not re.fullmatch(rf"{re.escape(aws['region'])}[a-z]", aws["availability_zone"]):
 		raise AtlasVmError(f"{path}: atlas.aws.availability_zone is not in atlas.aws.region")
-	storage_device = Path(aws["storage_pool_device"])
-	if (
-		not storage_device.is_absolute()
-		or not storage_device.is_relative_to("/dev")
-		or len(storage_device.parts) < 3
-		or ".." in storage_device.parts
-	):
-		raise AtlasVmError(f"{path}: atlas.aws.storage_pool_device must be a /dev path")
 
 
 def _validate_route53_configuration(route53: dict, path: Path) -> None:
