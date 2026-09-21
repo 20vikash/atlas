@@ -5,6 +5,10 @@ import frappe
 REQUEST_TIMEOUT_SECONDS = 10
 MAXIMUM_RETRIES = 3
 
+SOURCE_HEADER = "X-FC-Source"
+REGION_HEADER = "X-FC-Region"
+SOURCE = "atlas"
+
 DELIVERIES = {
 	"on_update": ("vm.state", 'doc.is_new() or doc.has_value_changed("status")'),
 	"on_trash": ("vm.state.deleted", None),
@@ -52,9 +56,12 @@ def configure_state_webhooks(
 			webhook.max_retries = MAXIMUM_RETRIES
 			webhook.enabled = int(enabled)
 
-			headers = [{"key": "Content-Type", "value": "application/json"}]
+			headers = [
+				{"key": "Content-Type", "value": "application/json"},
+				{"key": SOURCE_HEADER, "value": SOURCE},
+			]
 			if region_name:
-				headers.append({"key": "X-Atlas-Region", "value": region_name})
+				headers.append({"key": REGION_HEADER, "value": region_name})
 			webhook.set("webhook_headers", headers)
 			webhook.save(ignore_permissions=True)
 			names.append(name)

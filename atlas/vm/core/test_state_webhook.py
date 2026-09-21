@@ -64,7 +64,8 @@ class TestStateWebhookConfiguration(UnitTestCase):
 				"webhook_headers",
 				[
 					{"key": "Content-Type", "value": "application/json"},
-					{"key": "X-Atlas-Region", "value": "par-2"},
+					{"key": "X-FC-Source", "value": "atlas"},
+					{"key": "X-FC-Region", "value": "par-2"},
 				],
 			)
 
@@ -102,7 +103,10 @@ class TestStateWebhookConfiguration(UnitTestCase):
 		for document in saved:
 			document.set.assert_called_once_with(
 				"webhook_headers",
-				[{"key": "Content-Type", "value": "application/json"}],
+				[
+					{"key": "Content-Type", "value": "application/json"},
+					{"key": "X-FC-Source", "value": "atlas"},
+				],
 			)
 
 
