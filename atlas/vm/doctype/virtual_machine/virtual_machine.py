@@ -154,9 +154,8 @@ class VirtualMachine(Document):
 
 	@property
 	def public_ipv4(self) -> str | None:
-		"""Return the attached public IPv4 address, when there is one."""
-		information = self.get_metal_vm_info()
-		return information.desired.network.public_ipv4 if information else None
+		"""Return the public IPv4 address assigned in Atlas."""
+		return frappe.db.get_value("Metal Server IP Address", {"virtual_machine": self.name}, "address")
 
 	@property
 	def ssh_host(self) -> str:

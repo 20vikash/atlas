@@ -21,6 +21,9 @@ class IPAddressIntent:
 	provider_resource_id: str
 	server: str | None
 	reserved: bool
+	public_address: str
+	host_address: str | None
+	virtual_machine: str | None
 
 
 class MetalServerIPAddress(Document):
@@ -37,6 +40,7 @@ class MetalServerIPAddress(Document):
 		from atlas.atlas.doctype.atlas_tag.atlas_tag import AtlasTag
 
 		address: DF.Data
+		host_address: DF.Data | None
 		intent_version: DF.Int
 		provider_resource_id: DF.Data
 		reserved: DF.Check
@@ -84,6 +88,7 @@ class MetalServerIPAddress(Document):
 		self.status = "Attaching"
 		self.server = server
 		self.virtual_machine = virtual_machine
+		self.host_address = None
 		self.intent_version = (self.intent_version or 0) + 1
 		self.save()
 		self.queue_reconcile()
@@ -97,6 +102,7 @@ class MetalServerIPAddress(Document):
 			self.status = "Detaching"
 		else:
 			self.status = "Allocated"
+			self.host_address = None
 			if not self.reserved:
 				self.tenant_id = UNOWNED_TENANT_ID
 		self.save()
@@ -148,14 +154,25 @@ class MetalServerIPAddress(Document):
 			return
 
 		try:
-			self.apply_intent(intent)
-			self.complete_intent(intent)
+			host_address = self.apply_intent(intent)
+			if not self.complete_intent(intent, host_address):
+				return
+			if intent.status == "Attaching" and intent.virtual_machine and host_address:
+				self.send_address_to_metal(intent.virtual_machine, host_address)
 		except Exception:
 			frappe.log_error(
 				message=frappe.get_traceback(),
 				title=(f"Metal Server IP Address {self.name} {intent.status} intent {intent.version} failed"),
 			)
 			raise
+
+	def send_address_to_metal(self, virtual_machine: str, host_address: str) -> None:
+		"""Send the host address to Metal after provider attachment."""
+		from atlas.vm.core.vm_service import VirtualMachineService
+
+		VirtualMachineService(frappe.get_doc("Virtual Machine", virtual_machine)).apply_attached_ip_address(
+			host_address
+		)
 
 	def get_intent(self) -> IPAddressIntent:
 		"""Return the desired provider state for this address."""
@@ -165,21 +182,37 @@ class MetalServerIPAddress(Document):
 			provider_resource_id=self.provider_resource_id,
 			server=self.server,
 			reserved=bool(self.reserved),
+			public_address=self.address,
+			host_address=self.host_address,
+			virtual_machine=self.virtual_machine,
 		)
 
-	def apply_intent(self, intent: IPAddressIntent) -> None:
-		"""Make the provider state match the desired state."""
+	def apply_intent(self, intent: IPAddressIntent) -> str | None:
+		"""Apply one provider intent and return its host address."""
 		provider = frappe.get_single("Atlas Settings").server_provider_controller
-		if intent.status == "Attaching":
+		if intent.status != "Attaching":
 			if not intent.server:
-				raise ValueError("An attach intent needs a Server")
-			provider.attach_public_ipv4_address(
-				intent.provider_resource_id, frappe.get_doc("Metal Server", intent.server)
+				raise ValueError("A detach intent needs a Server")
+			provider.detach_public_ipv4_address(
+				intent.provider_resource_id,
+				intent.host_address,
+				frappe.get_doc("Metal Server", intent.server),
 			)
-		else:
-			provider.detach_public_ipv4_address(intent.provider_resource_id)
+			return None
 
-	def complete_intent(self, intent: IPAddressIntent) -> None:
+		if not intent.server:
+			raise ValueError("An attach intent needs a Server")
+		host_address = provider.attach_public_ipv4_address(
+			intent.provider_resource_id,
+			intent.public_address,
+			frappe.get_doc("Metal Server", intent.server),
+		)
+		try:
+			return str(ipaddress.IPv4Address(host_address))
+		except ipaddress.AddressValueError as error:
+			raise ValueError("A provider attach must return an IPv4 host address") from error
+
+	def complete_intent(self, intent: IPAddressIntent, host_address: str | None) -> bool:
 		"""Complete an intent only when no newer intent exists."""
 		table = frappe.qb.DocType("Metal Server IP Address")
 		is_attaching = intent.status == "Attaching"
@@ -188,12 +221,27 @@ class MetalServerIPAddress(Document):
 			frappe.qb.update(table)
 			.set(table.status, "Attached" if is_attaching else "Allocated")
 			.set(table.server, intent.server if is_attaching else None)
+			.set(table.host_address, host_address if is_attaching else None)
 			.where(table.name == self.name)
 			.where(table.intent_version == intent.version)
 		)
 		if not is_attaching and not intent.reserved:
 			query = query.set(table.tenant_id, UNOWNED_TENANT_ID)
 		query.run()
+
+		current = frappe.db.get_value(
+			self.doctype,
+			self.name,
+			["intent_version", "status", "host_address"],
+			as_dict=True,
+		)
+		expected_status = "Attached" if is_attaching else "Allocated"
+		return bool(
+			current
+			and current.intent_version == intent.version
+			and current.status == expected_status
+			and current.host_address == (host_address if is_attaching else None)
+		)
 
 
 def enqueue_pending_ip_address_reconcilation() -> None:

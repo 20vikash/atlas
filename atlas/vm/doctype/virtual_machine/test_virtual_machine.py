@@ -323,6 +323,21 @@ class TestVirtualMachineDocument(UnitTestCase):
 
 
 class TestVirtualMachineService(UnitTestCase):
+	def test_create_request_waits_for_the_provider_host_address(self) -> None:
+		request = VirtualMachineCreateRequest("machine-image", 2000, 2048, 10240, 7)
+		image = SimpleNamespace(get_metal_image_request=Mock(return_value={}))
+		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
+		server_ip_address = SimpleNamespace(host_address=None)
+
+		with patch.object(
+			virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa::1"
+		):
+			metal_request = VirtualMachineService(virtual_machine).get_metal_request(
+				request, image, server_ip_address
+			)
+
+		self.assertEqual(metal_request["network"]["public_ipv4"], "")
+
 	def test_machine_image_uses_its_own_artifacts(self) -> None:
 		request = VirtualMachineCreateRequest("machine-image", 2000, 2048, 10240, 7)
 		image_request = {
@@ -378,6 +393,19 @@ class TestVirtualMachineService(UnitTestCase):
 
 
 class TestVirtualMachineVirtualFields(UnitTestCase):
+	def test_the_public_address_comes_from_the_atlas_record(self) -> None:
+		virtual_machine = VirtualMachine.__new__(VirtualMachine)
+		virtual_machine.name = "vm-0000001"
+
+		with patch(
+			"atlas.vm.doctype.virtual_machine.virtual_machine.frappe.db.get_value",
+			return_value="203.0.113.10",
+		) as get_value:
+			self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
+
+		self.assertEqual(get_value.call_args.args[0], "Metal Server IP Address")
+		self.assertEqual(get_value.call_args.args[1], {"virtual_machine": "vm-0000001"})
+
 	def test_virtual_fields_read_the_nested_model(self) -> None:
 		virtual_machine = VirtualMachine.__new__(VirtualMachine)
 		virtual_machine.is_draft = 0
@@ -391,7 +419,6 @@ class TestVirtualMachineVirtualFields(UnitTestCase):
 		self.assertEqual(virtual_machine.mac, "06:00:00:00:00:01")
 		self.assertEqual(virtual_machine.egress, "uplink")
 		self.assertEqual(virtual_machine.wireguard_mesh_ipv6, "fdaa:1::1")
-		self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
 		self.assertEqual(virtual_machine.disk_throughput_mibps, 50)
 		self.assertEqual(virtual_machine.disk_iops, 2000)
 		self.assertEqual(virtual_machine.private_network_throughput_mibps, 100)
@@ -557,9 +584,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				{"public_network_throughput_mibps": 25}
 			)
 
-	def test_attach_ip_address_requests_host_egress(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "none"})
-		address = SimpleNamespace(address="203.0.113.10")
+	def test_attach_ip_address_waits_for_the_host_address(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "none", "public_ipv4": ""})
+		address = SimpleNamespace(address="203.0.113.10", host_address=None)
 		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
 		with (
@@ -574,7 +601,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		assign.assert_called_once_with("203.0.113.10")
 		request = client.set_virtual_machine_network.call_args.args[1]
 		self.assertEqual(request["egress"], "uplink")
-		self.assertEqual(request["public_ipv4"], "203.0.113.10")
+		self.assertEqual(request["public_ipv4"], "")
 
 	def test_attach_ip_address_rejects_a_second_address(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})

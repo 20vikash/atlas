@@ -163,7 +163,7 @@ class VirtualMachineService:
 			},
 			"image": image.get_metal_image_request(),
 			"network": {
-				"public_ipv4": server_ip_address.address if server_ip_address else "",
+				"public_ipv4": (server_ip_address.host_address or "") if server_ip_address else "",
 				"wireguard_mesh_ipv6": get_virtual_machine_mesh_address(self.virtual_machine),
 				"private_network_throughput_mibps": request.private_network_throughput_mibps,
 				"public_network_throughput_mibps": request.public_network_throughput_mibps,
@@ -381,9 +381,13 @@ class VirtualMachineService:
 			raise AssertionError from error
 
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
-		"""Set the address intent before the Metal network request."""
-		address = self.assign_ip_address(server_ip_address)
-		return self.update_network({"egress": "uplink", "public_ipv4": address.address})
+		"""Set the address intent before provider reconciliation."""
+		self.assign_ip_address(server_ip_address)
+		return self.update_network({"egress": "uplink"})
+
+	def apply_attached_ip_address(self, host_address: str) -> None:
+		"""Send the attached host address to Metal."""
+		self.update_network({"egress": "uplink", "public_ipv4": host_address})
 
 	def detach_ip_address(self) -> dict[str, Any]:
 		"""Update Metal before the address release intent."""

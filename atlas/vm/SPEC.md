@@ -258,6 +258,8 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 
 Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, throughput limits, and firewall rules can also be set during creation.
 
+An attach first records the provider intent. The provider reconcile job gets the host address and then sends that address to Metal. VM creation leaves the Metal address empty until this reconcile job succeeds.
+
 The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change one firewall field. Atlas merges it with the current desired firewall and sends the complete network to Metal.
 
 Firewall rules are allow rules for public and mesh traffic. They support `any`, `tcp`, `udp`, and `icmp`. TCP and UDP rules can select one destination port or one inclusive range. Each rule needs one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries.

@@ -74,6 +74,10 @@ The same exchange carries the Atlas public keys that the host must trust. Each h
 
 An address carries a desired intent and an intent version. Reconciliation applies the intent and preserves a pending one for a retry, so a failed apply is never mistaken for a completed one.
 
+The provider attach operation returns the host address that receives public traffic. Atlas stores this value in `host_address` and then sends it to Metal. A newer intent prevents the old reconcile job from sending its value to Metal.
+
+Detach gives the provider the stored host address and the server. This state lets a provider finish cleanup after an earlier partial operation.
+
 An address has a tenant and a `reserved` flag. An address without a tenant is in the shared pool. `IPAddressService` owns both fields.
 
 A tenant reservation claims an address from the shared pool. An operator fills the pool from the provider. An empty pool is an error. A claim locks the row before it writes the tenant and flag. Release clears both fields, keeps the provider reservation, and refuses attached or detaching addresses.
