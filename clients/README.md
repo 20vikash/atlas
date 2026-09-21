@@ -28,7 +28,7 @@ with client as client:
         x_tenant_id=12,
     )
 
-print(f"{BASE_URL}/vm_console?vm=vm-00010#token={console.token}")
+print(f"{BASE_URL}/vm_console#token={console.token}")
 ```
 
 `console.mode` is `tty` for the serial console and `ssh` for the SSH console. `console.expires_in` is the lifetime in seconds.

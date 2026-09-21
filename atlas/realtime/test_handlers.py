@@ -6,6 +6,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock, patch
 
 from atlas.realtime import handlers
+from atlas.vm.core.console_token import CONSOLE_TOKEN_LENGTH
 
 
 class TestConsoleHandlers(IsolatedAsyncioTestCase):
@@ -24,7 +25,7 @@ class TestConsoleHandlers(IsolatedAsyncioTestCase):
 			patch.object(handlers, "ConsoleSession", return_value=session),
 			patch.dict(handlers._sessions, {}, clear=True),
 		):
-			await handlers.atlas_console_open(socket, "a" * 48)
+			await handlers.atlas_console_open(socket, "a" * CONSOLE_TOKEN_LENGTH)
 			self.assertIs(handlers._sessions[socket.sid], session)
 
 		tls_context_for_site.assert_called_once_with("test.local")
@@ -57,7 +58,7 @@ class TestConsoleHandlers(IsolatedAsyncioTestCase):
 			patch.object(handlers.frappe, "log_error") as log_error,
 			patch.dict(handlers._sessions, {}, clear=True),
 		):
-			await handlers.atlas_console_open(socket, "a" * 48)
+			await handlers.atlas_console_open(socket, "a" * CONSOLE_TOKEN_LENGTH)
 
 		log_error.assert_called_once_with(title="Invalid console token payload for site test.local")
 		socket.emit.assert_awaited_once_with(

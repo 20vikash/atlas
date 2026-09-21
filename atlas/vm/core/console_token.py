@@ -11,6 +11,8 @@ import frappe
 import redis
 
 CONSOLE_TOKEN_TTL_SECONDS = 60
+CONSOLE_TOKEN_LENGTH = 256
+CONSOLE_TOKEN_ATTEMPTS = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,17 +54,25 @@ def console_token_key(site: str, token: str) -> str:
 
 def is_valid_console_token(value: object) -> bool:
 	"""Return whether a value has the generated console token format."""
-	return isinstance(value, str) and len(value) == 48 and value.isalnum()
+	return isinstance(value, str) and len(value) == CONSOLE_TOKEN_LENGTH and value.isalnum()
 
 
 def issue_console_token(connection: dict[str, Any]) -> str:
 	"""Store the console connection under a new token and return the token."""
 	validated_connection = ConsoleConnection.from_value(connection)
-	token = frappe.generate_hash(length=48)
+	payload = json.dumps(validated_connection.as_dict())
 	client = redis.from_url(frappe.conf.redis_cache)
-	client.set(
-		console_token_key(frappe.local.site, token),
-		json.dumps(validated_connection.as_dict()),
-		ex=CONSOLE_TOKEN_TTL_SECONDS,
-	)
-	return token
+
+	for _ in range(CONSOLE_TOKEN_ATTEMPTS):
+		token = frappe.generate_hash(length=CONSOLE_TOKEN_LENGTH)
+		if client.set(
+			console_token_key(frappe.local.site, token),
+			payload,
+			ex=CONSOLE_TOKEN_TTL_SECONDS,
+			# nx keeps a live session its token
+			# so a collision never takes over another console.
+			nx=True,
+		):
+			return token
+
+	raise RuntimeError("Could not generate a console token")

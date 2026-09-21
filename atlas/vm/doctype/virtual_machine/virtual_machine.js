@@ -240,11 +240,7 @@ function openConsole(frm, mode) {
 			return;
 		}
 		// Keep the token in the fragment.
-		const url =
-			"/vm_console?vm=" +
-			encodeURIComponent(frm.doc.name) +
-			"#token=" +
-			encodeURIComponent(token);
+		const url = "/vm_console#token=" + encodeURIComponent(token);
 		if (consoleTab) {
 			consoleTab.location = url;
 		} else {
