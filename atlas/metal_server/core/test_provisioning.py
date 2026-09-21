@@ -38,6 +38,7 @@ class TestServerProvisioner(UnitTestCase):
 		)
 		self.assertEqual(server.status, "Running")
 		self.assertEqual(server.is_provisioning_completed, 1)
+		server.enqueue_disk_sync.assert_called_once_with()
 
 	def test_run_keeps_progress_and_reports_the_failed_phase(self) -> None:
 		server = self.server()
@@ -55,6 +56,7 @@ class TestServerProvisioner(UnitTestCase):
 			provisioner.run()
 
 		self.assertEqual(server.status, "Failed")
+		server.enqueue_disk_sync.assert_not_called()
 		self.assertGreaterEqual(server.db_set.call_count, 3)
 		self.assertIn("provider-network", log_error.call_args.kwargs["title"])
 
@@ -107,6 +109,7 @@ class TestServerProvisioner(UnitTestCase):
 			wireguard_ip_address="fdab:1::1",
 			wireguard_public_key="public-key",
 			db_set=Mock(),
+			enqueue_disk_sync=Mock(),
 		)
 		server.get = lambda field: getattr(server, field)
 		return server

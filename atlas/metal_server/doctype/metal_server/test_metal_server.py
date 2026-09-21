@@ -222,7 +222,7 @@ class TestServer(UnitTestCase):
 				return_value=task,
 			) as create_for_command,
 		):
-			MetalServer.sync_disks(server)
+			MetalServer._sync_disks(server)
 
 		self.assertFalse(create_for_command.call_args.kwargs["run_in_background"])
 		server.set.assert_called_once_with(
@@ -253,7 +253,7 @@ class TestServer(UnitTestCase):
 				return_value=task,
 			),
 		):
-			MetalServer.sync_disks(server)
+			MetalServer._sync_disks(server)
 
 		devices = [disk["device"] for disk in server.set.call_args.args[1]]
 		self.assertEqual(len(devices), len(set(devices)))
@@ -315,7 +315,7 @@ class TestServer(UnitTestCase):
 				return_value=task,
 			),
 		):
-			MetalServer.sync_disks(server)
+			MetalServer._sync_disks(server)
 
 		self.assertEqual(
 			[disk["device"] for disk in server.set.call_args.args[1]],
@@ -337,9 +337,25 @@ class TestServer(UnitTestCase):
 			),
 		):
 			with self.assertRaises(ValueError):
-				MetalServer.sync_disks(server)
+				MetalServer._sync_disks(server)
 
 		server.save.assert_not_called()
+
+	def test_sync_disks_queues_one_job_per_server(self) -> None:
+		server = self._server(status="Running")
+		server.enqueue_disk_sync = lambda: MetalServer.enqueue_disk_sync(server)
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+			patch("atlas.metal_server.core.disk_inventory.SSHTask.create_for_command") as create_for_command,
+		):
+			MetalServer.sync_disks(server)
+
+		create_for_command.assert_not_called()
+		self.assertEqual(enqueue_doc.call_args.args, ("Metal Server", SERVER_NAME, "_sync_disks"))
+		self.assertEqual(enqueue_doc.call_args.kwargs["job_id"], f"atlas||server||sync-disks||{SERVER_NAME}")
+		self.assertTrue(enqueue_doc.call_args.kwargs["deduplicate"])
 
 	def test_sync_disks_rejects_a_server_that_is_not_running(self) -> None:
 		server = self._server(status="Stopped")

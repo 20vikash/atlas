@@ -49,6 +49,7 @@ class ServerProvisioner:
 			self.server.status = "Running"
 			self.server.is_provisioning_completed = 1
 			self.save_progress()
+			self.server.enqueue_disk_sync()
 		except Exception:
 			self.server.status = "Failed"
 			self.save_progress()

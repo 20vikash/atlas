@@ -110,8 +110,7 @@ class MetalServer(Document):
 		self.provider_metadata = frappe.as_json(provider_server.provider_metadata)
 
 	def validate(self) -> None:
-		"""Fill the disks and the mesh address once the server runs."""
-		self._sync_disks_if_running()
+		"""Fill the mesh address."""
 		self._set_wireguard_ip_address_if_not_set()
 
 	def after_insert(self) -> None:
@@ -231,11 +230,25 @@ class MetalServer(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_disks(self) -> None:
-		"""Read the block devices on the server and replace the disks table."""
+		"""Queue a read of the block devices on the server."""
 		frappe.only_for("System Manager")
 		if self.status != "Running":
 			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
 
+		self.enqueue_disk_sync()
+
+	def enqueue_disk_sync(self) -> None:
+		"""Queue the replacement of the disks table from the host."""
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_sync_disks",
+			job_id=f"atlas||server||sync-disks||{self.name}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	def _sync_disks(self) -> None:
 		DiskInventory(self).sync()
 
 	@frappe.whitelist(methods=["POST"])
@@ -372,16 +385,6 @@ class MetalServer(Document):
 	def _set_wireguard_ip_address_if_not_set(self) -> None:
 		"""Set the WireGuard IP address if it is not already set."""
 		HostInstallation(self).set_wireguard_ip_address()
-
-	def _sync_disks_if_running(self) -> None:
-		"""Fill the disks table once the server runs."""
-		if self.status != "Running" or self.disks:
-			return
-
-		try:
-			self.sync_disks()
-		except Exception:
-			frappe.log_error(title=f"Could not sync the disks of server {self.name}")
 
 	def _parse_disks(self, lsblk_output: str) -> list[dict[str, str]]:
 		"""Return one row for each mounted device and the raw storage pool device."""

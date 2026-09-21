@@ -58,7 +58,7 @@ frappe.ui.form.on("Metal Server", {
 				__("Renew the TLS certificate on {0}? Metal restarts with it.", [
 					frm.doc.name.bold(),
 				]),
-				true,
+				false,
 			],
 			[
 				__("Reboot"),
