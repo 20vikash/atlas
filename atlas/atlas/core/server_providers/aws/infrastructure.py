@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from atlas.atlas.core.server_providers.aws.client import AwsError
@@ -39,14 +38,6 @@ class AwsInfrastructure:
 		if network.version != 4 or not any(network.subnet_of(item) for item in PRIVATE_IPV4_NETWORKS):
 			raise AwsError(f"Atlas private network CIDR {network} must be a private IPv4 network")
 
-		try:
-			management = ipaddress.ip_network(configuration.management_cidr, strict=False)
-		except ValueError as error:
-			raise AwsError(f"Invalid AWS management CIDR: {configuration.management_cidr}") from error
-
-		if management.version != 4:
-			raise AwsError(f"AWS management CIDR {management} must be an IPv4 network")
-
 		if not (
 			self.provider.private_network_min_prefix
 			<= network.prefixlen
@@ -56,15 +47,6 @@ class AwsInfrastructure:
 				f"Private network CIDR {network} must have a prefix length between "
 				f"/{self.provider.private_network_min_prefix} and /{self.provider.private_network_max_prefix}."
 			)
-
-		storage_device = PurePosixPath(configuration.storage_pool_device)
-		if (
-			not storage_device.is_absolute()
-			or not storage_device.is_relative_to("/dev")
-			or len(storage_device.parts) < 3
-			or ".." in storage_device.parts
-		):
-			raise AwsError("AWS storage pool device must be a path below /dev")
 
 	def validate_credentials(self) -> bool:
 		"""Return true when the configured keys can access AWS."""
@@ -196,10 +178,21 @@ class AwsInfrastructure:
 			group_id = response["GroupId"]
 			permissions = []
 
-		missing_rules = [rule for rule in self.ingress_rules if not self.has_ingress_rule(permissions, rule)]
+		desired_rules = self.ingress_rules
+		missing_rules = [rule for rule in desired_rules if not self.has_ingress_rule(permissions, rule)]
 		if missing_rules:
 			self.provider.client.call(
 				"ec2", "authorize_security_group_ingress", GroupId=group_id, IpPermissions=missing_rules
+			)
+
+		obsolete_rules = [
+			permission
+			for permission in permissions
+			if not any(self.has_ingress_rule([permission], rule) for rule in desired_rules)
+		]
+		if obsolete_rules:
+			self.provider.client.call(
+				"ec2", "revoke_security_group_ingress", GroupId=group_id, IpPermissions=obsolete_rules
 			)
 		return group_id
 
@@ -449,37 +442,10 @@ class AwsInfrastructure:
 
 	@property
 	def ingress_rules(self) -> list[dict]:
-		"""Return the inbound rules for Atlas hosts.
-
-		Atlas reaches Secure Shell and the Metal API over the public address of a
-		host, so both ports accept the management network. WireGuard stays open to
-		the internet because a peer dials in from any address and the tunnel
-		authenticates by key. Everything else stays inside the private network.
-		"""
-		from atlas.vm.core.metal_client import MetalClient
-
-		management_cidr = self.provider.configuration.management_cidr
+		"""Allow all inbound traffic during development."""
 		return [
-			self.port_rule("tcp", 22, "Atlas Secure Shell", management_cidr),
-			self.port_rule("tcp", MetalClient.api_port, "Atlas Metal API", management_cidr),
-			self.port_rule("udp", self.provider.wireguard_port, "WireGuard", "0.0.0.0/0"),
 			{
 				"IpProtocol": "-1",
-				"IpRanges": [
-					{
-						"CidrIp": self.private_network_cidr,
-						"Description": "Atlas private network",
-					}
-				],
-			},
+				"IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "Atlas development access"}],
+			}
 		]
-
-	@staticmethod
-	def port_rule(protocol: str, port: int, description: str, cidr: str) -> dict:
-		"""Return one inbound rule that opens a single port to one network."""
-		return {
-			"IpProtocol": protocol,
-			"FromPort": port,
-			"ToPort": port,
-			"IpRanges": [{"CidrIp": cidr, "Description": description}],
-		}

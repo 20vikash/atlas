@@ -59,7 +59,6 @@
   "aws_settings_section",
   "aws_region",
   "aws_availability_zone",
-  "aws_storage_pool_device",
   "column_break_awsa",
   "aws_access_key_id",
   "aws_secret_access_key",
@@ -634,15 +633,6 @@
    "label": "Availability Zone",
    "mandatory_depends_on": "eval: doc.server_provider == \"AWS\"",
    "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
-  },
-  {
-   "default": "/dev/nvme1n1",
-   "description": "The raw block device that Metal uses for the virtual machine storage pool.",
-   "fieldname": "aws_storage_pool_device",
-   "fieldtype": "Data",
-   "label": "Storage Pool Device",
-   "mandatory_depends_on": "eval: doc.server_provider == \"AWS\"",
-   "show_description_on_click": 1
   },
   {
    "fieldname": "column_break_awsa",

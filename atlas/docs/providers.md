@@ -18,6 +18,7 @@ The provider contract includes these operations:
 - Ensure one provider host by its Atlas name.
 - Prepare provider resources before Secure Shell access.
 - Configure the provider network after Secure Shell access.
+- Return the address that metald can bind.
 - Apply one explicit power action.
 - Delete one provider host safely.
 - Return the storage pool device.
@@ -89,14 +90,30 @@ Atlas stores the mesh network interface ID before it starts the attachment. AWS 
 
 ### Network exposure
 
-The Atlas security group opens Secure Shell, the Metal API port, and the WireGuard port to the internet, because Atlas reaches a host through its public address. The Metal API accepts only the Atlas client certificate. Every other port is open only inside the Atlas private network.
+The Atlas security group allows all inbound traffic during development. Scaleway hosts have the same exposure because Atlas does not configure a Scaleway firewall.
 
 ### Instance types
 
-Atlas needs hardware virtualization, local instance storage, and two network interfaces. The catalog rejects an instance type that does not provide them.
+Atlas needs hardware virtualization and two network interfaces. The catalog rejects instance types that have local instance storage.
 
 A bare metal type provides the processor extensions. A virtual type must report `nested-virtualization` in `ProcessorInfo.SupportedFeatures`.
 
 AWS keeps nested virtualization off until an instance asks for it, so Atlas launches a virtual instance with `CpuOptions.NestedVirtualization` set to `enabled`. A bare metal instance rejects that option, so Atlas does not send it.
 
 `DescribeInstanceTypes` reports no price, so the catalog prices stay empty.
+
+### Storage volumes
+
+Atlas creates a 64 GiB `gp3` root volume and a 500 GiB `gp3` storage volume. Both volumes are part of the instance launch request.
+
+The image metadata supplies the root device name. The host finds the unused storage volume because AWS does not give stable NVMe device names.
+
+Both volumes have `DeleteOnTermination` enabled. A stop or a hardware change does not remove the storage volume, but instance deletion removes it.
+
+### Public IPv4 addresses
+
+AWS translates each public address to a secondary private address on the primary network interface. Atlas stores this private address as the host address.
+
+Metal maps the host address to the virtual machine. Detach uses the stored host address, so a retry can remove the secondary address after disassociation.
+
+Atlas does not use the primary private address for a virtual machine. This rule keeps the host public address separate from virtual machine traffic.

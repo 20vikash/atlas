@@ -65,8 +65,8 @@ class TestScalewayProvider(UnitTestCase):
 		provider = self.provider()
 		server = self.server(provider_server_id="server-id")
 
-		provider.attach_public_ipv4_address("address-id", server)
-		provider.detach_public_ipv4_address("address-id")
+		provider.attach_public_ipv4_address("address-id", "203.0.113.9", server)
+		provider.detach_public_ipv4_address("address-id", "203.0.113.9", server)
 		provider.delete_public_ipv4_address("address-id")
 
 		provider.ip_addresses.attach.assert_called_once_with("address-id", "server-id")

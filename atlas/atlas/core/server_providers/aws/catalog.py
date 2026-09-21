@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping
 
 from atlas.atlas.core.server_providers.aws.client import AwsError
+from atlas.atlas.core.server_providers.aws.configuration import STORAGE_VOLUME_SIZE_GIB
 from atlas.atlas.core.server_providers.base import (
 	ACCEPTED_OS_VERSIONS,
 	ServerImageData,
@@ -55,12 +56,7 @@ class AwsCatalog:
 
 	@staticmethod
 	def is_supported(instance_type: Mapping) -> bool:
-		"""Report whether an AWS instance type can run Atlas virtual machines.
-
-		Atlas needs hardware virtualization, local storage, and a second network
-		interface. Bare metal always gives hardware virtualization. A virtual
-		instance gives it only when AWS reports the nested virtualization feature.
-		"""
+		"""Report whether a type supports Atlas without local storage."""
 		processor = instance_type.get("ProcessorInfo")
 		features = processor.get("SupportedFeatures", []) if isinstance(processor, Mapping) else []
 		network = instance_type.get("NetworkInfo")
@@ -71,7 +67,7 @@ class AwsCatalog:
 		)
 		return (
 			has_virtualization
-			and AwsCatalog._disk_gib(instance_type) > 0
+			and AwsCatalog._disk_gib(instance_type) == 0
 			and isinstance(maximum_interfaces, int)
 			and maximum_interfaces >= 2
 		)
@@ -83,6 +79,14 @@ class AwsCatalog:
 		if not isinstance(image_id, str):
 			raise AwsError(f"Metal Server Image {image_name} has no AWS machine image ID")
 		return image_id
+
+	@staticmethod
+	def root_device_name(metadata: object, image_name: str) -> str:
+		"""Return the AWS root device name from provider image metadata."""
+		device_name = metadata.get("RootDeviceName") if isinstance(metadata, Mapping) else None
+		if not isinstance(device_name, str):
+			raise AwsError(f"Metal Server Image {image_name} has no AWS root device name")
+		return device_name
 
 	def _server_size(self, instance_type: Mapping) -> ServerSizeData:
 		name = instance_type.get("InstanceType")
@@ -100,7 +104,7 @@ class AwsCatalog:
 			architecture=self.instance_type_architecture(instance_type),
 			cpu_count=cpu_count,
 			memory_mib=memory_mib,
-			disk_gib=self._disk_gib(instance_type),
+			disk_gib=STORAGE_VOLUME_SIZE_GIB,
 			hourly_pricing_usd_cents=None,
 			monthly_pricing_usd_cents=None,
 			provider_metadata=dict(instance_type),

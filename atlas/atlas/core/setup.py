@@ -30,8 +30,6 @@ PROVIDER_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 			"aws_availability_zone",
 			"aws_access_key_id",
 			"aws_secret_access_key",
-			"aws_storage_pool_device",
-			"aws_management_cidr",
 		),
 	}
 )
@@ -83,8 +81,6 @@ class AtlasSetupConfiguration:
 	aws_availability_zone: str = ""
 	aws_access_key_id: str = ""
 	aws_secret_access_key: str = ""
-	aws_storage_pool_device: str = ""
-	aws_management_cidr: str = "0.0.0.0/0"
 
 	@classmethod
 	def from_dict(cls, values: Any) -> "AtlasSetupConfiguration":

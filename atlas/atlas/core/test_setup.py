@@ -54,8 +54,6 @@ def aws_configuration(**changes: object) -> AtlasSetupConfiguration:
 			"aws_availability_zone": "eu-west-1a",
 			"aws_access_key_id": "key-id",
 			"aws_secret_access_key": "key-secret",
-			"aws_storage_pool_device": "/dev/nvme1n1",
-			"aws_management_cidr": "203.0.113.0/24",
 		}
 	)
 	values.update(changes)

@@ -195,11 +195,15 @@ class ServerProvider(ABC):
 		"""Delete one public IPv4 address."""
 		raise UnsupportedProviderOperation("public IPv4 address deletion")
 
-	def attach_public_ipv4_address(self, provider_resource_id: str, server: "MetalServer") -> None:
-		"""Attach one public IPv4 address to a provider server."""
+	def attach_public_ipv4_address(
+		self, provider_resource_id: str, public_address: str, server: "MetalServer"
+	) -> str:
+		"""Attach one public IPv4 address and return its host address."""
 		raise UnsupportedProviderOperation("public IPv4 address attachment")
 
-	def detach_public_ipv4_address(self, provider_resource_id: str) -> None:
+	def detach_public_ipv4_address(
+		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
+	) -> None:
 		"""Detach one public IPv4 address from its provider server."""
 		raise UnsupportedProviderOperation("public IPv4 address detachment")
 

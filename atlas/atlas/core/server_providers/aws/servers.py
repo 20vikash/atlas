@@ -6,7 +6,12 @@ from typing import ClassVar
 
 from atlas.atlas.core.server_providers.aws.catalog import AwsCatalog
 from atlas.atlas.core.server_providers.aws.client import AwsClient, AwsError
-from atlas.atlas.core.server_providers.aws.configuration import AwsConfiguration
+from atlas.atlas.core.server_providers.aws.configuration import (
+	ROOT_VOLUME_SIZE_GIB,
+	STORAGE_VOLUME_DEVICE_NAME,
+	STORAGE_VOLUME_SIZE_GIB,
+	AwsConfiguration,
+)
 from atlas.atlas.core.server_providers.base import (
 	ProviderServer,
 	ServerCreateRequest,
@@ -68,6 +73,7 @@ class AwsServers:
 			KeyName=self.configuration.key_pair_name,
 			SubnetId=self.configuration.subnet_id,
 			SecurityGroupIds=[self.configuration.security_group_id],
+			BlockDeviceMappings=[self.root_volume(request), self.storage_volume()],
 			TagSpecifications=[
 				{
 					"ResourceType": "instance",
@@ -83,6 +89,31 @@ class AwsServers:
 		if not isinstance(instances, list) or len(instances) != 1 or not isinstance(instances[0], Mapping):
 			raise AwsError(f"AWS did not return an instance for Atlas server {request.name}")
 		return instances[0]
+
+	def root_volume(self, request: ServerCreateRequest) -> dict:
+		"""Return the resized volume mapping for the image root device."""
+		return {
+			"DeviceName": self.catalog.root_device_name(
+				request.image_provider_metadata, request.server_image
+			),
+			"Ebs": {
+				"VolumeSize": ROOT_VOLUME_SIZE_GIB,
+				"VolumeType": "gp3",
+				"DeleteOnTermination": True,
+			},
+		}
+
+	@staticmethod
+	def storage_volume() -> dict:
+		"""Return the volume mapping for the virtual machine storage pool."""
+		return {
+			"DeviceName": STORAGE_VOLUME_DEVICE_NAME,
+			"Ebs": {
+				"VolumeSize": STORAGE_VOLUME_SIZE_GIB,
+				"VolumeType": "gp3",
+				"DeleteOnTermination": True,
+			},
+		}
 
 	@staticmethod
 	def cpu_options(size_provider_metadata: Mapping) -> dict:
@@ -238,6 +269,7 @@ class AwsServers:
 				TransitGatewayMulticastDomainId=self.configuration.multicast_domain_id,
 				GroupIpAddress=MESH_MULTICAST_GROUP,
 				NetworkInterfaceIds=[network_interface_id],
+				allow_existing=True,
 			)
 
 	def deregister_multicast_interface(self, network_interface_id: str) -> None:
