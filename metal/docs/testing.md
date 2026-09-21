@@ -50,12 +50,11 @@ A full boot, Secure Shell, and idle shutdown check needs a complete environment.
 
 An idle VM stops and keeps no Firecracker process. The next IPv4 or IPv6 packet starts it again.
 
-```text
-running -> idle -> stopped (no Firecracker process)
-					 |
-			 IPv4 or IPv6 packet
-					 v
-				  running
+```mermaid
+stateDiagram-v2
+    running --> idle: no host-to-guest traffic
+    idle --> stopped: idle timeout expires
+    stopped --> running: IPv4 or IPv6 packet arrives
 ```
 
 ## Configuration

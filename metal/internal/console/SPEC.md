@@ -26,14 +26,16 @@ This package owns the serial console only. The API serves an SSH session on the 
 
 Each VM gets one PTY pair. Metal keeps the master. The systemd unit opens the slave through a stable symlink, so the unit needs no knowledge of the allocated PTY name.
 
-```text
-Firecracker --writes--> PTY slave <--symlink-- <sockets>/consoles/<id>
-                            |
-                        PTY master  (held by console)
-                            |            \
-                     drain goroutine      systemd descriptor store
-                       |          |
-                  ringBuffer   viewers --> API WebSocket
+```mermaid
+flowchart LR
+    Firecracker -->|writes| Slave[PTY slave]
+    Link[Console symlink] --> Slave
+    Slave --> Master[PTY master]
+    Master --> Drain[Drain goroutine]
+    Master --> Store[systemd descriptor store]
+    Drain --> Buffer[Ring buffer]
+    Drain --> Viewers[Attached viewers]
+    Viewers --> Socket[API WebSocket]
 ```
 
 `Open` allocates the master and starts the drain. `Persist` stores it. `Close` releases it. `Attach` adds a viewer. `Shutdown` releases local masters. `Adopt` restores stored masters.
@@ -58,13 +60,19 @@ A viewer that attaches receives the scrollback first, then live output. Scrollba
 
 ## Lifecycle
 
-```text
-metald start               -> Adopt(running VM IDs)
-firecracker prepareLaunch  -> Open(id)
-firecracker prepareLaunch  -> Persist(id)   after the unit start
-api  GET /v1/vms/{id}/console?mode=tty -> Attach(id)   many, concurrent, capped
-firecracker stop or remove -> Close(id)
-metald shutdown            -> Shutdown()
+```mermaid
+sequenceDiagram
+    participant Metal
+    participant Runtime as Firecracker runtime
+    participant Console as Serial broker
+    participant API
+
+    Metal->>Console: Adopt running VM IDs
+    Runtime->>Console: Open VM console
+    Runtime->>Console: Persist after unit start
+    API->>Console: Attach viewer
+    Runtime->>Console: Close after stop or removal
+    Metal->>Console: Shutdown
 ```
 
 `Adopt` restores consoles for running VMs and removes stale masters and links.

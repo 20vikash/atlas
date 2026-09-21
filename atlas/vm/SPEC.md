@@ -32,12 +32,13 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 
 ## Create
 
-```text
-validate request
-  -> select and lock a Metal Server        capacity sample minus local reservations
-  -> insert draft, COMMIT            the draft reserves capacity and fixes the name
-  -> PUT /v1/vms/{name}              idempotent on the name
-  -> clear draft
+```mermaid
+flowchart LR
+    Validate[Validate request] --> Select[Select and lock Metal Server]
+    Select --> Capacity[Subtract local reservations<br/>from capacity sample]
+    Capacity --> Draft[Insert and commit draft]
+    Draft --> Put[PUT desired state with stable VM ID]
+    Put --> Clear[Clear draft after confirmation]
 ```
 
 The commit before the Metal call is deliberate. The draft must exist on disk before Atlas asks Metal for anything, so a lost response leaves a record to reconcile rather than an orphaned VM.

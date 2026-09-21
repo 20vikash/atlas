@@ -27,11 +27,11 @@ Metal talks to systemd through D-Bus. It does not call the `systemctl` command.
 
 One template unit runs each virtual machine:
 
-```text
-template: metal-vm@.service
-instance: metal-vm@<id>.service
-
-Metal --D-Bus--> systemd --> jailer --> Firecracker
+```mermaid
+flowchart LR
+    Metal -->|D-Bus| Systemd["systemd<br/>metal-vm@.service"]
+    Systemd --> Jailer[jailer]
+    Jailer --> Firecracker
 ```
 
 `Connect` opens one system-bus connection and `Close` releases it. The runtime receives `UnitManager`, so it does not depend on D-Bus details.
@@ -51,9 +51,16 @@ The context cancels systemd waits and polling. The VM runtime maps the returned 
 
 systemd holds file descriptors across a restart or a stop of the service. `FileDescriptorStore` stores one with `FDSTORE=1`, removes one with `FDSTOREREMOVE=1`, and reads the descriptors that systemd returns.
 
-```text
-metald run 1 --FDSTORE=1, FDNAME=<id>--> systemd --holds--> descriptor
-metald run 2 <--LISTEN_FDS, LISTEN_FDNAMES-- systemd
+```mermaid
+sequenceDiagram
+    participant First as metald run 1
+    participant Systemd
+    participant Descriptor as Console descriptor
+    participant Second as metald run 2
+
+    First->>Systemd: FDSTORE=1 and FDNAME=VM ID
+    Systemd->>Descriptor: Hold descriptor
+    Systemd->>Second: LISTEN_FDS and LISTEN_FDNAMES
 ```
 
 The unit needs `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes`. Without the notification socket, `IsAvailable` is false and store operations do nothing.

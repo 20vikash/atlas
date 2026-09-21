@@ -8,16 +8,19 @@ Every virtual machine gets the same private addresses. That is safe because each
 
 ## Topology
 
-```text
-guest eth0
-    |
-   tap0  172.16.0.1/24
-    |
-network namespace metal-<id>
-    |
-    +- egress none:   no veth pair, no path out
-    +- egress mesh:   vg-<user-id> <-> vh-<user-id>
-    +- egress uplink: vg-<user-id> <-> vh-<user-id> -> host uplink
+```mermaid
+flowchart TB
+    Guest[Guest eth0<br/>172.16.0.2]
+    Tap[tap0<br/>gateway 172.16.0.1]
+    Mode{Egress mode}
+    None[none<br/>no veth pair]
+
+    Guest --> Tap --> Mode
+    Mode -->|none| None
+    Mode -->|mesh| Veth[VM veth pair]
+    Mode -->|uplink| Veth
+    Veth --> Mesh[WG Mesh]
+    Veth -->|uplink only| Internet[Host uplink and NAT]
 ```
 
 The guest address is `172.16.0.2`, the gateway `172.16.0.1`, and the guest MAC `06:00:ac:10:00:02`, which encodes that address. A warm VM keeps the MAC of the snapshot it resumed from, so a fixed value keeps the reported MAC true.
@@ -72,10 +75,14 @@ Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [int
 
 Metal tracks TCP traffic from the host to the guest. It ignores other packets and all guest-to-host traffic. This prevents ARP and IPv6 housekeeping from keeping a VM awake.
 
-```text
-host TCP packet -> tap0 egress TCX hook -> record activity
-                                      |
-                                      +-> VM is armed -> send wake event -> restore VM
+```mermaid
+flowchart LR
+    Packet[Host-to-guest TCP packet] --> Hook[tap0 egress TCX hook]
+    Hook --> Activity[Record packet time]
+    Hook --> Armed{VM is armed?}
+    Armed -->|Yes| Wake[Send wake event]
+    Wake --> Restore[Restore VM]
+    Armed -->|No| Continue[Continue packet path]
 ```
 
 The eBPF program observes packets but does not change them. It stores the last packet time by VM user ID.

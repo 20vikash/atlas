@@ -46,8 +46,11 @@ image-policies.json
 
 ## Clone and snapshot lineage
 
-```text
-image @ready -> VM clone -> temporary staging or warm source snapshot
+```mermaid
+flowchart LR
+    Ready[Image ready snapshot] --> Clone[VM disk clone]
+    Clone --> Stage[Temporary snapshot staging]
+    Clone --> Warm[Warm source snapshot]
 ```
 
 VM clones share image blocks. Staging clones share one fixed VM snapshot. Warm promotion uses ZFS send and receive for an independent warm disk.

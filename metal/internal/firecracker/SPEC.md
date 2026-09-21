@@ -22,12 +22,15 @@ What this package owns is everything inside that unit: the jail, the boot config
 
 ## Composition
 
-```text
-vm.Manager -> firecracker.Runtime -> systemd -> jailer -> Firecracker
-                         |
-                         +-> VM disk storage
-                         +-> image storage
-                         +-> serial broker
+```mermaid
+flowchart LR
+    VM[vm.Manager] --> Runtime[firecracker.Runtime]
+    Runtime --> Systemd[systemd]
+    Systemd --> Jailer[jailer]
+    Jailer --> Firecracker
+    Runtime --> Disk[VM disk storage]
+    Runtime --> Image[Image storage]
+    Runtime --> Console[Serial broker]
 ```
 
 ## Jail
@@ -40,16 +43,19 @@ The jailer arguments reach systemd through an `EnvironmentFile`. systemd word sp
 
 Cold and warm launch share one preparation step:
 
-```text
-write the jailer environment and the socket link
-open the console PTY          before the unit starts, so no output is lost
-start the systemd unit
-persist the console master    after the unit holds the PTY slave
-set unit resource limits
-wait for the API socket       the process belongs to systemd, so this is the only signal
-    |
-    +- cold: prepare the disk, then configure machine, kernel, drives, network, MMDS
-    +- warm: prepare the disk from the warm snapshot, load state and memory, resume
+```mermaid
+flowchart TD
+    Environment[Write jailer environment and socket link] --> Console[Open console PTY]
+    Console --> Unit[Start systemd unit]
+    Unit --> Persist[Persist console master]
+    Persist --> Limits[Set unit resource limits]
+    Limits --> Socket[Wait for Firecracker API socket]
+    Socket --> Mode{Start mode}
+    Mode -->|Cold| Cold[Prepare disk and configure machine]
+    Mode -->|Warm| Warm[Prepare warm disk and load state]
+    Cold --> Ready[VM ready]
+    Warm --> Resume[Resume VM]
+    Resume --> Ready
 ```
 
 A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
@@ -58,11 +64,16 @@ The VM specification stores CPU entitlement in millicores. Firecracker receives 
 
 The runtime has explicit start operations:
 
-```text
-Start         -> shared warm image -> failure -> cold boot
-ColdStart     -> cold boot, never a warm image
-Restore       -> VM saved state -> resume
-RestorePaused -> VM saved state -> stay paused
+```mermaid
+flowchart LR
+    Start[Start] --> Shared[Try shared warm image]
+    Shared -->|failure| Cold[Cold boot]
+    Shared -->|success| Running[Running]
+    ColdStart[ColdStart] --> Cold
+    Cold --> Running
+    Restore[Restore] --> Saved[Load VM saved state]
+    Saved --> Running
+    RestorePaused[RestorePaused] --> Paused[Load saved state and stay paused]
 ```
 
 `Start` uses a warm image only when the image and derived guest-vCPU count, memory, and disk match. It cold boots if warm launch fails. `ColdStart` always cold boots, so a migrated disk never inherits the source guest memory. `Restore` returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
@@ -75,15 +86,14 @@ A memory snapshot restores only into the Firecracker build that wrote it. The bi
 
 A saved state contains `state`, `memory`, and `metadata.json`. It belongs to one VM and is separate from shared warm image artifacts.
 
-```text
-running -> pause -> jail/saved-state-pending/{state,memory,metadata.json}
-					|
-					v
-		  machines/<id>/saved-state/
-					|
-					+-> terminate Firecracker -> stopped
-
-stopped -> copy state to new jail -> load -> update guest metadata -> resume
+```mermaid
+stateDiagram-v2
+    running --> paused: pause VM
+    paused --> pending: write state, memory, and metadata
+    pending --> saved: publish saved state atomically
+    saved --> stopped: terminate Firecracker
+    stopped --> restoring: copy state to new jail
+    restoring --> running: load, update metadata, and resume
 ```
 
 The metadata records VM identity, record generations, Firecracker compatibility, creation time, fixed file names, and file sizes. Restore paths come from the VM ID.
@@ -106,13 +116,15 @@ A requested restore never falls back to a cold boot. It can also load the guest 
 
 State comes from two places. systemd owns whether the process runs, and Firecracker owns what the guest does inside it. Only an active unit is worth asking:
 
-```text
-failed                  -> failed
-inactive, deactivating  -> stopped
-active -> Firecracker instance state
-             Not started -> created
-             Running     -> running
-             Paused      -> paused
+```mermaid
+flowchart LR
+    Unit{systemd unit state}
+    Unit -->|failed| Failed[failed]
+    Unit -->|inactive or deactivating| Stopped[stopped]
+    Unit -->|active| Instance{Firecracker state}
+    Instance -->|Not started| Created[created]
+    Instance -->|Running| Running[running]
+    Instance -->|Paused| Paused[paused]
 ```
 
 Anything else reads as `unknown`, and an API fault returns `unknown` with an error rather than a guess.

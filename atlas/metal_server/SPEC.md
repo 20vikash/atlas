@@ -23,19 +23,19 @@ Provisioning is a sequence of phases, not one transaction. Each phase records pr
 | `IPAddressService` | Tenant reservation, shared-pool claims, and release. |
 | `MetalServerUsage` (DocType) | One capacity sample reported by Metal. |
 
-The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/README.md) for host commands. The DocType belongs to the Atlas module.
+The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/) for host commands. The DocType belongs to the Atlas module.
 
 ## Provisioning
 
-```text
-insert pending host       one durable placement intent
-  -> create provider host in a job
-  -> wait for ready
-  -> attach addresses
-  -> configure WireGuard
-  -> issue and install the Metal TLS certificate
-  -> install Metal
-  -> mark provisioning complete
+```mermaid
+flowchart LR
+    Pending[Insert Pending host] --> Provider[Create provider host]
+    Provider --> Ready[Wait for provider readiness]
+    Ready --> Address[Attach addresses]
+    Address --> WireGuard[Configure WireGuard]
+    WireGuard --> TLS[Issue and install Metal certificate]
+    TLS --> Install[Install Metal]
+    Install --> Complete[Mark provisioning complete]
 ```
 
 Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored identity key, so a lost response cannot create a second host. A failed job sets the record to Failed.

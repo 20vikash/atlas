@@ -24,15 +24,18 @@ Each set arrives complete and replaces the previous one. The controller sends no
 
 ## Synchronize
 
-```text
-POST /v1/sync
-   |
-   +-> ApplyPrivilegedAddresses   privileged VM address set
-   +-> Apply                      WireGuard peers
-   +-> SetImagePolicies           image policies
-   +-> Wake                       start a reconcile pass now
-   +-> List                       one read, used for capacity and states
-   +-> SyncResult                 returned in the same response
+```mermaid
+flowchart LR
+    Sync[POST /v1/sync] --> Addresses[Apply privileged VM addresses]
+    Sync --> Peers[Apply WireGuard peers]
+    Sync --> Policies[Set image policies]
+    Sync --> Wake[Wake reconcilers]
+    Sync --> List[List VM state once]
+    Addresses --> Result[Build SyncResult]
+    Peers --> Result
+    Policies --> Result
+    List --> Result
+    Result --> Response[Return capacity and states]
 ```
 
 The steps run in order and stop at the first error, so a failed step leaves the later sets untouched and the controller retries the whole sync. `Wake` follows the writes, so the reconciler acts on the new policies at once instead of at its next tick.

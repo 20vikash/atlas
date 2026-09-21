@@ -29,16 +29,32 @@ The `vm` package defines the contracts. The other packages implement or consume 
 
 ## Dependency graph
 
-```text
-cmd/metald
-   ├─ api -> vm.Manager, host.Service, console.SerialBroker, vm/migration
-   ├─ host -> vm, network, storage, vm/migration
-   ├─ reconciler -> vm.Manager, storage stores
-   ├─ firecracker -> vm, storage, platform, console, firecracker/api
-   ├─ storage -> vm, platform
-   ├─ network -> vm, platform, network/traffic
-   ├─ vm/migration -> vm, storage, platform
-   └─ network/traffic -> cilium/ebpf
+```mermaid
+flowchart LR
+    Main[cmd/metald]
+    API[api]
+    Host[host]
+    Reconciler[reconciler]
+    Firecracker[firecracker]
+    Storage[storage]
+    Network[network]
+    Migration[VM migration]
+    Traffic[network traffic]
+    VM[vm]
+    Platform[platform]
+    Console[console]
+    FCAPI[Firecracker API]
+    EBPF[cilium eBPF]
+
+    Main --> API & Host & Reconciler & Firecracker & Storage & Network & Migration & Traffic
+    API --> VM & Host & Console & Migration
+    Host --> VM & Network & Storage & Migration
+    Reconciler --> VM & Storage & Migration
+    Firecracker --> VM & Storage & Platform & Console & FCAPI
+    Storage --> VM & Platform
+    Network --> VM & Platform & Traffic
+    Migration --> VM & Storage & Platform
+    Traffic --> EBPF
 ```
 
 The `vm/migration` package imports `vm`. The `vm` package does not import `vm/migration`. It reads migration lock state through an injected guard.

@@ -4,10 +4,12 @@
 
 Cargo Server manages the single regional Cargo virtual machine. It installs Cargo and publishes `cargo.<wildcard-domain>` and `cargo-pilot.<wildcard-domain>` through the regional Proxy.
 
-```text
-Atlas SSH ----------------------> Cargo public IPv4
-cargo.<wildcard-domain> -> Proxy -> Cargo mesh IPv6
-cargo-pilot.<wildcard-domain> -> Proxy -> Cargo mesh IPv6
+```mermaid
+flowchart LR
+    Atlas -->|SSH setup| Public[Cargo public IPv4]
+    Cargo[cargo wildcard name] --> Proxy[Regional proxy]
+    Pilot[cargo-pilot wildcard name] --> Proxy
+    Proxy -->|Private HTTP| Mesh[Cargo mesh IPv6]
 ```
 
 ## Provision

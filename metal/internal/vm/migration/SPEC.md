@@ -17,17 +17,14 @@ One VM ID locates all VM state. A source record blocks VM changes and reconcilia
 
 ## Preparing
 
-```text
-Atlas PUT -> destination record (preparing), reserve the VM ID
-                 |
-                 v
-           lock the source and read its VM definition over the mesh
-                 |
-                 v
-           check capacity -> allocate local IDs -> reconstruct records
-                 |
-                 v
-           state copying
+```mermaid
+flowchart TD
+    Put[Atlas creates destination migration] --> Reserve[Reserve VM ID]
+    Reserve --> Source[Lock source and read VM definition]
+    Source --> Capacity[Check destination capacity]
+    Capacity --> Allocate[Allocate local IDs]
+    Allocate --> Records[Reconstruct VM records]
+    Records --> Copying[Set state to copying]
 ```
 
 The destination reserves compute only after the source supplies the VM definition. One host allocation lock covers the capacity check and the saved reservation. Host capacity subtracts that reservation while the destination stays out of the VM list. A destination that stays in `preparing` for 10 minutes expires. The destination then aborts the source and releases the reservation.
@@ -38,23 +35,15 @@ During copying, `Manager` runs one disk transfer per VM and waits for transfers 
 
 An HTTP request, the transfer worker, and the reconciler all change the destination record. Every read-modify-write of that record holds the migration lock of its VM. A caller that already holds the lock writes through `writeDestination`. Every other caller uses `mutateDestination`, which takes the lock, reads the stored record again, applies the change, and writes it. The worker therefore cannot write a copy it read before a long operation and drop an abort that arrived in the meantime. The lock is held only for the read and the write, so an abort stays available while data moves. The lock is not reentrant, so a locked caller must not call `mutateDestination`. An interval completion and a transfer failure detach the context, because the snapshot or the reason is already real when the worker stops.
 
-```text
-next snapshot from source  (acknowledge the last completed sequence)
-        |
-        v
-start the source snapshot listener
-        |
-        v
-destination connects -> zfs recv -s -> resume the same sequence after an interrupt
-        |
-        v
-compare received GUID with the source GUID
-        |
-        v
-mark the interval complete with the estimated stream size
-        |
-        v
-copy or cut over
+```mermaid
+flowchart TD
+    Next[Request next snapshot and acknowledge last sequence] --> Listen[Start source snapshot listener]
+    Listen --> Connect[Destination connects]
+    Connect --> Receive[Receive resumable ZFS stream]
+    Receive --> Verify{Received GUID matches source?}
+    Verify -->|No| Fail[Fail and keep data for inspection]
+    Verify -->|Yes| Complete[Save completed interval and size]
+    Complete --> Decision{Copy again or cut over?}
 ```
 
 The source keeps the acknowledged snapshot as the next incremental base and removes the previous one. The destination saves each interval before transfer, then saves its finish time and result after transfer. A record write error ends the transfer pass and reports the storage error. A stopped source needs one full interval. A network break or restart resumes the same sequence. A GUID mismatch, invalid sequence, or wrong destination dataset fails the migration and keeps the data for inspection.
@@ -63,28 +52,31 @@ The source keeps the acknowledged snapshot as the next incremental base and remo
 
 A running source always sends the first full interval while it runs. For each later delta the destination compares its size with `migration.final_delta_mib`.
 
-```text
-delta larger than final_delta_mib -> copy it, limit the source disk (64, 32, 16, 8 MiB/s)
-delta at or below final_delta_mib -> stop the source
-16 intervals or 30 minutes        -> stop the source
-non-running source                -> stop the source before the first transfer
+```mermaid
+flowchart TD
+    Source{Source state}
+    Source -->|Not running| Stop[Stop before first transfer]
+    Source -->|Running| Delta{Delta size}
+    Delta -->|At or below final limit| Stop
+    Delta -->|Above final limit| Copy[Copy delta and lower disk limit]
+    Copy --> Bound{16 intervals or 30 minutes?}
+    Bound -->|Yes| Stop
+    Bound -->|No| Delta
 ```
 
 The destination sends the temporary limit on the stream header. The source applies the lower of that limit and the configured disk limit, and never raises an existing limit.
 
 The stop request acknowledges the last completed interval. The source creates the final snapshot after the highest acknowledged sequence.
 
-```text
-stopping: /stop -> source stops, removes its network, takes the final snapshot
-        |
-        v
-receive and verify the final snapshot
-        |
-        v
-starting: create the destination network -> apply the original desired state (cold start)
-        |
-        v
-verify the destination state -> status ready
+```mermaid
+flowchart TD
+    Stop[Stop source] --> Remove[Remove source network]
+    Remove --> Snapshot[Create final snapshot]
+    Snapshot --> Receive[Receive and verify final snapshot]
+    Receive --> Network[Create destination network]
+    Network --> Start[Cold-start original desired state]
+    Start --> Verify[Verify destination state]
+    Verify --> Ready[Set status to ready]
 ```
 
 The source is stopped before the final snapshot. A running VM stops. A paused VM resumes, then stops. A created VM stops without guest work. A stopped VM with saved state restores, then stops. Saved memory is not transferred. The destination cold-starts the disk and keeps the record at `ready` until Atlas commits.
@@ -95,16 +87,26 @@ The source stop, network removal, final snapshot, destination network, and desti
 
 One cancellable background worker per VM drives finish and abort as well as the transfer. Atlas records a request on the destination, which wakes the worker.
 
-```text
-finish (Atlas, destination ready) -> destroy source -> remove received snapshots -> completed
-abort  (Atlas, nonterminal)  -> cancel transfer -> rollback -> aborted
+```mermaid
+flowchart LR
+    Finish[Finish request when ready] --> Destroy[Destroy source]
+    Destroy --> Remove[Remove received snapshots]
+    Remove --> Completed[completed]
+    Abort[Abort request] --> Cancel[Cancel transfer]
+    Cancel --> Rollback[Roll back destination and source]
+    Rollback --> Aborted[aborted]
 ```
 
 A finish and an abort are mutually exclusive. The first request wins. A finish is valid only after the destination reports ready.
 
-```text
-abort, source not stopped -> clean destination -> unlock the still-available source
-abort, source stopped     -> clean destination -> restore the source -> unlock the source
+```mermaid
+flowchart TD
+    Abort[Abort] --> State{Did source stop?}
+    State -->|No| Clean[Clean destination]
+    Clean --> Unlock[Unlock source]
+    State -->|Yes| CleanStopped[Clean destination]
+    CleanStopped --> Restore[Restore source with cold start]
+    Restore --> Unlock
 ```
 
 Rollback removes the destination runtime, network, dataset, and staging records. It aborts a partial receive before it removes the dataset. It creates the destination network only after the source network is gone. A stopped source is restored with a cold start and then unlocked. A rollback failure keeps both records, locks, and the source disk in a rollback state.
@@ -127,12 +129,13 @@ Control calls use HTTPS and mutual TLS on port 9001. They prepare the source, se
 
 Snapshot bytes use port 9002 and do not pass through an HTTP body. The source binds a `crypto/tls` listener, accepts the one destination connection, closes the listener, and relays the `zfs send` pipe into the connection. The relay is one direction only: the destination never writes on that connection. The control request returns after the listener is bound, so a bind failure is reported to the destination instead of a connection that is refused later.
 
-```text
-source: zfs send -> pipe -> tls.Listen  (one accept, then closed)
-                                  |
-                                  | TLS 1.3 and node certificates
-                                  v
-destination: zfs recv <- pipe <- tls.Dial
+```mermaid
+flowchart LR
+    ZFSSend[Source zfs send] --> PipeOut[Pipe]
+    PipeOut --> Listener[One-shot TLS listener]
+    Listener -->|TLS 1.3 and node certificates| Dial[Destination TLS connection]
+    Dial --> PipeIn[Pipe]
+    PipeIn --> ZFSReceive[Destination zfs receive]
 ```
 
 The transport must stay one direction. A two-way relay on this connection deadlocks, because the destination sends nothing and any read of the connection waits forever while the send pipe fills.

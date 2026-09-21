@@ -2,34 +2,39 @@
 
 For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
 
-This document explains packet paths, BPF state, and recovery behavior. Read the [operations guide](operations.md) for setup.
+This document explains packet paths, BPF state, and recovery behavior. Read the [operations guide](operations.md) for setup and host commands.
 
-## Contents
+## Read this page in order
 
-- [Atlas WG Mesh design](#atlas-wg-mesh-design)
-  - [Contents](#contents)
-  - [Addressing and state](#addressing-and-state)
-  - [Trust model](#trust-model)
-  - [BPF interface](#bpf-interface)
-  - [System view](#system-view)
-  - [Scenario 1: local VM delivery](#scenario-1-local-vm-delivery)
-  - [Scenario 2: known remote VM](#scenario-2-known-remote-vm)
-  - [Scenario 3: first packet to a remote VM](#scenario-3-first-packet-to-a-remote-vm)
-  - [Scenario 4: receive an Atlas WG Mesh tunnel](#scenario-4-receive-an-atlas-wg-mesh-tunnel)
-  - [Scenario 5: planned VM move](#scenario-5-planned-vm-move)
-  - [Scenario 6: missed move announcement](#scenario-6-missed-move-announcement)
-  - [Scenario 7: old host failure](#scenario-7-old-host-failure)
-  - [Scenario 8: falsely declared-dead host returns](#scenario-8-falsely-declared-dead-host-returns)
-  - [Code map](#code-map)
+1. Read [addressing and state](#addressing-and-state) to learn which addresses the mesh owns.
+2. Read [trust model](#trust-model) before you change discovery or tenant filtering.
+3. Read [system view](#system-view) to see the packet hooks.
+4. Use the scenarios to trace one packet or one VM move.
+5. Use [debug in production](debug-in-production.md) when you need live map and event data.
+
+The mesh uses eBPF for the fast packet decision, WireGuard for host-to-host encryption, and discovery for VM location. The design avoids a controller lookup for every packet.
+
+```mermaid
+flowchart TD
+    Packet[Packet from a VM] --> Local{Destination is local?}
+    Local -->|Yes| Linux[Linux routes to local VM]
+    Local -->|No| Known{Remote location is known?}
+    Known -->|Yes| Tunnel[Add tunnel header and send through WireGuard]
+    Known -->|No| Discover[Send WHO_HAS and replace this packet]
+    Discover --> Learn[Receive FOUND and cache location]
+    Learn --> Tunnel
+```
 
 ## Addressing and state
 
 Each host has a WireGuard address in `fdab::/16`. Each VM has an address in `fdaa::/16`.
 
-```text
-Bytes:  0  1 |  2  3 |  4  5  6  7 |  8  9 10 11 12 13 14 15
-Field: fd aa | region |    tenant   |          VM ID
-```
+| Bytes | Field | Purpose |
+| --- | --- | --- |
+| `0-1` | `fdaa` | Atlas WG Mesh VM prefix |
+| `2-3` | Region | Region identifier |
+| `4-7` | Tenant | Tenant identifier |
+| `8-15` | VM ID | Virtual machine identifier |
 
 The data path uses the tenant field. Region and VM ID fields are available to provisioning.
 

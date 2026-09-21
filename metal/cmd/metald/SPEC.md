@@ -26,24 +26,22 @@ The default configuration path is `/var/lib/metal/metald.toml`. A missing defaul
 
 ## Startup wiring
 
-```text
-load configuration
-   -> load the node certificate and regional authority
-   -> create required directories
-   -> connect to systemd
-   -> create storage stores
-   -> create the WireGuard manager
-   -> optionally connect Atlas WG Mesh and configure the host
-   -> optionally create the traffic monitor
-   -> create the Firecracker runtime
-   -> validate all VM records and create the VM manager
-   -> create the host service
-   -> create the VM and image reconcilers
-   -> start the traffic listener when monitoring is enabled
-   -> load the Atlas trusted keys
-   -> create the authenticated Atlas API
-   -> create the mutual-TLS coordination API
-   -> listen and serve both APIs
+```mermaid
+flowchart TD
+    Config[Load configuration] --> TLS[Load node certificate and authority]
+    TLS --> Directories[Create required directories]
+    Directories --> Systemd[Connect to systemd]
+    Systemd --> Stores[Create storage stores]
+    Stores --> WireGuard[Create WireGuard manager]
+    WireGuard --> Mesh[Connect and configure WG Mesh]
+    Mesh --> Traffic[Create optional traffic monitor]
+    Traffic --> Runtime[Create Firecracker runtime]
+    Runtime --> VM[Validate records and create VM manager]
+    VM --> Host[Create host service]
+    Host --> Reconcile[Create reconcilers]
+    Reconcile --> Keys[Load Atlas trusted keys]
+    Keys --> APIs[Create Atlas and coordination APIs]
+    APIs --> Serve[Listen and serve]
 ```
 
 The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.

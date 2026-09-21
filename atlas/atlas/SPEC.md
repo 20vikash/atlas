@@ -32,14 +32,13 @@ The Placement Strategy section selects a registered placement strategy and defau
 
 ## Provider boundary
 
-```text
-server / vm code
-      |
-      v
-ServerProvider  (typed create, result, catalog, power, address, and error values)
-      |
-      +-- scaleway/   client, servers, ip_addresses, catalog, partitioning, infrastructure
-      +-- aws/        client, servers, ip_addresses, catalog, configuration, infrastructure
+```mermaid
+flowchart LR
+    Domain[Server and VM domain code] --> Contract[ServerProvider contract]
+    Contract --> Scaleway[Scaleway implementation]
+    Contract --> AWS[AWS implementation]
+    Scaleway --> SParts[Client, servers, addresses,<br/>catalog, partitions, infrastructure]
+    AWS --> AParts[Client, servers, addresses,<br/>catalog, configuration, infrastructure]
 ```
 
 A provider component never saves a Frappe document. It returns typed values, and the caller decides what to record. That keeps provider code testable without a database and keeps persistence in one place.
@@ -70,7 +69,7 @@ An `SSH Task` records one shell command or script run for a `Metal Server` or a 
 
 An `SSH Task` stores no credentials. It uses the identity of the Atlas host. The caller must make the target reachable.
 
-Do not put a key or password in `script` or `environment`. These fields are stored as plain text. Use `SSHRunner` directly when the command needs secret data. See the [SSH Task README](doctype/ssh_task/README.md) for the creation methods and task states.
+Do not put a key or password in `script` or `environment`. These fields are stored as plain text. Use `SSHRunner` directly when the command needs secret data. See the [SSH Task guide](doctype/ssh_task/) for the creation methods and task states.
 
 ## Host binaries
 

@@ -61,12 +61,14 @@ The host veth is `vh-<user-id>`. The namespace veth is `vg-<user-id>`. The TAP n
 
 Automatic idle shutdown uses this local cycle:
 
-```text
-idle timeout                     IP packet or configuration change
-running -- save state --> stopped -- restore state --> running
-                            |
-                            +-> Firecracker: stopped, MainPID 0
-                            +-> saved state and vms/<id>: kept
+```mermaid
+stateDiagram-v2
+    running --> stopped: idle timeout saves state
+    stopped --> running: IP packet or configuration change
+    note right of stopped
+        Firecracker process is stopped
+        Saved state and VM disk remain
+    end note
 ```
 
 The saved state is under `machines/<id>/saved-state/`. Metal writes it under `saved-state-pending` and publishes it with one atomic rename.

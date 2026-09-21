@@ -48,7 +48,7 @@ Virtual Machine Image is the durable boot artifact for System and Machine images
 
 Atlas holds one public wildcard TLS certificate and one private Metal certificate authority for the region. The private authority issues each trusted Metal node certificate. See [the security model](docs/security.md).
 
-See [the security model](docs/security.md) for the trust boundaries and the accepted risks. See [the documentation index](docs/README.md) for every guide.
+See [the security model](docs/security.md) for the trust boundaries and the accepted risks. See [the Atlas app guide](./) for the documentation path.
 
 ## Validation
 

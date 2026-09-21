@@ -10,14 +10,19 @@ This package owns VM records, state transitions, and reconciliation. Host packag
 
 ## Request flow
 
-```text
-API request -> desired record -> response
-                    |
-                    v
-             reconcile pass -> Runtime, Network, Storage, traffic.Monitor
-                    |
-                    v
-              observed record
+```mermaid
+flowchart LR
+    Request[API request] --> Desired[(Desired record)]
+    Desired --> Response[API response]
+    Desired --> Reconcile[Reconcile pass]
+    Reconcile --> Runtime[Runtime]
+    Reconcile --> Network[Network]
+    Reconcile --> Storage[Storage]
+    Reconcile --> Traffic[Traffic monitor]
+    Runtime --> Observed[(Observed record)]
+    Network --> Observed
+    Storage --> Observed
+    Traffic --> Observed
 ```
 
 The controller polls until observed generations match desired generations. The desired generation rises only for a real desired change. The restart generation rises for each accepted restart.
@@ -41,11 +46,14 @@ The daemon validates every record at startup. It does not repair or remove an in
 
 ## Reconciliation
 
-```text
-desired running   -> start, resume, restore saved state, or stop after idle
-desired paused    -> start or restore when necessary, then pause
-desired stopped   -> hard stop and delete saved state
-desired destroyed -> remove runtime, network, storage, and records
+```mermaid
+flowchart LR
+    Desired{Desired power state}
+    Desired -->|running| Running[Start, resume, or restore]
+    Running --> Idle[Stop after idle when configured]
+    Desired -->|paused| Paused[Start or restore, then pause]
+    Desired -->|stopped| Stopped[Hard stop and delete saved state]
+    Desired -->|destroyed| Destroyed[Remove runtime, network, storage, and records]
 ```
 
 The manager checks traffic only after normal running reconciliation completes. It starts event observation before the final sample. A sample error before state creation keeps the VM running. New traffic or a sample error after state creation restores the VM.

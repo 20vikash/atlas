@@ -18,14 +18,17 @@ That is why this package is thin: it owns request validation, the public respons
 
 ## Request flow
 
-```text
-correlation -> log -> group authentication -> handler
-                                                 |
-                             decode strict JSON -+
-                             validate            |
-                             call a service      |
-                             wake the reconciler |
-                             respond ------------+
+```mermaid
+flowchart LR
+    Request[Request] --> Correlation[Add correlation ID]
+    Correlation --> Log[Request log]
+    Log --> Auth[Authenticate route group]
+    Auth --> Handler[Handler]
+    Handler --> Decode[Decode strict JSON]
+    Decode --> Validate[Validate request]
+    Validate --> Service[Call domain service]
+    Service --> Wake[Wake reconciler when needed]
+    Wake --> Response[Write response]
 ```
 
 Correlation runs first, so every log line and every error carries the same IDs. Each request gets an `X-Request-ID` and an `X-Operation-ID`, returned as response headers and included in logs. A caller-supplied value is kept when it is safe to echo, and replaced when it is not.
