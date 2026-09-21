@@ -163,7 +163,7 @@ class AtlasSettings(Document):
 		"""Return the public regional JSON Web Key Set URL."""
 		from atlas.auth.jwks import JWKS_PATH
 
-		base_url = frappe.conf.atlas_base_url or frappe.utils.get_url()
+		base_url = frappe.conf.atlas_base_url or frappe.utils.get_url(allow_header_override=False)
 		return f"{base_url.rstrip('/')}{JWKS_PATH}"
 
 	@cached_property

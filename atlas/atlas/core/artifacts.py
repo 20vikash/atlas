@@ -88,5 +88,5 @@ def get_download_url(file_name: str) -> str:
 	reach, which the site's own URL is not during local development.
 	"""
 	file_url = frappe.db.get_value("File", file_name, "file_url")
-	base_url = frappe.conf.atlas_base_url or frappe.utils.get_url()
+	base_url = frappe.conf.atlas_base_url or frappe.utils.get_url(allow_header_override=False)
 	return f"{base_url.rstrip('/')}{file_url}"

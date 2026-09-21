@@ -21,14 +21,18 @@ class TestArtifacts(UnitTestCase):
 		self.assertEqual(url, "https://atlas.test/files/metald-linux-amd64")
 
 	def test_download_url_falls_back_to_the_site_url(self) -> None:
+		"""The request Host never names the address a host downloads from."""
 		with (
 			patch.object(artifacts.frappe.db, "get_value", return_value="/files/metald-linux-amd64"),
 			patch.object(artifacts.frappe, "conf", SimpleNamespace(atlas_base_url=None)),
-			patch.object(artifacts.frappe.utils, "get_url", return_value="http://atlas.localhost:8000"),
+			patch.object(
+				artifacts.frappe.utils, "get_url", return_value="http://atlas.localhost:8000"
+			) as get_url,
 		):
 			url = artifacts.get_download_url("metald-file")
 
 		self.assertEqual(url, "http://atlas.localhost:8000/files/metald-linux-amd64")
+		self.assertFalse(get_url.call_args.kwargs["allow_header_override"])
 
 
 class TestPublishedFiles(IntegrationTestCase):
