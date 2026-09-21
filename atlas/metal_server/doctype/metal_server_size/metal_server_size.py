@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import frappe
-from frappe import _
 from frappe.model.document import Document
 
 
@@ -27,18 +25,4 @@ class MetalServerSize(Document):
 		memory_mib: DF.Int
 		monthly_pricing_usd_cents: DF.Int
 		provider_metadata: DF.Code | None
-		provider_type: DF.Literal["Scaleway"]
-		size: DF.Data
 	# end: auto-generated types
-
-	def autoname(self) -> None:
-		"""Name the size from its provider and identifier."""
-		if not self.provider_type or not self.size:
-			frappe.throw(_("Metal Server Size requires provider_type and size"))
-		self.name = f"{self.provider_type}/{self.size}"
-
-	def validate(self) -> None:
-		"""Reject a size without CPU, memory, or storage values."""
-		expected = f"{self.provider_type}/{self.size}"
-		if self.name and self.name != expected:
-			frappe.throw(_("Metal Server Size name {0} does not match {1}").format(self.name, expected))

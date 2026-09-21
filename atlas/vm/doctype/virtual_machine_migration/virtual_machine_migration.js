@@ -1,3 +1,5 @@
+const TERMINAL_STATUSES = ["completed", "failed", "aborted"];
+
 frappe.ui.form.on("Virtual Machine Migration", {
 	refresh(frm) {
 		if (frm.is_new()) {
@@ -7,20 +9,24 @@ frappe.ui.form.on("Virtual Machine Migration", {
 		// Atlas drives this record. A user acts through buttons, not a direct save.
 		frm.disable_save();
 
-		frm.add_custom_button(
-			__("View Virtual Machine"),
-			() => frappe.set_route("Form", "Virtual Machine", frm.doc.virtual_machine),
-			__("Actions")
-		);
-
-		const is_active = ["running", "ready"].includes(frm.doc.status);
-		if (is_active && !frm.doc.abort_requested) {
+		const is_active = !TERMINAL_STATUSES.includes(frm.doc.status);
+		if (is_active) {
+			showMigrationProgress(frm);
+		}
+		if (is_active && frm.doc.status !== "canceling") {
 			frm.add_custom_button(__("Abort Migration"), () => abortMigration(frm), __("Actions"));
 		}
 
+		// Always called, so a finished migration also clears a running interval.
 		scheduleProgressRefresh(frm);
 	},
 });
+
+function showMigrationProgress(frm) {
+	const progress = Math.min(100, Math.max(0, Number(frm.doc.progress_percent) || 0));
+	const status = __(frappe.model.unscrub(frm.doc.status));
+	frm.dashboard.show_progress(__("Migration Progress"), progress, status);
+}
 
 // A running migration reloads on an interval, so the desk shows live progress.
 function scheduleProgressRefresh(frm) {
@@ -28,7 +34,7 @@ function scheduleProgressRefresh(frm) {
 		clearInterval(frm.__migration_poll);
 		frm.__migration_poll = null;
 	}
-	if (!["running", "ready"].includes(frm.doc.status)) {
+	if (TERMINAL_STATUSES.includes(frm.doc.status)) {
 		return;
 	}
 	frm.__migration_poll = setInterval(() => {
@@ -49,8 +55,8 @@ function scheduleProgressRefresh(frm) {
 function abortMigration(frm) {
 	frappe.confirm(
 		__(
-			"Abort this migration? The VM stays on {0} if it has not cut over yet. Abort is not allowed once Atlas commits the VM to the target.",
-			[frm.doc.source_server]
+			"Abort this migration? The VM stays on {0} if it has not cut over yet. Abort is not allowed once Atlas commits the VM to the destination.",
+			[frm.doc.source_metal_server]
 		),
 		() =>
 			frm

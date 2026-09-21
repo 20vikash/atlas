@@ -4,7 +4,7 @@ Use this guide to create one test virtual machine. Use a test Scaleway project a
 
 Keep the Frappe worker active. Provider setup, catalog sync, and Metal Server provisioning run in background jobs.
 
-Use [`atlas-vm`](../../scripts/atlas-vm/README.md) for an automatic installation in a Firecracker VM. It installs Atlas and completes the settings, provider, DNS, catalog, and system image steps. It does not create a Metal Server.
+Use [`atlas-vm`](../../scripts/atlas-vm/) for an automatic installation in a Firecracker VM. It installs Atlas and completes the settings, provider, DNS, catalog, and system image steps. It does not create a Metal Server.
 
 
 ## 1. Install build tools
@@ -70,7 +70,7 @@ Wait for the background jobs to finish. The catalog supplies the provider size a
 
 ## 7. Create a Metal Server
 
-Open **Metal Server** and create a record. Select `Scaleway/EM-A116X-SSD` and an Ubuntu 24.04 Metal Server Image.
+Open **Metal Server** and create a record. Select `EM-A116X-SSD` and an Ubuntu 24.04 Metal Server Image.
 
 Save the record. Wait for its status to become `Running`. Open its linked **SSH Task** records to see each host command and its result.
 

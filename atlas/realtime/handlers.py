@@ -6,12 +6,15 @@ import asyncio
 import base64
 import binascii
 import json
+import ssl
+from pathlib import Path
 
 import frappe
 import redis.asyncio as redis
 import websockets
 from frappe.realtime import Socket, realtime
 
+from atlas.atlas.core.tls.metal import TLS_DIRECTORY
 from atlas.vm.core.console_token import ConsoleConnection, console_token_key, is_valid_console_token
 
 # Active bridges by socket ID.
@@ -19,6 +22,14 @@ _sessions: dict[str, "ConsoleSession"] = {}
 
 _redis_client: redis.Redis | None = None
 MAXIMUM_CONSOLE_INPUT_BYTES = 64 * 1024
+
+
+def _tls_context(site: str) -> ssl.SSLContext:
+	"""Return the client context that authenticates Atlas to Metal."""
+	directory = Path(frappe.local.sites_path, site, *TLS_DIRECTORY)
+	context = ssl.create_default_context(cafile=str(directory / "ca.crt"))
+	context.load_cert_chain(str(directory / "atlas.crt"), str(directory / "atlas.key"))
+	return context
 
 
 def _cache() -> redis.Redis:
@@ -116,9 +127,7 @@ async def atlas_console_open(socket: Socket, token: str) -> None:
 		return
 	try:
 		metal_connection = await websockets.connect(
-			connection.url,
-			additional_headers={"Authorization": connection.authorization},
-			max_size=None,
+			connection.url, max_size=None, ssl=_tls_context(socket.site)
 		)
 	except OSError, websockets.WebSocketException:
 		await socket.emit("atlas_console_error", "Could not reach the virtual machine console.")

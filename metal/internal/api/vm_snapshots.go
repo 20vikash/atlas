@@ -27,9 +27,12 @@ type snapshotUploadPartRequest struct {
 	URL        string `json:"url"`
 }
 
-// snapshotArtifactUploadRequest carries every part of one artifact.
+// snapshotArtifactUploadRequest carries every part of one artifact. The upload
+// ID identifies the multipart upload the parts belong to, so a resumed upload
+// never reuses an ETag from an upload the controller replaced.
 type snapshotArtifactUploadRequest struct {
-	Parts []snapshotUploadPartRequest `json:"parts"`
+	UploadID string                      `json:"upload_id"`
+	Parts    []snapshotUploadPartRequest `json:"parts"`
 }
 
 // snapshotUploadRequest carries the parts of both artifacts.
@@ -44,11 +47,13 @@ type uploadedPartResponse struct {
 	ETag       string `json:"etag"`
 }
 
-// uploadedArtifactResponse describes one finished artifact upload.
+// uploadedArtifactResponse describes one finished artifact upload. SizeBytes is
+// the uncompressed image and StoredSizeBytes is what the object store holds.
 type uploadedArtifactResponse struct {
-	SizeBytes int64                  `json:"size_bytes"`
-	SHA256    string                 `json:"sha256"`
-	Parts     []uploadedPartResponse `json:"parts"`
+	SizeBytes       int64                  `json:"size_bytes"`
+	StoredSizeBytes int64                  `json:"stored_size_bytes"`
+	SHA256          string                 `json:"sha256"`
+	Parts           []uploadedPartResponse `json:"parts"`
 }
 
 // snapshotStatusResponse reports upload progress. Artifact details appear only
@@ -206,8 +211,8 @@ func (s *Server) deleteSnapshot(c echo.Context) error {
 // storageRequest converts the request into the storage form.
 func (request snapshotUploadRequest) storageRequest() storage.SnapshotUploadRequest {
 	return storage.SnapshotUploadRequest{
-		Rootfs: storage.SnapshotArtifactUpload{Parts: storageParts(request.Rootfs.Parts)},
-		Kernel: storage.SnapshotArtifactUpload{Parts: storageParts(request.Kernel.Parts)},
+		Rootfs: storage.SnapshotArtifactUpload{UploadID: request.Rootfs.UploadID, Parts: storageParts(request.Rootfs.Parts)},
+		Kernel: storage.SnapshotArtifactUpload{UploadID: request.Kernel.UploadID, Parts: storageParts(request.Kernel.Parts)},
 	}
 }
 
@@ -226,5 +231,10 @@ func uploadedArtifact(artifact storage.UploadedArtifact) uploadedArtifactRespons
 	for _, part := range artifact.Parts {
 		parts = append(parts, uploadedPartResponse{PartNumber: part.PartNumber, ETag: part.ETag})
 	}
-	return uploadedArtifactResponse{SizeBytes: artifact.SizeBytes, SHA256: artifact.SHA256, Parts: parts}
+	return uploadedArtifactResponse{
+		SizeBytes:       artifact.SizeBytes,
+		StoredSizeBytes: artifact.StoredSizeBytes,
+		SHA256:          artifact.SHA256,
+		Parts:           parts,
+	}
 }

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 import frappe
 from frappe.utils import get_datetime, get_system_timezone
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
-from atlas.atlas.core.tags import read_tags
+from atlas.atlas.core.tags import (
+	MAXIMUM_TAG_KEY_LENGTH,
+	MAXIMUM_TAG_VALUE_LENGTH,
+	MAXIMUM_TAGS,
+	read_tags,
+)
 from atlas.vm.core.models import (
 	MAXIMUM_CPU_MILLICORES,
 	MAXIMUM_FIREWALL_PREFIXES,
@@ -28,6 +33,13 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 EgressMode = Literal["uplink", "mesh", "none"]
+TagMap = Annotated[
+	dict[
+		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_KEY_LENGTH)],
+		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_VALUE_LENGTH)],
+	],
+	Field(max_length=MAXIMUM_TAGS),
+]
 FirewallProtocol = Literal["any", "tcp", "udp", "icmp"]
 AUTO_IP_ADDRESS = "auto"
 
@@ -39,18 +51,39 @@ class ApiErrorField(BaseModel):
 	message: str
 
 
-class CapacityPendingError(BaseModel):
-	"""The error returned while Atlas starts host capacity."""
+class OutOfCapacityError(BaseModel):
+	"""No host can accept the VM. The fleet needs more capacity."""
 
-	code: Literal["capacity_pending"]
+	code: Literal["out_of_capacity"]
 	message: str
 	fields: list[ApiErrorField]
 
 
-class CapacityPendingResponse(BaseModel):
-	"""The JSON body of a pending capacity response."""
+class PlacementBusyError(BaseModel):
+	"""Every candidate host was held by another placement.
 
-	error: CapacityPendingError
+	The fleet has room. Retry at once, guided by the `Retry-After` header.
+	"""
+
+	code: Literal["placement_busy"]
+	message: str
+	fields: list[ApiErrorField]
+
+
+CapacityError = Annotated[
+	OutOfCapacityError | PlacementBusyError,
+	Field(discriminator="code"),
+]
+
+
+class CapacityUnavailableResponse(BaseModel):
+	"""The JSON body of a 503 from virtual machine creation.
+
+	`error.code` separates a fleet that is full from one that is only busy, so a
+	caller can retry a busy placement at once and escalate a full one.
+	"""
+
+	error: CapacityError
 
 
 def to_unix_timestamp(value: str | datetime) -> int:
@@ -196,6 +229,7 @@ class ImageResponse(BaseModel):
 					"enabled": True,
 					"cache_image": False,
 					"memory_snapshot": False,
+					"is_termination_protected": False,
 					"rootfs_size_mib": 20480,
 					"kernel_size_mib": 8,
 					"transfer_progress": 100,
@@ -216,6 +250,7 @@ class ImageResponse(BaseModel):
 	enabled: bool
 	cache_image: bool
 	memory_snapshot: bool
+	is_termination_protected: bool
 	rootfs_size_mib: int
 	kernel_size_mib: int
 	transfer_progress: int
@@ -236,6 +271,7 @@ class ImageResponse(BaseModel):
 			enabled=bool(image.enabled),
 			cache_image=bool(image.cache_image),
 			memory_snapshot=bool(image.memory_snapshot),
+			is_termination_protected=bool(image.is_termination_protected),
 			rootfs_size_mib=image.image_size_mib,
 			kernel_size_mib=image.kernel_size_mib,
 			transfer_progress=image.transfer_progress,
@@ -356,6 +392,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	ip_address_id: str | None = None
 	egress: EgressMode = "uplink"
 	is_privileged: bool = False
+	is_termination_protected: bool = False
 	sleep_after_idle_seconds: int = Field(default=0, ge=0, le=9_223_372_036)
 	disk_throughput_mibps: int = Field(default=0, ge=0)
 	disk_iops: int = Field(default=0, ge=0)
@@ -379,6 +416,7 @@ class CreateVirtualMachinePayload(StrictModel):
 			metadata=self.metadata,
 			egress=self.egress,
 			is_privileged=self.is_privileged,
+			is_termination_protected=self.is_termination_protected,
 			sleep_after_idle_seconds=self.sleep_after_idle_seconds,
 			disk_throughput_mibps=self.disk_throughput_mibps,
 			disk_iops=self.disk_iops,
@@ -446,6 +484,14 @@ class IPAddressAssignmentPayload(StrictModel):
 	)
 
 
+class MemorySnapshotConfigurationPayload(StrictModel):
+	"""The virtual machine shape that a warm artifact serves."""
+
+	virtual_cpu_count: int | None = Field(default=None, ge=1)
+	memory_mib: int | None = Field(default=None, ge=1)
+	disk_mib: int | None = Field(default=None, ge=1)
+
+
 class SnapshotPayload(StrictModel):
 	"""Values that create one image from a virtual machine."""
 
@@ -453,7 +499,17 @@ class SnapshotPayload(StrictModel):
 	image_type: Literal["machine", "system"] = "machine"
 	cache_image: bool = False
 	memory_snapshot: bool = False
-	tags: dict[str, str] = Field(default_factory=dict)
+	memory_snapshot_configuration: MemorySnapshotConfigurationPayload = Field(
+		default_factory=MemorySnapshotConfigurationPayload
+	)
+	is_termination_protected: bool = False
+	tags: TagMap = Field(default_factory=dict)
+
+
+class TerminationProtectionPayload(StrictModel):
+	"""The termination protection state to store."""
+
+	enabled: bool
 
 
 class ConsoleTokenPayload(StrictModel):
@@ -486,6 +542,7 @@ class VirtualMachineResponse(BaseModel):
 					"memory_mib": 2048,
 					"disk_mib": 20480,
 					"sleep_after_idle_seconds": 0,
+					"is_termination_protected": False,
 					"tags": {"env": "prod"},
 					"created_at": 1788834165,
 				}
@@ -501,6 +558,7 @@ class VirtualMachineResponse(BaseModel):
 	memory_mib: int
 	disk_mib: int
 	sleep_after_idle_seconds: int
+	is_termination_protected: bool
 	tags: dict[str, str]
 	created_at: int
 
@@ -518,6 +576,7 @@ class VirtualMachineResponse(BaseModel):
 			memory_mib=virtual_machine.memory_mib,
 			disk_mib=virtual_machine.disk_mib,
 			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
+			is_termination_protected=bool(virtual_machine.is_termination_protected),
 			tags=read_tags(virtual_machine) if tags is None else tags,
 			created_at=to_unix_timestamp(virtual_machine.creation),
 		)

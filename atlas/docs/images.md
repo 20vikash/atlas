@@ -35,10 +35,13 @@ The order keeps one downloadable copy at each step. An interrupted job leaves an
 
 The Create Machine Image action asks Metal to stage a disk and kernel. Metal returns a UUIDv7 snapshot ID. Atlas uses this ID as the image record name.
 
-```text
-Metal snapshot staging -> signed multipart parts -> object storage
-                       -> validate hashes and sizes -> Available image
-                       -> delete Metal staging
+```mermaid
+flowchart LR
+    Stage[Metal snapshot staging] --> Parts[Signed multipart upload]
+    Parts --> Object[(Object storage)]
+    Object --> Validate[Validate hashes and sizes]
+    Validate --> Available[Set image to Available]
+    Available --> Delete[Delete Metal staging]
 ```
 
 Atlas saves both multipart upload IDs before it asks Metal to start. A failed start or finalization marks the image Failed and keeps the source Metal Server, snapshot ID, object keys, and upload IDs.

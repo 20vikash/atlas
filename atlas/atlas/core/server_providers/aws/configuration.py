@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
+ROOT_VOLUME_SIZE_GIB = 64
+STORAGE_VOLUME_SIZE_GIB = 500
+STORAGE_VOLUME_DEVICE_NAME = "/dev/sdb"
+
 
 @dataclass(frozen=True, slots=True)
 class AwsConfiguration:
@@ -21,7 +25,6 @@ class AwsConfiguration:
 	transit_gateway_id: str | None
 	transit_gateway_attachment_id: str | None
 	multicast_domain_id: str | None
-	storage_pool_device: str
 
 	@classmethod
 	def from_settings(cls, settings: "AtlasSettings") -> "AwsConfiguration":
@@ -37,5 +40,4 @@ class AwsConfiguration:
 			transit_gateway_id=settings.aws_transit_gateway_id,
 			transit_gateway_attachment_id=settings.aws_transit_gateway_attachment_id,
 			multicast_domain_id=settings.aws_multicast_domain_id,
-			storage_pool_device=settings.aws_storage_pool_device,
 		)

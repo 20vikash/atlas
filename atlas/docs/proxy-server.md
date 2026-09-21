@@ -16,16 +16,16 @@ Each node needs one Allocated Metal Server IP Address. Reserve it before you cre
 
 Atlas uses this order for a new node:
 
-```text
-create VM
-  -> create node A record
-  -> wait for SSH
-  -> install proxy package
-  -> send local configuration
-  -> send new membership to active peers
-  -> wait for node readiness
-  -> create health check, regional DNS record, and wildcard CNAME
-  -> mark node Active
+```mermaid
+flowchart LR
+    VM[Create VM] --> DNS[Create node A record]
+    DNS --> SSH[Wait for SSH]
+    SSH --> Install[Install proxy package]
+    Install --> Local[Send local configuration]
+    Local --> Peers[Update active peers]
+    Peers --> Ready[Wait for readiness]
+    Ready --> Regional[Create health check and regional DNS]
+    Regional --> Active[Set node to Active]
 ```
 
 The configuration contains all Active and Provisioning nodes. The joining daemon gets route maps from the peer with the highest generation. Atlas sends no route snapshot during provisioning.

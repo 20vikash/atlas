@@ -2,9 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
+import orjson
 from frappe.tests import UnitTestCase
 
-from atlas.api.models import VirtualMachineDetailResponse, VirtualMachineResponse
+from atlas.api.models import SnapshotPayload, VirtualMachineDetailResponse, VirtualMachineResponse
 from atlas.api.routes.virtual_machines import (
 	attach_virtual_machine_ip_address,
 	create_virtual_machine,
@@ -18,8 +19,20 @@ from atlas.api.routes.virtual_machines import (
 	update_virtual_machine_compute,
 	update_virtual_machine_network,
 )
-from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request, call_route
+from atlas.api.tests.test_support import (
+	OTHER_TENANT_ID,
+	TENANT_ID,
+	api_request,
+	call_route,
+	route_response,
+)
+from atlas.atlas.core.tags import (
+	MAXIMUM_TAG_KEY_LENGTH,
+	MAXIMUM_TAG_VALUE_LENGTH,
+	MAXIMUM_TAGS,
+)
 from atlas.vm.core.metal_models import MetalFirewall, MetalFirewallRule
+from atlas.vm.core.placement import OutOfCapacity
 
 CREATE_BODY = {
 	"image_id": "system-image",
@@ -41,6 +54,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"disk_mib": 20480,
 		"sleep_after_idle_seconds": 0,
 		"is_privileged": 0,
+		"is_termination_protected": 0,
 		"is_draft": 0,
 		"is_terminating": 0,
 		"creation": "2026-09-08T10:00:00+05:30",
@@ -52,6 +66,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"attach_ip_address": Mock(),
 		"detach_ip_address": Mock(),
 		"update_network": Mock(),
+		"set_termination_protection": Mock(),
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
@@ -184,6 +199,24 @@ class TestCreateVirtualMachine(UnitTestCase):
 		self.assertEqual(status, 201)
 		self.assertEqual(body["id"], "vm-00001")
 		self.assertEqual(create.call_args.args[0].tenant_id, TENANT_ID)
+
+	def test_create_reports_out_of_capacity_without_retry_header(self) -> None:
+		with (
+			api_request("POST", "/api/atlas/virtual-machines", tenant_id=TENANT_ID, json=CREATE_BODY),
+			patch(
+				"atlas.api.routes.virtual_machines.get_owned_image",
+				return_value=SimpleNamespace(name="system-image"),
+			),
+			patch(
+				"atlas.api.routes.virtual_machines.create_virtual_machine_request",
+				side_effect=OutOfCapacity("Retry later"),
+			),
+		):
+			response = route_response(create_virtual_machine)
+
+		self.assertEqual(response.status_code, 503)
+		self.assertEqual(orjson.loads(response.get_data())["error"]["code"], "out_of_capacity")
+		self.assertNotIn("Retry-After", response.headers)
 
 	def test_create_needs_a_tenant_header(self) -> None:
 		status, body, _ = self.create(CREATE_BODY, tenant_id=None)
@@ -538,3 +571,26 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		virtual_machine.detach_ip_address.assert_not_called()
+
+
+class TestSnapshotPayload(UnitTestCase):
+	def test_a_tag_map_within_every_limit_is_accepted(self) -> None:
+		tags = {"k" * MAXIMUM_TAG_KEY_LENGTH: "v" * MAXIMUM_TAG_VALUE_LENGTH}
+
+		payload = SnapshotPayload(title="image", tags=tags)
+
+		self.assertEqual(payload.tags, tags)
+
+	def test_a_long_tag_key_is_rejected(self) -> None:
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags={"k" * (MAXIMUM_TAG_KEY_LENGTH + 1): "a"})
+
+	def test_a_long_tag_value_is_rejected(self) -> None:
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags={"os": "v" * (MAXIMUM_TAG_VALUE_LENGTH + 1)})
+
+	def test_too_many_tags_are_rejected(self) -> None:
+		tags = {f"key-{index}": "a" for index in range(MAXIMUM_TAGS + 1)}
+
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags=tags)

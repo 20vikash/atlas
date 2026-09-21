@@ -79,4 +79,19 @@ ip link set dev "$DEVICE" mtu "$MTU" up
 ip addr replace "$ADDRESS" dev "$DEVICE"
 ip route replace 224.0.0.0/4 dev "$DEVICE"
 
-ip -4 -o addr show dev "$DEVICE" scope global | awk 'NR == 1 {print $4}' | cut -d/ -f1
+if systemctl is-active --quiet systemd-networkd; then
+	networkctl reconfigure "$DEVICE"
+fi
+
+address=""
+for _ in $(seq 1 15); do
+	address=$(ip -4 -o addr show dev "$DEVICE" scope global | awk 'NR == 1 {print $4}' | cut -d/ -f1)
+	[ -z "$address" ] || break
+	sleep 1
+done
+if [ -z "$address" ]; then
+	echo "$DEVICE has no global IPv4 address after configuration" >&2
+	exit 1
+fi
+
+echo "$address"

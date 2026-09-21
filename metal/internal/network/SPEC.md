@@ -31,15 +31,14 @@ This package makes one virtual machine network agree with its desired state, and
 
 For one virtual machine network, `Ensure` is the only entry point. It reads the host and makes the host match. It does not store applied network state.
 
-```text
-Ensure
-  |
-  +- ensureNamespace      create the namespace when absent
-  +- ensureNamespaceBase  loopback, TAP, gateway address
-  +- convergeFirewall     IPv4 and IPv6 filter tables
-  +- removeUnwanted       what this request no longer asks for
-  +- addWanted            veth -> internet path -> public IPv4 -> mesh
-  +- traffic control      policers on the namespace end of the veth
+```mermaid
+flowchart TD
+    Ensure[Ensure network] --> Namespace[Create namespace when absent]
+    Namespace --> Base[Ensure loopback, TAP, and gateway]
+    Base --> Firewall[Converge IPv4 and IPv6 firewall]
+    Firewall --> Remove[Remove resources no longer wanted]
+    Remove --> Add[Add veth, internet, public IPv4, and mesh]
+    Add --> Traffic[Apply traffic control]
 ```
 
 Removal comes before addition, so a change of egress mode never leaves both shapes in place at once. Within `addWanted` the order is load bearing: the veth carries everything above it, and the mesh registration announces the VM, so it is last and the first packet it attracts finds a complete path.
@@ -74,6 +73,12 @@ Every rule carries the comment `metal-public-ipv4-<vm-id>`. Cleanup finds rules 
 
 `iptables` fails on a duplicate add and on a delete of an absent rule, so each change tests with `-C` first. Exit code 1 means absent; any other failure is an error, so a broken check never reads as absent.
 
+## Maximum segment size
+
+The namespace clamps TCP MSS in the `mangle` table. The rule matches the outgoing veth, so it covers a SYN and a SYN-ACK to the guest.
+
+The guest image sets `eth0` to the veth MTU. The clamp protects TCP from older or custom images that use 1500. UDP still depends on ICMP `fragmentation needed`.
+
 ## Traffic control
 
 Policers go on the namespace end of the veth. The host end belongs to Atlas WG Mesh and its terminating direct-action program, so each component owns one end and neither can displace the other.
@@ -90,10 +95,11 @@ When traffic monitoring is enabled, the [traffic SPEC](traffic/SPEC.md) owns tra
 
 A stopped guest cannot answer ARP or neighbour discovery. Metal pins both guest addresses to the fixed guest MAC:
 
-```text
-fixed guest IPv4 ---+
-                    +-> guest MAC -> tap0
-per-VM mesh IPv6 ---+
+```mermaid
+flowchart LR
+    IPv4[Fixed guest IPv4] --> MAC[Deterministic guest MAC]
+    Mesh[Per-VM mesh IPv6] --> TAP[tap0 and namespace routes]
+    MAC --> TAP
 ```
 
 `ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver an IP packet while Firecracker is stopped.
@@ -105,6 +111,8 @@ When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interf
 `EnsureHost` configures an unconfigured host and refuses a host that discovers on another interface, because the uplink hook consumes the discovery traffic of every VLAN beneath it.
 
 `ApplyPrivilegedAddresses` and `WireGuardManager.Apply` each replace a complete set. `Apply` drops this host from the peer set it receives and records what it applied, so it never peers with itself and never disturbs peers added by other tools.
+
+Each peer supplies `mesh_address`, which becomes its `AllowedIPs` entry. `Apply` rejects a set with a missing, invalid, or repeated mesh address.
 
 ## Related
 

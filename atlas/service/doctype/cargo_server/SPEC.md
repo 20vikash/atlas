@@ -8,11 +8,15 @@ Cargo Server is a Single DocType that owns the regional Cargo service and its vi
 
 ## Lifecycle
 
-```text
-Not Provisioned -> Pending -> Provisioning -> Active
-                       |            |
-                       +----------> Failed
-attached VM -> terminate VM -> Archived
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: provision requested
+    Pending --> Provisioning: VM ready
+    Pending --> Failed: VM or setup error
+    Provisioning --> Active: readiness check passes
+    Provisioning --> Failed: installation or route error
+    Active --> Archived: archive removes routes and VM
+    Failed --> Archived: archive removes attached VM
 ```
 
 Provision is available only in Not Provisioned or Archived status when no virtual machine is attached. A Failed service must be archived before another provision request.

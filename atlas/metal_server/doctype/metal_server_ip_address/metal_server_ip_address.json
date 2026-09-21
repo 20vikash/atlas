@@ -9,6 +9,7 @@
   "status",
   "address",
   "provider_resource_id",
+  "host_address",
   "column_break_uoyq",
   "tenant_id",
   "reserved",
@@ -50,6 +51,14 @@
    "label": "Provider Resource ID",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "description": "The address that receives this traffic on the host.",
+   "fieldname": "host_address",
+   "fieldtype": "Data",
+   "label": "Host Address",
+   "read_only": 1,
+   "show_description_on_click": 1
   },
   {
    "fieldname": "column_break_uoyq",

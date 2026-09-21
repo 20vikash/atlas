@@ -20,6 +20,7 @@ def build_image(**overrides) -> SimpleNamespace:
 		"kernel_multipart_upload_id": None,
 		"source_server": "node-1",
 		"save": Mock(),
+		"ensure_not_termination_protected": Mock(),
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
@@ -31,6 +32,17 @@ def live_virtual_machine(is_live: bool):
 
 
 class TestMachineImageDeletionRequest(UnitTestCase):
+	def test_a_protected_image_keeps_its_status(self) -> None:
+		service = VirtualMachineImageDeletionService()
+		guard = Mock(side_effect=frappe.ValidationError("protected"))
+		image = build_image(ensure_not_termination_protected=guard)
+
+		with self.assertRaises(frappe.ValidationError):
+			service.request(image)
+
+		self.assertEqual(image.status, "Available")
+		image.save.assert_not_called()
+
 	def test_a_system_image_is_archived_and_keeps_its_artifacts(self) -> None:
 		service = VirtualMachineImageDeletionService()
 		image = build_image(image_type="system")

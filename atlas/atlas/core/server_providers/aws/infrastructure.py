@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from atlas.atlas.core.server_providers.aws.client import AwsError
@@ -48,15 +47,6 @@ class AwsInfrastructure:
 				f"Private network CIDR {network} must have a prefix length between "
 				f"/{self.provider.private_network_min_prefix} and /{self.provider.private_network_max_prefix}."
 			)
-
-		storage_device = PurePosixPath(configuration.storage_pool_device)
-		if (
-			not storage_device.is_absolute()
-			or not storage_device.is_relative_to("/dev")
-			or len(storage_device.parts) < 3
-			or ".." in storage_device.parts
-		):
-			raise AwsError("AWS storage pool device must be a path below /dev")
 
 	def validate_credentials(self) -> bool:
 		"""Return true when the configured keys can access AWS."""
@@ -188,10 +178,21 @@ class AwsInfrastructure:
 			group_id = response["GroupId"]
 			permissions = []
 
-		missing_rules = [rule for rule in self.ingress_rules if not self.has_ingress_rule(permissions, rule)]
+		desired_rules = self.ingress_rules
+		missing_rules = [rule for rule in desired_rules if not self.has_ingress_rule(permissions, rule)]
 		if missing_rules:
 			self.provider.client.call(
 				"ec2", "authorize_security_group_ingress", GroupId=group_id, IpPermissions=missing_rules
+			)
+
+		obsolete_rules = [
+			permission
+			for permission in permissions
+			if not any(self.has_ingress_rule([permission], rule) for rule in desired_rules)
+		]
+		if obsolete_rules:
+			self.provider.client.call(
+				"ec2", "revoke_security_group_ingress", GroupId=group_id, IpPermissions=obsolete_rules
 			)
 		return group_id
 
@@ -441,35 +442,10 @@ class AwsInfrastructure:
 
 	@property
 	def ingress_rules(self) -> list[dict]:
-		"""Return the inbound rules for Atlas hosts.
-
-		Atlas reaches Secure Shell and the Metal API over the public address of a
-		host, so both ports are open to the internet. The Metal API uses a bearer
-		token. Everything else stays inside the Atlas private network.
-		"""
-		from atlas.vm.core.metal_client import MetalClient
-
+		"""Allow all inbound traffic during development."""
 		return [
-			self.port_rule("tcp", 22, "Atlas Secure Shell"),
-			self.port_rule("tcp", MetalClient.api_port, "Atlas Metal API"),
-			self.port_rule("udp", self.provider.wireguard_port, "WireGuard"),
 			{
 				"IpProtocol": "-1",
-				"IpRanges": [
-					{
-						"CidrIp": self.private_network_cidr,
-						"Description": "Atlas private network",
-					}
-				],
-			},
+				"IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "Atlas development access"}],
+			}
 		]
-
-	@staticmethod
-	def port_rule(protocol: str, port: int, description: str) -> dict:
-		"""Return one inbound rule that opens a single port to the internet."""
-		return {
-			"IpProtocol": protocol,
-			"FromPort": port,
-			"ToPort": port,
-			"IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": description}],
-		}

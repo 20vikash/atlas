@@ -7,7 +7,8 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 MEBIBYTE = 1 << 20
-MULTIPART_PART_SIZE_MIB = 2 * 1024
+# Keep this in sync with Metal's SnapshotPartSizeBytes.
+MULTIPART_PART_SIZE_MIB = 256
 
 
 class MultipartUploadError(Exception):
@@ -39,21 +40,25 @@ class MultipartUploadService:
 			self.image.save()
 
 	def get_upload_request(self) -> dict[str, Any]:
-		"""Return signed upload parts for each image artifact."""
+		"""Return signed parts and multipart upload IDs for each artifact."""
+		rootfs_upload_id = self.require_value(self.image.rootfs_multipart_upload_id, "rootfs upload ID")
+		kernel_upload_id = self.require_value(self.image.kernel_multipart_upload_id, "kernel upload ID")
 		return {
 			"rootfs": {
+				"upload_id": rootfs_upload_id,
 				"parts": self.get_signed_parts(
 					self.require_value(self.image.image_object_key, "rootfs object key"),
-					self.require_value(self.image.rootfs_multipart_upload_id, "rootfs upload ID"),
+					rootfs_upload_id,
 					self.image.image_size_mib,
-				)
+				),
 			},
 			"kernel": {
+				"upload_id": kernel_upload_id,
 				"parts": self.get_signed_parts(
 					self.require_value(self.image.kernel_object_key, "kernel object key"),
-					self.require_value(self.image.kernel_multipart_upload_id, "kernel upload ID"),
+					kernel_upload_id,
 					self.image.kernel_size_mib,
-				)
+				),
 			},
 		}
 
@@ -66,7 +71,7 @@ class MultipartUploadService:
 					object_key, upload_id, part_number, expiry_seconds=86400
 				),
 			}
-			for part_number in range(1, get_multipart_part_count(size_mib) + 1)
+			for part_number in range(1, get_multipart_part_count(size_mib) + 2)
 		]
 
 	def complete_stored_uploads(self) -> None:
@@ -75,15 +80,24 @@ class MultipartUploadService:
 			"rootfs": self.get_stored_parts(
 				self.require_value(self.image.image_object_key, "rootfs object key"),
 				self.require_value(self.image.rootfs_multipart_upload_id, "rootfs upload ID"),
-				self.image.image_size_mib,
+				self.stored_size_mib("rootfs"),
 			),
 			"kernel": self.get_stored_parts(
 				self.require_value(self.image.kernel_object_key, "kernel object key"),
 				self.require_value(self.image.kernel_multipart_upload_id, "kernel upload ID"),
-				self.image.kernel_size_mib,
+				self.stored_size_mib("kernel"),
 			),
 		}
 		self.complete_uploads(parts_by_artifact)
+
+	def stored_size_mib(self, artifact: str) -> int:
+		"""Return the compressed size that the object store holds."""
+		value = (
+			self.image.image_stored_size_mib if artifact == "rootfs" else self.image.kernel_stored_size_mib
+		)
+		if not value or value <= 0:
+			raise MultipartUploadError(f"Machine image has no stored {artifact} size")
+		return value
 
 	def get_stored_parts(self, object_key: str, upload_id: str, size_mib: int) -> list[dict[str, Any]]:
 		"""Return and validate the parts stored for one artifact."""
@@ -91,7 +105,7 @@ class MultipartUploadService:
 		if head and self.has_expected_size(head, size_mib):
 			return []
 		parts = self.object_storage_client.list_multipart_parts(object_key, upload_id)
-		self.validate_parts("stored", size_mib, parts)
+		self.validate_parts("stored", parts)
 		return parts
 
 	def complete_uploads(self, parts_by_artifact: dict[str, list[dict[str, Any]]]) -> None:
@@ -99,13 +113,13 @@ class MultipartUploadService:
 		self.complete_upload(
 			self.require_value(self.image.image_object_key, "rootfs object key"),
 			self.require_value(self.image.rootfs_multipart_upload_id, "rootfs upload ID"),
-			self.image.image_size_mib,
+			self.stored_size_mib("rootfs"),
 			parts_by_artifact["rootfs"],
 		)
 		self.complete_upload(
 			self.require_value(self.image.kernel_object_key, "kernel object key"),
 			self.require_value(self.image.kernel_multipart_upload_id, "kernel upload ID"),
-			self.image.kernel_size_mib,
+			self.stored_size_mib("kernel"),
 			parts_by_artifact["kernel"],
 		)
 
@@ -122,12 +136,13 @@ class MultipartUploadService:
 			raise MultipartUploadError(f"Object storage stored an invalid size for {object_key}")
 
 	@staticmethod
-	def validate_parts(artifact: str, size_mib: int, parts: list[dict[str, Any]]) -> None:
+	def validate_parts(artifact: str, parts: list[dict[str, Any]]) -> None:
 		"""Reject missing, unordered, or empty multipart upload parts."""
-		expected_numbers = list(range(1, get_multipart_part_count(size_mib) + 1))
 		part_numbers = [part.get("part_number", part.get("PartNumber")) for part in parts]
-		if part_numbers != expected_numbers:
+		if part_numbers != list(range(1, len(parts) + 1)):
 			raise MultipartUploadError(f"Metal returned invalid {artifact} part numbers")
+		if not parts:
+			raise MultipartUploadError(f"Metal stored no {artifact} part")
 		if any(not part.get("etag", part.get("ETag")) for part in parts):
 			raise MultipartUploadError(f"Metal returned an empty {artifact} ETag")
 

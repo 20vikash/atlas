@@ -3,14 +3,9 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"fmt"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"io"
 	"log/slog"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -18,13 +13,12 @@ import (
 	"github.com/frappe/atlas/metal/internal/host"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
-// Config contains HTTP server configuration. Only the token hash is stored; the
-// plain token never reaches this package.
+// Config contains HTTP server configuration. The TLS listener authenticates the caller.
 type Config struct {
-	AuthTokenHash string
-	Logger        *slog.Logger
+	Logger *slog.Logger
 }
 
 // SnapshotStore uploads and removes local image staging snapshots.
@@ -64,13 +58,14 @@ type VirtualMachineManager interface {
 
 // MigrationManager owns this host's migration records and reservations.
 type MigrationManager interface {
-	CreateTarget(ctx context.Context, migrationID, virtualMachineID, source string) (vmmigration.TargetMigrationRecord, error)
-	TargetStatus(ctx context.Context, migrationID string) (vmmigration.TargetMigrationRecord, error)
+	CreateDestination(ctx context.Context, migrationID, virtualMachineID, source string) (migration.DestinationProgress, error)
+	DestinationStatus(ctx context.Context, migrationID string) (migration.DestinationProgress, error)
 	RequestFinish(ctx context.Context, migrationID string) error
-	AbortTarget(ctx context.Context, migrationID string) error
-	LockSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceHandshake, error)
-	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (vmmigration.SourceSnapshot, error)
-	StopSource(ctx context.Context, migrationID, virtualMachineID string) (vmmigration.SourceSnapshot, error)
+	AbortDestination(ctx context.Context, migrationID string) error
+	LockSource(ctx context.Context, migrationID, virtualMachineID string) (migration.SourceDescription, error)
+	NextSourceSnapshot(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (migration.SourceSnapshot, error)
+	StartSourceStream(ctx context.Context, migrationID, virtualMachineID string, sequence int, resumeToken string, throughputMiBps int) error
+	StopSource(ctx context.Context, migrationID, virtualMachineID string, receivedSequence int) (migration.SourceSnapshot, error)
 	StartSourceRollback(ctx context.Context, migrationID, virtualMachineID string) error
 	DestroySource(ctx context.Context, migrationID, virtualMachineID string) error
 	UnlockSource(ctx context.Context, migrationID, virtualMachineID string) error
@@ -94,7 +89,6 @@ type Server struct {
 	wakeReconciler        func()
 	hostService           HostService
 	serialBroker          SerialBroker
-	authTokenHash         []byte
 	logger                *slog.Logger
 }
 
@@ -111,7 +105,6 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 		wakeReconciler:        dependencies.WakeReconciler,
 		hostService:           dependencies.HostService,
 		serialBroker:          dependencies.SerialBroker,
-		authTokenHash:         []byte(configuration.AuthTokenHash),
 	}
 	if configuration.Logger == nil {
 		configuration.Logger = slog.Default()
@@ -127,6 +120,25 @@ func New(configuration Config, dependencies Dependencies) (*echo.Echo, error) {
 	router.Use(server.logRequest)
 	server.registerRoutes(router)
 
+	return router, nil
+}
+
+// NewCoordination builds the mutual-TLS router used between Metal nodes.
+// The listener enforces the client certificate before a request reaches it.
+func NewCoordination(logger *slog.Logger, migrationManager MigrationManager) (*echo.Echo, error) {
+	if migrationManager == nil {
+		return nil, fmt.Errorf("migration manager is required")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	server := &Server{migrationManager: migrationManager, logger: logger}
+	router := echo.New()
+	router.HideBanner = true
+	router.HTTPErrorHandler = errorHandler
+	router.Use(correlationMiddleware)
+	router.Use(server.logRequest)
+	server.registerCoordinationRoutes(router)
 	return router, nil
 }
 
@@ -152,45 +164,9 @@ func (s *Server) logRequest(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 // validateServerConfiguration rejects unsafe server configuration.
-func validateServerConfiguration(configuration Config, dependencies Dependencies) error {
-	if len(configuration.AuthTokenHash) != sha256.Size*2 {
-		return fmt.Errorf("API authentication token SHA-256 hash is required")
-	}
-	if _, err := hex.DecodeString(configuration.AuthTokenHash); err != nil || configuration.AuthTokenHash != strings.ToLower(configuration.AuthTokenHash) {
-		return fmt.Errorf("API authentication token SHA-256 hash is invalid")
-	}
+func validateServerConfiguration(_ Config, dependencies Dependencies) error {
 	if dependencies.VirtualMachineManager == nil || dependencies.MigrationManager == nil || dependencies.SnapshotStore == nil || dependencies.WakeReconciler == nil || dependencies.HostService == nil || dependencies.SerialBroker == nil {
 		return fmt.Errorf("API dependencies are required")
 	}
 	return nil
-}
-
-// authenticate accepts a bearer token with the configured SHA-256 digest. The
-// comparison is constant time.
-func (s *Server) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		presented, found := bearerToken(c)
-		if !found {
-			return unauthorized()
-		}
-
-		digest := sha256.Sum256([]byte(presented))
-		if subtle.ConstantTimeCompare(s.authTokenHash, []byte(hex.EncodeToString(digest[:]))) != 1 {
-			return unauthorized()
-		}
-
-		return next(c)
-	}
-}
-
-// bearerToken returns the Authorization token.
-func bearerToken(c echo.Context) (string, bool) {
-	const prefix = "Bearer "
-
-	header := c.Request().Header.Get("Authorization")
-	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
-		return "", false
-	}
-
-	return header[len(prefix):], true
 }

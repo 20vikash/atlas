@@ -1,13 +1,54 @@
 import asyncio
 import base64
+import json
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from atlas.realtime import handlers
+from atlas.vm.core.console_token import CONSOLE_TOKEN_LENGTH
 
 
 class TestConsoleHandlers(IsolatedAsyncioTestCase):
+	async def test_open_presents_the_atlas_client_certificate(self) -> None:
+		socket = SimpleNamespace(sid="socket-1", site="test.local", emit=AsyncMock())
+		connection = {"url": "wss://192.0.2.12:9000/v1/vms/vm-1/console?mode=tty"}
+		cache = SimpleNamespace(getdel=AsyncMock(return_value=json.dumps(connection).encode()))
+		tls_context = Mock()
+		metal_connection = Mock()
+		session = Mock()
+
+		with (
+			patch.object(handlers, "_cache", return_value=cache),
+			patch.object(handlers, "_tls_context", return_value=tls_context) as tls_context_for_site,
+			patch.object(handlers.websockets, "connect", AsyncMock(return_value=metal_connection)) as connect,
+			patch.object(handlers, "ConsoleSession", return_value=session),
+			patch.dict(handlers._sessions, {}, clear=True),
+		):
+			await handlers.atlas_console_open(socket, "a" * CONSOLE_TOKEN_LENGTH)
+			self.assertIs(handlers._sessions[socket.sid], session)
+
+		tls_context_for_site.assert_called_once_with("test.local")
+		connect.assert_awaited_once_with(connection["url"], max_size=None, ssl=tls_context)
+		socket.emit.assert_awaited_once_with("atlas_console_ready")
+
+	def test_tls_context_loads_the_regional_files(self) -> None:
+		context = Mock()
+
+		with (
+			patch.object(handlers.frappe, "local", SimpleNamespace(sites_path="/bench/sites")),
+			patch.object(handlers.ssl, "create_default_context", return_value=context) as create_context,
+		):
+			self.assertIs(handlers._tls_context("test.local"), context)
+
+		create_context.assert_called_once_with(
+			cafile="/bench/sites/test.local/private/atlas-metal-tls/ca.crt"
+		)
+		context.load_cert_chain.assert_called_once_with(
+			"/bench/sites/test.local/private/atlas-metal-tls/atlas.crt",
+			"/bench/sites/test.local/private/atlas-metal-tls/atlas.key",
+		)
+
 	async def test_open_rejects_an_invalid_stored_payload(self) -> None:
 		socket = SimpleNamespace(sid="socket-1", site="test.local", emit=AsyncMock())
 		cache = SimpleNamespace(getdel=AsyncMock(return_value=b"not-json"))
@@ -17,7 +58,7 @@ class TestConsoleHandlers(IsolatedAsyncioTestCase):
 			patch.object(handlers.frappe, "log_error") as log_error,
 			patch.dict(handlers._sessions, {}, clear=True),
 		):
-			await handlers.atlas_console_open(socket, "a" * 48)
+			await handlers.atlas_console_open(socket, "a" * CONSOLE_TOKEN_LENGTH)
 
 		log_error.assert_called_once_with(title="Invalid console token payload for site test.local")
 		socket.emit.assert_awaited_once_with(

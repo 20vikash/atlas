@@ -102,7 +102,7 @@ class CargoBucket:
 
 		from atlas.service.doctype.cargo_server.cargo_server import enqueue_pilot_release_tracker_enable
 
-		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+		enqueue_pilot_release_tracker_enable()
 
 
 def enqueue_bucket_provisioning(enqueue_after_commit: bool = True) -> None:

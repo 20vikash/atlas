@@ -1,27 +1,18 @@
 {
  "actions": [],
+ "autoname": "Prompt",
  "creation": "2026-09-01 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "provider_type",
-  "image",
+  "os",
+  "os_version",
   "column_break_header",
   "enabled",
   "section_break_metadata",
   "provider_metadata"
  ],
  "fields": [
-  {
-   "fieldname": "provider_type",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Provider Type",
-   "options": "Scaleway\nAWS",
-   "reqd": 1,
-   "set_only_once": 1
-  },
   {
    "fieldname": "column_break_header",
    "fieldtype": "Column Break"
@@ -48,12 +39,20 @@
    "read_only": 1
   },
   {
-   "fieldname": "image",
+   "fieldname": "os",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Image",
-   "reqd": 1,
-   "set_only_once": 1
+   "in_standard_filter": 1,
+   "label": "OS",
+   "read_only": 1
+  },
+  {
+   "fieldname": "os_version",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "OS Version",
+   "read_only": 1
   }
  ],
  "links": [],
@@ -61,7 +60,7 @@
  "modified_by": "Administrator",
  "module": "Metal Server",
  "name": "Metal Server Image",
- "naming_rule": "By script",
+ "naming_rule": "Set by user",
  "owner": "Administrator",
  "permissions": [
   {

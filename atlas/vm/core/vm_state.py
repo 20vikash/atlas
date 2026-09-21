@@ -35,6 +35,7 @@ def store_reported_states(server_name: str, reported: object) -> None:
 			state.save(ignore_permissions=True)
 			frappe.db.commit()  # nosemgrep
 		except Exception:
+			frappe.db.rollback()
 			frappe.log_error(f"Virtual Machine State write failed: {name}")
 
 

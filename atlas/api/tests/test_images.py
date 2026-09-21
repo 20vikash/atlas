@@ -53,6 +53,7 @@ class TestImageView(UnitTestCase):
 				enabled=1,
 				cache_image=0,
 				memory_snapshot=0,
+				is_termination_protected=0,
 				image_size_mib=1024,
 				kernel_size_mib=8,
 				transfer_progress=100,

@@ -15,6 +15,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Key",
+   "length": 128,
    "reqd": 1,
    "search_index": 1
   },
@@ -23,6 +24,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Value",
+   "length": 1000,
    "search_index": 1
   }
  ],

@@ -18,7 +18,8 @@ from atlas.vm.core.models import (
 	FirewallConfiguration,
 	VirtualMachineCreateRequest,
 )
-from atlas.vm.core.placement.service import PlacementService
+from atlas.vm.core.placement import PlacementRequirements, PlacementStrategy
+from atlas.vm.core.placement.transaction import use_read_committed
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -57,6 +58,7 @@ class VirtualMachineService:
 		self.virtual_machine = virtual_machine
 
 	@classmethod
+	@use_read_committed
 	def create(cls, value: str | dict[str, Any] | VirtualMachineCreateRequest) -> VirtualMachineCreateResult:
 		"""Create and commit an Atlas request before the Metal request."""
 		if isinstance(value, VirtualMachineCreateRequest):
@@ -70,8 +72,16 @@ class VirtualMachineService:
 
 		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
-		server = PlacementService().select_server(request, image.architecture)
-		virtual_machine = cls.insert_draft(request, image, cast(str, server.name))
+		requirements = PlacementRequirements(
+			request.cpu_millicores,
+			request.memory_mib,
+			request.disk_mib,
+			image.architecture,
+			request.tenant_id,
+			request.sleep_after_idle_seconds > 0,
+		)
+		server_name = PlacementStrategy.find_server(requirements)
+		virtual_machine = cls.insert_draft(request, image, server_name)
 		service = cls(virtual_machine)
 		server_ip_address = (
 			service.assign_ip_address(request.server_ip_address) if request.server_ip_address else None
@@ -81,7 +91,7 @@ class VirtualMachineService:
 
 		virtual_machine_name = cast(str, virtual_machine.name)
 		try:
-			MetalClient(server).put_virtual_machine(virtual_machine_name, metal_request)
+			service.metal_client.put_virtual_machine(virtual_machine_name, metal_request)
 		except MetalClientError as error:
 			if error.uncertain:
 				return {"name": virtual_machine_name, "is_draft": True}
@@ -126,6 +136,7 @@ class VirtualMachineService:
 				"disk_mib": request.disk_mib,
 				"tenant_id": request.tenant_id,
 				"is_privileged": request.is_privileged,
+				"is_termination_protected": request.is_termination_protected,
 				"sleep_after_idle_seconds": request.sleep_after_idle_seconds,
 			}
 		)
@@ -152,7 +163,7 @@ class VirtualMachineService:
 			},
 			"image": image.get_metal_image_request(),
 			"network": {
-				"public_ipv4": server_ip_address.address if server_ip_address else "",
+				"public_ipv4": (server_ip_address.host_address or "") if server_ip_address else "",
 				"wireguard_mesh_ipv6": get_virtual_machine_mesh_address(self.virtual_machine),
 				"private_network_throughput_mibps": request.private_network_throughput_mibps,
 				"public_network_throughput_mibps": request.public_network_throughput_mibps,
@@ -370,9 +381,13 @@ class VirtualMachineService:
 			raise AssertionError from error
 
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
-		"""Set the address intent before the Metal network request."""
-		address = self.assign_ip_address(server_ip_address)
-		return self.update_network({"egress": "uplink", "public_ipv4": address.address})
+		"""Set the address intent before provider reconciliation."""
+		self.assign_ip_address(server_ip_address)
+		return self.update_network({"egress": "uplink"})
+
+	def apply_attached_ip_address(self, host_address: str) -> None:
+		"""Send the attached host address to Metal."""
+		self.update_network({"egress": "uplink", "public_ipv4": host_address})
 
 	def detach_ip_address(self) -> dict[str, Any]:
 		"""Update Metal before the address release intent."""

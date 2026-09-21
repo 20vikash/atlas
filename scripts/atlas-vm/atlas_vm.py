@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import secrets
@@ -213,6 +214,7 @@ def _validate_atlas_configuration(atlas: dict, path: Path) -> None:
 			"private_network_cidr",
 			"private_network_mtu",
 			"central_jwks_url",
+			"vm_scheduling",
 			"scaleway",
 			"aws",
 			"route53",
@@ -237,9 +239,50 @@ def _validate_atlas_configuration(atlas: dict, path: Path) -> None:
 	if atlas["wildcard_domain"].startswith("*.") or "." not in atlas["wildcard_domain"]:
 		raise AtlasVmError(f"{path}: atlas.wildcard_domain must be a domain without '*.'")
 	_validate_network_configuration(atlas, path, provider)
+	_validate_vm_scheduling_configuration(_required_table(atlas, "vm_scheduling", path, "atlas"), path)
 	_validate_provider_configuration(atlas, path, provider)
 	_validate_route53_configuration(_required_table(atlas, "route53", path, "atlas"), path)
 	_validate_letsencrypt_configuration(_required_table(atlas, "letsencrypt", path, "atlas"), path)
+
+
+def _validate_vm_scheduling_configuration(scheduling: dict, path: Path) -> None:
+	_validate_keys(
+		scheduling,
+		{
+			"use_dedicated_sleepy_vm_hosts",
+			"placement_strategy",
+			"sleepy_vm_overcommit_factor",
+			"auto_spawn_metal_server",
+			"default_metal_machine_size",
+			"default_metal_machine_image",
+		},
+		path,
+		"atlas.vm_scheduling",
+	)
+	_required_string(scheduling, "placement_strategy", path, "atlas.vm_scheduling")
+	for key in ("use_dedicated_sleepy_vm_hosts", "auto_spawn_metal_server"):
+		if not isinstance(scheduling.get(key), bool):
+			raise AtlasVmError(f"{path}: atlas.vm_scheduling.{key} must be true or false")
+
+	factor = scheduling.get("sleepy_vm_overcommit_factor")
+	if (
+		not isinstance(factor, (int, float))
+		or isinstance(factor, bool)
+		or not math.isfinite(factor)
+		or factor < 1
+	):
+		raise AtlasVmError(
+			f"{path}: atlas.vm_scheduling.sleepy_vm_overcommit_factor must be a finite number of at least 1"
+		)
+
+	for key in ("default_metal_machine_size", "default_metal_machine_image"):
+		value = scheduling.get(key)
+		if not isinstance(value, str):
+			raise AtlasVmError(f"{path}: atlas.vm_scheduling.{key} must be a string")
+		if scheduling["auto_spawn_metal_server"] and not value.strip():
+			raise AtlasVmError(
+				f"{path}: atlas.vm_scheduling.{key} is required when auto_spawn_metal_server is true"
+			)
 
 
 def _validate_provider_configuration(atlas: dict, path: Path, provider: str) -> None:
@@ -291,30 +334,12 @@ def _validate_scaleway_configuration(scaleway: dict, path: Path) -> None:
 
 
 def _validate_aws_configuration(aws: dict, path: Path) -> None:
-	_validate_keys(
-		aws,
-		{
-			"region",
-			"availability_zone",
-			"access_key_id",
-			"secret_access_key",
-			"storage_pool_device",
-		},
-		path,
-		"atlas.aws",
-	)
-	for key in ("region", "availability_zone", "access_key_id", "secret_access_key", "storage_pool_device"):
+	keys = ("region", "availability_zone", "access_key_id", "secret_access_key")
+	_validate_keys(aws, set(keys), path, "atlas.aws")
+	for key in keys:
 		_required_string(aws, key, path, "atlas.aws")
 	if not re.fullmatch(rf"{re.escape(aws['region'])}[a-z]", aws["availability_zone"]):
 		raise AtlasVmError(f"{path}: atlas.aws.availability_zone is not in atlas.aws.region")
-	storage_device = Path(aws["storage_pool_device"])
-	if (
-		not storage_device.is_absolute()
-		or not storage_device.is_relative_to("/dev")
-		or len(storage_device.parts) < 3
-		or ".." in storage_device.parts
-	):
-		raise AtlasVmError(f"{path}: atlas.aws.storage_pool_device must be a /dev path")
 
 
 def _validate_route53_configuration(route53: dict, path: Path) -> None:

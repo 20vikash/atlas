@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
+
+from frappe.utils import convert_utc_to_system_timezone
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,6 +294,25 @@ def string_field(value: dict[str, Any], field_name: str, *, default: str | None 
 	if not isinstance(field_value, str):
 		raise ValueError(f"{field_name} must be a string")
 	return field_value
+
+
+def timestamp_field(value: dict[str, Any], field_name: str) -> datetime | None:
+	"""Return one RFC 3339 timestamp as a naive site-timezone value.
+
+	Metal sends UTC with nanosecond precision, which a Datetime column rejects.
+	Go marshals an unset time as year 1, which is not a real timestamp.
+	"""
+	field_value = value.get(field_name)
+	if not field_value:
+		return None
+	if not isinstance(field_value, str):
+		raise ValueError(f"{field_name} must be a string")
+
+	parsed = datetime.fromisoformat(field_value)
+	if parsed.year == 1:
+		return None
+
+	return convert_utc_to_system_timezone(parsed).replace(tzinfo=None)
 
 
 def integer_field(value: dict[str, Any], field_name: str) -> int:

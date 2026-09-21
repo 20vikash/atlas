@@ -98,7 +98,7 @@ class ScalewayCatalog:
 		hourly_amount, monthly_amount = self._fill_missing_prices(hourly_amount, monthly_amount)
 
 		return ServerSizeData(
-			size=offer["name"],
+			name=offer["name"],
 			architecture=architecture,
 			cpu_count=sum(cpu["core_count"] for cpu in offer.get("cpus", [])),
 			memory_mib=sum(memory["capacity"] for memory in offer.get("memories", [])) // 1_048_576,
@@ -150,7 +150,7 @@ class ScalewayCatalog:
 		metadata = dict(image)
 		metadata["os_id"] = image.get("id")
 		return ServerImageData(
-			image=f"{os_name}_{version}", os=os_name, version=version, provider_metadata=metadata
+			name=f"{os_name}_{version}", os=os_name, version=version, provider_metadata=metadata
 		)
 
 	@classmethod

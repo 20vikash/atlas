@@ -16,7 +16,7 @@ Package `storage` imports images, creates fast virtual machine disk clones, mana
 | `VirtualMachineStore` | VM disk preparation, usage, growth, and release. |
 | `ImageStore` | Image directory, HTTP client, image locks, manifests, policy, pruning, and warm artifacts. |
 | `SnapshotStore` | Snapshot directory, HTTP client, snapshot locks, staging, upload, deletion, and pruning. |
-| `MigrationTransfer` | ZFS snapshot, estimate, resumable send and receive, resume token, GUID, and cleanup for a disk migration. |
+| `MigrationTransfer` | ZFS snapshot, estimate, mutual-TLS stream transport, resume token, GUID, and cleanup for a disk migration. |
 | `Stores` | The four services created by `NewStores`. |
 
 Consumers define the interfaces that they need. The storage package does not export one broad storage interface.
@@ -46,8 +46,11 @@ image-policies.json
 
 ## Clone and snapshot lineage
 
-```text
-image @ready -> VM clone -> temporary staging or warm source snapshot
+```mermaid
+flowchart LR
+    Ready[Image ready snapshot] --> Clone[VM disk clone]
+    Clone --> Stage[Temporary snapshot staging]
+    Clone --> Warm[Warm source snapshot]
 ```
 
 VM clones share image blocks. Staging clones share one fixed VM snapshot. Warm promotion uses ZFS send and receive for an independent warm disk.
@@ -74,19 +77,31 @@ A successful VM start records image use. Metal keeps an image when a dependent V
 
 `Stage` creates a UUIDv7 value and stages a VM disk and kernel for the VM manager.
 
-`StartUpload` validates that the parts cover the artifact exactly and starts an asynchronous upload. The part size is fixed, because the controller signs each part against it. Uploads use a store-owned root context and wait group. Shutdown cancels new and active uploads and waits up to the daemon deadline.
+`StartUpload` checks the signed parts and starts an asynchronous upload. The part size is fixed, because the controller signs each part against it. The part count is an upper bound rather than an exact figure, because the artifact is stored compressed and its part count is known only once it is written. Uploads use a store-owned root context and wait group. Shutdown cancels new and active uploads and waits up to the daemon deadline.
 
-Durable upload state lives in the staging metadata. Live byte progress stays in memory. An upload recorded as running with no goroutine behind it did not survive a restart, so `UploadStatus` reports it as pending and the controller starts it again.
+Each artifact is stored compressed with zstd at its fastest level and one encoder thread. A VM disk is mostly unwritten blocks, so the stored object is a small fraction of the provisioned volume. One thread is deliberate: more threads did not compress faster in measurement, and the host runs customer VMs whose CPU this would take. `UploadedArtifact` reports `SizeBytes` for the uncompressed image and `StoredSizeBytes` for what the object store holds. The SHA-256 covers the uncompressed image, so one image keeps one digest whether it is stored raw or compressed.
+
+Parts are cut from the compressed stream, so each one is buffered to a file in the snapshot directory before it is sent. No more than one part is held at a time, and the buffer is removed as soon as the part is stored. `StartUpload` removes buffers a crashed upload left behind.
+
+Durable upload state lives in the staging metadata, including the parts the object store already holds and the multipart upload they belong to. An upload that restarts sends only the missing parts. A stored part is reused only when this pass produced the same length for it, because part boundaries come from the compressor; a part that differs is uploaded again over its part number. A different multipart upload ID discards the stored parts, so a replaced upload never reuses an ETag.
+
+One part that the object store refuses is repeated up to three times before the artifact fails, and each attempt sends the part again from the start.
+
+Live byte progress stays in memory and counts uncompressed bytes, which is the size the controller shows. An upload recorded as running with no goroutine behind it did not survive a restart, so `UploadStatus` reports it as pending and the controller starts it again.
+
+A download detects the artifact format from its content. A zstd artifact begins with the frame magic `28 B5 2F FD` and a raw artifact does not, so the controller can serve either form with no agreement between the two. The digest covers the decoded bytes, so a wrong guess fails the download instead of writing a bad disk.
 
 `DeleteSnapshot` cancels a running upload and waits for it to stop before it removes the data that upload is reading. It removes the staging clone before the source snapshot, because ZFS keeps a snapshot alive while a clone of it exists.
 
+The prune pass keeps staging data while an upload goroutine uses it. The pass removes invalid staging metadata and reads the source snapshot from the ZFS clone.
+
 ## Migration transfer
 
-`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>`, estimates the full or incremental stream, and sends it. The target receives with `zfs recv -s`, which saves a resume token when a receive is interrupted. The target then compares the received snapshot GUID with the source GUID, so only a verified copy counts.
+`MigrationTransfer` copies one VM disk between hosts. The source snapshots `<pool>/vms/<vm-id>@<name>` and estimates the full or incremental stream. A one-shot mutual-TLS listener relays `zfs send` to the one destination that connects, in that direction only. The destination verifies the source WireGuard IP and pipes the received stream into `zfs recv -s`. The receive saves a resume token when it stops early. The destination compares the received snapshot GUID with the source GUID, so only a verified copy counts.
 
-Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send and receive use `exec` and are covered by a host-guarded integration test. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
+Non-streaming commands run through an injectable runner, so a focused test uses a fake. The streaming send and receive commands use `exec`, and the stream itself moves through a `crypto/tls` connection. A resume token is validated against the requested snapshot, so a token cannot read another dataset.
 
-`AbortReceive` cancels an interrupted resumable receive and removes the target dataset. An abort calls it before it removes the target VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
+`AbortReceive` cancels an interrupted resumable receive and removes the destination dataset. An abort calls it before it removes the destination VM records. A missing dataset, or a dataset with no saved receive state, is not an error.
 
 ## Concurrency
 

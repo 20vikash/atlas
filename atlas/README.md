@@ -1,38 +1,84 @@
 # Atlas app
 
-The Atlas Frappe app owns provider integration, Metal Server records, placement, images, and user actions.
+The Atlas app is the control plane. It stores user intent, manages provider resources, selects Metal hosts, and presents current VM state.
 
-Atlas sends desired virtual machine state to Metal. Metal owns runtime state and host resources.
+Atlas is a Frappe application. Users work through Desk or the tenant API.
 
-## Start here
+## What Atlas owns
 
-1. Read the [system architecture](../docs/architecture.md) to understand the Atlas and Metal boundary.
-2. Read the [Atlas app specification](SPEC.md) for app ownership and layout.
-3. Choose an area below, then read its module SPEC before you change its code.
+```mermaid
+flowchart TB
+    User[Desk or tenant API]
+    Atlas[Atlas app]
 
-| Area | Purpose | Start here |
-|---|---|---|
-| Atlas settings | Provider selection, credentials, region data, and host binaries | [Atlas module](atlas/SPEC.md) |
-| Metal Servers | Provider hosts, Metal installation, and capacity | [Metal Server module](metal_server/SPEC.md) |
-| Virtual machines | Placement, Metal requests, images, and user workflows | [Virtual machine module](vm/SPEC.md) |
-| Realtime | Console WebSocket bridge | [Realtime specification](realtime/SPEC.md) |
+    subgraph Owned[Atlas-owned state]
+        Provider[Provider resources]
+        Hosts[Metal Server records]
+        Placement[Placement and reservations]
+        Images[Image records]
+        Services[Proxy and Cargo services]
+        Address[Public IPv4 intent]
+    end
 
-## Guides
+    Metal[Metal hosts]
 
-- [Getting started](docs/getting-started.md)
-- [Provider contract and extension guide](docs/providers.md)
-- [Metal Server lifecycle](docs/metal-server-lifecycle.md)
-- [Virtual machine control plane](docs/vm-control-plane.md)
-- [Image lifecycle](docs/images.md)
-- [Atlas operations](docs/operations.md)
-- [Development and tests](docs/development.md)
-- [System architecture](../docs/architecture.md)
-- [Metal `/v1` contract](../docs/metal-v1-contract.md)
+    User --> Atlas
+    Atlas --> Provider
+    Atlas --> Hosts
+    Atlas --> Placement
+    Atlas --> Images
+    Atlas --> Services
+    Atlas --> Address
+    Atlas -->|Desired VM state| Metal
+    Metal -->|Current host state| Atlas
+```
 
-## Boundaries
+Metal owns VM runtime state and host resources. Atlas reads current Metal state instead of duplicating it in DocType fields.
 
-Keep DocType methods as permission and API boundaries. Put provider behavior in `atlas/core/server_providers/`.
+## Follow a VM request
 
-Put Metal Server setup behavior in `metal_server/core/`. Put virtual machine orchestration in `vm/core/`.
+```mermaid
+flowchart LR
+    Request[Create VM] --> Validate[Validate tenant, image, and values]
+    Validate --> Place[Select and lock a Metal Server]
+    Place --> Draft[Commit draft and reservation]
+    Draft --> Send[Send desired state to Metal]
+    Send --> Reconcile[Metal reconciles host resources]
+    Reconcile --> Read[Atlas reads current state]
+```
 
-Do not store mutable Metal runtime state in DocType fields.
+The committed draft makes a lost create response safe. Atlas keeps the reservation until Metal confirms whether the VM exists.
+
+Read [VM control plane](docs/vm-control-plane.md) for the complete placement and retry flow.
+
+## Choose a guide
+
+| Task | Guide |
+| --- | --- |
+| Create a test environment and first VM | [Getting started](docs/getting-started.md) |
+| Understand VM placement and desired state | [VM control plane](docs/vm-control-plane.md) |
+| Move a VM between hosts | [VM migration](docs/virtual-machine-migrations.md) |
+| Provision and manage a host | [Metal Server lifecycle](docs/metal-server-lifecycle.md) |
+| Build, transfer, and remove images | [Image lifecycle](docs/images.md) |
+| Add or change a cloud provider | [Provider guide](docs/providers.md) |
+| Understand tenant boundaries | [Tenant API](docs/tenant-api.md) and [security model](docs/security.md) |
+| Investigate a failure | [Atlas operations](docs/operations.md) |
+| Run tests and checks | [Atlas development](docs/development.md) |
+
+## Module ownership
+
+| Module | Responsibility | Detailed reference |
+| --- | --- | --- |
+| `atlas` | Settings, providers, DNS, TLS, and host binaries | [Settings and providers](atlas/SPEC.md) |
+| `metal_server` | Provider hosts, Metal installation, and capacity | [Metal Server module](metal_server/SPEC.md) |
+| `vm` | Placement, VM intent, images, and migration orchestration | [VM module](vm/SPEC.md) |
+| `service` | Regional services that run on VMs | [Service module](service/SPEC.md) |
+| `realtime` | Browser console WebSocket bridge | [Realtime module](realtime/SPEC.md) |
+
+## Change boundaries
+
+Keep DocType methods as permission and API boundaries. Put long operations in the domain object or background task that owns them.
+
+Put provider behavior in `atlas/core/server_providers/`. Put host setup in `metal_server/core/`. Put VM orchestration in `vm/core/`.
+
+Read the [Atlas app specification](SPEC.md) before you change a module boundary.

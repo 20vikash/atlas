@@ -4,11 +4,15 @@ Atlas owns the user request, placement, and related provider intent. Metal owns 
 
 ## Create sequence
 
-```text
-request -> validate image and values -> select and lock Metal Server
-        -> insert and commit draft -> PUT /v1/vms/{name}
-        -> Metal saves desired state -> Metal reconciles host resources
-        -> Atlas clears the draft after confirmation
+```mermaid
+flowchart LR
+    Request[Create request] --> Validate[Validate image and values]
+    Validate --> Select[Select and lock Metal Server]
+    Select --> Draft[Insert and commit draft]
+    Draft --> Send[PUT desired state to Metal]
+    Send --> Store[Metal stores desired state]
+    Store --> Reconcile[Metal reconciles host resources]
+    Reconcile --> Confirm[Atlas confirms and clears draft]
 ```
 
 The Atlas document name is the Metal virtual machine ID. The committed draft makes a lost create response safe. Atlas keeps an uncertain draft until `GET /v1/vms/{name}` confirms presence or returns HTTP `404`.

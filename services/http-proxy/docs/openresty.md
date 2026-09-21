@@ -31,20 +31,16 @@ The wildcard certificate covers site HTTPS traffic. An address of `-` returns `5
 
 A configured host form such as `site-<label>` or `*-vm-<label>` below the wildcard zone routes directly to its VM address on port `80`. The label is a canonical, 96-bit base-36 value: `(vm << 32) | tenant`. It uses lowercase `0` to `9` and `a` to `z`, has at most 19 digits, and has no leading zero. For example, `site-lpc8lqa` with address prefix `fdaa:1` routes to `[fdaa:1:0:2:0:0:0:b]:80`.
 
-```text
-site-lpc8lqa
-     |
-     +-- label: lpc8lqa
-             |
-             | base-36 decode
-             v
-     +--------------------+----------------+
-     | 64-bit VM: 0x000b  | tenant: 0x0002 |
-     +--------------------+----------------+
-             |                    |
-             +--------+-----------+
-                      v
-fdaa:1 + tenant + VM = fdaa:1:0:2:0:0:0:b
+```mermaid
+flowchart LR
+    Host[site-lpc8lqa] --> Label[Extract label<br/>lpc8lqa]
+    Label --> Decode[Decode base 36]
+    Decode --> VM[VM ID<br/>0x000b]
+    Decode --> Tenant[Tenant ID<br/>0x0002]
+    VM --> Address[Build mesh address]
+    Tenant --> Address
+    Prefix[Regional prefix<br/>fdaa:1] --> Address
+    Address --> Result[fdaa:1:0:2:0:0:0:b]
 ```
 
 OpenResty computes the address. The control daemon reserves every site key that matches an auto-proxy prefix.

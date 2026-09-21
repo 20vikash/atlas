@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from ipaddress import ip_address
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.tls.certificate import (
 	CertificateError,
+	create_certificate_authority,
 	create_certificate_request,
 	create_private_key,
+	issue_certificate,
 	read_certificate,
 	serialize_private_key,
+	verify_issued_certificate,
 	verify_key_pair,
 )
 
@@ -80,3 +84,65 @@ class TestCertificate(UnitTestCase):
 		names = request.extensions.get_extension_for_class(x509.SubjectAlternativeName)
 		self.assertEqual(names.value.get_values_for_type(x509.DNSName), ["*.example.com"])
 		self.assertTrue(request.is_signature_valid)
+
+	def test_regional_ca_issues_a_metal_client_and_server_certificate(self) -> None:
+		ca_certificate, ca_private_key = create_certificate_authority("Atlas Metal CA test")
+		addresses = [ip_address("fdab::12"), ip_address("10.0.0.12"), ip_address("192.0.2.12")]
+
+		certificate, private_key = issue_certificate(
+			ca_certificate,
+			ca_private_key,
+			"metal-12.example.test",
+			addresses,
+		)
+
+		verify_key_pair(certificate, private_key)
+		verify_issued_certificate(certificate, ca_certificate)
+		details = read_certificate(certificate)
+		self.assertEqual(details.dns_names, ("metal-12.example.test",))
+		self.assertEqual(set(details.ip_addresses), set(addresses))
+		leaf = x509.load_pem_x509_certificate(certificate.encode())
+		usage = leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+		self.assertEqual(set(usage), {ExtendedKeyUsageOID.SERVER_AUTH, ExtendedKeyUsageOID.CLIENT_AUTH})
+
+	def test_issued_certificate_carries_both_key_identifiers(self) -> None:
+		ca_certificate, ca_private_key = create_certificate_authority("Atlas Metal CA test")
+
+		certificate, _ = issue_certificate(
+			ca_certificate, ca_private_key, "metal-12.example.test", [ip_address("192.0.2.12")]
+		)
+
+		authority = x509.load_pem_x509_certificate(ca_certificate.encode())
+		leaf = x509.load_pem_x509_certificate(certificate.encode())
+		authority_identifier = leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+		subject_identifier = authority.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+		self.assertEqual(authority_identifier.key_identifier, subject_identifier.key_identifier)
+		self.assertEqual(
+			leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value.digest,
+			x509.SubjectKeyIdentifier.from_public_key(leaf.public_key()).digest,
+		)
+
+	def test_issued_certificate_rejects_a_replaced_certificate_authority(self) -> None:
+		"""A rotation keeps the CA identity, so only the signature separates the two."""
+		identity = "Atlas Metal CA test"
+		ca_certificate, ca_private_key = create_certificate_authority(identity)
+		certificate, _ = issue_certificate(
+			ca_certificate, ca_private_key, "metal-12.example.test", [ip_address("192.0.2.12")]
+		)
+		replaced_ca_certificate, _ = create_certificate_authority(identity)
+
+		with self.assertRaises(CertificateError):
+			verify_issued_certificate(certificate, replaced_ca_certificate)
+
+	def test_issued_certificate_rejects_another_certificate_authority(self) -> None:
+		ca_certificate, ca_private_key = create_certificate_authority("Atlas Metal CA test")
+		certificate, _ = issue_certificate(
+			ca_certificate,
+			ca_private_key,
+			"metal-12.example.test",
+			[ip_address("192.0.2.12")],
+		)
+		other_ca_certificate, _ = create_certificate_authority("Atlas Metal CA other")
+
+		with self.assertRaises(CertificateError):
+			verify_issued_certificate(certificate, other_ca_certificate)

@@ -42,7 +42,7 @@ func TestNormalizeSourceToStopped(t *testing.T) {
 			runtime.state = tc.state
 			runtime.hasSavedState = tc.savedState
 
-			if err := machines.NormalizeSourceToStopped(ctx, "vm-1"); err != nil {
+			if err := NewMigrationHost(machines).NormalizeSourceToStopped(ctx, "vm-1"); err != nil {
 				t.Fatal(err)
 			}
 			if runtime.stops != tc.wantStops || runtime.resumes != tc.wantResumes || runtime.restores != tc.wantRestores {
@@ -64,13 +64,13 @@ func TestNormalizeSourceToStoppedRefusesFailedState(t *testing.T) {
 	setObservedState(t, machines, "vm-1", StateFailed)
 	runtime.state = StateFailed
 
-	if err := machines.NormalizeSourceToStopped(ctx, "vm-1"); !errors.Is(err, ErrConflict) {
+	if err := NewMigrationHost(machines).NormalizeSourceToStopped(ctx, "vm-1"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("failed source = %v, want ErrConflict", err)
 	}
 }
 
-// seedTargetVM writes reconstructed target records in the original state.
-func seedTargetVM(t *testing.T, machines *Manager, desiredState State) {
+// seedDestinationVM writes reconstructed destination records in the original state.
+func seedDestinationVM(t *testing.T, machines *Manager, desiredState State) {
 	t.Helper()
 	desired := DesiredRecord{
 		ID: "vm-1", UserID: 1000, GroupID: 1000, State: desiredState,
@@ -88,9 +88,9 @@ func seedTargetVM(t *testing.T, machines *Manager, desiredState State) {
 
 func TestEnsureMigrationNetworkRecordsTheInterface(t *testing.T) {
 	machines, _, network, _ := newTestManager(t)
-	seedTargetVM(t, machines, StateRunning)
+	seedDestinationVM(t, machines, StateRunning)
 
-	if err := machines.EnsureMigrationNetwork(context.Background(), "vm-1"); err != nil {
+	if err := NewMigrationHost(machines).EnsureMigrationNetwork(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
 	}
 	if network.ensures != 1 {
@@ -105,7 +105,7 @@ func TestEnsureMigrationNetworkRecordsTheInterface(t *testing.T) {
 	}
 }
 
-func TestApplyMigratedTargetState(t *testing.T) {
+func TestApplyMigratedDestinationState(t *testing.T) {
 	cases := []struct {
 		name           string
 		desiredState   State
@@ -120,9 +120,9 @@ func TestApplyMigratedTargetState(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			machines, runtime, _, _ := newTestManager(t)
 			runtime.state = StateStopped
-			seedTargetVM(t, machines, tc.desiredState)
+			seedDestinationVM(t, machines, tc.desiredState)
 
-			if err := machines.ApplyMigratedTargetState(context.Background(), "vm-1"); err != nil {
+			if err := NewMigrationHost(machines).ApplyMigratedDestinationState(context.Background(), "vm-1"); err != nil {
 				t.Fatal(err)
 			}
 			if runtime.coldStarts != tc.wantColdStarts || runtime.pauses != tc.wantPauses {
@@ -139,13 +139,13 @@ func TestApplyMigratedTargetState(t *testing.T) {
 	}
 }
 
-func TestApplyMigratedTargetStateReportsAStartFailure(t *testing.T) {
+func TestApplyMigratedDestinationStateReportsAStartFailure(t *testing.T) {
 	machines, runtime, _, _ := newTestManager(t)
 	runtime.state = StateStopped
 	runtime.coldStartError = errors.New("boot failed")
-	seedTargetVM(t, machines, StateRunning)
+	seedDestinationVM(t, machines, StateRunning)
 
-	if err := machines.ApplyMigratedTargetState(context.Background(), "vm-1"); err == nil {
+	if err := NewMigrationHost(machines).ApplyMigratedDestinationState(context.Background(), "vm-1"); err == nil {
 		t.Fatal("want a cold-start failure")
 	}
 	observed, err := machines.store.readObserved("vm-1")
@@ -169,7 +169,7 @@ func TestLimitSourceDiskAppliesAndClampsTheThrottle(t *testing.T) {
 	runtime.state = StateRunning
 
 	// A throttle below the configured limit applies as requested.
-	applied, err := machines.LimitSourceDisk(ctx, "vm-1", 64)
+	applied, err := NewMigrationHost(machines).LimitSourceDisk(ctx, "vm-1", 64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestLimitSourceDiskAppliesAndClampsTheThrottle(t *testing.T) {
 	}
 
 	// A throttle above the configured limit clamps down to it.
-	applied, err = machines.LimitSourceDisk(ctx, "vm-1", 500)
+	applied, err = NewMigrationHost(machines).LimitSourceDisk(ctx, "vm-1", 500)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestLimitSourceDiskAppliesAndClampsTheThrottle(t *testing.T) {
 
 	// A nonpositive throttle is a no-op and touches nothing on the guest.
 	runtime.diskRefresh = 0
-	applied, err = machines.LimitSourceDisk(ctx, "vm-1", 0)
+	applied, err = NewMigrationHost(machines).LimitSourceDisk(ctx, "vm-1", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestRemoveMigrationNetworkReleases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := machines.RemoveMigrationNetwork(ctx, "vm-1"); err != nil {
+	if err := NewMigrationHost(machines).RemoveMigrationNetwork(ctx, "vm-1"); err != nil {
 		t.Fatal(err)
 	}
 	if network.releases != 1 {

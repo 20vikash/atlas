@@ -28,6 +28,16 @@ private_network_mtu = 1500
 # Set this URL when Central sends requests to this Atlas region.
 central_jwks_url = ""
 
+[atlas.vm_scheduling]
+use_dedicated_sleepy_vm_hosts = true
+placement_strategy = "balanced"
+sleepy_vm_overcommit_factor = 1.0
+
+# Enable this after both names match entries in the Metal catalogs.
+auto_spawn_metal_server = false
+default_metal_machine_size = ""
+default_metal_machine_image = ""
+
 [atlas.scaleway]
 organization_id = "change-me"
 project_id = "change-me"
@@ -43,7 +53,6 @@ region = "eu-west-1"
 availability_zone = "eu-west-1a"
 access_key_id = "change-me"
 secret_access_key = "change-me"
-storage_pool_device = "/dev/nvme1n1"
 
 [atlas.route53]
 access_key_id = "change-me"

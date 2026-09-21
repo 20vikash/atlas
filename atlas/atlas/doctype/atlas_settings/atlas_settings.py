@@ -50,6 +50,9 @@ class AtlasSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		atlas_tls_certificate: DF.Password | None
+		atlas_tls_private_key: DF.Password | None
+		auto_spawn_metal_server: DF.Check
 		aws_access_key_id: DF.Data | None
 		aws_availability_zone: DF.Data | None
 		aws_key_pair_name: DF.Data | None
@@ -57,13 +60,14 @@ class AtlasSettings(Document):
 		aws_region: DF.Data | None
 		aws_secret_access_key: DF.Password | None
 		aws_security_group_id: DF.Data | None
-		aws_storage_pool_device: DF.Data | None
 		aws_subnet_id: DF.Data | None
 		aws_transit_gateway_attachment_id: DF.Data | None
 		aws_transit_gateway_id: DF.Data | None
 		aws_vpc_id: DF.Data | None
 		central_jwks: DF.JSON | None
 		central_jwks_url: DF.Data | None
+		default_metal_machine_image: DF.Autocomplete | None
+		default_metal_machine_size: DF.Autocomplete | None
 		dns_provider: DF.Literal["Route53"]
 		http_proxy_package_file: DF.Link | None
 		http_proxy_package_hash: DF.Data | None
@@ -76,9 +80,11 @@ class AtlasSettings(Document):
 		jwt_signing_private_key: DF.Password | None
 		letsencrypt_config_directory: DF.Data | None
 		letsencrypt_email: DF.Data
+		metal_tls_ca_certificate: DF.Password | None
+		metal_tls_ca_private_key: DF.Password | None
 		metald_binary_x86_64_file: DF.Link | None
+		metald_binary_hash: DF.Data | None
 		metald_source_hash: DF.Data | None
-		new_host_type: DF.Link | None
 		object_storage_access_key_id: DF.Data | None
 		object_storage_bucket: DF.Data | None
 		object_storage_endpoint_url: DF.Data | None
@@ -118,7 +124,10 @@ class AtlasSettings(Document):
 		]
 		server_provider: DF.Literal["Scaleway", "AWS"]
 		sleepy_vm_overcommit_factor: DF.Float
+		use_dedicated_sleepy_vm_hosts: DF.Check
+		use_public_ip_for_metald: DF.Check
 		wg_mesh_binary_x86_64_file: DF.Link | None
+		wg_mesh_binary_hash: DF.Data | None
 		wg_mesh_source_hash: DF.Data | None
 		wildcard_domain: DF.Data
 		wildcard_tls_certificate: DF.Password | None
@@ -156,7 +165,7 @@ class AtlasSettings(Document):
 		"""Return the public regional JSON Web Key Set URL."""
 		from atlas.auth.jwks import JWKS_PATH
 
-		base_url = frappe.conf.atlas_base_url or frappe.utils.get_url()
+		base_url = frappe.conf.atlas_base_url or frappe.utils.get_url(allow_header_override=False)
 		return f"{base_url.rstrip('/')}{JWKS_PATH}"
 
 	@cached_property
@@ -204,9 +213,9 @@ class AtlasSettings(Document):
 
 	def validate(self) -> None:
 		"""Reject invalid site settings."""
-		from atlas.vm.core.placement.strategies import STRATEGIES
+		from atlas.vm.core.placement import PlacementStrategy
 
-		if self.placement_strategy not in STRATEGIES:
+		if self.placement_strategy not in PlacementStrategy.registered_names():
 			frappe.throw(_("Unknown placement strategy: {0}.").format(self.placement_strategy))
 
 		self._validate_sleepy_vm_overcommit_factor()
@@ -247,14 +256,6 @@ class AtlasSettings(Document):
 
 		self.sleepy_vm_overcommit_factor = factor
 
-	@frappe.whitelist()
-	def available_placement_strategies(self) -> list[str]:
-		"""Return the names that the Placement tab can select."""
-		from atlas.vm.core.placement.strategies import STRATEGIES
-
-		frappe.only_for("System Manager")
-		return list(STRATEGIES)
-
 	def on_update(self) -> None:
 		"""Skip provider checks when the empty settings document is created."""
 		if self.flags.in_insert:
@@ -284,8 +285,14 @@ class AtlasSettings(Document):
 
 	def before_save(self) -> None:
 		"""Create the regional credentials and apply provider setup when the credentials change."""
+		from atlas.atlas.core.tls.metal import (
+			ensure_atlas_client_certificate,
+			ensure_certificate_authority,
+		)
 		from atlas.auth.issuer import initialize_signing_key
 
+		ensure_certificate_authority(self)
+		ensure_atlas_client_certificate(self)
 		self.initialize_proxy_cluster_password()
 		initialize_signing_key(self)
 
@@ -324,6 +331,22 @@ class AtlasSettings(Document):
 			)
 
 		self.wildcard_tls_expires_on = convert_utc_to_system_timezone(details.expires_on).replace(tzinfo=None)
+
+	@frappe.whitelist()
+	def get_form_autocomplete_options(self) -> dict[str, list[str]]:
+		"""Return the autocomplete options for Atlas Settings."""
+		from atlas.vm.core.placement import PlacementStrategy
+
+		frappe.only_for("System Manager")
+		return {
+			"placement_strategies": list(PlacementStrategy.registered_names()),
+			"available_metal_machine_sizes": frappe.get_all(
+				"Metal Server Size", {"enabled": 1}, pluck="name"
+			),
+			"available_metal_machine_images": frappe.get_all(
+				"Metal Server Image", {"enabled": 1}, pluck="name"
+			),
+		}
 
 	@frappe.whitelist(methods=["POST"])
 	def setup_server_provider(self) -> None:
@@ -475,9 +498,3 @@ def renew_expiring_wildcard_certificate() -> None:
 def rotate_proxy_cluster_password() -> None:
 	"""Rotate the regional proxy password on schedule."""
 	frappe.get_single("Atlas Settings")._rotate_proxy_cluster_password()
-
-
-def migrate_placement_strategy() -> None:
-	"""Replace the removed strategy on sites that stored it before the new default."""
-	if frappe.db.get_single_value("Atlas Settings", "placement_strategy") == "Default":
-		frappe.db.set_single_value("Atlas Settings", "placement_strategy", "balanced")

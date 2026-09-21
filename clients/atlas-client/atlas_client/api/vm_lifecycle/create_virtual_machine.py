@@ -8,7 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.capacity_pending_response import CapacityPendingResponse
+from ...models.capacity_unavailable_response import CapacityUnavailableResponse
 from ...models.create_virtual_machine_payload import CreateVirtualMachinePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
 from typing import cast
@@ -45,7 +45,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> CapacityPendingResponse | VirtualMachineResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
     if response.status_code == 201:
         response_201 = VirtualMachineResponse.from_dict(response.json())
 
@@ -54,7 +54,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_201
 
     if response.status_code == 503:
-        response_503 = CapacityPendingResponse.from_dict(response.json())
+        response_503 = CapacityUnavailableResponse.from_dict(response.json())
 
 
 
@@ -66,7 +66,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[CapacityPendingResponse | VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -81,12 +81,15 @@ def sync_detailed(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> Response[CapacityPendingResponse | VirtualMachineResponse]:
+) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
+
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
 
     Args:
         x_tenant_id (int):
@@ -97,7 +100,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CapacityPendingResponse | VirtualMachineResponse]
+        Response[CapacityUnavailableResponse | VirtualMachineResponse]
      """
 
 
@@ -119,12 +122,15 @@ def sync(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> CapacityPendingResponse | VirtualMachineResponse | None:
+) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
+
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
 
     Args:
         x_tenant_id (int):
@@ -135,7 +141,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CapacityPendingResponse | VirtualMachineResponse
+        CapacityUnavailableResponse | VirtualMachineResponse
      """
 
 
@@ -152,12 +158,15 @@ async def asyncio_detailed(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> Response[CapacityPendingResponse | VirtualMachineResponse]:
+) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
+
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
 
     Args:
         x_tenant_id (int):
@@ -168,7 +177,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CapacityPendingResponse | VirtualMachineResponse]
+        Response[CapacityUnavailableResponse | VirtualMachineResponse]
      """
 
 
@@ -190,12 +199,15 @@ async def asyncio(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> CapacityPendingResponse | VirtualMachineResponse | None:
+) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
     configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through
     the mesh.
+
+    Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route
+    changes it later.
 
     Args:
         x_tenant_id (int):
@@ -206,7 +218,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CapacityPendingResponse | VirtualMachineResponse
+        CapacityUnavailableResponse | VirtualMachineResponse
      """
 
 

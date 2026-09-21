@@ -23,13 +23,15 @@ The network allocator calls `Attach` after it creates the TAP and calls `Detach`
 
 ## Packet path
 
-```text
-host IPv4 or IPv6 to guest MAC -> tap0 egress -> activity_by_user_id
-                                              -> traffic event when watched
-
-ARP or other Ethernet traffic  -> ignored
-multicast or broadcast MAC     -> ignored
-guest traffic                  -> tap0 ingress -> not hooked
+```mermaid
+flowchart LR
+    Host[Host IPv4 or IPv6 packet] --> Guest{Guest unicast MAC?}
+    Guest -->|Yes| Hook[tap0 egress hook]
+    Hook --> Activity[Update activity by user ID]
+    Hook -->|VM watched| Event[Send traffic event]
+    Guest -->|No| Ignore[Ignore packet]
+    ARP[ARP or other Ethernet traffic] --> Ignore
+    Ingress[Guest-to-host traffic] --> NoHook[tap0 ingress has no hook]
 ```
 
 The eBPF program reads the Ethernet destination and type, records `bpf_ktime_get_ns`, and can write the user ID to a ring buffer. It returns `TCX_NEXT` and does not change packets.

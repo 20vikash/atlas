@@ -109,7 +109,7 @@ class ScalewayProvider(ServerProvider):
 
 	@override
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the Scaleway server for the discovery key."""
+		"""Return the Scaleway server for the identity key."""
 		return self.servers.ensure(request)
 
 	@override
@@ -141,7 +141,7 @@ class ScalewayProvider(ServerProvider):
 		self.wait_for_private_address(server)
 
 	@override
-	def get_storage_pool_device(self, server: "MetalServer") -> str:
+	def storage_pool_device(self, server: "MetalServer") -> str:
 		"""Return the raw device for the virtual machine storage pool."""
 		return self.partitioning.storage_array
 
@@ -166,14 +166,19 @@ class ScalewayProvider(ServerProvider):
 		self.ip_addresses.delete(provider_resource_id)
 
 	@override
-	def attach_public_ipv4_address(self, provider_resource_id: str, server: "MetalServer") -> None:
+	def attach_public_ipv4_address(
+		self, provider_resource_id: str, public_address: str, server: "MetalServer"
+	) -> str:
 		"""Attach a reserved address to a server."""
 		if not server.provider_server_id:
 			raise ScalewayError("Atlas server has no Scaleway server ID")
 		self.ip_addresses.attach(provider_resource_id, server.provider_server_id)
+		return public_address
 
 	@override
-	def detach_public_ipv4_address(self, provider_resource_id: str) -> None:
+	def detach_public_ipv4_address(
+		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
+	) -> None:
 		"""Detach an address from a server."""
 		self.ip_addresses.detach(provider_resource_id)
 

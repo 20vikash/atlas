@@ -23,27 +23,46 @@ Provisioning is a sequence of phases, not one transaction. Each phase records pr
 | `IPAddressService` | Tenant reservation, shared-pool claims, and release. |
 | `MetalServerUsage` (DocType) | One capacity sample reported by Metal. |
 
-The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/README.md) for host commands. The DocType belongs to the Atlas module.
+The `Metal Server` module uses [SSH Task](../atlas/doctype/ssh_task/) for host commands. The DocType belongs to the Atlas module.
 
 ## Provisioning
 
-```text
-insert pending host       one durable placement intent
-  -> create provider host in a job
-  -> wait for ready
-  -> attach addresses
-  -> install Metal
-  -> configure WireGuard
-  -> mark provisioning complete
+```mermaid
+flowchart LR
+    Pending[Insert Pending host] --> Provider[Create provider host]
+    Provider --> Ready[Wait for provider readiness]
+    Ready --> Address[Attach addresses]
+    Address --> WireGuard[Configure WireGuard]
+    WireGuard --> TLS[Issue and install Metal certificate]
+    TLS --> Install[Install Metal]
+    Install --> Complete[Mark provisioning complete]
 ```
 
-Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored discovery key, so a lost response cannot create a second host. A failed job sets the record to Failed.
+Manual creation and placement both insert the Pending Metal Server before its provider job starts. Every setup phase is safe to repeat. A creation retry uses the stored identity key, so a lost response cannot create a second host. A failed job sets the record to Failed.
+
+Metal listens for the Atlas API on port 9000 and accepts only the Atlas client certificate. The provider returns an address that Metal can bind. Most providers use the endpoint from `Atlas Settings.use_public_ip_for_metald`. AWS uses the private address of the primary interface because the public address exists only in the internet gateway. Node coordination uses the WireGuard address on port 9001. Snapshot data uses port 9002. Host installation configures all three TLS paths before it starts Metal.
+
+The provider returns the storage pool device. Host installation makes the ZFS pool from that one device and does not search for a disk.
+
+## Certificate renewal
+
+The node certificate is valid for 825 days. Metal reads it once at startup, so a new certificate needs a restart.
+
+| Trigger | Result |
+|---|---|
+| Daily job `renew_expiring_tls_certificates` | Queues a renewal for each Running host whose stored expiry is inside 30 days. |
+| Metal Server action Renew TLS Certificate | Queues one renewal for that host. |
+| Host installation | Installs a current certificate before it installs Metal. |
+
+Atlas stores the expiry in `metald_tls_expires_on` each time it issues the host certificate.
+
+Renewal writes the new files and restarts `metal.service` when the unit is active. The unit sets `FileDescriptorStorePreserve=yes`, so the guest virtual machines stay up. A migration or console session on that host does not survive the restart. Renewal shares the Metald job lock, so it never runs at the same time as an install or an upgrade.
 
 ## Capacity
 
 `POST /v1/sync` sends the desired host state and returns capacity in the same exchange. Atlas records the result as a Metal Server Usage row, which is what placement later reads.
 
-The operator can set `is_sleepy` on a Metal Server for placement strategies. Placement also sets the flag when it provisions a host for the sleepy pool. The flag is stored on the Pending record, so later placement requests reuse only a host in the same pool. It does not change host setup or capacity reporting.
+The operator can set `is_sleepy_vm_host` on a Metal Server for placement strategies. Placement also sets the flag when it provisions a host for the sleepy pool. The flag is stored on the Pending record, so later placement requests reuse only a host in the same pool. It does not change host setup or capacity reporting.
 
 A scheduled job queues one exchange for each ready server. The `sync_state` action queues one exchange for a single server, so an operator does not wait for the next scheduled run.
 
@@ -54,6 +73,10 @@ The same exchange carries the Atlas public keys that the host must trust. Each h
 ## Public IPv4
 
 An address carries a desired intent and an intent version. Reconciliation applies the intent and preserves a pending one for a retry, so a failed apply is never mistaken for a completed one.
+
+The provider attach operation returns the host address that receives public traffic. Atlas stores this value in `host_address` and then sends it to Metal. A newer intent prevents the old reconcile job from sending its value to Metal.
+
+Detach gives the provider the stored host address and the server. This state lets a provider finish cleanup after an earlier partial operation.
 
 An address has a tenant and a `reserved` flag. An address without a tenant is in the shared pool. `IPAddressService` owns both fields.
 

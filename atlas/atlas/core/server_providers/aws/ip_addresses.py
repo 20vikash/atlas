@@ -36,28 +36,108 @@ class AwsIPAddresses:
 		"""Release one public IPv4 address if it exists."""
 		self.client.call("ec2", "release_address", AllocationId=provider_resource_id, allow_missing=True)
 
-	def attach(self, provider_resource_id: str, provider_server_id: str) -> None:
-		"""Attach one public IPv4 address to a provider server."""
+	def attach(self, provider_resource_id: str, network_interface_id: str) -> str:
+		"""Attach one public address to a dedicated host address."""
+		host_address = self.reusable_host_address(provider_resource_id, network_interface_id)
+		is_new_address = host_address is None
+		if is_new_address:
+			host_address = self.assign_host_address(network_interface_id)
+
+		try:
+			self.client.call(
+				"ec2",
+				"associate_address",
+				AllocationId=provider_resource_id,
+				NetworkInterfaceId=network_interface_id,
+				PrivateIpAddress=host_address,
+				AllowReassociation=True,
+			)
+		except Exception as error:
+			if is_new_address:
+				try:
+					self.unassign_host_address(network_interface_id, host_address)
+				except Exception as cleanup_error:
+					raise AwsError(
+						f"Could not clean up private address {host_address}: {cleanup_error}"
+					) from error
+			raise
+
+		return host_address
+
+	def reusable_host_address(self, provider_resource_id: str, network_interface_id: str) -> str | None:
+		"""Return the existing non-primary host address, if one exists."""
+		association = self.association(provider_resource_id)
+		if association.get("NetworkInterfaceId") != network_interface_id:
+			return None
+
+		host_address = association.get("PrivateIpAddress")
+		if not host_address or host_address == self.primary_private_address(network_interface_id):
+			return None
+		return host_address
+
+	def primary_private_address(self, network_interface_id: str) -> str:
+		"""Return the private address that belongs to the interface itself."""
+		response = self.client.call(
+			"ec2", "describe_network_interfaces", NetworkInterfaceIds=[network_interface_id]
+		)
+		for interface in response.get("NetworkInterfaces") or []:
+			for entry in interface.get("PrivateIpAddresses") or []:
+				address = entry.get("PrivateIpAddress")
+				if entry.get("Primary") and isinstance(address, str):
+					return address
+		raise AwsError(f"AWS interface {network_interface_id} has no primary private address")
+
+	def assign_host_address(self, network_interface_id: str) -> str:
+		"""Add one private address to an interface and return it."""
+		response = self.client.call(
+			"ec2",
+			"assign_private_ip_addresses",
+			NetworkInterfaceId=network_interface_id,
+			SecondaryPrivateIpAddressCount=1,
+		)
+		assigned = response.get("AssignedPrivateIpAddresses") or []
+		address = assigned[0].get("PrivateIpAddress") if assigned else None
+		if not isinstance(address, str):
+			raise AwsError(f"AWS assigned no private address to interface {network_interface_id}")
+		return address
+
+	def detach(self, provider_resource_id: str, network_interface_id: str, host_address: str | None) -> None:
+		"""Detach one public IPv4 address and remove the private address it used."""
+		association = self.association(provider_resource_id)
+		if not host_address:
+			associated_interface = association.get("NetworkInterfaceId")
+			host_address = association.get("PrivateIpAddress")
+			if associated_interface != network_interface_id or not host_address:
+				raise AwsError("AWS public address has no host address on the expected interface")
+
+		if host_address == self.primary_private_address(network_interface_id):
+			raise AwsError(f"Refusing to unassign primary private address {host_address}")
+
+		if association.get("AssociationId"):
+			self.client.call(
+				"ec2",
+				"disassociate_address",
+				AssociationId=association["AssociationId"],
+				allow_missing=True,
+			)
+
+		self.unassign_host_address(network_interface_id, host_address)
+
+	def unassign_host_address(self, network_interface_id: str, host_address: str) -> None:
+		"""Remove one secondary private address from an interface."""
 		self.client.call(
 			"ec2",
-			"associate_address",
-			AllocationId=provider_resource_id,
-			InstanceId=provider_server_id,
-			AllowReassociation=False,
+			"unassign_private_ip_addresses",
+			NetworkInterfaceId=network_interface_id,
+			PrivateIpAddresses=[host_address],
+			allow_missing=True,
 		)
 
-	def detach(self, provider_resource_id: str) -> None:
-		"""Detach one public IPv4 address from its provider server."""
-		association_id = self.association_id(provider_resource_id)
-		if association_id is None:
-			return
-		self.client.call("ec2", "disassociate_address", AssociationId=association_id, allow_missing=True)
-
-	def association_id(self, provider_resource_id: str) -> str | None:
+	def association(self, provider_resource_id: str) -> dict[str, str]:
 		"""Return the current association of one reserved address."""
 		response = self.client.call(
 			"ec2", "describe_addresses", AllocationIds=[provider_resource_id], allow_missing=True
 		)
-		for address in response.get("Addresses", []):
-			return address.get("AssociationId")
-		return None
+		for address in response.get("Addresses") or []:
+			return {key: value for key, value in address.items() if isinstance(value, str)}
+		return {}

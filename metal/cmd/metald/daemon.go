@@ -45,29 +45,23 @@ type trafficMonitorResource interface {
 }
 
 type daemon struct {
-	context           context.Context
-	cancel            context.CancelFunc
-	logger            *slog.Logger
-	snapshotUploads   snapshotUploadOwner
-	serialBroker      serialBroker
-	systemd           systemdConnection
-	trafficMonitor    trafficMonitorResource
-	workers           sync.WaitGroup
-	httpServer        daemonHTTPServer
-	httpServerErrors  chan error
-	migrations        migrationShutdownOwner
-	migrationListener migrationShutdownOwner
+	context          context.Context
+	cancel           context.CancelFunc
+	logger           *slog.Logger
+	snapshotUploads  snapshotUploadOwner
+	serialBroker     serialBroker
+	systemd          systemdConnection
+	trafficMonitor   trafficMonitorResource
+	workers          sync.WaitGroup
+	httpServers      []daemonHTTPServer
+	httpServerErrors chan error
+	httpServerExits  int
+	migrations       migrationShutdownOwner
 }
 
 // OwnMigrations makes the daemon stop migration transfers at shutdown.
 func (daemon *daemon) OwnMigrations(migrations migrationShutdownOwner) {
 	daemon.migrations = migrations
-}
-
-// OwnMigrationListener makes the daemon stop the source transfer listener at
-// shutdown.
-func (daemon *daemon) OwnMigrationListener(listener migrationShutdownOwner) {
-	daemon.migrationListener = listener
 }
 
 func newDaemon(
@@ -125,16 +119,18 @@ func (daemon *daemon) StartTrafficListener(events <-chan traffic.Event, restore 
 }
 
 // Serve runs the HTTP server until it stops or the daemon receives a signal.
-func (daemon *daemon) Serve(server daemonHTTPServer) error {
-	daemon.httpServer = server
-	daemon.httpServerErrors = make(chan error, 1)
-	go func() { daemon.httpServerErrors <- server.Start("") }()
+func (daemon *daemon) Serve(servers ...daemonHTTPServer) error {
+	daemon.httpServers = servers
+	daemon.httpServerErrors = make(chan error, len(servers))
+	for _, server := range servers {
+		go func() { daemon.httpServerErrors <- server.Start("") }()
+	}
 
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	select {
 	case err := <-daemon.httpServerErrors:
-		daemon.httpServer = nil
+		daemon.httpServerExits++
 		if err == http.ErrServerClosed {
 			return nil
 		}
@@ -148,8 +144,8 @@ func (daemon *daemon) Serve(server daemonHTTPServer) error {
 // Shutdown stops daemon work without stopping guest virtual machines.
 func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 	var shutdownErrors []error
-	if daemon.httpServer != nil {
-		if err := daemon.httpServer.Shutdown(shutdownContext); err != nil && err != http.ErrServerClosed {
+	for _, server := range daemon.httpServers {
+		if err := server.Shutdown(shutdownContext); err != nil && err != http.ErrServerClosed {
 			shutdownErrors = append(shutdownErrors, fmt.Errorf("shut down HTTP server: %w", err))
 		}
 	}
@@ -164,11 +160,6 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 			shutdownErrors = append(shutdownErrors, fmt.Errorf("close traffic monitor: %w", err))
 		}
 	}
-	if daemon.migrationListener != nil {
-		if err := daemon.migrationListener.Shutdown(shutdownContext); err != nil {
-			shutdownErrors = append(shutdownErrors, err)
-		}
-	}
 	if daemon.migrations != nil {
 		if err := daemon.migrations.Shutdown(shutdownContext); err != nil {
 			shutdownErrors = append(shutdownErrors, err)
@@ -180,7 +171,7 @@ func (daemon *daemon) Shutdown(shutdownContext context.Context) error {
 	daemon.serialBroker.Shutdown()
 	daemon.systemd.Close()
 
-	if daemon.httpServer != nil {
+	for range len(daemon.httpServers) - daemon.httpServerExits {
 		select {
 		case err := <-daemon.httpServerErrors:
 			if err != nil && err != http.ErrServerClosed {

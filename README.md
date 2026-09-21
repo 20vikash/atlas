@@ -1,39 +1,44 @@
-<div align="center">
-  <img src=".github/assets/logo.svg" alt="Atlas" width="80" height="80">
-  <h1>Atlas</h1>
+---
+layout: home
+
+hero:
+  name: Atlas
+  text: VM infrastructure for Frappe Cloud
+  tagline: A practical guide to the control plane, host runtime, public proxy, and private network.
+  image:
+    src: /logo.svg
+    alt: Atlas
+  actions:
+    - theme: brand
+      text: Start with the architecture
+      link: /docs/architecture
+---
+
+## Four systems, one VM platform
+
+Each component has one clear responsibility. Start with the component that owns the behavior you want to change.
+
+<div class="atlas-component-grid">
+  <a class="atlas-component" href="./atlas/">
+    <span>Control plane</span>
+    <strong>Atlas app</strong>
+    <p>Stores user intent, selects hosts, and manages provider resources.</p>
+  </a>
+  <a class="atlas-component" href="./metal/">
+    <span>Host runtime</span>
+    <strong>Metal</strong>
+    <p>Makes each host match the desired virtual machine state.</p>
+  </a>
+  <a class="atlas-component" href="./services/http-proxy/">
+    <span>Public traffic</span>
+    <strong>HTTP proxy</strong>
+    <p>Routes public HTTP and TLS traffic to virtual machines.</p>
+  </a>
+  <a class="atlas-component" href="./services/wg-mesh/">
+    <span>Private traffic</span>
+    <strong>WG Mesh</strong>
+    <p>Carries private virtual machine traffic between hosts.</p>
+  </a>
 </div>
 
-Atlas is the virtual machine control system for Frappe Cloud V2.
-
-This monorepo contains the Atlas controller, the Metal host daemon, the HTTP proxy, and Atlas WG Mesh. Each component has its own code, tests, and development guide.
-
-## Start here
-
-1. Read the [system architecture](docs/architecture.md) to understand ownership and the main request flows.
-2. If you need a complete virtual machine environment, use [Metal testing](metal/docs/testing.md) to prepare a development host.
-3. Choose the component that you want to inspect or change. Its README routes you to its detailed guides and specification.
-
-Use the [glossary](docs/glossary.md) when a term is not clear.
-
-| Component  | Purpose                                                 | First document                              |
-| ---------- | ------------------------------------------------------- | ------------------------------------------- |
-| Atlas app  | Provider integration, Metal Servers, VM placement, images, and user actions | [Atlas app](atlas/README.md)                |
-| Metal      | Virtual machine state and host resources                | [Metal](metal/README.md)                    |
-| HTTP proxy | Regional HTTP and TLS routing                           | [HTTP proxy](services/http-proxy/README.md) |
-| WG Mesh    | Private virtual machine network                         | [WG Mesh](services/wg-mesh/README.md)       |
-
-Use [Atlas operations](atlas/docs/operations.md) and [Metal operations](metal/docs/operations.md) during fault recovery.
-
-## Development
-
-Each component owns its commands and tests. Do not run Go commands from the repository root.
-
-- Use [Atlas development](atlas/docs/development.md) for the Frappe app.
-- Use [Metal development and tests](metal/docs/testing.md) for the Go host daemon.
-- Use each service README for its local commands.
-
-Atlas builds and uploads host binaries during installation and migration. Install the [Ubuntu build tools](atlas/docs/development.md#ubuntu-build-tools) first.
-
-## License
-
-Atlas uses the AGPL-3.0 license.
+<p class="atlas-home-paths"><a href="./docs/development">Set up development</a><span>or</span><a href="./docs/operations">investigate a failure</a></p>

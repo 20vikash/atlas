@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from hashlib import sha256
+from datetime import datetime
 from types import MethodType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -9,42 +9,76 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.base import ProviderServer, ServerPowerAction
-from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
+from atlas.atlas.core.tls.metal import CERTIFICATE_RENEWAL_WINDOW_DAYS
+from atlas.metal_server.doctype.metal_server.metal_server import (
+	MetalServer,
+	renew_expiring_tls_certificates,
+)
 
 
 def _disk(device: str) -> dict:
 	"""Return one disk from the test RAID layout."""
 	return {
 		"name": f"/dev/{device}",
+		"type": "disk",
 		"uuid": None,
 		"size": 953 * 1024**3,
 		"mountpoint": None,
 		"children": [
-			{"name": f"/dev/{device}1", "uuid": None, "size": 1024**3 // 2, "mountpoint": None},
+			{
+				"name": f"/dev/{device}1",
+				"type": "part",
+				"uuid": None,
+				"size": 1024**3 // 2,
+				"mountpoint": None,
+			},
 			{
 				"name": f"/dev/{device}2",
+				"type": "part",
 				"uuid": "boot-member-uuid",
 				"size": 1024**3,
 				"mountpoint": None,
 				"children": [
-					{"name": "/dev/md0", "uuid": "boot-uuid", "size": 1024**3, "mountpoint": "/boot"}
+					{
+						"name": "/dev/md0",
+						"type": "raid1",
+						"uuid": "boot-uuid",
+						"size": 1024**3,
+						"mountpoint": "/boot",
+					}
 				],
 			},
 			{
 				"name": f"/dev/{device}3",
+				"type": "part",
 				"uuid": "root-member-uuid",
 				"size": 64 * 1024**3,
 				"mountpoint": None,
 				"children": [
-					{"name": "/dev/md1", "uuid": "root-uuid", "size": 64 * 1024**3, "mountpoint": "/"}
+					{
+						"name": "/dev/md1",
+						"type": "raid1",
+						"uuid": "root-uuid",
+						"size": 64 * 1024**3,
+						"mountpoint": "/",
+					}
 				],
 			},
 			{
 				"name": f"/dev/{device}4",
+				"type": "part",
 				"uuid": "data-member-uuid",
 				"size": 888 * 1024**3,
 				"mountpoint": None,
-				"children": [{"name": "/dev/md2", "uuid": None, "size": 888 * 1024**3, "mountpoint": None}],
+				"children": [
+					{
+						"name": "/dev/md2",
+						"type": "raid1",
+						"uuid": None,
+						"size": 888 * 1024**3,
+						"mountpoint": None,
+					}
+				],
 			},
 		],
 	}
@@ -52,17 +86,20 @@ def _disk(device: str) -> dict:
 
 _LSBLK_OUTPUT = json.dumps({"blockdevices": [_disk("sda"), _disk("sdb")]})
 
+SERVER_NAME = "01a0c05f-e209-70ad-a183-dda2a727cd8b"
+# The low 96 bits of SERVER_NAME under region 1.
+SERVER_MESH_ADDRESS = "fdab:1:e209:70ad:a183:dda2:a727:cd8b"
+
 
 class TestServer(UnitTestCase):
-	def test_before_validate_sets_key_without_provider_creation(self) -> None:
+	def test_before_validate_takes_the_architecture_without_provider_creation(self) -> None:
 		provider = SimpleNamespace(validate_settings=Mock(), ensure_server=Mock())
 		server = SimpleNamespace(
-			name="node-test-00007",
+			name=SERVER_NAME,
 			provider_server_id=None,
-			provider_discovery_key=None,
 			architecture=None,
-			server_size="Scaleway/size",
-			server_image="Scaleway/image",
+			server_size="large",
+			server_image="Ubuntu_26.04",
 			status="Pending",
 			settings=SimpleNamespace(server_provider_controller=provider),
 			_validate_provider_catalog=Mock(),
@@ -74,34 +111,11 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.before_validate(server)
 
-		self.assertEqual(len(server.provider_discovery_key), 32)
 		provider.validate_settings.assert_called_once_with()
 		self.assertEqual(server.architecture, "amd64")
 		provider.ensure_server.assert_not_called()
 
-	def test_before_validate_keeps_existing_discovery_key(self) -> None:
-		provider = SimpleNamespace(validate_settings=Mock())
-		server = SimpleNamespace(
-			provider_server_id=None,
-			provider_discovery_key=None,
-			server_size="Scaleway/arm-size",
-			architecture=None,
-			settings=SimpleNamespace(server_provider_controller=provider),
-			_validate_provider_catalog=Mock(),
-		)
-
-		with patch(
-			"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
-			return_value=SimpleNamespace(architecture="arm64"),
-		):
-			MetalServer.before_validate(server)
-			key = server.provider_discovery_key
-			MetalServer.before_validate(server)
-
-		self.assertEqual(server.architecture, "arm64")
-		self.assertEqual(server.provider_discovery_key, key)
-
-	def test_ensure_provider_server_uses_stored_discovery_key(self) -> None:
+	def test_ensure_provider_server_identifies_the_host_by_name(self) -> None:
 		provider = SimpleNamespace(
 			ensure_server=Mock(
 				return_value=ProviderServer(
@@ -113,11 +127,10 @@ class TestServer(UnitTestCase):
 			)
 		)
 		server = SimpleNamespace(
-			name="node-test-00007",
+			name=SERVER_NAME,
 			provider_server_id=None,
-			provider_discovery_key="stored-key",
-			server_size="Scaleway/size",
-			server_image="Scaleway/image",
+			server_size="large",
+			server_image="Ubuntu_26.04",
 			status="Pending",
 			settings=SimpleNamespace(server_provider_controller=provider),
 			_provider_metadata=MetalServer._provider_metadata,
@@ -129,27 +142,8 @@ class TestServer(UnitTestCase):
 		):
 			MetalServer.ensure_provider_server(server)
 
-		self.assertEqual(provider.ensure_server.call_args.args[0].discovery_key, "stored-key")
+		self.assertEqual(provider.ensure_server.call_args.args[0].name, SERVER_NAME)
 		self.assertEqual(server.provider_server_id, "server-id")
-
-	def test_provision_inserts_pending_host_for_setup_job(self) -> None:
-		server = SimpleNamespace(insert=Mock())
-		with (
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_single",
-				return_value=SimpleNamespace(server_provider="Scaleway"),
-			),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc",
-				return_value=SimpleNamespace(name="Scaleway/Ubuntu_26.04"),
-			),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.new_doc", return_value=server),
-		):
-			MetalServer.provision(size="Scaleway/size", is_sleepy=True)
-
-		self.assertEqual(server.server_size, "Scaleway/size")
-		self.assertTrue(server.is_sleepy)
-		server.insert.assert_called_once_with(ignore_permissions=True)
 
 	def test_provisioning_worker_runs_as_administrator(self) -> None:
 		previous_user = frappe.session.user
@@ -165,15 +159,6 @@ class TestServer(UnitTestCase):
 			frappe.set_user(previous_user)
 
 		self.assertEqual(seen_users, ["Administrator"])
-
-	def test_validate_checks_the_provider_catalog(self) -> None:
-		server = self._server(status="Pending")
-		server._validate_provider_catalog = Mock()
-		server._sync_disks_if_running = Mock()
-
-		MetalServer.validate(server)
-
-		server._validate_provider_catalog.assert_called_once()
 
 	def test_setup_server_queues_when_no_setup_job_runs(self) -> None:
 		server = self._server(status="Failed")
@@ -209,24 +194,6 @@ class TestServer(UnitTestCase):
 
 		server._enqueue_setup_server.assert_not_called()
 
-	def test_ping_server_creates_a_ping_script_log(self) -> None:
-		server = self._server(status="Running")
-		log = SimpleNamespace(name="SSH-00001")
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.SSHTask.create_for_script_file",
-				return_value=log,
-			) as create_for_script_file,
-		):
-			log_name = MetalServer.ping_server(server)
-
-		self.assertEqual(log_name, "SSH-00001")
-		create_for_script_file.assert_called_once_with(
-			target_type="Metal Server", target=server.name, script_path="ping-server.sh"
-		)
-
 	def test_ping_server_rejects_a_server_that_is_not_running(self) -> None:
 		server = self._server(status="Stopped")
 
@@ -255,12 +222,13 @@ class TestServer(UnitTestCase):
 				return_value=task,
 			) as create_for_command,
 		):
-			MetalServer.sync_disks(server)
+			MetalServer._sync_disks(server)
 
 		self.assertFalse(create_for_command.call_args.kwargs["run_in_background"])
 		server.set.assert_called_once_with(
 			"disks",
 			[
+				{"device": "/dev/sda", "uuid": "", "mount_point": "", "size_gb": "953.00"},
 				{
 					"device": "/dev/md0",
 					"uuid": "boot-uuid",
@@ -269,6 +237,7 @@ class TestServer(UnitTestCase):
 				},
 				{"device": "/dev/md1", "uuid": "root-uuid", "mount_point": "/", "size_gb": "64.00"},
 				{"device": "/dev/md2", "uuid": "", "mount_point": "", "size_gb": "888.00"},
+				{"device": "/dev/sdb", "uuid": "", "mount_point": "", "size_gb": "953.00"},
 			],
 		)
 		server.save.assert_called_once()
@@ -284,10 +253,74 @@ class TestServer(UnitTestCase):
 				return_value=task,
 			),
 		):
-			MetalServer.sync_disks(server)
+			MetalServer._sync_disks(server)
 
 		devices = [disk["device"] for disk in server.set.call_args.args[1]]
 		self.assertEqual(len(devices), len(set(devices)))
+
+	def test_sync_disks_reports_every_whole_disk_and_skips_loop_devices(self) -> None:
+		server = self._server(status="Running")
+		output = json.dumps(
+			{
+				"blockdevices": [
+					{"name": "/dev/loop0", "type": "loop", "size": 28 * 1024**2, "mountpoint": "/snap/core"},
+					{
+						"name": "/dev/nvme1n1",
+						"type": "disk",
+						"uuid": None,
+						"size": 64 * 1024**3,
+						"mountpoint": None,
+						"children": [
+							{
+								"name": "/dev/nvme1n1p1",
+								"type": "part",
+								"uuid": "root-uuid",
+								"size": 62 * 1024**3,
+								"mountpoint": "/",
+							},
+							{
+								"name": "/dev/nvme1n1p14",
+								"type": "part",
+								"uuid": None,
+								"size": 4 * 1024**2,
+								"mountpoint": None,
+							},
+						],
+					},
+					{
+						"name": "/dev/nvme0n1",
+						"type": "disk",
+						"uuid": None,
+						"size": 500 * 1024**3,
+						"mountpoint": None,
+						"children": [
+							{
+								"name": "/dev/nvme0n1p1",
+								"type": "part",
+								"uuid": None,
+								"size": 500 * 1024**3,
+								"mountpoint": None,
+							}
+						],
+					},
+				]
+			}
+		)
+		task = SimpleNamespace(result=SimpleNamespace(output=output, is_success=True))
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch(
+				"atlas.metal_server.core.disk_inventory.SSHTask.create_for_command",
+				return_value=task,
+			),
+		):
+			MetalServer._sync_disks(server)
+
+		self.assertEqual(
+			[disk["device"] for disk in server.set.call_args.args[1]],
+			["/dev/nvme1n1", "/dev/nvme1n1p1", "/dev/nvme0n1"],
+		)
 
 	def test_sync_disks_rejects_a_failed_lsblk_run(self) -> None:
 		server = self._server(status="Running")
@@ -304,9 +337,25 @@ class TestServer(UnitTestCase):
 			),
 		):
 			with self.assertRaises(ValueError):
-				MetalServer.sync_disks(server)
+				MetalServer._sync_disks(server)
 
 		server.save.assert_not_called()
+
+	def test_sync_disks_queues_one_job_per_server(self) -> None:
+		server = self._server(status="Running")
+		server.enqueue_disk_sync = lambda: MetalServer.enqueue_disk_sync(server)
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+			patch("atlas.metal_server.core.disk_inventory.SSHTask.create_for_command") as create_for_command,
+		):
+			MetalServer.sync_disks(server)
+
+		create_for_command.assert_not_called()
+		self.assertEqual(enqueue_doc.call_args.args, ("Metal Server", SERVER_NAME, "_sync_disks"))
+		self.assertEqual(enqueue_doc.call_args.kwargs["job_id"], f"atlas||server||sync-disks||{SERVER_NAME}")
+		self.assertTrue(enqueue_doc.call_args.kwargs["deduplicate"])
 
 	def test_sync_disks_rejects_a_server_that_is_not_running(self) -> None:
 		server = self._server(status="Stopped")
@@ -322,20 +371,6 @@ class TestServer(UnitTestCase):
 				MetalServer.sync_disks(server)
 
 		create_for_command.assert_not_called()
-
-	def test_sync_state_queues_one_host_exchange(self) -> None:
-		server = self._server(status="Running")
-		server.is_provisioning_completed = True
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.enqueue_server_sync"
-			) as enqueue_server_sync,
-		):
-			MetalServer.sync_state(server)
-
-		enqueue_server_sync.assert_called_once_with(server.name)
 
 	# An unprovisioned host has no Metal token.
 	def test_sync_state_rejects_a_server_that_is_not_ready(self) -> None:
@@ -355,26 +390,30 @@ class TestServer(UnitTestCase):
 
 		enqueue_server_sync.assert_not_called()
 
-	def test_install_metald_queues_the_install_job(self) -> None:
+	def test_every_metald_operation_shares_one_job_lock(self) -> None:
 		server = self._server(status="Running")
+		job_ids = []
 
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		for operation in (
+			MetalServer.install_metald,
+			MetalServer.upgrade_metald,
+			MetalServer.enqueue_tls_certificate_renewal,
 		):
-			MetalServer.install_metald(server)
+			with (
+				patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+				patch(
+					"atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued",
+					return_value=False,
+				),
+				patch(
+					"atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc"
+				) as enqueue_doc,
+			):
+				operation(server)
 
-		enqueue_doc.assert_called_once_with(
-			"Metal Server",
-			"node-test-00007",
-			"_install_metald",
-			queue="long",
-			timeout=1200,
-			job_id="atlas||server||metald||node-test-00007",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
+			job_ids.append(enqueue_doc.call_args.kwargs["job_id"])
+
+		self.assertEqual(job_ids, [server.metald_job_id] * 3)
 
 	def test_install_metald_rejects_a_missing_binary(self) -> None:
 		server = self._server(status="Running")
@@ -412,16 +451,15 @@ class TestServer(UnitTestCase):
 	def test_install_metald_worker_passes_the_pool_device(self) -> None:
 		server = self._server(status="Running")
 		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.wireguard_ip_address = "fdab:1::7"
 		task = SimpleNamespace(result=SimpleNamespace(is_success=True))
+		tls_result = SimpleNamespace(is_success=True)
 		file_urls = {
 			"metald-file": "https://atlas.test/files/metald-linux-amd64",
 			"wg-mesh-file": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
 		}
 
 		with (
-			patch(
-				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
-			),
 			patch(
 				"atlas.metal_server.core.host_installation.get_download_url",
 				side_effect=lambda file_name: file_urls[file_name],
@@ -430,7 +468,13 @@ class TestServer(UnitTestCase):
 				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
 				return_value=task,
 			) as create_for_script_file,
+			patch(
+				"atlas.metal_server.core.host_installation.ensure_server_certificate",
+				return_value=("ca", "certificate", "private-key"),
+			),
+			patch("atlas.metal_server.core.host_installation.SSHRunner") as ssh_runner,
 		):
+			ssh_runner.return_value.run_script.return_value = tls_result
 			MetalServer._install_metald(server)
 
 		arguments = create_for_script_file.call_args.kwargs
@@ -439,34 +483,97 @@ class TestServer(UnitTestCase):
 			arguments["environment"],
 			{
 				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
+				"METALD_SHA256": "metald-binary-sha256",
 				"WG_MESH_DOWNLOAD_URL": "https://atlas.test/files/atlas-wg-mesh-linux-amd64",
-				"METALD_AUTH_TOKEN_HASH": sha256(b"test-token").hexdigest(),
-				"LISTEN_ADDRESS": "0.0.0.0:9000",
+				"WG_MESH_SHA256": "wg-mesh-binary-sha256",
+				"LISTEN_ADDRESS": "10.0.0.7:9000",
+				"ATLAS_COMMON_NAME": "atlas.example.test",
+				"COORDINATION_LISTEN_ADDRESS": "[fdab:1::7]:9001",
 				"STORAGE_POOL_DEVICE": "/dev/md2",
 				"MESH_UPLINK_INTERFACE": "eno1.1878",
 			},
 		)
+		ssh_runner.return_value.run_script.assert_called_once_with(
+			"install-metal-tls.sh",
+			data={
+				"METAL_TLS_CA_CERTIFICATE": "ca",
+				"METAL_TLS_CERTIFICATE": "certificate",
+				"METAL_TLS_PRIVATE_KEY": "private-key",
+			},
+			timeout_seconds=1200,
+		)
 
-	def test_upgrade_metald_queues_the_upgrade_job(self) -> None:
+	def test_install_metald_listens_on_the_address_the_provider_chooses(self) -> None:
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.settings.server_provider_controller.metald_listen_address = Mock(return_value="203.0.113.7")
+		server.wireguard_ip_address = "fdab:1::7"
+		task = SimpleNamespace(result=SimpleNamespace(is_success=True))
+		tls_result = SimpleNamespace(is_success=True)
+
+		with (
+			patch(
+				"atlas.metal_server.core.host_installation.get_download_url",
+				return_value="https://atlas.test/files/metald-linux-amd64",
+			),
+			patch(
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file",
+				return_value=task,
+			) as create_for_script_file,
+			patch(
+				"atlas.metal_server.core.host_installation.ensure_server_certificate",
+				return_value=("ca", "certificate", "private-key"),
+			),
+			patch("atlas.metal_server.core.host_installation.SSHRunner") as ssh_runner,
+		):
+			ssh_runner.return_value.run_script.return_value = tls_result
+			MetalServer._install_metald(server)
+
+		self.assertEqual(
+			create_for_script_file.call_args.kwargs["environment"]["LISTEN_ADDRESS"], "203.0.113.7:9000"
+		)
+
+	def test_install_metald_rejects_an_address_that_is_not_ipv4(self) -> None:
+		server = self._server(status="Running")
+		server.settings.metald_binary_x86_64_file = "metald-file"
+		server.settings.server_provider_controller.metald_listen_address = Mock(return_value="0.0.0.0/0")
+
+		with (
+			patch("atlas.metal_server.core.host_installation.HostInstallation.install_tls_credentials"),
+			patch("atlas.metal_server.core.host_installation.frappe.throw", side_effect=ValueError),
+		):
+			with self.assertRaises(ValueError):
+				MetalServer._install_metald(server)
+
+	def test_tls_renewal_waits_for_a_running_metald_job(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
+		):
+			with self.assertRaises(ValueError):
+				MetalServer.enqueue_tls_certificate_renewal(server)
+
+		enqueue_doc.assert_not_called()
+
+	def test_renew_tls_certificate_rejects_a_server_that_is_not_provisioned(self) -> None:
 		server = self._server(status="Running")
 
 		with (
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
+			),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
 		):
-			MetalServer.upgrade_metald(server)
+			with self.assertRaises(ValueError):
+				MetalServer.renew_tls_certificate(server)
 
-		enqueue_doc.assert_called_once_with(
-			"Metal Server",
-			"node-test-00007",
-			"_upgrade_metald",
-			queue="long",
-			timeout=1200,
-			job_id="atlas||server||metald||node-test-00007",
-			deduplicate=True,
-			enqueue_after_commit=True,
-		)
+		enqueue_doc.assert_not_called()
 
 	def test_upgrade_metald_waits_for_a_running_metald_job(self) -> None:
 		"""Install and upgrade share one lock, so they never restart metald together."""
@@ -518,7 +625,7 @@ class TestServer(UnitTestCase):
 
 		create_for_script_file.assert_not_called()
 
-	def test_upgrade_metald_worker_sends_only_the_download_url(self) -> None:
+	def test_upgrade_metald_worker_sends_only_the_download_url_and_digest(self) -> None:
 		"""The upgrade replaces the binary. It does not rewrite host configuration."""
 		server = self._server(status="Running")
 		server.settings.metald_binary_x86_64_file = "metald-file"
@@ -540,7 +647,10 @@ class TestServer(UnitTestCase):
 		self.assertEqual(arguments["script_path"], "upgrade-metald.sh")
 		self.assertEqual(
 			arguments["environment"],
-			{"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64"},
+			{
+				"METALD_DOWNLOAD_URL": "https://atlas.test/files/metald-linux-amd64",
+				"METALD_SHA256": "metald-binary-sha256",
+			},
 		)
 
 	def test_upgrade_metald_reports_the_reason_the_script_printed(self) -> None:
@@ -589,7 +699,7 @@ class TestServer(UnitTestCase):
 		from atlas.metal_server.core.host_installation import throw_script_failure
 
 		with self.assertRaises(frappe.ValidationError) as raised:
-			throw_script_failure("Could not upgrade metald on server node-test-00007.", None)
+			throw_script_failure(f"Could not upgrade metald on server {SERVER_NAME}.", None)
 
 		self.assertIn("did not run", str(raised.exception))
 
@@ -601,9 +711,6 @@ class TestServer(UnitTestCase):
 
 		with (
 			patch(
-				"atlas.metal_server.core.host_installation.get_decrypted_password", return_value="test-token"
-			),
-			patch(
 				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
 			) as create_for_script_file,
 			self.assertRaises(frappe.ValidationError),
@@ -612,29 +719,29 @@ class TestServer(UnitTestCase):
 
 		create_for_script_file.assert_not_called()
 
-	def test_get_wireguard_ip_address_uses_the_node_number(self) -> None:
+	def test_get_wireguard_ip_address_uses_the_server_uuid(self) -> None:
 		server = self._server(status="Running")
 
-		self.assertEqual(MetalServer._get_wireguard_ip_address(server), "fdab:1::7")
+		self.assertEqual(MetalServer._get_wireguard_ip_address(server), SERVER_MESH_ADDRESS)
 
-	def test_get_wireguard_ip_address_writes_hexadecimal_fields(self) -> None:
-		"""An IPv6 field is hexadecimal, so node 16 is 10 and region 26 is 1a."""
+	def test_get_wireguard_ip_address_writes_the_region_in_hexadecimal(self) -> None:
+		"""An IPv6 field is hexadecimal, so region 26 is 1a."""
 		server = self._server(status="Running")
-		server.name = "node-test-00016"
 		server.settings.region_id = 26
 
-		self.assertEqual(MetalServer._get_wireguard_ip_address(server), "fdab:1a::10")
+		self.assertEqual(
+			MetalServer._get_wireguard_ip_address(server), "fdab:1a:e209:70ad:a183:dda2:a727:cd8b"
+		)
 
-	def test_get_wireguard_ip_address_carries_a_large_node_number(self) -> None:
-		"""One IPv6 field holds 65535, and the name series runs to 99999."""
+	def test_get_wireguard_ip_address_keeps_the_host_inside_96_bits(self) -> None:
+		"""Only the low 96 bits of the UUID fit, so the region field stays intact."""
 		server = self._server(status="Running")
-		for node_number, want in (
-			("01000", "fdab:1::3e8"),
-			("65535", "fdab:1::ffff"),
-			("99999", "fdab:1::1:869f"),
+		for name, want in (
+			("00000000-0000-0000-0000-000000000000", "fdab:1::"),
+			("ffffffff-ffff-ffff-ffff-ffffffffffff", "fdab:1:ffff:ffff:ffff:ffff:ffff:ffff"),
 		):
-			with self.subTest(node_number=node_number):
-				server.name = f"node-test-{node_number}"
+			with self.subTest(name=name):
+				server.name = name
 				self.assertEqual(MetalServer._get_wireguard_ip_address(server), want)
 
 	def test_get_wireguard_ip_address_rejects_an_oversized_region(self) -> None:
@@ -646,28 +753,6 @@ class TestServer(UnitTestCase):
 		):
 			with self.assertRaises(ValueError):
 				MetalServer._get_wireguard_ip_address(server)
-
-	def test_get_wireguard_ip_address_rejects_a_name_without_a_node_number(self) -> None:
-		server = self._server(status="Running")
-		server.name = "node-test-main"
-
-		with patch(
-			"atlas.metal_server.doctype.metal_server.metal_server.frappe.throw", side_effect=ValueError
-		):
-			with self.assertRaises(ValueError):
-				MetalServer._get_wireguard_ip_address(server)
-
-	def test_configure_wireguard_queues_the_job(self) -> None:
-		server = self._server(status="Running")
-
-		with (
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.enqueue_doc") as enqueue_doc,
-		):
-			MetalServer.configure_wireguard(server)
-
-		self.assertEqual(enqueue_doc.call_args.args[2], "_configure_wireguard")
 
 	def test_configure_wireguard_rejects_a_running_job(self) -> None:
 		server = self._server(status="Running")
@@ -703,13 +788,29 @@ class TestServer(UnitTestCase):
 		self.assertEqual(
 			arguments["environment"],
 			{
-				"WIREGUARD_ADDRESS": "fdab:1::7",
+				"WIREGUARD_ADDRESS": SERVER_MESH_ADDRESS,
 				"WIREGUARD_LISTEN_PORT": 51820,
+				"MESH_UPLINK_INTERFACE": "eno1.1878",
 			},
 		)
 		self.assertFalse(arguments["run_in_background"])
-		server.db_set.assert_any_call("wireguard_ip_address", "fdab:1::7")
+		server.db_set.assert_any_call("wireguard_ip_address", SERVER_MESH_ADDRESS)
 		server.db_set.assert_called_with("wireguard_public_key", "SGVsbG9XaXJlR3VhcmRQdWJsaWNLZXlIZXJlPQ=")
+
+	def test_configure_wireguard_job_needs_the_mesh_uplink(self) -> None:
+		server = self._server(status="Running")
+		server.private_network_interface = None
+
+		with (
+			patch("atlas.metal_server.core.host_installation.frappe.throw", side_effect=ValueError),
+			patch(
+				"atlas.metal_server.core.host_installation.SSHTask.create_for_script_file"
+			) as create_for_script_file,
+			self.assertRaises(ValueError),
+		):
+			MetalServer._configure_wireguard(server)
+
+		create_for_script_file.assert_not_called()
 
 	def test_configure_wireguard_job_rejects_output_without_a_public_key(self) -> None:
 		"""A successful run that prints no key must not store a marker as the key."""
@@ -847,6 +948,9 @@ class TestServer(UnitTestCase):
 		with (
 			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
 			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.db.exists", return_value=False
+			),
 		):
 			MetalServer.archive_server(server)
 
@@ -875,32 +979,55 @@ class TestServer(UnitTestCase):
 			with self.assertRaises(ValueError):
 				MetalServer.archive_server(server)
 
+	def test_archive_server_rejects_a_server_with_a_virtual_machine(self) -> None:
+		server = self._server(status="Running")
+
+		with (
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.only_for"),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.db.exists", return_value=True
+			) as exists,
+			self.assertRaises(frappe.ValidationError),
+		):
+			MetalServer.archive_server(server)
+
+		exists.assert_called_once_with("Virtual Machine", {"server": SERVER_NAME})
+		server.settings.server_provider_controller.delete_server.assert_not_called()
+
 	@staticmethod
 	def _server(*, status: str) -> SimpleNamespace:
 		server = SimpleNamespace(
 			doctype="Metal Server",
-			name="node-test-00007",
+			name=SERVER_NAME,
 			status=status,
 			provider_server_id="server-id",
 			provider_metadata="{}",
 			is_provisioning_completed=False,
-			setup_job_id="atlas||server-provision||node-test-00007",
-			wireguard_job_id="atlas||server-wireguard||node-test-00007",
-			metald_job_id="atlas||server||metald||node-test-00007",
+			setup_job_id=f"atlas||server-provision||{SERVER_NAME}",
+			wireguard_job_id=f"atlas||server-wireguard||{SERVER_NAME}",
+			metald_job_id=f"atlas||server||metald||{SERVER_NAME}",
 			wireguard_ip_address=None,
 			private_ipv4_address="10.0.0.7",
+			public_ipv4_address="203.0.113.7",
 			private_network_interface="eno1.1878",
+			ssh_host="192.0.2.7",
 			port=51820,
 			settings=SimpleNamespace(
 				server_provider_controller=SimpleNamespace(
 					delete_server=Mock(),
 					set_power_state=Mock(),
-					get_storage_pool_device=Mock(return_value="/dev/md2"),
+					storage_pool_device=Mock(return_value="/dev/md2"),
+					metald_listen_address=Mock(return_value="10.0.0.7"),
 				),
 				metald_binary_x86_64_file=None,
+				metald_binary_hash="metald-binary-sha256",
 				wg_mesh_binary_x86_64_file="wg-mesh-file",
+				wg_mesh_binary_hash="wg-mesh-binary-sha256",
+				wildcard_domain="example.test",
 				region_id=1,
 				private_network_mtu=1500,
+				use_public_ip_for_metald=False,
 			),
 			set=Mock(),
 			save=Mock(),
@@ -923,3 +1050,89 @@ class TestServer(UnitTestCase):
 		server._validate_power_action = MethodType(MetalServer._validate_power_action, server)
 		server._provider_server_id = MethodType(MetalServer._provider_server_id, server)
 		return server
+
+
+class TestExpiringCertificateRenewal(UnitTestCase):
+	def test_renewal_queues_each_server_inside_the_window(self) -> None:
+		server = Mock(metald_job_id=f"atlas||server||metald||{SERVER_NAME}")
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.is_certificate_authority_expiring",
+				return_value=False,
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.now_datetime",
+				return_value=datetime(2026, 9, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.add_days",
+				return_value=datetime(2026, 10, 20),
+			) as add_days,
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all",
+				return_value=[SERVER_NAME],
+			) as get_all,
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=False),
+		):
+			renew_expiring_tls_certificates()
+
+		server.enqueue_tls_certificate_renewal.assert_called_once_with()
+		add_days.assert_called_once_with(datetime(2026, 9, 20), CERTIFICATE_RENEWAL_WINDOW_DAYS)
+		self.assertEqual(
+			get_all.call_args.kwargs["filters"],
+			{
+				"status": "Running",
+				"is_provisioning_completed": 1,
+				"metald_tls_expires_on": ["<=", datetime(2026, 10, 20)],
+			},
+		)
+
+	def test_renewal_skips_a_server_with_a_running_metald_job(self) -> None:
+		server = Mock(metald_job_id=f"atlas||server||metald||{SERVER_NAME}")
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.is_certificate_authority_expiring",
+				return_value=False,
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.now_datetime",
+				return_value=datetime(2026, 9, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.add_days",
+				return_value=datetime(2026, 10, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all",
+				return_value=[SERVER_NAME],
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.is_job_enqueued", return_value=True),
+		):
+			renew_expiring_tls_certificates()
+
+		server.enqueue_tls_certificate_renewal.assert_not_called()
+
+	def test_renewal_reports_an_expiring_certificate_authority(self) -> None:
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.is_certificate_authority_expiring",
+				return_value=True,
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.now_datetime",
+				return_value=datetime(2026, 9, 20),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server.metal_server.add_days",
+				return_value=datetime(2026, 10, 20),
+			),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.get_all", return_value=[]),
+			patch("atlas.metal_server.doctype.metal_server.metal_server.frappe.log_error") as log_error,
+		):
+			renew_expiring_tls_certificates()
+
+		log_error.assert_called_once()

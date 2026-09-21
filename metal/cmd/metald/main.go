@@ -9,13 +9,16 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +32,7 @@ import (
 	"github.com/frappe/atlas/metal/internal/reconciler"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
 const (
@@ -113,19 +116,18 @@ func listen(addr string) (net.Listener, error) {
 	return net.Listen("tcp", addr)
 }
 
-// transferListenAddress derives the migration transfer address from the API
-// listen address, keeping its host but using the transfer port. A unix socket
-// API address falls back to every interface.
-func transferListenAddress(apiAddress string, transferPort int) string {
-	port := fmt.Sprintf("%d", transferPort)
-	if strings.HasPrefix(apiAddress, "unix:") {
-		return ":" + port
-	}
-	host, _, err := net.SplitHostPort(apiAddress)
+// transferListenAddress keeps the coordination host and replaces its port. The
+// snapshot server binds one node address, so a wildcard host is rejected.
+func transferListenAddress(coordinationAddress string, transferPort int) (string, error) {
+	host, _, err := net.SplitHostPort(coordinationAddress)
 	if err != nil {
-		return ":" + port
+		return "", fmt.Errorf("parse metald.coordination_listen %q: %w", coordinationAddress, err)
 	}
-	return net.JoinHostPort(host, port)
+	address, err := netip.ParseAddr(host)
+	if err != nil || address.IsUnspecified() {
+		return "", fmt.Errorf("metald.coordination_listen needs a node IP address, not %q", coordinationAddress)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(transferPort)), nil
 }
 
 func makeDirs(options options) error {
@@ -208,12 +210,16 @@ func adoptConsoles(
 }
 
 func serve(options options, logger *slog.Logger) (serveError error) {
-	if options.authTokenHash == "" {
-		return fmt.Errorf("metald.auth_token_hash is required")
+	tlsConfigurations, err := loadTLS(options.tls)
+	if err != nil {
+		return err
+	}
+	transferAddress, err := transferListenAddress(options.coordinationListen, options.migration.transferPort)
+	if err != nil {
+		return err
 	}
 
 	// Connect required host services.
-	var err error
 	var mesh *network.Mesh
 	if options.mesh.enabled {
 		mesh, err = connectMesh(options)
@@ -310,7 +316,7 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconciler.ImageConfig{Logger: logger},
 	)
 	var migrationReconciler *reconciler.MigrationReconciler
-	var migrationManager *vmmigration.VMMigration
+	var migrationManager *migration.Manager
 	notifyReconcilers := func() {
 		virtualMachineReconciler.Wake()
 		imageReconciler.Wake()
@@ -318,11 +324,11 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 			migrationReconciler.Wake()
 		}
 	}
-	migrationReservations := func(ctx context.Context) ([]vmmigration.TargetReservation, error) {
+	migrationReservations := func(ctx context.Context) ([]migration.DestinationReservation, error) {
 		if migrationManager == nil {
 			return nil, nil
 		}
-		return migrationManager.TargetReservations(ctx)
+		return migrationManager.DestinationReservations(ctx)
 	}
 	hostService, err := host.NewService(host.Dependencies{
 		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
@@ -332,22 +338,27 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
-	migrationCapacity := func(ctx context.Context) (vmmigration.AvailableCapacity, error) {
+	migrationCapacity := func(ctx context.Context) (migration.AvailableCapacity, error) {
 		capacity, err := hostService.Capacity(ctx)
 		if err != nil {
-			return vmmigration.AvailableCapacity{}, err
+			return migration.AvailableCapacity{}, err
 		}
-		return vmmigration.AvailableCapacity{
+		return migration.AvailableCapacity{
 			MemoryMiB:  capacity.AvailableMemoryMiB,
 			StorageMiB: capacity.AvailableStorageMiB,
 		}, nil
 	}
-	migrationManager, err = vmmigration.NewVMMigration(
-		virtualMachineManager,
-		vmmigration.NewSourceClient(0, options.migration.transferPort),
-		storage.NewMigrationTransfer(stores.Pool),
+	migrationManager, err = migration.NewManager(
+		vm.NewMigrationHost(virtualMachineManager),
+		migration.NewSourceClient(0, tlsConfigurations.client),
+		storage.NewMigrationTransfer(stores.Pool, storage.MigrationTLSConfig{
+			CAFile: options.tls.caFile, CertificateFile: options.tls.certificateFile,
+			PrivateKeyFile: options.tls.privateKeyFile,
+			ListenAddress:  transferAddress,
+			TransferPort:   options.migration.transferPort,
+		}),
 		migrationCapacity,
-		vmmigration.MigrationSettings{FinalDeltaMiB: options.migration.finalDeltaMiB},
+		options.migration.finalDeltaMiB,
 		logger,
 	)
 	if err != nil {
@@ -362,12 +373,11 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		reconciler.MigrationConfig{Logger: logger},
 	)
 	daemon.OwnMigrations(migrationManager)
-	migrationListener, err := vmmigration.Listen(transferListenAddress(options.listen, options.migration.transferPort), migrationManager, logger)
+	coordinationServer, err := api.NewCoordination(logger, migrationManager)
 	if err != nil {
-		return fmt.Errorf("start migration transfer listener: %w", err)
+		return fmt.Errorf("configure coordination API: %w", err)
 	}
-	daemon.OwnMigrationListener(migrationListener)
-	server, err := api.New(api.Config{AuthTokenHash: options.authTokenHash, Logger: logger}, api.Dependencies{
+	server, err := api.New(api.Config{Logger: logger}, api.Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		MigrationManager:      migrationManager,
 		SnapshotStore:         stores.Snapshots,
@@ -384,13 +394,20 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", options.listen, err)
 	}
+	listener = tls.NewListener(listener, tlsConfigurations.api)
+	coordinationListener, err := listen(options.coordinationListen)
+	if err != nil {
+		return fmt.Errorf("listen for Metal coordination on %s: %w", options.coordinationListen, err)
+	}
+	coordinationListener = tls.NewListener(coordinationListener, tlsConfigurations.coordination)
 	logger.Info("metald listening", "version", version, "address", options.listen)
 	server.Listener = listener
+	coordinationServer.Listener = coordinationListener
 	daemon.StartWorker(virtualMachineReconciler.Run)
 	daemon.StartWorker(imageReconciler.Run)
 	daemon.StartWorker(migrationReconciler.Run)
 	if trafficMonitor != nil {
 		daemon.StartTrafficListener(trafficMonitor.Events(), virtualMachineManager.RestoreAfterTraffic)
 	}
-	return daemon.Serve(server)
+	return daemon.Serve(server, coordinationServer)
 }

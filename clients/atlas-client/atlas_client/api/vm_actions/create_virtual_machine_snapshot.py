@@ -84,6 +84,12 @@ def sync_detailed(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
+    Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
+    VM value. The request needs `memory_snapshot`.
+
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
+
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.
 
@@ -130,6 +136,12 @@ def sync(
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
+    Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
+    VM value. The request needs `memory_snapshot`.
+
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
+
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.
 
@@ -170,6 +182,12 @@ async def asyncio_detailed(
     If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
+
+    Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
+    VM value. The request needs `memory_snapshot`.
+
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
 
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.
@@ -216,6 +234,12 @@ async def asyncio(
     If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only
     tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant
     0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
+
+    Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source
+    VM value. The request needs `memory_snapshot`.
+
+    Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always
+    protected.
 
     Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and
     `?tag=purpose:pilot`.

@@ -75,6 +75,8 @@ def sync_detailed(
      Starts VM termination and detaches its public IP address without releasing the tenant reservation.
     Poll the VM until cleanup removes the record and this route returns 404.
 
+    A VM with `is_termination_protected` returns `400`. Clear the protection first.
+
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
@@ -112,6 +114,8 @@ def sync(
      Starts VM termination and detaches its public IP address without releasing the tenant reservation.
     Poll the VM until cleanup removes the record and this route returns 404.
 
+    A VM with `is_termination_protected` returns `400`. Clear the protection first.
+
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
@@ -143,6 +147,8 @@ async def asyncio_detailed(
 
      Starts VM termination and detaches its public IP address without releasing the tenant reservation.
     Poll the VM until cleanup removes the record and this route returns 404.
+
+    A VM with `is_termination_protected` returns `400`. Clear the protection first.
 
     Args:
         virtual_machine_id (str):
@@ -180,6 +186,8 @@ async def asyncio(
 
      Starts VM termination and detaches its public IP address without releasing the tenant reservation.
     Poll the VM until cleanup removes the record and this route returns 404.
+
+    A VM with `is_termination_protected` returns `400`. Clear the protection first.
 
     Args:
         virtual_machine_id (str):

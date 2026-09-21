@@ -33,7 +33,7 @@ From this directory, run `make bpf` and `make build`. Run Go tests from `cli/`.
 
 ## Documentation
 
-Read [`README.md`](README.md) first. Then read the relevant file in [`docs/`](docs/).
+Read the [WG Mesh overview](./) first. Then read the relevant file in [`docs/`](docs/).
 
 ## Scope
 

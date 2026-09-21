@@ -230,9 +230,13 @@ Snapshot creation has no request body. It returns the staging identity and exact
 }
 ```
 
-The upload request supplies consecutive multipart URLs. Metal does not return these URLs.
+The upload request supplies consecutive multipart URLs and the multipart `upload_id` each artifact belongs to. Metal does not return these URLs. Metal stores the parts it has sent against that upload ID, so an upload that restarts sends only the parts the object store does not hold, and a replaced multipart upload starts again.
 
-The snapshot status reports `pending`, `uploading`, `completing`, `completed`, or `failed`. A completed response contains part numbers, ETags, sizes, and SHA-256 values.
+The part count is an upper bound. Metal stores each artifact compressed with zstd, so it uses as many of the signed parts as the compressed artifact needs and leaves the rest unused. Atlas signs one spare part beyond the uncompressed size.
+
+The snapshot status reports `pending`, `uploading`, `completing`, `completed`, or `failed`. A completed response contains part numbers, ETags, SHA-256 values, `size_bytes`, and `stored_size_bytes`. `size_bytes` is the uncompressed image, which is the size a VM disk must hold. `stored_size_bytes` is what the object store holds. The SHA-256 covers the uncompressed image, so one image keeps one digest whether it is stored raw or compressed.
+
+A consumer detects the format from the content rather than the object name. A zstd artifact begins with the frame magic `28 B5 2F FD` and a raw artifact does not, so Atlas can serve either form.
 
 ## Synchronization
 

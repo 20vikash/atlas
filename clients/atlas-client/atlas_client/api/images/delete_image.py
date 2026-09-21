@@ -81,6 +81,8 @@ def sync_detailed(
     Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status
     and answers again.
 
+    An image with `is_termination_protected` returns `400`. Clear the protection first.
+
     Args:
         image_id (str):
         x_tenant_id (int):
@@ -120,6 +122,8 @@ def sync(
     Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status
     and answers again.
 
+    An image with `is_termination_protected` returns `400`. Clear the protection first.
+
     Args:
         image_id (str):
         x_tenant_id (int):
@@ -153,6 +157,8 @@ async def asyncio_detailed(
     artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes
     Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status
     and answers again.
+
+    An image with `is_termination_protected` returns `400`. Clear the protection first.
 
     Args:
         image_id (str):
@@ -192,6 +198,8 @@ async def asyncio(
     artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes
     Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status
     and answers again.
+
+    An image with `is_termination_protected` returns `400`. Clear the protection first.
 
     Args:
         image_id (str):

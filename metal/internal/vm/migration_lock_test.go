@@ -8,24 +8,24 @@ import (
 
 // fakeMigrationGuard answers the migration lock questions in a test.
 type fakeMigrationGuard struct {
-	sourceLocked   map[string]bool
-	targetReserved map[string]bool
+	sourceLocked        map[string]bool
+	destinationReserved map[string]bool
 }
 
 func (g *fakeMigrationGuard) IsSourceLocked(virtualMachineID string) bool {
 	return g.sourceLocked[virtualMachineID]
 }
 
-func (g *fakeMigrationGuard) IsTargetReserved(virtualMachineID string) bool {
-	return g.targetReserved[virtualMachineID]
+func (g *fakeMigrationGuard) IsDestinationReserved(virtualMachineID string) bool {
+	return g.destinationReserved[virtualMachineID]
 }
 
 // lockSource installs a guard that reports one VM as a migration source.
 func lockSource(t *testing.T, manager *Manager, virtualMachineID string) *fakeMigrationGuard {
 	t.Helper()
 	guard := &fakeMigrationGuard{
-		sourceLocked:   map[string]bool{virtualMachineID: true},
-		targetReserved: map[string]bool{},
+		sourceLocked:        map[string]bool{virtualMachineID: true},
+		destinationReserved: map[string]bool{},
 	}
 	manager.SetMigrationGuard(guard)
 	return guard

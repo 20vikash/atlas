@@ -33,9 +33,9 @@ Metal keeps virtual machine state on disk. After a restart, it reads the state f
         ├── status.json             versioned observed state and cleanup progress
         ├── jailer.env              JAILER_ARGS for metal-vm@<id>.service
         ├── migration/              present only while a migration holds this VM
-        │   ├── target.json         target reservation and state
+        │   ├── destination.json         destination reservation and state
         │   ├── source.json         source lock
-        │   └── token               the target-to-source token, mode 0600
+        │   └── token               the destination-to-source token, mode 0600
         ├── saved-state/            one resumable state for automatic idle shutdown
         │   ├── state
         │   ├── memory
@@ -61,12 +61,14 @@ The host veth is `vh-<user-id>`. The namespace veth is `vg-<user-id>`. The TAP n
 
 Automatic idle shutdown uses this local cycle:
 
-```text
-idle timeout                     IP packet or configuration change
-running -- save state --> stopped -- restore state --> running
-                            |
-                            +-> Firecracker: stopped, MainPID 0
-                            +-> saved state and vms/<id>: kept
+```mermaid
+stateDiagram-v2
+    running --> stopped: idle timeout saves state
+    stopped --> running: IP packet or configuration change
+    note right of stopped
+        Firecracker process is stopped
+        Saved state and VM disk remain
+    end note
 ```
 
 The saved state is under `machines/<id>/saved-state/`. Metal writes it under `saved-state-pending` and publishes it with one atomic rename.

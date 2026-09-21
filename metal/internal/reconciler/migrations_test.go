@@ -9,30 +9,66 @@ import (
 )
 
 type recordingDriver struct {
-	ids     []string
-	listErr error
+	ids        []string
+	listErr    error
+	expiredIDs []string
 
-	mu   sync.Mutex
-	seen map[string]int
-	done chan string
+	mu      sync.Mutex
+	seen    map[string]int
+	expired map[string]int
+	done    chan string
 }
 
 func newRecordingDriver(ids ...string) *recordingDriver {
-	return &recordingDriver{ids: ids, seen: map[string]int{}, done: make(chan string, 16)}
+	return &recordingDriver{ids: ids, seen: map[string]int{}, expired: map[string]int{}, done: make(chan string, 16)}
 }
 
-func (driver *recordingDriver) ActiveTargetVirtualMachineIDs(context.Context) ([]string, error) {
+func (driver *recordingDriver) ActiveDestinationVirtualMachineIDs(context.Context) ([]string, error) {
 	driver.mu.Lock()
 	defer driver.mu.Unlock()
 	return driver.ids, driver.listErr
 }
 
-func (driver *recordingDriver) AdvanceTarget(_ context.Context, virtualMachineID string) error {
+func (driver *recordingDriver) AdvanceDestination(_ context.Context, virtualMachineID string) error {
 	driver.mu.Lock()
 	driver.seen[virtualMachineID]++
 	driver.mu.Unlock()
 	driver.done <- virtualMachineID
 	return nil
+}
+
+func (driver *recordingDriver) ExpiredSourceVirtualMachineIDs(context.Context) ([]string, error) {
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+	return driver.expiredIDs, nil
+}
+
+func (driver *recordingDriver) ExpireSource(_ context.Context, virtualMachineID string) error {
+	driver.mu.Lock()
+	driver.expired[virtualMachineID]++
+	driver.mu.Unlock()
+	driver.done <- virtualMachineID
+	return nil
+}
+
+func TestRunReleasesEveryExpiredSourceLock(t *testing.T) {
+	driver := newRecordingDriver()
+	driver.expiredIDs = []string{"vm-9"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go NewMigrationReconciler(driver, time.Hour, MigrationConfig{}).Run(ctx)
+
+	select {
+	case <-driver.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the reconciler did not release the expired source lock")
+	}
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+	if driver.expired["vm-9"] == 0 {
+		t.Fatalf("expired = %v", driver.expired)
+	}
 }
 
 func TestRunAdvancesEveryActiveMigration(t *testing.T) {

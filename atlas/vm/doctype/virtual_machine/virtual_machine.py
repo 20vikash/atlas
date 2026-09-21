@@ -46,6 +46,7 @@ class VirtualMachine(Document):
 		is_draft: DF.Check
 		is_privileged: DF.Check
 		is_terminating: DF.Check
+		is_termination_protected: DF.Check
 		memory_mib: DF.Int
 		metadata: DF.Code | None
 		server: DF.Link
@@ -88,11 +89,19 @@ class VirtualMachine(Document):
 
 	def on_trash(self) -> None:
 		"""Delete only after Metal confirms that the VM is absent."""
+		self.ensure_not_termination_protected()
 		VirtualMachineService(self).validate_deletion()
 		delete_tasks_for_target(self.doctype, self.name)
 		if frappe.db.exists("Virtual Machine State", self.name):
 			frappe.delete_doc(
 				"Virtual Machine State", self.name, ignore_permissions=True, delete_permanently=True
+			)
+		# Migration records link to the VM and must be deleted with it.
+		for migration in frappe.get_all(
+			"Virtual Machine Migration", filters={"virtual_machine": self.name}, pluck="name"
+		):
+			frappe.delete_doc(
+				"Virtual Machine Migration", migration, ignore_permissions=True, delete_permanently=True
 			)
 
 	@property
@@ -145,9 +154,8 @@ class VirtualMachine(Document):
 
 	@property
 	def public_ipv4(self) -> str | None:
-		"""Return the attached public IPv4 address, when there is one."""
-		information = self.get_metal_vm_info()
-		return information.desired.network.public_ipv4 if information else None
+		"""Return the public IPv4 address assigned in Atlas."""
+		return frappe.db.get_value("Metal Server IP Address", {"virtual_machine": self.name}, "address")
 
 	@property
 	def ssh_host(self) -> str:
@@ -239,17 +247,34 @@ class VirtualMachine(Document):
 	def terminate(self) -> None:
 		"""Ask Metal to remove this VM and release its IP address."""
 		self.check_permission("write")
+		self.ensure_not_termination_protected()
 		self.ensure_not_migrating()
 		VirtualMachineService(self).terminate()
 
 	@frappe.whitelist(methods=["POST"])
-	def migrate(self, target_server: str | None = None) -> str:
-		"""Move this VM to another host. Atlas selects the host when target_server
-		is empty. Return the migration ID."""
+	def set_termination_protection(self, is_protected: bool | int | str) -> None:
+		"""Set or clear termination protection."""
+		self.check_permission("write")
+		if self.is_terminating:
+			frappe.throw(_("Virtual Machine {0} is terminating.").format(self.name), exc=AtlasUserError)
+
+		self.is_termination_protected = strict_bool(is_protected, "is_protected")
+		self.save()
+
+	def ensure_not_termination_protected(self) -> None:
+		"""Reject removal while termination protection holds this VM."""
+		if self.is_termination_protected:
+			frappe.throw(
+				_("Virtual Machine {0} is termination protected.").format(self.name), exc=AtlasUserError
+			)
+
+	@frappe.whitelist(methods=["POST"])
+	def migrate(self, destination_metal_server: str | None = None) -> str:
+		"""Schedule this VM for migration, with an optional destination Metal Server."""
 		self.check_permission("write")
 		from atlas.vm.core.vm_migration import MigrationService
 
-		return MigrationService.create(self, target_server=target_server or None)
+		return MigrationService.create(self, destination_metal_server=destination_metal_server or None)
 
 	def ensure_not_migrating(self) -> None:
 		"""Reject a mutable action while a migration owns this VM."""
@@ -263,9 +288,12 @@ class VirtualMachine(Document):
 		image_type: str = "machine",
 		cache_image: bool = False,
 		memory_snapshot: bool = False,
+		memory_snapshot_configuration: dict[str, int] | None = None,
+		is_termination_protected: bool = False,
 		tags: dict[str, str] | None = None,
 	) -> str:
-		"""Queue an image transfer from this VM. A System image needs tenant 0."""
+		"""Queue an image transfer from this VM. A System image needs tenant 0. An absent
+		memory snapshot value keeps this VM shape."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		if self.is_draft:
@@ -291,6 +319,9 @@ class VirtualMachine(Document):
 				exc=AtlasUserError,
 			)
 
+		if memory_snapshot_configuration and not memory_snapshot:
+			frappe.throw(_("Memory snapshot configuration needs a memory snapshot."), exc=AtlasUserError)
+
 		from atlas.vm.core.vm_image_transfer import VirtualMachineImageTransferService
 
 		return VirtualMachineImageTransferService().create_from_virtual_machine(
@@ -299,6 +330,8 @@ class VirtualMachine(Document):
 			image_type=image_type,
 			cache_image=cache_image,
 			memory_snapshot=memory_snapshot,
+			memory_snapshot_configuration=memory_snapshot_configuration,
+			is_termination_protected=strict_bool(is_termination_protected, "is_termination_protected"),
 			tags=tags,
 		)
 
@@ -527,3 +560,15 @@ def reconcile_terminating_virtual_machines() -> None:
 def reconcile_terminating_virtual_machine(name: str) -> None:
 	"""Delete a terminated VM once Metal confirms it is absent."""
 	reconciliation.reconcile_terminating(name)
+
+
+def on_doctype_update() -> None:
+	"""Index each aggregate that placement reads, so none of them scans the fleet."""
+	frappe.db.add_index("Virtual Machine", ["server", "creation", "is_draft"], "placement_vm_usage")
+	frappe.db.add_index("Virtual Machine", ["creation", "server"], "placement_rate")
+	frappe.db.add_index("Virtual Machine", ["tenant_id", "server"], "placement_tenant_hosts")
+	frappe.db.add_index(
+		"Virtual Machine",
+		["server", "sleep_after_idle_seconds", "memory_mib"],
+		"placement_sleepy_memory",
+	)

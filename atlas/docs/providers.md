@@ -15,9 +15,10 @@ The provider contract includes these operations:
 - Validate settings and credentials.
 - Set up named provider infrastructure.
 - Return server sizes and images.
-- Ensure one provider host by its discovery key.
+- Ensure one provider host by its Atlas name.
 - Prepare provider resources before Secure Shell access.
 - Configure the provider network after Secure Shell access.
+- Return the address that metald can bind.
 - Apply one explicit power action.
 - Delete one provider host safely.
 - Return the storage pool device.
@@ -38,7 +39,7 @@ Creation uses `ServerCreateRequest` and returns `ProviderServer`. Catalog operat
 7. Add the provider option and fields to Atlas Settings.
 8. Update this guide and the related specification.
 
-Use the persisted `ServerCreateRequest.discovery_key` for provider discovery. It is unique to one Metal Server record across Atlas sites. Keep the provider host ID in `provider_server_id`; the Metal Server name is only a label. The provider host is created only after Atlas commits the Pending Metal Server record. A retry uses the stored key to find the same host.
+Use `ServerCreateRequest.name` for provider identity. A Metal Server is named with a UUID, which is unique across Atlas sites. Keep the provider host ID in `provider_server_id`. The provider host is created only after Atlas commits the Pending Metal Server record. A retry uses the same name to find the same host.
 
 ## Shared provider behavior
 
@@ -83,20 +84,38 @@ An Atlas host gets a second network interface in the Atlas subnet. That interfac
 
 AWS gives no stable guest device name, so `aws/configure-private-network.sh` finds the interface by its MAC address and renames it to `atlas-mesh`. metald uses that name as its mesh uplink.
 
+The cloud-init network hotplug handler renames an attached interface back to its default name. Atlas launches each instance with user data that limits cloud-init network updates to the first boot, so the handler does not run.
+
 The script sends the IPv4 multicast range through `atlas-mesh`. It writes persistent configuration for Netplan or `systemd-networkd`.
 
 Atlas stores the mesh network interface ID before it starts the attachment. AWS deletion uses only this stored ID. It verifies the interface attachment before it deletes the interface or the instance.
 
 ### Network exposure
 
-The Atlas security group opens Secure Shell, the Metal API port, and the WireGuard port to the internet, because Atlas reaches a host through its public address. The Metal API uses a bearer token. Every other port is open only inside the Atlas private network.
+The Atlas security group allows all inbound traffic during development. Scaleway hosts have the same exposure because Atlas does not configure a Scaleway firewall.
 
 ### Instance types
 
-Atlas needs hardware virtualization, local instance storage, and two network interfaces. The catalog rejects an instance type that does not provide them.
+Atlas needs hardware virtualization and two network interfaces. The catalog rejects instance types that have local instance storage.
 
 A bare metal type provides the processor extensions. A virtual type must report `nested-virtualization` in `ProcessorInfo.SupportedFeatures`.
 
 AWS keeps nested virtualization off until an instance asks for it, so Atlas launches a virtual instance with `CpuOptions.NestedVirtualization` set to `enabled`. A bare metal instance rejects that option, so Atlas does not send it.
 
 `DescribeInstanceTypes` reports no price, so the catalog prices stay empty.
+
+### Storage volumes
+
+Atlas creates a 64 GiB `gp3` root volume and a 500 GiB `gp3` storage volume. Both volumes are part of the instance launch request.
+
+The image metadata supplies the root device name. AWS does not give stable NVMe device names, so the provider sends the `/dev/disk/by-id` path of the storage volume. The path holds the volume ID without its dash.
+
+Both volumes have `DeleteOnTermination` enabled. A stop or a hardware change does not remove the storage volume, but instance deletion removes it.
+
+### Public IPv4 addresses
+
+AWS translates each public address to a secondary private address on the primary network interface. Atlas stores this private address as the host address.
+
+Metal maps the host address to the virtual machine. Detach uses the stored host address, so a retry can remove the secondary address after disassociation.
+
+Atlas does not use the primary private address for a virtual machine. This rule keeps the host public address separate from virtual machine traffic.

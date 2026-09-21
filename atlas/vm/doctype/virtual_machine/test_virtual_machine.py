@@ -1,14 +1,13 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import frappe
-import requests
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core import vm_service as virtual_machine_service_module
-from atlas.vm.core.metal_client import MetalClient, MetalClientError
+from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import FirewallConfiguration, FirewallRule, VirtualMachineCreateRequest
 from atlas.vm.core.vm_service import VirtualMachineService
@@ -63,21 +62,6 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 		"error": None,
 	},
 }
-
-
-COMPUTE_REQUEST = {
-	"cpu_millicores": 2000,
-	"memory_mib": 2048,
-	"sleep_after_idle_seconds": 1800,
-}
-
-
-def metal_virtual_machine_response(status_code: int = 200) -> SimpleNamespace:
-	return SimpleNamespace(
-		status_code=status_code,
-		content=b"{}",
-		json=lambda: METAL_VIRTUAL_MACHINE_RESPONSE,
-	)
 
 
 class TestVirtualMachineRequest(UnitTestCase):
@@ -339,6 +323,21 @@ class TestVirtualMachineDocument(UnitTestCase):
 
 
 class TestVirtualMachineService(UnitTestCase):
+	def test_create_request_waits_for_the_provider_host_address(self) -> None:
+		request = VirtualMachineCreateRequest("machine-image", 2000, 2048, 10240, 7)
+		image = SimpleNamespace(get_metal_image_request=Mock(return_value={}))
+		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
+		server_ip_address = SimpleNamespace(host_address=None)
+
+		with patch.object(
+			virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa::1"
+		):
+			metal_request = VirtualMachineService(virtual_machine).get_metal_request(
+				request, image, server_ip_address
+			)
+
+		self.assertEqual(metal_request["network"]["public_ipv4"], "")
+
 	def test_machine_image_uses_its_own_artifacts(self) -> None:
 		request = VirtualMachineCreateRequest("machine-image", 2000, 2048, 10240, 7)
 		image_request = {
@@ -393,279 +392,19 @@ class TestVirtualMachineService(UnitTestCase):
 		)
 
 
-class TestMetalClient(UnitTestCase):
-	@patch("atlas.vm.core.metal_client.get_decrypted_password", return_value="token")
-	def test_client_uses_the_validated_public_ipv4_address(self, _get_password: Mock) -> None:
-		client = MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="203.0.113.8"))
+class TestVirtualMachineVirtualFields(UnitTestCase):
+	def test_the_public_address_comes_from_the_atlas_record(self) -> None:
+		virtual_machine = VirtualMachine.__new__(VirtualMachine)
+		virtual_machine.name = "vm-0000001"
 
-		self.assertEqual(client.base_url, "http://203.0.113.8:9000")
+		with patch(
+			"atlas.vm.doctype.virtual_machine.virtual_machine.frappe.db.get_value",
+			return_value="203.0.113.10",
+		) as get_value:
+			self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
 
-	@patch("atlas.vm.core.metal_client.get_decrypted_password")
-	def test_client_rejects_an_invalid_public_ipv4_address(self, get_password: Mock) -> None:
-		with self.assertRaisesRegex(MetalClientError, "invalid public IPv4 address"):
-			MetalClient(SimpleNamespace(name="Server-1", public_ipv4_address="not-an-address"))
-
-		get_password.assert_not_called()
-
-	def test_error_keeps_contract_fields(self) -> None:
-		error = MetalClientError("busy", status=503, code="host_busy", retryable=True, uncertain=True)
-
-		self.assertEqual(error.status, 503)
-		self.assertEqual(error.code, "host_busy")
-		self.assertTrue(error.retryable)
-		self.assertTrue(error.uncertain)
-		self.assertFalse(error.is_not_found)
-
-	def test_put_uses_the_atlas_vm_name(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = metal_virtual_machine_response(202)
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.put_virtual_machine("VM-00001", {"cpu_millicores": 1000})
-
-		self.assertEqual(request.call_args.args[:2], ("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001"))
-
-	def test_client_uses_versioned_mutation_paths(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = metal_virtual_machine_response(202)
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.set_virtual_machine_power_state("VM-00001", "running")
-			client.request_virtual_machine_restart("VM-00001")
-			client.set_virtual_machine_disk("VM-00001", {"size_mib": 2048, "throughput_mibps": 0, "iops": 0})
-			client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST)
-			client.delete_virtual_machine("VM-00001")
-
-		paths = [call.args[1] for call in request.call_args_list]
-		self.assertEqual(
-			paths,
-			[
-				"http://10.0.0.2:9000/v1/vms/VM-00001/power",
-				"http://10.0.0.2:9000/v1/vms/VM-00001/restart",
-				"http://10.0.0.2:9000/v1/vms/VM-00001/disk",
-				"http://10.0.0.2:9000/v1/vms/VM-00001/compute",
-				"http://10.0.0.2:9000/v1/vms/VM-00001",
-			],
-		)
-		self.assertEqual(
-			request.call_args_list[2].kwargs["json"],
-			{"size_mib": 2048, "throughput_mibps": 0, "iops": 0},
-		)
-		self.assertEqual(request.call_args_list[3].kwargs["json"], COMPUTE_REQUEST)
-
-	def test_console_connection_builds_websocket_url(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-
-		connection = client.get_console_connection("VM-00001")
-		ssh_connection = client.get_console_connection("VM-00001", "ssh")
-
-		self.assertEqual(connection["url"], "ws://10.0.0.2:9000/v1/vms/VM-00001/console?mode=tty")
-		self.assertEqual(ssh_connection["url"], "ws://10.0.0.2:9000/v1/vms/VM-00001/console?mode=ssh")
-		self.assertEqual(connection["authorization"], "Bearer token")
-
-	def test_replace_ssh_keys_uses_vm_subresource(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = metal_virtual_machine_response()
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.replace_virtual_machine_ssh_keys("VM-00001", ["ssh-ed25519 AAAA"])
-
-		self.assertEqual(
-			request.call_args.args[:2],
-			("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001/ssh-keys"),
-		)
-		self.assertEqual(request.call_args.kwargs["json"], {"ssh_keys": ["ssh-ed25519 AAAA"]})
-
-	def test_replace_metadata_uses_vm_subresource(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = metal_virtual_machine_response()
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.replace_virtual_machine_metadata("VM-00001", {"env": "prod"})
-
-		self.assertEqual(
-			request.call_args.args[:2],
-			("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001/metadata"),
-		)
-		self.assertEqual(request.call_args.kwargs["json"], {"metadata": {"env": "prod"}})
-
-	def test_set_disk_uses_vm_subresource(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = metal_virtual_machine_response(202)
-		disk = {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000}
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.set_virtual_machine_disk("VM-00001", disk)
-
-		self.assertEqual(
-			request.call_args.args[:2],
-			("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001/disk"),
-		)
-		self.assertEqual(request.call_args.kwargs["json"], disk)
-
-	def test_set_network_uses_vm_subresource(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = metal_virtual_machine_response(202)
-		network = {
-			"egress": "uplink",
-			"public_ipv4": "203.0.113.10",
-			"wireguard_mesh_ipv6": "fdaa:1::1",
-			"private_network_throughput_mibps": 100,
-			"public_network_throughput_mibps": 50,
-		}
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			client.set_virtual_machine_network("VM-00001", network)
-
-		self.assertEqual(
-			request.call_args.args[:2],
-			("PUT", "http://10.0.0.2:9000/v1/vms/VM-00001/network"),
-		)
-		self.assertEqual(request.call_args.kwargs["json"], network)
-
-	def test_snapshot_calls_use_unified_image_paths(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		responses = [
-			SimpleNamespace(status_code=201, content=b"{}", json=lambda: {}),
-			SimpleNamespace(status_code=202, content=b""),
-			SimpleNamespace(
-				status_code=200, content=b'{"state": "uploading"}', json=lambda: {"state": "uploading"}
-			),
-			SimpleNamespace(status_code=204, content=b""),
-		]
-
-		with patch("atlas.vm.core.metal_client.requests.request", side_effect=responses) as request:
-			client.create_snapshot("VM-00001")
-			client.start_snapshot_upload("image-1", {"rootfs": {"parts": []}, "kernel": {"parts": []}})
-			client.get_snapshot("image-1")
-			client.delete_snapshot("image-1")
-
-		self.assertEqual(
-			[call.args[:2] for call in request.call_args_list],
-			[
-				("POST", "http://10.0.0.2:9000/v1/vms/VM-00001/snapshots"),
-				("POST", "http://10.0.0.2:9000/v1/snapshots/image-1/upload"),
-				("GET", "http://10.0.0.2:9000/v1/snapshots/image-1"),
-				("DELETE", "http://10.0.0.2:9000/v1/snapshots/image-1"),
-			],
-		)
-		self.assertEqual(request.call_args_list[0].kwargs["timeout"], client.snapshot_timeout_seconds)
-		self.assertEqual(request.call_args_list[1].kwargs["timeout"], client.snapshot_timeout_seconds)
-
-	def test_sync_sends_wireguard_peers_images_and_privileged_addresses(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {"Authorization": "Bearer token"}
-		response = SimpleNamespace(status_code=200, content=b"{}", json=lambda: {"capacity": {}})
-
-		with patch("atlas.vm.core.metal_client.requests.request", return_value=response) as request:
-			result = client.sync([{"node": "node-1"}], [{"ref": "sha256:image"}], ["fdaa:1::1"])
-
-		self.assertEqual(result, {"capacity": {}})
-		self.assertEqual(request.call_args.args[:2], ("POST", "http://10.0.0.2:9000/v1/sync"))
-		self.assertEqual(
-			request.call_args.kwargs["json"],
-			{
-				"wireguard_peers": [{"node": "node-1"}],
-				"images": [{"ref": "sha256:image"}],
-				"privileged_vm_addresses": ["fdaa:1::1"],
-			},
-		)
-
-	def test_snapshot_transport_error_is_uncertain(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {}
-
-		with (
-			patch(
-				"atlas.vm.core.metal_client.requests.request", side_effect=requests.ConnectionError("lost")
-			),
-			self.assertRaises(MetalClientError) as raised,
-		):
-			client.start_snapshot_upload("image-1", {})
-
-		self.assertTrue(raised.exception.uncertain)
-
-	def test_transport_error_marks_virtual_machine_writes_as_uncertain(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {}
-
-		write_operations = {
-			"create": lambda: client.put_virtual_machine("VM-00001", {}),
-			"restart": lambda: client.request_virtual_machine_restart("VM-00001"),
-			"delete": lambda: client.delete_virtual_machine("VM-00001"),
-			"power": lambda: client.set_virtual_machine_power_state("VM-00001", "running"),
-			"ssh_keys": lambda: client.replace_virtual_machine_ssh_keys("VM-00001", []),
-			"metadata": lambda: client.replace_virtual_machine_metadata("VM-00001", {}),
-			"network": lambda: client.set_virtual_machine_network("VM-00001", {}),
-			"disk": lambda: client.set_virtual_machine_disk("VM-00001", {}),
-			"compute": lambda: client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST),
-			"sync": lambda: client.sync([], [], []),
-		}
-
-		for operation_name, write_operation in write_operations.items():
-			with (
-				self.subTest(operation=operation_name),
-				patch(
-					"atlas.vm.core.metal_client.requests.request",
-					side_effect=requests.ConnectionError("lost"),
-				),
-				self.assertRaises(MetalClientError) as raised,
-			):
-				write_operation()
-
-			self.assertTrue(raised.exception.uncertain)
-
-	def test_error_uses_the_metal_retryable_value(self) -> None:
-		client = MetalClient.__new__(MetalClient)
-		client.base_url = "http://10.0.0.2:9000"
-		client.headers = {}
-		response = SimpleNamespace(
-			status_code=500,
-			content=b"{}",
-			json=lambda: {"error": {"code": "internal_error", "message": "failed", "retryable": False}},
-		)
-
-		with (
-			patch("atlas.vm.core.metal_client.requests.request", return_value=response),
-			self.assertRaises(MetalClientError) as raised,
-		):
-			client.get_virtual_machine("VM-00001")
-
-		self.assertFalse(raised.exception.retryable)
-
-
-class TestMetalVirtualMachineModel(UnitTestCase):
-	def test_model_parses_nested_desired_and_observed_state(self) -> None:
-		information = MetalVirtualMachine.from_dict(METAL_VIRTUAL_MACHINE_RESPONSE)
-
-		self.assertEqual(information.desired.compute.cpu_millicores, 2000)
-		self.assertEqual(information.desired.disk.size_mib, 2048)
-		self.assertEqual(information.desired.network.wireguard_mesh_ipv6, "fdaa:1::1")
-		self.assertEqual(information.observed.disk.used_mib, 1024)
-		self.assertEqual(information.observed.network.mac, "06:00:00:00:00:01")
-
-	def test_model_rejects_the_old_flat_response(self) -> None:
-		with self.assertRaises(ValueError):
-			MetalVirtualMachine.from_dict({"id": "VM-00001", "state": "running"})
+		self.assertEqual(get_value.call_args.args[0], "Metal Server IP Address")
+		self.assertEqual(get_value.call_args.args[1], {"virtual_machine": "vm-0000001"})
 
 	def test_virtual_fields_read_the_nested_model(self) -> None:
 		virtual_machine = VirtualMachine.__new__(VirtualMachine)
@@ -680,7 +419,6 @@ class TestMetalVirtualMachineModel(UnitTestCase):
 		self.assertEqual(virtual_machine.mac, "06:00:00:00:00:01")
 		self.assertEqual(virtual_machine.egress, "uplink")
 		self.assertEqual(virtual_machine.wireguard_mesh_ipv6, "fdaa:1::1")
-		self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
 		self.assertEqual(virtual_machine.disk_throughput_mibps, 50)
 		self.assertEqual(virtual_machine.disk_iops, 2000)
 		self.assertEqual(virtual_machine.private_network_throughput_mibps, 100)
@@ -846,9 +584,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				{"public_network_throughput_mibps": 25}
 			)
 
-	def test_attach_ip_address_requests_host_egress(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "none"})
-		address = SimpleNamespace(address="203.0.113.10")
+	def test_attach_ip_address_waits_for_the_host_address(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "none", "public_ipv4": ""})
+		address = SimpleNamespace(address="203.0.113.10", host_address=None)
 		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
 		with (
@@ -863,7 +601,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		assign.assert_called_once_with("203.0.113.10")
 		request = client.set_virtual_machine_network.call_args.args[1]
 		self.assertEqual(request["egress"], "uplink")
-		self.assertEqual(request["public_ipv4"], "203.0.113.10")
+		self.assertEqual(request["public_ipv4"], "")
 
 	def test_attach_ip_address_rejects_a_second_address(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
@@ -987,7 +725,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 class TestVirtualMachineTrash(UnitTestCase):
 	"""Cover the cleanup that lets a terminated VM record be deleted."""
 
-	def _trash(self, state_exists: bool) -> Mock:
+	def _trash(self, state_exists: bool, migrations: list[str] | None = None) -> Mock:
 		virtual_machine = Mock(doctype="Virtual Machine")
 		virtual_machine.name = "vm-00003"
 
@@ -995,6 +733,7 @@ class TestVirtualMachineTrash(UnitTestCase):
 			patch.object(virtual_machine_module, "VirtualMachineService") as service,
 			patch.object(virtual_machine_module, "delete_tasks_for_target") as delete_tasks,
 			patch.object(virtual_machine_module.frappe.db, "exists", return_value=state_exists),
+			patch.object(virtual_machine_module.frappe, "get_all", return_value=migrations or []),
 			patch.object(virtual_machine_module.frappe, "delete_doc") as delete_doc,
 		):
 			virtual_machine_module.VirtualMachine.on_trash(virtual_machine)
@@ -1015,44 +754,90 @@ class TestVirtualMachineTrash(UnitTestCase):
 		"""A virtual machine that never reported a state still deletes."""
 		self._trash(state_exists=False).assert_not_called()
 
+	def test_trash_removes_the_migration_history(self) -> None:
+		"""A migration links to its VM, so the history must go with the VM."""
+		delete_doc = self._trash(state_exists=False, migrations=["mig-00001", "mig-00002"])
 
-class TestReconcileTerminating(UnitTestCase):
-	"""Cover the scheduled cleanup of terminated VMs."""
+		self.assertEqual(
+			delete_doc.call_args_list,
+			[
+				call(
+					"Virtual Machine Migration",
+					"mig-00001",
+					ignore_permissions=True,
+					delete_permanently=True,
+				),
+				call(
+					"Virtual Machine Migration",
+					"mig-00002",
+					ignore_permissions=True,
+					delete_permanently=True,
+				),
+			],
+		)
 
-	def _run(self, error: MetalClientError | None) -> Mock:
-		virtual_machine = Mock(server="node-1", flags=SimpleNamespace())
-		client = Mock()
-		if error is not None:
-			client.get_virtual_machine.side_effect = error
-		with (
-			patch.object(
-				virtual_machine_module.frappe,
-				"get_doc",
-				side_effect=[virtual_machine, Mock()],
-			),
-			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
-		):
-			virtual_machine_module.reconcile_terminating_virtual_machine("VM-00001")
+
+class TestVirtualMachineTerminationProtection(UnitTestCase):
+	"""Cover the flag that refuses removal of a virtual machine."""
+
+	def build_virtual_machine(self, *, is_termination_protected: int = 0) -> VirtualMachine:
+		virtual_machine = VirtualMachine.__new__(VirtualMachine)
+		virtual_machine.name = "VM-00001"
+		virtual_machine.is_terminating = 0
+		virtual_machine.is_termination_protected = is_termination_protected
+		virtual_machine.active_migration = None
+		virtual_machine.check_permission = Mock()
+		virtual_machine.save = Mock()
 		return virtual_machine
 
-	def test_absent_vm_is_deleted(self) -> None:
-		virtual_machine = self._run(MetalClientError("gone", status=404))
-		self.assertTrue(virtual_machine.flags.metal_absence_confirmed)
-		virtual_machine.delete.assert_called_once()
+	def test_a_protected_virtual_machine_is_not_terminated(self) -> None:
+		virtual_machine = self.build_virtual_machine(is_termination_protected=1)
 
-	def test_present_vm_is_kept(self) -> None:
-		virtual_machine = self._run(None)
-		virtual_machine.delete.assert_not_called()
+		with (
+			patch.object(virtual_machine_module, "VirtualMachineService") as service,
+			self.assertRaises(AtlasUserError),
+		):
+			virtual_machine.terminate()
 
-	def test_other_error_keeps_vm(self) -> None:
-		with patch.object(virtual_machine_service_module.frappe, "log_error") as log_error:
-			virtual_machine = self._run(MetalClientError("busy", status=503))
+		service.return_value.terminate.assert_not_called()
 
-		virtual_machine.delete.assert_not_called()
-		self.assertEqual(
-			log_error.call_args.kwargs["title"],
-			"Virtual Machine VM-00001 termination reconciliation failed",
-		)
+	def test_a_protected_virtual_machine_is_not_deleted(self) -> None:
+		"""The guard must also stop a direct delete, not only the terminate action."""
+		virtual_machine = self.build_virtual_machine(is_termination_protected=1)
+		virtual_machine.doctype = "Virtual Machine"
+
+		with (
+			patch.object(virtual_machine_module, "VirtualMachineService") as service,
+			self.assertRaises(AtlasUserError),
+		):
+			virtual_machine.on_trash()
+
+		service.return_value.validate_deletion.assert_not_called()
+
+	def test_an_unprotected_virtual_machine_is_terminated(self) -> None:
+		virtual_machine = self.build_virtual_machine()
+
+		with patch.object(virtual_machine_module, "VirtualMachineService") as service:
+			virtual_machine.terminate()
+
+		service.return_value.terminate.assert_called_once()
+
+	def test_protection_is_set_and_cleared(self) -> None:
+		virtual_machine = self.build_virtual_machine()
+
+		virtual_machine.set_termination_protection("true")
+		self.assertTrue(virtual_machine.is_termination_protected)
+
+		virtual_machine.set_termination_protection(False)
+		self.assertFalse(virtual_machine.is_termination_protected)
+		self.assertEqual(virtual_machine.save.call_count, 2)
+
+	def test_a_terminating_virtual_machine_rejects_the_change(self) -> None:
+		virtual_machine = self.build_virtual_machine()
+		virtual_machine.is_terminating = 1
+
+		with self.assertRaises(AtlasUserError):
+			virtual_machine.set_termination_protection(True)
 
 
 class TestVirtualMachinePrivilege(UnitTestCase):
@@ -1165,6 +950,10 @@ class TestSystemImageCreation(UnitTestCase):
 
 		self.assertEqual(name, "IMG-00001")
 		self.assertEqual(create.call_args.kwargs["image_type"], "machine")
+
+	def test_a_shape_without_a_memory_snapshot_is_rejected(self) -> None:
+		with self.assertRaises(AtlasUserError):
+			self.create_image(tenant_id=0, memory_snapshot_configuration={"memory_mib": 4096})
 
 	def test_another_tenant_cannot_use_a_shared_option(self) -> None:
 		for options in ({"image_type": "system"}, {"cache_image": True}, {"memory_snapshot": True}):

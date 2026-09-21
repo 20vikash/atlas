@@ -9,11 +9,13 @@
   "status",
   "title",
   "tenant_id",
+  "is_termination_protected",
+  "cache_image",
   "column_break_identity",
+  "artifact_storage",
   "image_type",
   "architecture",
   "transfer_progress",
-  "cache_image",
   "memory_snapshot",
   "section_break_memory_snapshot_config",
   "memory_snapshot_virtual_cpu_count",
@@ -22,17 +24,21 @@
   "column_break_ueib",
   "memory_snapshot_disk_mib",
   "section_break_files",
-  "artifact_storage",
+  "image_size_mib",
+  "image_stored_size_mib",
   "image_object_key",
   "image_file",
   "image_sha256",
-  "image_size_mib",
+  "site_file_retention_until",
   "column_break_files",
+  "kernel_size_mib",
+  "kernel_stored_size_mib",
   "kernel_object_key",
   "kernel_file",
   "kernel_sha256",
-  "kernel_size_mib",
-  "site_file_retention_until",
+  "section_break_tags",
+  "tags",
+  "version",
   "section_break_source",
   "source_virtual_machine",
   "column_break_igol",
@@ -42,10 +48,7 @@
   "section_break_transfer",
   "rootfs_multipart_upload_id",
   "kernel_multipart_upload_id",
-  "transfer_error",
-  "section_break_tags",
-  "tags",
-  "version"
+  "transfer_error"
  ],
  "fields": [
   {
@@ -97,6 +100,13 @@
   },
   {
    "default": "0",
+   "fieldname": "is_termination_protected",
+   "fieldtype": "Check",
+   "label": "Is Termination Protected",
+   "read_only": 1
+  },
+  {
+   "default": "0",
    "fieldname": "cache_image",
    "fieldtype": "Check",
    "label": "Cache Image"
@@ -136,32 +146,26 @@
   },
   {
    "default": "Object Storage",
-   "description": "Where the rootfs and kernel bytes are stored.",
    "fieldname": "artifact_storage",
    "fieldtype": "Select",
    "label": "Artifact Storage",
    "options": "Object Storage\nSite File",
    "read_only": 1,
-   "reqd": 1,
-   "show_description_on_click": 1
+   "reqd": 1
   },
   {
-   "description": "Object key of the rootfs image.",
    "fieldname": "image_object_key",
    "fieldtype": "Data",
    "label": "Image Object Key",
-   "read_only": 1,
-   "show_description_on_click": 1
+   "read_only": 1
   },
   {
    "depends_on": "eval: doc.artifact_storage === 'Site File'",
-   "description": "Public site File that holds the rootfs during bootstrap.",
    "fieldname": "image_file",
    "fieldtype": "Link",
    "label": "Image File",
    "options": "File",
-   "read_only": 1,
-   "show_description_on_click": 1
+   "read_only": 1
   },
   {
    "fieldname": "image_sha256",
@@ -180,22 +184,18 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Object key of the kernel.",
    "fieldname": "kernel_object_key",
    "fieldtype": "Data",
    "label": "Kernel Object Key",
-   "read_only": 1,
-   "show_description_on_click": 1
+   "read_only": 1
   },
   {
    "depends_on": "eval: doc.artifact_storage === 'Site File'",
-   "description": "Public site File that holds the kernel during bootstrap.",
    "fieldname": "kernel_file",
    "fieldtype": "Link",
    "label": "Kernel File",
    "options": "File",
-   "read_only": 1,
-   "show_description_on_click": 1
+   "read_only": 1
   },
   {
    "fieldname": "kernel_sha256",
@@ -235,13 +235,11 @@
    "label": "Transfer"
   },
   {
-   "description": "Upload progress in percent.",
    "fieldname": "transfer_progress",
    "fieldtype": "Int",
    "label": "Progress (%)",
    "non_negative": 1,
-   "read_only": 1,
-   "show_description_on_click": 1
+   "read_only": 1
   },
   {
    "fieldname": "rootfs_multipart_upload_id",
@@ -308,8 +306,7 @@
   },
   {
    "fieldname": "section_break_tags",
-   "fieldtype": "Section Break",
-   "label": "Tags"
+   "fieldtype": "Section Break"
   },
   {
    "description": "Your own key and value labels for this image, such as os and Ubuntu. Use them to find it again.",
@@ -327,11 +324,23 @@
    "label": "Site Files Kept Until",
    "read_only": 1,
    "show_description_on_click": 1
+  },
+  {
+   "fieldname": "image_stored_size_mib",
+   "fieldtype": "Int",
+   "label": "Image Stored Size (MiB)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "kernel_stored_size_mib",
+   "fieldtype": "Int",
+   "label": "Kernel Stored Size (MiB)",
+   "read_only": 1
   }
  ],
  "links": [],
- "modified": "2026-09-16 12:47:26.760562",
- "modified_by": "Administrator",
+ "modified": "2026-09-21 02:01:06.906414",
+ "modified_by": "test@gmail.com",
  "module": "VM",
  "name": "Virtual Machine Image",
  "naming_rule": "Random",

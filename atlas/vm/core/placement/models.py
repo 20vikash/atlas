@@ -21,8 +21,8 @@ class Resources:
 
 
 @dataclass(frozen=True, slots=True)
-class PlacementDemand:
-	"""The VM shape and identity visible to a placement strategy."""
+class PlacementRequirements:
+	"""VM resources and placement constraints visible to a strategy."""
 
 	cpu_millicores: int
 	memory_mib: int
@@ -44,6 +44,7 @@ class HostUsage:
 	free: Resources
 	tenant_vm_count: int
 	sleepy_reserved_memory_mib: int
+	placement_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,3 +56,4 @@ class FleetUsage:
 	free: Resources
 	tenant_vm_count: int
 	sleepy_reserved_memory_mib: int
+	placement_count: int

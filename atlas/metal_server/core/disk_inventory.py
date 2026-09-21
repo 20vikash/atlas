@@ -12,6 +12,9 @@ from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
+LOOP_DEVICE_TYPE = "loop"
+WHOLE_DISK_TYPES = frozenset({"disk", "raid0", "raid1", "raid5", "raid6", "raid10"})
+
 
 class DiskInventory:
 	"""Read and parse the block devices for one server."""
@@ -24,7 +27,7 @@ class DiskInventory:
 		result = SSHTask.create_for_command(
 			target_type=self.server.doctype,
 			target=self.server.name,
-			command="lsblk --json --bytes --paths --output NAME,UUID,SIZE,MOUNTPOINT",
+			command="lsblk --json --bytes --paths --output NAME,TYPE,UUID,SIZE,MOUNTPOINT",
 			run_in_background=False,
 		).result
 		if not result or not result.is_success:
@@ -34,17 +37,16 @@ class DiskInventory:
 		self.server.save()
 
 	def parse(self, lsblk_output: str) -> list[dict[str, str]]:
-		"""Return mounted devices and the raw storage pool device."""
-		storage_pool_device = self.server.settings.server_provider_controller.get_storage_pool_device(
-			self.server
-		)
+		"""Return whole disks and mounted devices, except loop devices."""
 		devices = deque(json.loads(lsblk_output).get("blockdevices", []))
 		disks: dict[str, dict[str, str]] = {}
 		while devices:
 			device = devices.popleft()
 			devices.extendleft(reversed(device.get("children") or []))
 			name = device["name"]
-			if not device.get("mountpoint") and name != storage_pool_device:
+			if device.get("type") == LOOP_DEVICE_TYPE:
+				continue
+			if not device.get("mountpoint") and device.get("type") not in WHOLE_DISK_TYPES:
 				continue
 			disks[name] = {
 				"device": name,

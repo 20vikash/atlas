@@ -1,60 +1,123 @@
 # Atlas HTTP proxy
 
-Atlas HTTP proxy is a regional cluster of one to five proxy virtual machines. Every ready proxy serves site and custom-domain traffic. The cluster replicates ordered route-map generations between nodes.
+The Atlas HTTP proxy routes public HTTP and HTTPS traffic to VMs in one region. A regional cluster has 1 to 5 proxy nodes.
 
-Clients and Atlas use `proxy.<wildcard-domain>` as the regional control address. Route 53 normally returns ready cluster members. It returns every member when all health checks fail. Each member also has a stable `proxy-NNN.<wildcard-domain>` address for peer communication and operations.
+Every ready node serves traffic. The nodes replicate one ordered route state for sites and custom domains.
 
-Atlas installs the component and writes `/etc/atlas/proxy-control.toml` over SSH. The file contains the regional certificate, external authentication settings, cluster credentials, and the complete peer list. A joining node gets route state from the peer with the highest generation. Atlas does not copy route maps to a joining node.
+## Start here
 
-Read these documents in this order:
+```mermaid
+flowchart LR
+    Client[Browser or API client]
+    DNS[Route 53<br/>health-checked records]
 
-1. [Setup and configuration](docs/setup.md)
-2. [High-availability design](docs/high-availability.md)
-3. [Control daemon API](docs/control-daemon.md)
-4. [OpenResty data plane](docs/openresty.md)
-5. [Development](docs/development.md)
+    subgraph Cluster[Regional proxy cluster]
+        P1[Proxy 1]
+        P2[Proxy 2]
+        P3[Proxy 3]
+    end
 
-## Request path
+    VM[Site VM]
 
-```text
-Atlas or API client
-        |
-        v
-proxy.<wildcard-domain> through health-checked DNS
-        |
-        v
-any ready proxy -> elected leader -> acknowledgement threshold -> response
+    Client -->|site.region.example.com| DNS
+    DNS --> P1
+    DNS --> P2
+    DNS --> P3
+    P1 --> VM
+    P2 --> VM
+    P3 --> VM
 ```
 
-The selected proxy handles reads locally. It forwards a mutation to the elected leader when required. The leader applies the mutation, assigns its generation, sends it to peers concurrently, and responds after the configured acknowledgement threshold is met.
+Read these guides in order:
 
-OpenResty handles public traffic and exposes the control daemon through the regional wildcard certificate. The daemon listens on `127.0.0.1:9000`. OpenResty and the daemon exchange map data through private Unix sockets.
+1. [Install](docs/setup.md) explains the services and host requirements.
+2. [Configuration](docs/configuration.md) explains certificates, peers, authentication, and DNS.
+3. [High availability](docs/high-availability.md) explains leader election and route replication.
+4. [Control daemon](docs/control-daemon.md) defines the route API.
+5. [OpenResty data plane](docs/openresty.md) traces public traffic to a VM.
 
-## Main paths
+## Why the proxy has 2 layers
 
-```text
-nginx/setup.sh                  Install the proxy on an Ubuntu VM.
-nginx/nginx.conf                Configure OpenResty.
-nginx/lua/http/                 Route HTTP traffic and store HTTP maps.
-nginx/lua/stream/               Route TLS traffic by SNI.
-nginx/systemd/                  Store the systemd units.
-control/proxy_control/          Store the control daemon and cluster code.
-control/tests/                  Store control daemon unit tests.
-docs/                           Store operator and developer guides.
-tests/                          Store data-plane tests.
+OpenResty handles public traffic. The control daemon validates route changes and replicates them to peer nodes.
+
+```mermaid
+flowchart TB
+    Public[Public HTTP and HTTPS]
+    API[Atlas or API client]
+
+    subgraph Node[One proxy node]
+        OpenResty[OpenResty<br/>data plane]
+        Control[Control daemon<br/>route state]
+        Maps[Shared route maps]
+        Snapshot[(Durable cluster snapshot)]
+    end
+
+    VM[Site VM]
+    Peers[Peer proxy nodes]
+
+    Public --> OpenResty
+    OpenResty -->|Route lookup| Maps
+    OpenResty --> VM
+    API -->|Public route API| OpenResty
+    OpenResty --> Control
+    Control --> Maps
+    Control --> Snapshot
+    Control -->|Replicate mutation| Peers
 ```
 
-## Quick start
+This split keeps the traffic path small. It also keeps route validation and cluster state outside OpenResty workers.
+
+## Addresses
+
+| Address | Purpose |
+| --- | --- |
+| `proxy.<wildcard-domain>` | Regional API address with health-checked records for ready nodes |
+| `proxy-NNN.<wildcard-domain>` | Stable address for one node and peer communication |
+| `*.<wildcard-domain>` | Wildcard route for site and auto-proxy traffic |
+
+Atlas manages these records and the regional wildcard certificate.
+
+## How a route change works
+
+A client can send a mutation to any ready node. A follower forwards the mutation to the current leader.
+
+```mermaid
+sequenceDiagram
+    participant Client as Atlas or API client
+    participant Node as Any ready node
+    participant Leader
+    participant Peers as Peer nodes
+    participant OpenResty
+
+    Client->>Node: Desired route mutation
+    Node->>Leader: Forward when node is a follower
+    Leader->>Leader: Validate and assign generation
+    Leader->>OpenResty: Apply local map change
+    par Replicate to peers
+        Leader->>Peers: Mutation and generation
+    end
+    Peers-->>Leader: Acknowledgements
+    Leader-->>Node: Required count reached
+    Node-->>Client: Success
+```
+
+All mutation types are idempotent. Send the same desired mutation again after an uncertain `503` response.
+
+## What each node stores
+
+Each node stores the site map, domain map, election term, vote, operation ID, and generation. The node writes this state to `/var/lib/nginx/cluster-state.json`.
+
+A new node asks peers for status. It installs the snapshot with the highest generation before it becomes ready.
+
+## Install locally
 
 ```sh
 sudo ./nginx/setup.sh
 ```
 
-The script installs OpenResty and the control daemon. A fresh install has an empty configuration file and a placeholder certificate. The daemon becomes ready after Atlas sends a complete configuration and the node restores its cluster state.
+The script installs OpenResty and the control daemon. Atlas must send a complete configuration before the node becomes ready.
 
-Follow the [setup guide](docs/setup.md) for the required configuration.
-
-## Local development
+For development, install the Python package and run the control tests:
 
 ```sh
 python3 -m venv .venv
@@ -63,8 +126,16 @@ python -m pip install --editable 'control[test]'
 python -m pytest -q control/tests
 ```
 
-Use the [development guide](docs/development.md) for the complete checks.
+Use the [development guide](docs/development.md) for the complete checks and code map.
 
-## License
+## Component paths
 
-Atlas HTTP proxy is licensed under [AGPL-3.0](../../license.txt).
+| Path | Purpose |
+| --- | --- |
+| `nginx/` | OpenResty configuration, Lua code, setup, and systemd units |
+| `control/proxy_control/` | Control API, cluster state, leader election, and replication |
+| `control/tests/` | Control daemon unit tests |
+| `tests/` | OpenResty data-plane tests |
+| `docs/` | Operator and developer guides |
+
+Atlas HTTP proxy uses the [AGPL-3.0 license](../../license.txt).

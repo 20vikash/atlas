@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,7 +13,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync/atomic"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // errRetryableDownload marks a failure that another attempt may recover from.
@@ -102,9 +107,18 @@ func downloadOnce(ctx context.Context, client *http.Client, directory, source, e
 		os.Remove(path)
 	}
 
+	// Count wire bytes. Compression makes them differ from bytes on disk.
+	transferred := &countingReader{reader: result.Body, counter: new(atomic.Int64)}
+	body, closeBody, err := decompressedBody(transferred)
+	if err != nil {
+		remove()
+		return "", err
+	}
+	defer closeBody()
+
 	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(file, hash), result.Body)
-	if err == nil && result.ContentLength >= 0 && written != result.ContentLength {
+	_, err = io.Copy(io.MultiWriter(file, hash), body)
+	if err == nil && result.ContentLength >= 0 && transferred.counter.Load() != result.ContentLength {
 		err = fmt.Errorf("truncated response")
 	}
 	if err == nil && hex.EncodeToString(hash.Sum(nil)) != expectedDigest {
@@ -124,6 +138,27 @@ func downloadOnce(ctx context.Context, client *http.Client, directory, source, e
 	}
 
 	return path, nil
+}
+
+// zstdMagic starts every zstd frame. A raw disk image never begins with it.
+var zstdMagic = []byte{0x28, 0xB5, 0x2F, 0xFD}
+
+// decompressedBody detects zstd content and returns decoded artifact bytes.
+func decompressedBody(body io.Reader) (io.Reader, func(), error) {
+	buffered := bufio.NewReaderSize(body, len(zstdMagic))
+	prefix, err := buffered.Peek(len(zstdMagic))
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, nil, fmt.Errorf("%w: read artifact header", errRetryableDownload)
+	}
+	if !bytes.Equal(prefix, zstdMagic) {
+		return buffered, func() {}, nil
+	}
+
+	decoder, err := zstd.NewReader(buffered, zstd.WithDecoderConcurrency(snapshotEncoderConcurrency))
+	if err != nil {
+		return nil, nil, fmt.Errorf("create artifact decoder: %w", err)
+	}
+	return decoder, decoder.Close, nil
 }
 
 // verifyFileSHA256 rereads a stored file and compares its digest.

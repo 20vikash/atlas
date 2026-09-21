@@ -2,15 +2,6 @@ package network
 
 import "testing"
 
-func TestNamespaceNames(t *testing.T) {
-	if got := namespaceName("abc"); got != "metal-abc" {
-		t.Errorf("namespaceName = %q", got)
-	}
-	if got := namespacePath("abc"); got != "/run/netns/metal-abc" {
-		t.Errorf("namespacePath = %q", got)
-	}
-}
-
 func TestTransitAddresses(t *testing.T) {
 	hostAddress, namespaceAddress := transitAddresses(100000)
 	if hostAddress != "10.6.26.129" || namespaceAddress != "10.6.26.130" {

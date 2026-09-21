@@ -6,11 +6,12 @@
  "field_order": [
   "is_draft",
   "is_terminating",
-  "active_migration",
   "current_state",
   "desired_state",
+  "active_migration",
   "tenant_id",
   "is_privileged",
+  "is_termination_protected",
   "column_break_status",
   "server",
   "virtual_machine_image",
@@ -58,7 +59,6 @@
    "read_only": 1
   },
   {
-   "description": "Set while a migration owns this VM. Blocks mutable actions.",
    "fieldname": "active_migration",
    "fieldtype": "Link",
    "hidden": 1,
@@ -88,7 +88,8 @@
    "label": "Server",
    "options": "Metal Server",
    "read_only": 1,
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "virtual_machine_image",
@@ -180,6 +181,15 @@
    "fieldname": "is_privileged",
    "fieldtype": "Check",
    "label": "Is Privileged",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "default": "0",
+   "description": "Termination and deletion are refused while this is set.",
+   "fieldname": "is_termination_protected",
+   "fieldtype": "Check",
+   "label": "Is Termination Protected",
    "read_only": 1,
    "show_description_on_click": 1
   },
@@ -316,8 +326,8 @@
    "link_fieldname": "virtual_machine"
   }
  ],
- "modified": "2026-09-09 18:11:57.295257",
- "modified_by": "Administrator",
+ "modified": "2026-09-21 00:51:27.833768",
+ "modified_by": "test@gmail.com",
  "module": "VM",
  "name": "Virtual Machine",
  "naming_rule": "By script",

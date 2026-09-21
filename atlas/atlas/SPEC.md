@@ -8,9 +8,9 @@ For the provider overview, see [docs/providers.md](../docs/providers.md).
 
 Atlas talks to an infrastructure provider only through one interface. Everything provider-specific lives behind it, so adding a provider never reaches into server or virtual machine code.
 
-This module also holds site settings, the regional token key, the wildcard TLS certificate, and the host binaries.
+This module also holds site settings, the regional token key, the wildcard TLS certificate, the private Metal certificate authority, and the host binaries.
 
-The Placement tab selects a registered placement strategy and defaults to `balanced`. Its choices come from the strategy registry, and unknown names are rejected. The tab also stores `sleepy_vm_overcommit_factor`, which defaults to `1.0` and must be finite and at least `1.0`. A sleepy VM has `sleep_after_idle_seconds` greater than zero. The factor is available to strategies. `new_host_type` stores the Metal Server Size used when placement requests a host. See the [VM placement specification](../vm/SPEC.md#placement).
+The Placement Strategy section selects a registered placement strategy and defaults to `balanced`. Its choices come from the strategy registry, and unknown names are rejected. The section also stores `sleepy_vm_overcommit_factor`, which defaults to `1.0` and must be finite and at least `1.0`. A sleepy VM has `sleep_after_idle_seconds` greater than zero. The factor is available to strategies. `default_metal_machine_size` and `default_metal_machine_image` select the catalog entries used for a new host. See the [VM placement specification](../vm/SPEC.md#placement).
 
 ## Types
 
@@ -25,20 +25,20 @@ The Placement tab selects a registered placement strategy and defaults to `balan
 | `artifacts` | Publishing a build output as a public File, and its download URL. |
 | `LetsEncrypt` | Wildcard certificate issuance through the dns-01 challenge. |
 | `AcmeClient` | The ACME v2 conversation for one account key. |
-| `certificate` | Reading a PEM chain, and checking a certificate against its key. |
+| `certificate` | Creating and checking certificate authorities, certificates, and private keys. |
+| `tls.metal` | Creating the regional Metal authority and each node certificate. |
 | `SSHTask` (DocType) | Records one SSH command for a Metal Server or a Virtual Machine. |
 | `ssh`, `parsing`, `mesh_address`, `object_storage` | Host access, strict input parsing, mesh addressing, and object storage. |
 
 ## Provider boundary
 
-```text
-server / vm code
-      |
-      v
-ServerProvider  (typed create, result, catalog, power, address, and error values)
-      |
-      +-- scaleway/   client, servers, ip_addresses, catalog, partitioning, infrastructure
-      +-- aws/        client, servers, ip_addresses, catalog, configuration, infrastructure
+```mermaid
+flowchart LR
+    Domain[Server and VM domain code] --> Contract[ServerProvider contract]
+    Contract --> Scaleway[Scaleway implementation]
+    Contract --> AWS[AWS implementation]
+    Scaleway --> SParts[Client, servers, addresses,<br/>catalog, partitions, infrastructure]
+    AWS --> AParts[Client, servers, addresses,<br/>catalog, configuration, infrastructure]
 ```
 
 A provider component never saves a Frappe document. It returns typed values, and the caller decides what to record. That keeps provider code testable without a database and keeps persistence in one place.
@@ -51,13 +51,25 @@ A wildcard name can only be proved through DNS, so `LetsEncrypt` answers the ACM
 
 Atlas Settings owns the certificate chain, the private key, and the expiry. The expiry is read from the certificate on every validate, so the stored values cannot drift apart.
 
+## Metal TLS
+
+Atlas Settings owns one private certificate authority for the region. Atlas creates it after the region name and wildcard domain are available.
+
+Each Metal Server owns one certificate and private key from this authority. The certificate identity is `<server>.<wildcard_domain>`. Its subject alternative names contain the WireGuard, private, and public IP addresses. The certificate permits TLS client and server use.
+
+Atlas Settings also owns one client certificate with the identity `atlas.<wildcard_domain>`. Atlas presents it on every Metal API call, and Metal accepts only that common name. A node certificate is valid for client use on the coordination API, so the common name is what separates Atlas from a node.
+
+Atlas writes the authority certificate and the client pair to private site files for Metal API clients and the console bridge. The authority private key stays in Atlas Settings. Host installation sends the node certificate, node key, and authority certificate through a direct SSH execution that does not create an SSH Task record.
+
+`ensure_server_certificate` issues a new certificate when the stored one is absent, does not match the server identity and addresses, or expires inside the renewal window of 30 days. Metal Server stores the expiry in `metald_tls_expires_on`. A daily job queues a renewal for each ready host inside that window, and reports an error when the authority itself expires inside 180 days. The operator can also start one renewal with the Metal Server action Renew TLS Certificate. See [Metal Server setup](../metal_server/SPEC.md).
+
 ## SSH tasks
 
 An `SSH Task` records one shell command or script run for a `Metal Server` or a `Virtual Machine`. Its `target` field is a Dynamic Link. The task reads the target document's `ssh_host` property for the connection address.
 
 An `SSH Task` stores no credentials. It uses the identity of the Atlas host. The caller must make the target reachable.
 
-Do not put a key or password in `script` or `environment`. These fields are stored as plain text. Use `SSHRunner` directly when the command needs secret data. See the [SSH Task README](doctype/ssh_task/README.md) for the creation methods and task states.
+Do not put a key or password in `script` or `environment`. These fields are stored as plain text. Use `SSHRunner` directly when the command needs secret data. See the [SSH Task guide](doctype/ssh_task/) for the creation methods and task states.
 
 ## Host binaries
 
@@ -67,7 +79,7 @@ A build runs only when its source hash changes. Atlas publishes the result as a 
 
 ## Automatic setup
 
-The `configure-atlas` site command reads one JSON document from standard input. The `atlas-vm` setup script uses this command and does not put secrets in process arguments.
+The `configure-atlas` site command reads one JSON document from standard input. The `atlas-vm` setup script uses this command and does not put secrets in process arguments. The script also applies the VM placement and Metal auto-spawn settings from `[atlas.vm_scheduling]`.
 
 The command keeps provider resource identifiers after each successful setup phase. A repeated command updates mutable settings and rejects changes to completed provider identities.
 

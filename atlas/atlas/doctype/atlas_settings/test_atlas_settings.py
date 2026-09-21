@@ -50,11 +50,19 @@ class TestRegionalCredentials(UnitTestCase):
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
 		settings = MagicMock(is_setup_completed=False)
-		with patch("atlas.auth.issuer.initialize_signing_key") as initialize_signing_key:
+		with (
+			patch("atlas.auth.issuer.initialize_signing_key") as initialize_signing_key,
+			patch("atlas.atlas.core.tls.metal.ensure_certificate_authority") as ensure_certificate_authority,
+			patch(
+				"atlas.atlas.core.tls.metal.ensure_atlas_client_certificate"
+			) as ensure_atlas_client_certificate,
+		):
 			AtlasSettings.before_save(settings)
 
 		settings.initialize_proxy_cluster_password.assert_called_once_with()
 		initialize_signing_key.assert_called_once_with(settings)
+		ensure_certificate_authority.assert_called_once_with(settings)
+		ensure_atlas_client_certificate.assert_called_once_with(settings)
 
 
 class TestRegionID(UnitTestCase):
@@ -112,22 +120,6 @@ class TestSleepyVMOvercommitFactor(UnitTestCase):
 
 
 class TestPlacementStrategy(UnitTestCase):
-	def test_migration_replaces_only_removed_strategy(self) -> None:
-		from atlas.atlas.doctype.atlas_settings.atlas_settings import migrate_placement_strategy
-
-		for stored in ("Default", "balanced", "best-fit"):
-			with (
-				self.subTest(stored=stored),
-				patch("frappe.db.get_single_value", return_value=stored),
-				patch("frappe.db.set_single_value") as set_value,
-			):
-				migrate_placement_strategy()
-
-			if stored == "Default":
-				set_value.assert_called_once_with("Atlas Settings", "placement_strategy", "balanced")
-			else:
-				set_value.assert_not_called()
-
 	def test_unknown_strategy_is_rejected(self) -> None:
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
@@ -139,10 +131,18 @@ class TestPlacementStrategy(UnitTestCase):
 		from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
 		with (
-			patch("atlas.vm.core.placement.strategies.STRATEGIES", {"Custom": lambda api: None}),
+			patch("atlas.vm.core.placement.strategies.base._REGISTERED_STRATEGIES", {"Custom": MagicMock()}),
 			patch("frappe.only_for") as only_for,
+			patch("frappe.get_all", side_effect=(["large"], ["Ubuntu_26.04"])),
 		):
-			self.assertEqual(AtlasSettings.available_placement_strategies(MagicMock()), ["Custom"])
+			self.assertEqual(
+				AtlasSettings.get_form_autocomplete_options(MagicMock()),
+				{
+					"placement_strategies": ["Custom"],
+					"available_metal_machine_sizes": ["large"],
+					"available_metal_machine_images": ["Ubuntu_26.04"],
+				},
+			)
 
 		only_for.assert_called_once_with("System Manager")
 
