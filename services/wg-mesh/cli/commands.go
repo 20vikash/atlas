@@ -54,7 +54,11 @@ func installHost(uplinkName, wireGuardName string) error {
 	if err != nil {
 		return err
 	}
-	collection, err := loadCollection(nil)
+	spec, err := collectionSpec()
+	if err != nil {
+		return err
+	}
+	collection, err := loadCollection(spec, nil)
 	if err != nil {
 		return err
 	}

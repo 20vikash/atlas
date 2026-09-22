@@ -16,14 +16,12 @@ import (
 
 var version = "dev"
 
-var upgradeForce bool
-
 var upgradeCommand = &cobra.Command{
 	Use:   "upgrade",
 	Short: "replace BPF programs with this binary's version",
 	Args:  cobra.NoArgs,
 	RunE: func(*cobra.Command, []string) error {
-		return upgradeBPF(upgradeForce)
+		return upgradeBPF(uplinkName, wireGuardName)
 	},
 }
 
@@ -38,7 +36,9 @@ func showVersion() error {
 	return nil
 }
 
-func upgradeBPF(force bool) error {
+// upgradeBPF keeps every pinned map that the new release can use and
+// recreates the others. It repairs the state that a recreated map loses.
+func upgradeBPF(uplinkName, wireGuardName string) error {
 	unlock, err := lockVMState()
 	if err != nil {
 		return err
@@ -46,55 +46,61 @@ func upgradeBPF(force bool) error {
 	defer unlock()
 
 	installed, err := readInstalledHash()
-
-	config, err := readPinnedConfig()
 	if err != nil {
 		return err
 	}
 
-	replacements, closeMaps, err := existingMaps()
+	if installed == bpfHash() {
+		fmt.Println("Atlas WG Mesh BPF is already current")
+		return nil
+	}
+
+	// The pinned config layout can change between releases, so rebuild it from the interfaces.
+	config, err := readHostConfig(uplinkName, wireGuardName)
+	if err != nil {
+		return err
+	}
+
+	// Read the VM interfaces before a recreated local_vms map loses them.
+	vmInterfaces, err := virtualMachineInterfaces()
+	if err != nil {
+		return err
+	}
+
+	spec, err := collectionSpec()
+	if err != nil {
+		return err
+	}
+
+	replacements, closeMaps, err := compatibleMaps(spec)
 	if err != nil {
 		return err
 	}
 	defer closeMaps()
 
-	collection, err := loadCollection(replacements)
+	collection, err := loadCollection(spec, replacements)
 	if err != nil {
-		if force {
-			return forceUpgrade(config)
-		}
-		return fmt.Errorf("BPF maps are incompatible; rerun with --force after adding a migration: %w", err)
+		return err
 	}
 	defer collection.Close()
 
-	// Drop old pins; a peers sync refills the peer maps.
-	for _, name := range []string{"peer_list", "remote_vms", "vm_peer_map", "config"} {
-		_ = os.Remove(filepath.Join(pinDirectory, name))
-	}
-
-	interfaces, err := configuredInterfaces(config)
-	if err != nil {
-		return err
-	}
-
-	if interfaces.uplinkName == "" || interfaces.wireGuardName == "" {
-		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
-	}
-
-	// Re-derive underlay ifindexes missing from an old configuration.
-	uplinkInterface, err := net.InterfaceByName(interfaces.uplinkName)
-	if err != nil {
-		return err
-	}
-
-	config.PublicIfIndex, config.PrivateIfIndex = underlayIfIndexes(uplinkInterface)
-
 	for name, bpfMap := range collection.Maps {
-		if _, exists := replacements[name]; exists {
+		if _, kept := replacements[name]; kept {
 			continue
 		}
 
-		if err := bpfMap.Pin(filepath.Join(pinDirectory, name)); err != nil {
+		path := filepath.Join(pinDirectory, name)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+
+		if err := bpfMap.Pin(path); err != nil {
+			return err
+		}
+	}
+
+	if _, kept := replacements["local_vms"]; !kept {
+		if err := restoreLocalVirtualMachines(vmInterfaces); err != nil {
 			return err
 		}
 	}
@@ -124,7 +130,7 @@ func upgradeBPF(force bool) error {
 	}
 
 	if err := attachUplinkHook(
-		interfaces.uplinkName,
+		uplinkName,
 		filepath.Join(release, ndpProgram),
 		filepath.Join(release, ndpUnicastIngressProgram),
 		filepath.Join(release, ndpUnicastEgressProgram),
@@ -132,12 +138,7 @@ func upgradeBPF(force bool) error {
 		return err
 	}
 
-	if err := attachHookPath(interfaces.wireGuardName, filepath.Join(release, wireguardProgram), "ingress"); err != nil {
-		return err
-	}
-
-	vmInterfaces, err := virtualMachineInterfaces()
-	if err != nil {
+	if err := attachHookPath(wireGuardName, filepath.Join(release, wireguardProgram), "ingress"); err != nil {
 		return err
 	}
 
@@ -147,10 +148,19 @@ func upgradeBPF(force bool) error {
 		}
 	}
 
+	// A valid neighbour entry sends no solicitation, so the NDP hook cannot relearn a location until it expires.
+	if _, kept := replacements["remote_vms"]; !kept {
+		if err := runCommand("ip", "-6", "neigh", "flush", "dev", uplinkName, "to", meshRoutePrefix); err != nil {
+			return err
+		}
+	}
+
 	// Remove the top level pins of a previous install.
 	for _, program := range []string{
 		vmBPFProgram,
 		ndpProgram,
+		ndpUnicastIngressProgram,
+		ndpUnicastEgressProgram,
 		wireguardProgram,
 	} {
 		_ = os.Remove(filepath.Join(pinDirectory, program))
@@ -162,63 +172,9 @@ func upgradeBPF(force bool) error {
 	return nil
 }
 
-func forceUpgrade(config hostConfig) error {
-	vmInterfaces, err := virtualMachineInterfaces()
-	if err != nil {
-		return err
-	}
-
-	interfaces, err := configuredInterfaces(config)
-	if err != nil {
-		return err
-	}
-
-	if interfaces.uplinkName == "" || interfaces.wireGuardName == "" {
-		return fmt.Errorf("cannot find configured uplink and WireGuard interfaces")
-	}
-
-	// Re-derive underlay ifindexes missing from an old configuration.
-	uplinkInterface, err := net.InterfaceByName(interfaces.uplinkName)
-	if err != nil {
-		return err
-	}
-
-	config.PublicIfIndex, config.PrivateIfIndex = underlayIfIndexes(uplinkInterface)
-
-	// Load first. A verifier rejection must leave the host untouched,
-	// rather than strip its BPF and leave the TC filters dangling.
-	collection, err := loadCollection(nil)
-	if err != nil {
-		return err
-	}
-	defer collection.Close()
-
-	if err := clearPinDirectory(); err != nil {
-		return err
-	}
-
-	if err := pinCollection(collection, config); err != nil {
-		return err
-	}
-
-	if err := attachUplinkHook(
-		interfaces.uplinkName,
-		filepath.Join(pinDirectory, ndpProgram),
-		filepath.Join(pinDirectory, ndpUnicastIngressProgram),
-		filepath.Join(pinDirectory, ndpUnicastEgressProgram),
-	); err != nil {
-		return err
-	}
-
-	if err := attachHook(interfaces.wireGuardName, wireguardProgram, "ingress"); err != nil {
-		return err
-	}
-
+// restoreLocalVirtualMachines refills a recreated local_vms map from the VM routes.
+func restoreLocalVirtualMachines(vmInterfaces map[[16]byte]string) error {
 	for vm, interfaceName := range vmInterfaces {
-		if err := attachHook(interfaceName, vmBPFProgram, "ingress"); err != nil {
-			return err
-		}
-
 		device, err := net.InterfaceByName(interfaceName)
 		if err != nil {
 			return err
@@ -228,10 +184,6 @@ func forceUpgrade(config hostConfig) error {
 			return err
 		}
 	}
-
-	hash := bpfHash()
-
-	fmt.Printf("Atlas WG Mesh BPF force-upgraded to %x; run peers sync to refill the peer state\n", hash[:6])
 
 	return nil
 }
@@ -251,8 +203,7 @@ func attachUplinkHook(uplinkName, multicastPath, unicastIngressPath, unicastEgre
 
 // virtualMachineInterfaces maps every registered VM to its host interface. It
 // reads the keys with a raw value buffer sized to the map itself, so it still
-// works when the value layout of local_vms has changed, which is exactly when
-// a forced migration is needed.
+// works when the new release changes the value layout of local_vms.
 func virtualMachineInterfaces() (map[[16]byte]string, error) {
 	vmMap, err := openMap("local_vms")
 	if err != nil {
@@ -284,38 +235,36 @@ func virtualMachineInterfaces() (map[[16]byte]string, error) {
 	return interfaces, iterator.Err()
 }
 
-func existingMaps() (map[string]*ebpf.Map, func(), error) {
-	names := []string{
-		"local_vms",
-		privilegedTenantAllowedAddressesMap,
-		"ndp_requesters",
-		"peers_by_mac",
-		"debug_config",
-		"debug_stats",
-		"debug_events",
-		"build_hash",
+// compatibleMaps opens every pinned map that the new release can keep. The
+// new release recreates an incompatible map empty.
+func compatibleMaps(spec *ebpf.CollectionSpec) (map[string]*ebpf.Map, func(), error) {
+	maps := make(map[string]*ebpf.Map)
+	closeMaps := func() {
+		for _, bpfMap := range maps {
+			bpfMap.Close()
+		}
 	}
 
-	maps := make(map[string]*ebpf.Map)
-
-	for _, name := range names {
+	for name, mapSpec := range spec.Maps {
 		bpfMap, err := openMap(name)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 
 		if err != nil {
+			closeMaps()
 			return nil, func() {}, err
+		}
+
+		if mapSpec.Compatible(bpfMap) != nil {
+			bpfMap.Close()
+			continue
 		}
 
 		maps[name] = bpfMap
 	}
 
-	return maps, func() {
-		for _, bpfMap := range maps {
-			bpfMap.Close()
-		}
-	}, nil
+	return maps, closeMaps, nil
 }
 
 func cleanReleases(current string, previous [32]byte) {

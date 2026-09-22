@@ -104,7 +104,7 @@ install_binary() {
 	local download
 
 	download=$(mktemp "$destination.staged.XXXXXX")
-	trap 'rm -f "$download"' EXIT
+	trap "rm -f '$download'" EXIT
 	curl -fsSL -o "$download" "$source_url"
 
 	# The version command below runs this file, so check it before that.
@@ -129,9 +129,18 @@ step "install metald"
 install_binary /usr/bin/metald "$METALD_DOWNLOAD_URL" "$METALD_SHA256"
 
 
+# upgrade_mesh_bpf loads the BPF that one mesh binary embeds, because the CLI
+# only works with its own BPF. metald configures a new host itself.
+upgrade_mesh_bpf() {
+	[ -e /sys/fs/bpf/atlas-wg-mesh/build_hash ] || return 0
+	"$1" upgrade --uplink "$MESH_UPLINK_INTERFACE" --wireguard "$wireguard_interface"
+}
+
+
 step "install atlas-wg-mesh"
 install -d -m 0755 "$(dirname "$mesh_binary_path")"
 install_binary "$mesh_binary_path" "$WG_MESH_DOWNLOAD_URL" "$WG_MESH_SHA256"
+upgrade_mesh_bpf "$mesh_binary_path"
 
 
 step "create directories for metald"
@@ -329,6 +338,10 @@ if ! systemctl restart metal.service || ! service_is_stable; then
 	fi
 	if [ -x /usr/bin/metald.previous ]; then
 		mv -f /usr/bin/metald.previous /usr/bin/metald
+	fi
+	if [ -x "$mesh_binary_path.previous" ]; then
+		mv -f "$mesh_binary_path.previous" "$mesh_binary_path"
+		upgrade_mesh_bpf "$mesh_binary_path" || true
 	fi
 	systemctl restart metal.service || true
 	journalctl -u metal.service -n 20 --no-pager -o cat >&2 || true

@@ -181,13 +181,24 @@ Read [Debug in production](debug-in-production.md).
 
 ## Upgrade BPF programs
 
-Run the newer CLI binary on the host:
+Run the newer CLI binary on the host with the interfaces that `configure` used:
 
 ```sh
-atlas-wg-mesh upgrade
+atlas-wg-mesh upgrade --uplink eno1.1680 --wireguard wg0
 ```
 
-It compares the embedded BPF hash, keeps compatible pinned maps including `privileged_tenant_allowed_addresses`, and replaces every Atlas WG Mesh hook. A host in unicast mode keeps its unicast hooks, refreshed from the new release, and gains no multicast hook next to them. If the embedded BPF hash differs and maps are incompatible, run `atlas-wg-mesh upgrade --force`; it rebuilds BPF state, restores local VMs from their routes, and clears learned remote locations. When the hashes already match, `upgrade --force` does nothing.
+When the embedded BPF hash matches the installed hash, the command does nothing. Otherwise it rebuilds the host configuration from the interfaces, keeps each pinned map that the new release can use, recreates each incompatible map empty, and replaces every Atlas WG Mesh hook. A host in unicast mode keeps its unicast hooks, refreshed from the new release, and gains no multicast hook next to them.
+
+The command repairs the state that a recreated map loses:
+
+| Recreated map | Repair |
+| --- | --- |
+| `local_vms` | Restores local VMs from their host routes. |
+| `remote_vms` | Flushes the `fdaa::/16` neighbour entries on the uplink, so the next packet discovers its owner again. |
+| Peer maps | The next `peers sync` refills them. |
+| `privileged_tenant_allowed_addresses` | The next controller sync refills it. |
+
+`install-metald.sh` runs the upgrade after it installs a new binary.
 
 Use `atlas-wg-mesh version` to show CLI and BPF hashes.
 

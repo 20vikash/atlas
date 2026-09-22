@@ -46,7 +46,10 @@ func init() {
 	topCommand.Flags().StringVar(&topDestinationText, "dst", "", "destination IPv6 address")
 	topCommand.Flags().Uint32Var(&topTenant, "tenant", 0, "tenant ID")
 
-	upgradeCommand.Flags().BoolVar(&upgradeForce, "force", false, "allow a state-breaking upgrade")
+	upgradeCommand.Flags().StringVar(&uplinkName, "uplink", "", "physical uplink interface")
+	upgradeCommand.Flags().StringVar(&wireGuardName, "wireguard", "", "WireGuard interface")
+	upgradeCommand.MarkFlagRequired("uplink")
+	upgradeCommand.MarkFlagRequired("wireguard")
 
 	virtualMachineCommand.AddCommand(addVirtualMachineCommand, removeVirtualMachineCommand, listVirtualMachinesCommand)
 	privilegedVMCommand.AddCommand(addPrivilegedVMCommand, removePrivilegedVMCommand, listPrivilegedVMCommand)

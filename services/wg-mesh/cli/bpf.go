@@ -83,12 +83,16 @@ func pinCollection(collection *ebpf.Collection, config hostConfig) error {
 	return collection.Maps["build_hash"].Put(uint32(0), bpfHash())
 }
 
-func loadCollection(replacements map[string]*ebpf.Map) (*ebpf.Collection, error) {
+func collectionSpec() (*ebpf.CollectionSpec, error) {
 	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfObject))
 	if err != nil {
 		return nil, fmt.Errorf("read embedded BPF object: %w", err)
 	}
 
+	return spec, nil
+}
+
+func loadCollection(spec *ebpf.CollectionSpec, replacements map[string]*ebpf.Map) (*ebpf.Collection, error) {
 	collection, err := ebpf.NewCollectionWithOptions(
 		spec,
 		ebpf.CollectionOptions{
