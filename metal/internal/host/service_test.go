@@ -5,8 +5,6 @@ import (
 	"runtime"
 	"testing"
 
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
-
 	"github.com/frappe/atlas/metal/internal/network"
 	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
@@ -16,6 +14,8 @@ import (
 type testHostDependencies struct {
 	privilegedAddresses []string
 	wireGuardPeers      []network.WireGuardPeer
+	unicast             bool
+	peerSyncs           int
 	images              []vm.Image
 	virtualMachines     []vm.Information
 	wakeCount           int
@@ -36,19 +36,14 @@ func (dependencies *testHostDependencies) SetImagePolicies(_ context.Context, im
 	return nil
 }
 
-type testUnicastTransport struct {
-	enabled  bool
-	disabled bool
-}
-
-func (transport *testUnicastTransport) Enable(context.Context) error {
-	transport.enabled = true
+func (dependencies *testHostDependencies) SyncPeerState(_ context.Context, unicast bool) error {
+	dependencies.unicast = unicast
+	dependencies.peerSyncs++
 	return nil
 }
 
-func (transport *testUnicastTransport) Disable(context.Context) error {
-	transport.disabled = true
-	return nil
+func (dependencies *testHostDependencies) PrivateNetworkMAC() (string, error) {
+	return "02:00:00:00:00:01", nil
 }
 
 func (dependencies *testHostDependencies) List(context.Context) ([]vm.Information, error) {
@@ -143,42 +138,41 @@ func TestSynchronizeAllowsMeshToBeDisabled(t *testing.T) {
 	}
 }
 
-func TestSynchronizeEnablesUnicastTransportInUnicastMode(t *testing.T) {
-	dependencies := &testHostDependencies{}
-	unicast := &testUnicastTransport{}
-	service, err := NewService(Dependencies{
-		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
-		Unicast: unicast, Wake: func() {},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestSynchronizeSelectsTheNDPMode(t *testing.T) {
+	for _, unicast := range []bool{true, false} {
+		dependencies := &testHostDependencies{}
+		service, err := NewService(Dependencies{
+			WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
+			Mesh: dependencies, Wake: func() {},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if _, err := service.Synchronize(t.Context(), DesiredState{UnicastEnabled: true}); err != nil {
-		t.Fatal(err)
-	}
+		if _, err := service.Synchronize(t.Context(), DesiredState{UnicastEnabled: unicast}); err != nil {
+			t.Fatal(err)
+		}
 
-	if !unicast.enabled || unicast.disabled {
-		t.Fatalf("unicast transport = enabled %t disabled %t, want an enabled transport", unicast.enabled, unicast.disabled)
+		if dependencies.unicast != unicast || dependencies.peerSyncs != 1 {
+			t.Fatalf("unicast = %t, peer syncs = %d, want unicast %t", dependencies.unicast, dependencies.peerSyncs, unicast)
+		}
 	}
 }
 
-func TestSynchronizeDisablesUnicastTransportInMulticastMode(t *testing.T) {
+func TestSynchronizeRefusesUnicastWithoutTheMesh(t *testing.T) {
 	dependencies := &testHostDependencies{}
-	unicast := &testUnicastTransport{}
 	service, err := NewService(Dependencies{
 		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
-		Unicast: unicast, Wake: func() {},
+		Wake: func() {},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := service.Synchronize(t.Context(), DesiredState{}); err != nil {
-		t.Fatal(err)
+	if _, err := service.Synchronize(t.Context(), DesiredState{UnicastEnabled: true}); err == nil {
+		t.Fatal("unicast sync without the mesh succeeded")
 	}
-
-	if !unicast.disabled || unicast.enabled {
-		t.Fatalf("unicast transport = enabled %t disabled %t, want a disabled transport", unicast.enabled, unicast.disabled)
+	if dependencies.wireGuardPeers != nil {
+		t.Fatal("WireGuard peers were applied before the refusal")
 	}
 }

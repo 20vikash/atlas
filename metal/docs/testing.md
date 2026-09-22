@@ -68,7 +68,7 @@ stateDiagram-v2
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
 | `zfs.pool` | `metal` | ZFS pool name. |
 | `wg_mesh.enabled` | `true` | Enables Atlas WG Mesh on the host. |
-| `wg_mesh.uplink` | none | Discovery interface. Required. |
+| `wg_mesh.uplink` | none | Private network interface that carries Atlas NDP. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
 
 The idle timeout is per VM. A create request and a compute request carry `sleep_after_idle_seconds`.

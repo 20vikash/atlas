@@ -55,10 +55,25 @@ type Disk struct {
 	IOPS            int `json:"iops"`
 }
 
+// GatewayRoute names the gateway that carries one destination range.
+type GatewayRoute struct {
+	Destination string `json:"destination"`
+	Gateway     string `json:"gateway"`
+}
+
+// defaultIPv6Destination reaches every IPv6 address.
+const defaultIPv6Destination = "::/0"
+
 // NetworkConfiguration contains the requested VM network configuration.
 type NetworkConfiguration struct {
-	PublicIPv4                    string                `json:"public_ipv4"`
-	WireGuardMeshIPv6             string                `json:"wireguard_mesh_ipv6"`
+	PublicIPv4        string `json:"public_ipv4"`
+	WireGuardMeshIPv6 string `json:"wireguard_mesh_ipv6"`
+	// GatewayRoutes name the gateway of each destination range this VM reaches.
+	GatewayRoutes []GatewayRoute `json:"gateway_routes,omitempty"`
+	// IsNetworkGateway lets this VM send a source address it does not own, so it can carry traffic for other VMs.
+	IsNetworkGateway bool `json:"is_network_gateway,omitempty"`
+	// PublicIPv6 is the address block the host routes into this VM, and whose addresses it may use.
+	PublicIPv6                    string                `json:"public_ipv6,omitempty"`
 	PrivateNetworkThroughputMiBps int                   `json:"private_network_throughput_mibps"`
 	PublicNetworkThroughputMiBps  int                   `json:"public_network_throughput_mibps"`
 	Egress                        Egress                `json:"egress"`
@@ -68,6 +83,9 @@ type NetworkConfiguration struct {
 // Equal reports whether two network configurations contain the same desired values.
 func (configuration NetworkConfiguration) Equal(other NetworkConfiguration) bool {
 	return configuration.PublicIPv4 == other.PublicIPv4 &&
+		slices.Equal(configuration.GatewayRoutes, other.GatewayRoutes) &&
+		configuration.IsNetworkGateway == other.IsNetworkGateway &&
+		configuration.PublicIPv6 == other.PublicIPv6 &&
 		configuration.WireGuardMeshIPv6 == other.WireGuardMeshIPv6 &&
 		configuration.PrivateNetworkThroughputMiBps == other.PrivateNetworkThroughputMiBps &&
 		configuration.PublicNetworkThroughputMiBps == other.PublicNetworkThroughputMiBps &&
@@ -206,6 +224,9 @@ type Information struct {
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
+	GatewayRoutes                 []GatewayRoute
+	IsNetworkGateway              bool
+	PublicIPv6                    string
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
 	Egress                        Egress
@@ -225,4 +246,20 @@ type PublicOperationError struct {
 	Code      string
 	Message   string
 	UpdatedAt time.Time
+}
+
+// HostReachedDestinations lists what a guest and its namespace route through
+// the host. A gateway or a VM with its own block reaches every destination
+// through the host. Another VM reaches only its gateway route destinations.
+func HostReachedDestinations(network NetworkConfiguration) []string {
+	if network.IsNetworkGateway || network.PublicIPv6 != "" {
+		return []string{defaultIPv6Destination}
+	}
+
+	destinations := make([]string, 0, len(network.GatewayRoutes))
+	for _, route := range network.GatewayRoutes {
+		destinations = append(destinations, route.Destination)
+	}
+
+	return destinations
 }

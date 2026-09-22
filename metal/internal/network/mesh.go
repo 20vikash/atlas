@@ -2,16 +2,17 @@ package network
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
+	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // meshMTU is the VM interface MTU required by Atlas WG Mesh. It leaves room for
@@ -31,16 +32,16 @@ type MeshConfig struct {
 	CommandPath   string
 	UplinkName    string
 	WireGuardName string
-	// PeersStatePath holds the managed WireGuard peer state on this host.
-	PeersStatePath string
+	// WireGuardStatePath holds the managed WireGuard peer state that the mesh reads.
+	WireGuardStatePath string
 }
 
 // Mesh registers virtual machine addresses with the Atlas WG Mesh CLI.
 type Mesh struct {
-	commandPath    string
-	uplinkName     string
-	wireGuardName  string
-	peersStatePath string
+	commandPath        string
+	uplinkName         string
+	wireGuardName      string
+	wireGuardStatePath string
 }
 
 // NewMesh returns a mesh registrar for one host.
@@ -54,7 +55,7 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	if configuration.UplinkName == "" {
 		return nil, errors.New("Atlas WG Mesh uplink interface name is required")
 	}
-	if configuration.PeersStatePath == "" {
+	if configuration.WireGuardStatePath == "" {
 		return nil, errors.New("Atlas WG Mesh peer state path is required")
 	}
 	if _, err := exec.LookPath(configuration.CommandPath); err != nil {
@@ -62,192 +63,57 @@ func NewMesh(configuration MeshConfig) (*Mesh, error) {
 	}
 
 	return &Mesh{
-		commandPath:    configuration.CommandPath,
-		uplinkName:     configuration.UplinkName,
-		wireGuardName:  configuration.WireGuardName,
-		peersStatePath: configuration.PeersStatePath,
+		commandPath:        configuration.CommandPath,
+		uplinkName:         configuration.UplinkName,
+		wireGuardName:      configuration.WireGuardName,
+		wireGuardStatePath: configuration.WireGuardStatePath,
 	}, nil
 }
 
 // Check the mesh registrar interface at compile time.
 var _ meshRegistrar = (*Mesh)(nil)
 
-// SyncPeerState reloads the BPF peer maps after the WireGuard peer state changed.
-func (mesh *Mesh) SyncPeerState(ctx context.Context) error {
-	return platform.Run(ctx, mesh.commandPath, "peers", "sync", mesh.peersStatePath)
+// SyncPeerState replaces the BPF peer map and its NDP transport mode.
+func (mesh *Mesh) SyncPeerState(ctx context.Context, unicast bool) error {
+	arguments := []string{"peers", "sync", mesh.wireGuardStatePath}
+	if unicast {
+		arguments = append(arguments, "--unicast")
+	}
+	return platform.Run(ctx, mesh.commandPath, arguments...)
 }
 
-// UplinkMAC returns the MAC address of the discovery uplink.
-func (mesh *Mesh) UplinkMAC() (string, error) {
-	uplink, err := net.InterfaceByName(mesh.uplinkName)
+// PrivateNetworkMAC returns the MAC address of the mesh uplink.
+// It reads one sysfs file, because every sync calls it and an interface lookup lists every link.
+func (mesh *Mesh) PrivateNetworkMAC() (string, error) {
+	contents, err := os.ReadFile("/sys/class/net/" + mesh.uplinkName + "/address")
 	if err != nil {
 		return "", fmt.Errorf("read uplink %s: %w", mesh.uplinkName, err)
 	}
-	if len(uplink.HardwareAddr) != 6 {
+	mac, err := net.ParseMAC(strings.TrimSpace(string(contents)))
+	if err != nil || len(mac) != 6 {
 		return "", fmt.Errorf("uplink %s has no Ethernet MAC address", mesh.uplinkName)
 	}
-	return uplink.HardwareAddr.String(), nil
+	return mac.String(), nil
 }
 
-// EnsureHost configures an unconfigured host and verifies its discovery
-// interface.
+// EnsureHost applies the host configuration and refreshes its BPF programs.
 func (mesh *Mesh) EnsureHost(ctx context.Context) error {
-	status, statusError := platform.Output(ctx, mesh.commandPath, "status")
-	if statusError == nil {
-		return mesh.verifyDiscoveryInterface(status)
-	}
-
-	err := platform.Run(ctx, mesh.commandPath, "configure",
+	return platform.Run(ctx, mesh.commandPath, "configure",
 		"--uplink", mesh.uplinkName, "--wireguard", mesh.wireGuardName)
-	if err != nil {
-		return errors.Join(fmt.Errorf("read Atlas WG Mesh status: %w", statusError), err)
-	}
-	return nil
 }
 
-// verifyDiscoveryInterface rejects a host that carries Atlas NDP on another
-// interface. The CLI reads the interface from the pinned configuration.
-func (mesh *Mesh) verifyDiscoveryInterface(status string) error {
-	name := discoveryInterface(status)
-	if name == "" {
-		return fmt.Errorf("Atlas WG Mesh status names no discovery interface")
-	}
-	if name != mesh.uplinkName {
-		return fmt.Errorf(
-			"Atlas WG Mesh carries NDP on %s and not %s: reset the host to change the interface",
-			name, mesh.uplinkName,
-		)
-	}
-	return nil
-}
-
-// discoveryInterface reads NAME from "discovery interface: NAME (multicast)".
-func discoveryInterface(status string) string {
-	for line := range strings.SplitSeq(status, "\n") {
-		name, found := strings.CutPrefix(strings.TrimSpace(line), "discovery interface: ")
-		if !found {
-			continue
-		}
-		if fields := strings.Fields(name); len(fields) > 0 {
-			return fields[0]
-		}
-	}
-	return ""
-}
-
-// Add registers one VM address on a host interface and announces its location.
-func (mesh *Mesh) Add(ctx context.Context, address, interfaceName string) error {
-	return platform.Run(ctx, mesh.commandPath, "vm", "add",
-		"--interface", interfaceName,
-		"--address", address,
-		"--mtu", strconv.Itoa(meshMTU),
-	)
-}
-
-// Remove unregisters one VM address. An address this host does not own is not an error.
-func (mesh *Mesh) Remove(ctx context.Context, address, interfaceName string) error {
-	registered, err := mesh.IsRegistered(ctx, address)
-	if err != nil || !registered {
-		return err
-	}
+// removeVM unregisters one VM address. An address this host does not own is not an error.
+func (mesh *Mesh) removeVM(ctx context.Context, address, interfaceName string) error {
 	return platform.Run(ctx, mesh.commandPath, "vm", "remove", "--interface", interfaceName, "--address", address)
 }
 
 // ApplyPrivilegedAddresses replaces the complete privileged VM whitelist.
 func (mesh *Mesh) ApplyPrivilegedAddresses(ctx context.Context, desired []string) error {
-	wanted, err := parseMeshAddresses(desired)
-	if err != nil {
-		return err
+	arguments := []string{"privileged-vm", "clear"}
+	if len(desired) > 0 {
+		arguments = append([]string{"privileged-vm", "replace"}, desired...)
 	}
-	current, err := mesh.privilegedAddresses(ctx)
-	if err != nil {
-		return err
-	}
-
-	var applyErrors []error
-	for address := range current {
-		if _, keep := wanted[address]; !keep {
-			applyErrors = append(applyErrors, mesh.setPrivileged(ctx, "remove", address))
-		}
-	}
-	for address := range wanted {
-		if _, present := current[address]; !present {
-			applyErrors = append(applyErrors, mesh.setPrivileged(ctx, "add", address))
-		}
-	}
-	return errors.Join(applyErrors...)
-}
-
-// setPrivileged adds or removes one address from the privileged whitelist.
-func (mesh *Mesh) setPrivileged(ctx context.Context, action, address string) error {
-	if err := platform.Run(ctx, mesh.commandPath, "privileged-vm", action, "--address", address); err != nil {
-		return fmt.Errorf("%s privileged mesh address %s: %w", action, address, err)
-	}
-	return nil
-}
-
-// privilegedAddresses returns the whitelist that this host holds now.
-func (mesh *Mesh) privilegedAddresses(ctx context.Context) (map[string]struct{}, error) {
-	output, err := platform.Output(ctx, mesh.commandPath, "privileged-vm", "list", "--json")
-	if err != nil {
-		return nil, fmt.Errorf("list privileged mesh addresses: %w", err)
-	}
-
-	var entries []struct {
-		Address string `json:"address"`
-	}
-	if err := json.Unmarshal([]byte(output), &entries); err != nil {
-		return nil, fmt.Errorf("decode privileged mesh addresses: %w", err)
-	}
-
-	addresses := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		address, err := netip.ParseAddr(entry.Address)
-		if err != nil {
-			return nil, fmt.Errorf("parse privileged mesh address %q: %w", entry.Address, err)
-		}
-		addresses[address.String()] = struct{}{}
-	}
-	return addresses, nil
-}
-
-// parseMeshAddresses normalises the desired address set.
-func parseMeshAddresses(values []string) (map[string]struct{}, error) {
-	addresses := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		address, err := netip.ParseAddr(value)
-		if err != nil {
-			return nil, fmt.Errorf("parse privileged mesh address %q: %w", value, err)
-		}
-		addresses[address.String()] = struct{}{}
-	}
-	return addresses, nil
-}
-
-// IsRegistered reports whether this host owns one VM address.
-func (mesh *Mesh) IsRegistered(ctx context.Context, address string) (bool, error) {
-	wanted, err := netip.ParseAddr(address)
-	if err != nil {
-		return false, fmt.Errorf("parse mesh address %q: %w", address, err)
-	}
-
-	output, err := platform.Output(ctx, mesh.commandPath, "vm", "list", "--json")
-	if err != nil {
-		return false, fmt.Errorf("list Atlas WG Mesh VMs: %w", err)
-	}
-
-	var entries []struct {
-		Address string `json:"address"`
-	}
-	if err := json.Unmarshal([]byte(output), &entries); err != nil {
-		return false, fmt.Errorf("decode Atlas WG Mesh VM list: %w", err)
-	}
-	for _, entry := range entries {
-		if registered, err := netip.ParseAddr(entry.Address); err == nil && registered == wanted {
-			return true, nil
-		}
-	}
-	return false, nil
+	return platform.Run(ctx, mesh.commandPath, arguments...)
 }
 
 // meshNamespaceSteps routes mesh traffic through the namespace. The guest
@@ -265,4 +131,135 @@ func meshNamespaceSteps(guestVirtualEthernet, address string) [][]string {
 		{"ip", "-6", "route", "replace", meshPrefix, "via", meshGatewayAddress, "dev", guestVirtualEthernet},
 		{"ip", "-6", "neigh", "replace", "proxy", address, "dev", guestVirtualEthernet},
 	}
+}
+
+// syncVM applies the host routes first and registers the complete VM state last.
+func (mesh *Mesh) syncVM(ctx context.Context, request request) error {
+	if request.WireGuardMeshIPv6 == "" {
+		return nil
+	}
+	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
+	if err := mesh.convergeNamespaceRoutes(ctx, request); err != nil {
+		return err
+	}
+	if err := mesh.convergeOwnedPrefixRoutes(ctx, request); err != nil {
+		return err
+	}
+
+	arguments := []string{
+		"vm", "sync", "--interface", hostVirtualEthernet,
+		"--address", request.WireGuardMeshIPv6, "--mtu", strconv.Itoa(meshMTU),
+	}
+	if request.IsNetworkGateway {
+		arguments = append(arguments, "--gateway")
+	}
+	if request.PublicIPv6 != "" {
+		arguments = append(arguments, "--prefix", request.PublicIPv6)
+	}
+	for _, route := range request.GatewayRoutes {
+		arguments = append(arguments, "--route", route.Destination+"="+route.Gateway)
+	}
+	return platform.Run(ctx, mesh.commandPath, arguments...)
+}
+
+// convergeNamespaceRoutes sends each configured destination through the host.
+func (mesh *Mesh) convergeNamespaceRoutes(ctx context.Context, request request) error {
+	_, guestVirtualEthernet := virtualEthernetNames(request.UserID)
+	wanted := vm.HostReachedDestinations(vm.NetworkConfiguration{
+		GatewayRoutes: request.GatewayRoutes, PublicIPv6: request.PublicIPv6, IsNetworkGateway: request.IsNetworkGateway,
+	})
+	present, err := mesh.namespaceRoutes(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	namespace := namespaceName(request.VirtualMachineID)
+	for _, destination := range present {
+		if slices.Contains(wanted, destination) {
+			continue
+		}
+		if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "del", destination,
+			"via", meshGatewayAddress, "dev", guestVirtualEthernet); err != nil {
+			return fmt.Errorf("remove the namespace route of %s: %w", destination, err)
+		}
+	}
+	for _, destination := range wanted {
+		if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "replace", destination,
+			"via", meshGatewayAddress, "dev", guestVirtualEthernet); err != nil {
+			return fmt.Errorf("add the namespace route of %s: %w", destination, err)
+		}
+	}
+	return nil
+}
+
+func (mesh *Mesh) namespaceRoutes(ctx context.Context, request request) ([]string, error) {
+	_, guestVirtualEthernet := virtualEthernetNames(request.UserID)
+	output, err := platform.RunInNetworkNamespace(ctx, namespaceName(request.VirtualMachineID),
+		"ip", "-6", "route", "show", "via", meshGatewayAddress, "dev", guestVirtualEthernet)
+	if err != nil {
+		return nil, fmt.Errorf("read the namespace routes of %s: %w", request.VirtualMachineID, err)
+	}
+
+	return parseNamespaceRoutes(output), nil
+}
+
+// parseNamespaceRoutes returns the destinations of ip route output, except the mesh route. ip prints ::/0 as default.
+func parseNamespaceRoutes(output string) []string {
+	var destinations []string
+	for line := range strings.SplitSeq(output, "\n") {
+		fields := strings.Fields(line)
+		switch {
+		case len(fields) == 0 || fields[0] == meshPrefix:
+		case fields[0] == "default":
+			destinations = append(destinations, "::/0")
+		default:
+			destinations = append(destinations, fields[0])
+		}
+	}
+	return destinations
+}
+
+// convergeOwnedPrefixRoutes sends each public prefix to its gateway VM.
+func (mesh *Mesh) convergeOwnedPrefixRoutes(ctx context.Context, request request) error {
+	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
+	present, err := platform.Output(ctx, "ip", "-6", "route", "show", "dev", hostVirtualEthernet)
+	if err != nil {
+		return fmt.Errorf("read the routes of %s: %w", hostVirtualEthernet, err)
+	}
+
+	for line := range strings.SplitSeq(present, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fieldAfter(fields, "via") != request.WireGuardMeshIPv6 || fields[0] == request.PublicIPv6 {
+			continue
+		}
+		if err := mesh.changeOwnedPrefixRoute(ctx, request, "del", fields[0]); err != nil {
+			return err
+		}
+	}
+	if request.PublicIPv6 != "" {
+		return mesh.changeOwnedPrefixRoute(ctx, request, "replace", request.PublicIPv6)
+	}
+	return nil
+}
+
+func (mesh *Mesh) changeOwnedPrefixRoute(ctx context.Context, request request, action, prefix string) error {
+	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
+	if err := platform.Run(ctx, "ip", "-6", "route", action, prefix,
+		"via", request.WireGuardMeshIPv6, "dev", hostVirtualEthernet); err != nil {
+		return fmt.Errorf("%s the route of %s: %w", action, prefix, err)
+	}
+	if _, err := platform.RunInNetworkNamespace(ctx, namespaceName(request.VirtualMachineID),
+		"ip", "-6", "route", action, prefix, "via", request.WireGuardMeshIPv6, "dev", tapName); err != nil {
+		return fmt.Errorf("%s the guest route of %s: %w", action, prefix, err)
+	}
+	return nil
+}
+
+func fieldAfter(fields []string, key string) string {
+	for index, field := range fields {
+		if field == key && index+1 < len(fields) {
+			return fields[index+1]
+		}
+	}
+	return ""
 }

@@ -105,12 +105,43 @@ func (request diskRequest) specification() vm.Disk {
 
 // networkRequest is the complete desired VM network.
 type networkRequest struct {
-	PublicIPv4                    string           `json:"public_ipv4"`
-	WireGuardMeshIPv6             string           `json:"wireguard_mesh_ipv6"`
-	PrivateNetworkThroughputMiBps int              `json:"private_network_throughput_mibps"`
-	PublicNetworkThroughputMiBps  int              `json:"public_network_throughput_mibps"`
-	Egress                        string           `json:"egress"`
-	Firewall                      *firewallRequest `json:"firewall"`
+	PublicIPv4                    string                `json:"public_ipv4"`
+	GatewayRoutes                 []gatewayRouteRequest `json:"gateway_routes"`
+	IsNetworkGateway              bool                  `json:"is_network_gateway"`
+	PublicIPv6                    string                `json:"public_ipv6"`
+	WireGuardMeshIPv6             string                `json:"wireguard_mesh_ipv6"`
+	PrivateNetworkThroughputMiBps int                   `json:"private_network_throughput_mibps"`
+	PublicNetworkThroughputMiBps  int                   `json:"public_network_throughput_mibps"`
+	Egress                        string                `json:"egress"`
+	Firewall                      *firewallRequest      `json:"firewall"`
+}
+
+// gatewayRouteRequest names the gateway that carries one destination range.
+type gatewayRouteRequest struct {
+	Destination string `json:"destination"`
+	Gateway     string `json:"gateway"`
+}
+
+// validate accepts one destination prefix and one gateway mesh address.
+func (route gatewayRouteRequest) validate() error {
+	if !isCanonicalIPv6Prefix(route.Destination) {
+		return fmt.Errorf("network.gateway_routes destination %q must be a canonical IPv6 prefix", route.Destination)
+	}
+
+	gateway, err := netip.ParseAddr(route.Gateway)
+	if err != nil || !wireGuardMeshPrefix.Contains(gateway) {
+		return fmt.Errorf("network.gateway_routes gateway must be in %s", wireGuardMeshPrefix)
+	}
+	return nil
+}
+
+// toGatewayRouteSpecifications converts the routes into the domain form.
+func toGatewayRouteSpecifications(routes []gatewayRouteRequest) []vm.GatewayRoute {
+	specifications := make([]vm.GatewayRoute, len(routes))
+	for index, route := range routes {
+		specifications[index] = vm.GatewayRoute{Destination: route.Destination, Gateway: route.Gateway}
+	}
+	return specifications
 }
 
 // firewallRequest is the complete desired firewall configuration.
@@ -277,6 +308,9 @@ func (request networkRequest) validate() error {
 	if err := request.Firewall.validate(); err != nil {
 		return err
 	}
+	if err := request.validateMeshRouting(); err != nil {
+		return err
+	}
 	if request.PublicIPv4 == "" {
 		return nil
 	}
@@ -291,11 +325,38 @@ func (request networkRequest) validate() error {
 	return nil
 }
 
+// validateMeshRouting checks the gateway routes, the gateway role, and the
+// public IPv6 block of a VM.
+func (request networkRequest) validateMeshRouting() error {
+	for _, route := range request.GatewayRoutes {
+		if err := route.validate(); err != nil {
+			return err
+		}
+	}
+	if (len(request.GatewayRoutes) > 0 || request.IsNetworkGateway || request.PublicIPv6 != "") && request.WireGuardMeshIPv6 == "" {
+		return fmt.Errorf("network.gateway_routes, network.is_network_gateway, and network.public_ipv6 require network.wireguard_mesh_ipv6")
+	}
+	if request.PublicIPv6 != "" && !isCanonicalIPv6Prefix(request.PublicIPv6) {
+		return fmt.Errorf("network.public_ipv6 %q must be a canonical IPv6 prefix", request.PublicIPv6)
+	}
+	return nil
+}
+
+// isCanonicalIPv6Prefix accepts a prefix only in the text form that ip prints,
+// so a reconcile pass can compare the host routes as text.
+func isCanonicalIPv6Prefix(value string) bool {
+	prefix, err := netip.ParsePrefix(value)
+	return err == nil && prefix.Addr().Is6() && !prefix.Addr().Is4In6() && prefix.Masked().String() == value
+}
+
 // specification converts the request into the domain network configuration.
 func (request networkRequest) specification() vm.NetworkConfiguration {
 	return vm.NetworkConfiguration{
 		PublicIPv4:                    request.PublicIPv4,
 		WireGuardMeshIPv6:             request.WireGuardMeshIPv6,
+		GatewayRoutes:                 toGatewayRouteSpecifications(request.GatewayRoutes),
+		IsNetworkGateway:              request.IsNetworkGateway,
+		PublicIPv6:                    request.PublicIPv6,
 		PrivateNetworkThroughputMiBps: request.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  request.PublicNetworkThroughputMiBps,
 		Egress:                        vm.Egress(request.Egress),

@@ -108,9 +108,11 @@ flowchart LR
 
 When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.
 
-`EnsureHost` configures an unconfigured host and refuses a host that discovers on another interface, because the uplink hook consumes the discovery traffic of every VLAN beneath it.
+`EnsureHost` applies the configured uplink and WireGuard interfaces. The CLI refuses an uplink change until an operator resets the mesh.
 
 `ApplyPrivilegedAddresses` and `WireGuardManager.Apply` each replace a complete set. `Apply` drops this host from the peer set it receives and records what it applied, so it never peers with itself and never disturbs peers added by other tools.
+
+`SyncPeerState` replaces the BPF peer map. It also attaches the unicast NDP hook or selects multicast NDP.
 
 Each peer supplies `mesh_address`, which becomes its `AllowedIPs` entry. `Apply` rejects a set with a missing, invalid, or repeated mesh address.
 

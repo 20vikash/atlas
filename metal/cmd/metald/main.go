@@ -39,8 +39,6 @@ const (
 	reconcileInterval      = 5 * time.Second
 	meshSetupTimeout       = 2 * time.Minute
 	imageReconcileInterval = time.Hour
-	// unicastShutdownTimeout bounds the clean stop of the unicast transport daemon.
-	unicastShutdownTimeout = 10 * time.Second
 )
 
 //	@title			Metal API
@@ -152,10 +150,10 @@ func makeDirs(options options) error {
 // connectMesh prepares Atlas WG Mesh and configures the host on every start.
 func connectMesh(options options) (*network.Mesh, error) {
 	mesh, err := network.NewMesh(network.MeshConfig{
-		CommandPath:    options.mesh.binaryPath,
-		UplinkName:     options.mesh.uplinkName,
-		WireGuardName:  options.wireGuardName,
-		PeersStatePath: wireGuardStatePath(options),
+		CommandPath:        options.mesh.binaryPath,
+		UplinkName:         options.mesh.uplinkName,
+		WireGuardName:      options.wireGuardName,
+		WireGuardStatePath: wireGuardStatePath(options),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure Atlas WG Mesh: %w", err)
@@ -269,24 +267,6 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
 	}
-	// The unicast transport needs the mesh binary, so it is absent when the
-	// mesh is disabled and a unicast sync then fails loudly.
-	var unicastManager *network.UnicastManager
-	if options.mesh.enabled {
-		unicastManager, err = network.NewUnicastManager(network.UnicastConfig{
-			BinaryPath:         options.mesh.binaryPath,
-			WireGuardStatePath: wireGuardState,
-		})
-		if err != nil {
-			return fmt.Errorf("configure unicast manager: %w", err)
-		}
-		// A metald stop also stops the transport daemon, so its clean stop restores the multicast NDP filters.
-		defer func() {
-			shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), unicastShutdownTimeout)
-			defer cancelShutdown()
-			serveError = errors.Join(serveError, unicastManager.Disable(shutdownContext))
-		}()
-	}
 	var trafficMonitor *traffic.Monitor
 	if options.trafficMonitor.enabled {
 		trafficMonitor, err = traffic.NewMonitor(traffic.Config{
@@ -358,17 +338,16 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		return migrationManager.DestinationReservations(ctx)
 	}
 	hostDependencies := host.Dependencies{
-		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
-		VirtualMachines: virtualMachineManager, Storage: stores.Pool,
-		MigrationReservations: migrationReservations, Wake: notifyReconcilers,
+		WireGuard:             wireGuardManager,
+		Images:                stores.Images,
+		VirtualMachines:       virtualMachineManager,
+		Storage:               stores.Pool,
+		MigrationReservations: migrationReservations,
+		Wake:                  notifyReconcilers,
 	}
+	// A nil *network.Mesh in the interface would not compare equal to nil.
 	if mesh != nil {
-		// The mesh owns the peer state sync and reports the uplink MAC.
-		hostDependencies.PeerState = mesh
-		hostDependencies.Uplink = mesh
-	}
-	if unicastManager != nil {
-		hostDependencies.Unicast = unicastManager
+		hostDependencies.Mesh = mesh
 	}
 	hostService, err := host.NewService(hostDependencies)
 	if err != nil {
@@ -388,10 +367,11 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		vm.NewMigrationHost(virtualMachineManager),
 		migration.NewSourceClient(0, tlsConfigurations.client),
 		storage.NewMigrationTransfer(stores.Pool, storage.MigrationTLSConfig{
-			CAFile: options.tls.caFile, CertificateFile: options.tls.certificateFile,
-			PrivateKeyFile: options.tls.privateKeyFile,
-			ListenAddress:  transferAddress,
-			TransferPort:   options.migration.transferPort,
+			CAFile:          options.tls.caFile,
+			CertificateFile: options.tls.certificateFile,
+			PrivateKeyFile:  options.tls.privateKeyFile,
+			ListenAddress:   transferAddress,
+			TransferPort:    options.migration.transferPort,
 		}),
 		migrationCapacity,
 		options.migration.finalDeltaMiB,

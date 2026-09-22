@@ -78,7 +78,7 @@ The source starts a one-shot mutual-TLS listener on `migration.transfer_port` fo
 | `wireguard.interface` | `wg0` | Underlay interface for managed peers and Atlas WG Mesh. |
 | `wg_mesh.enabled` | `true` | Enables Atlas WG Mesh host setup and VM mesh registration. |
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
-| `wg_mesh.uplink` | none | Discovery uplink. Required. |
+| `wg_mesh.uplink` | none | Private network interface that carries Atlas NDP. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
 | `migration.final_delta_mib` | `512` | Incremental size at or below which the destination stops the source and takes the final snapshot. |
 | `migration.transfer_port` | `9002` | Mutual-TLS snapshot stream port. Use the same value on every host in the region. |

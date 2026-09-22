@@ -25,8 +25,8 @@ type DesiredState struct {
 type SyncResult struct {
 	Capacity             Capacity
 	VirtualMachineStates map[string]vm.State
-	// UplinkMAC is the discovery uplink MAC of this host.
-	UplinkMAC string
+	// PrivateNetworkMAC is the MAC of the mesh uplink. It is empty when the mesh is disabled.
+	PrivateNetworkMAC string
 }
 
 // Capacity contains current host compute and storage capacity.
@@ -40,30 +40,16 @@ type Capacity struct {
 	AvailableStorageMiB    int
 }
 
-// PrivilegedMesh replaces the privileged virtual machine address set.
-type PrivilegedMesh interface {
+// Mesh applies controller-owned mesh state and reports the MAC of the mesh uplink.
+type Mesh interface {
 	ApplyPrivilegedAddresses(context.Context, []string) error
+	SyncPeerState(ctx context.Context, unicast bool) error
+	PrivateNetworkMAC() (string, error)
 }
 
 // WireGuardManager replaces controller-owned WireGuard peers.
 type WireGuardManager interface {
 	Apply(context.Context, []network.WireGuardPeer) error
-}
-
-// UnicastTransport switches the unicast NDP transport on and off.
-type UnicastTransport interface {
-	Enable(context.Context) error
-	Disable(context.Context) error
-}
-
-// PeerStateSyncer reloads the mesh peer state after the WireGuard peers change.
-type PeerStateSyncer interface {
-	SyncPeerState(context.Context) error
-}
-
-// UplinkReporter reports the discovery uplink MAC of this host.
-type UplinkReporter interface {
-	UplinkMAC() (string, error)
 }
 
 // ImagePolicyStore replaces controller-owned image policies.
@@ -87,11 +73,9 @@ type MigrationReservations func(context.Context) ([]migration.DestinationReserva
 
 // Dependencies contains host synchronization services.
 type Dependencies struct {
-	Mesh                  PrivilegedMesh
+	// Mesh is nil when Atlas WG Mesh is disabled.
+	Mesh                  Mesh
 	WireGuard             WireGuardManager
-	Unicast               UnicastTransport
-	PeerState             PeerStateSyncer
-	Uplink                UplinkReporter
 	Images                ImagePolicyStore
 	VirtualMachines       VirtualMachineSource
 	Storage               StorageCapacitySource
@@ -103,11 +87,8 @@ type Dependencies struct {
 
 // Service owns controller synchronization and host capacity calculation.
 type Service struct {
-	mesh                  PrivilegedMesh
+	mesh                  Mesh
 	wireGuard             WireGuardManager
-	unicast               UnicastTransport
-	peerState             PeerStateSyncer
-	uplink                UplinkReporter
 	images                ImagePolicyStore
 	virtualMachines       VirtualMachineSource
 	storage               StorageCapacitySource
@@ -125,9 +106,6 @@ func NewService(dependencies Dependencies) (*Service, error) {
 	return &Service{
 		mesh:                  dependencies.Mesh,
 		wireGuard:             dependencies.WireGuard,
-		unicast:               dependencies.Unicast,
-		peerState:             dependencies.PeerState,
-		uplink:                dependencies.Uplink,
 		images:                dependencies.Images,
 		virtualMachines:       dependencies.VirtualMachines,
 		storage:               dependencies.Storage,
@@ -139,22 +117,20 @@ func NewService(dependencies Dependencies) (*Service, error) {
 // Synchronize applies controller-owned state and returns the sync result. Each
 // set is replaced in full, so the controller never sends incremental changes.
 func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (SyncResult, error) {
-	addresses := desired.PrivilegedVirtualMachineAddresses
-	if service.mesh != nil {
-		if err := service.mesh.ApplyPrivilegedAddresses(ctx, addresses); err != nil {
-			return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
-		}
+	if service.mesh == nil && desired.UnicastEnabled {
+		return SyncResult{}, fmt.Errorf("enable unicast transport: Atlas WG Mesh is disabled")
 	}
 	if err := service.wireGuard.Apply(ctx, desired.WireGuardPeers); err != nil {
 		return SyncResult{}, fmt.Errorf("apply WireGuard peers: %w", err)
 	}
-	if service.peerState != nil {
-		if err := service.peerState.SyncPeerState(ctx); err != nil {
+	// The mesh reads the peer state that WireGuard.Apply just wrote.
+	if service.mesh != nil {
+		if err := service.mesh.ApplyPrivilegedAddresses(ctx, desired.PrivilegedVirtualMachineAddresses); err != nil {
+			return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
+		}
+		if err := service.mesh.SyncPeerState(ctx, desired.UnicastEnabled); err != nil {
 			return SyncResult{}, fmt.Errorf("sync mesh peer state: %w", err)
 		}
-	}
-	if err := service.applyUnicast(ctx, desired.UnicastEnabled); err != nil {
-		return SyncResult{}, err
 	}
 	if err := service.images.SetImagePolicies(ctx, desired.Images); err != nil {
 		return SyncResult{}, fmt.Errorf("apply image policies: %w", err)
@@ -178,36 +154,15 @@ func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (
 	}
 
 	result := SyncResult{Capacity: capacity, VirtualMachineStates: states}
-	if service.uplink != nil {
-		uplinkMAC, err := service.uplink.UplinkMAC()
+	if service.mesh != nil {
+		mac, err := service.mesh.PrivateNetworkMAC()
 		if err != nil {
-			return SyncResult{}, fmt.Errorf("read uplink MAC: %w", err)
+			return SyncResult{}, fmt.Errorf("read the private network MAC: %w", err)
 		}
-		result.UplinkMAC = uplinkMAC
+		result.PrivateNetworkMAC = mac
 	}
 
 	return result, nil
-}
-
-// applyUnicast switches the unicast NDP transport.
-func (service *Service) applyUnicast(ctx context.Context, enabled bool) error {
-	if service.unicast == nil {
-		if enabled {
-			return fmt.Errorf("enable unicast transport: Atlas WG Mesh is disabled")
-		}
-		return nil
-	}
-
-	if enabled {
-		if err := service.unicast.Enable(ctx); err != nil {
-			return fmt.Errorf("enable unicast transport: %w", err)
-		}
-		return nil
-	}
-	if err := service.unicast.Disable(ctx); err != nil {
-		return fmt.Errorf("disable unicast transport: %w", err)
-	}
-	return nil
 }
 
 // Capacity returns current host capacity and valid VM reservations. CPU is

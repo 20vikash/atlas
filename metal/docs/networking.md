@@ -65,11 +65,13 @@ Each VM has a private IPv6 address in `fdaa::/16`. Atlas WG Mesh routes it betwe
 
 How the mesh forwards packets and discovers VM locations: [Atlas WG Mesh design guide](../../services/wg-mesh/docs/design.md).
 
-`metald` runs the `atlas-wg-mesh` CLI. On every start it runs `status` and configures the host when the CLI reports no configuration. It then replays the existing VM network configurations, so a reinstalled or reset host restores the VM registrations without an operator.
+`metald` runs `configure` on every start. The command installs the mesh or replaces its BPF programs without a service interruption. Metal then applies each virtual machine configuration.
+
+A VM can route destinations outside the mesh to a gateway VM, and a VM can own a public IPv6 block. Metal adds the namespace and host routes, and registers the complete VM state with `atlas-wg-mesh vm sync`. A gateway VM and a VM with a block route `::/0` through the host. See [Gateways](../../services/wg-mesh/docs/gateways.md).
 
 Tenant 0 is the privileged tenant. A tenant-0 VM crosses tenants only when its address is in the Atlas WG Mesh whitelist, which `POST /v1/sync` carries in full.
 
-A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes. The service then resets the guest resolver and time sync, because both resume backed off. See [Per-VM metadata](../../atlas/vm/SPEC.md#per-vm-metadata).
+A VM learns its address from MMDS. `atlas-metadata.service` reads `meta-data/mesh-ipv6` every 250 ms and writes a systemd-networkd drop-in. This updates the address after a warm snapshot resumes. The service then resets the guest resolver and time sync, because both resume backed off. It also reads `meta-data/host-routes`, the destinations the guest routes through the host. See [Per-VM metadata](../../atlas/vm/SPEC.md#per-vm-metadata).
 
 Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [internal/network/SPEC.md](../internal/network/SPEC.md).
 
@@ -97,9 +99,9 @@ The first packet can be lost while Firecracker starts. Clients must retry. A met
 
 Each peer carries its mesh address, which becomes its `AllowedIPs` entry. Atlas owns the mesh address of each host, so Metal applies the address it receives and does not calculate one.
 
-Each peer endpoint is a public address, so the tunnel crosses the uplink. Atlas WG Mesh discovery uses the private network. The WireGuard MTU follows the uplink MTU for this reason.
+Each peer endpoint is the private address of its host, so the tunnel crosses the private network. Atlas WG Mesh NDP uses the same network. The WireGuard MTU follows the private network MTU for this reason.
 
-Runtime `wg set` installs no system routes, so the manager also owns one `/128` route per peer into `wg0`. The encapsulated tunnel traffic from the mesh reaches `wg0` only through these routes. A peer that leaves the set loses its peer entry and its route; a missing route is reinstalled on the next apply, because routes do not survive a reboot while the managed peer state does.
+Runtime `wg set` installs no system routes, so the manager also owns one `/128` route per peer into `wg0`. The encapsulated tunnel traffic from the mesh reaches `wg0` only through these routes. A peer that leaves the set loses its peer entry and its route. A missing route is reinstalled on the next apply, because routes do not survive a reboot but the managed peer state does.
 
 ## Design notes
 
