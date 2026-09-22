@@ -20,7 +20,7 @@ Provisioning is a sequence of phases, not one transaction. Each phase records pr
 | `disk_inventory` | Reading block devices into Metal Server Disk rows. |
 | `catalog_sync` | Refreshing Metal Server Size and Metal Server Image from the provider. |
 | `host_inspection` | Inspecting and registering a Generic provider host. See [providers](../docs/providers.md#generic-provider). |
-| `MetalServerIPAddress` (DocType) | One public IPv4 address and its provider intent. |
+| `MetalServerIPAddress` (DocType) | One public IPv4 address or IPv6 block, and its provider intent. |
 | `IPAddressService` | Tenant reservation, shared-pool claims, and release. |
 | `MetalServerUsage` (DocType) | One capacity sample reported by Metal. |
 
@@ -92,6 +92,24 @@ A tenant can reserve an address it already holds to stop that return, even while
 Reset Tenant returns one unattached address to the shared pool. It needs the System Manager role, refuses unowned addresses, and records the previous tenant in a comment.
 
 Remove deletes one unattached address and releases its provider reservation. It uses the standard delete permission and confirmation. Both actions appear only for an unused Allocated address.
+
+An IPv4 record is one `/32` address, and validation refuses any other length. The provider maps it to a host address, and Metal sends its traffic to one VM. Atlas has no IPv4 blocks.
+
+## Public IPv6 blocks
+
+A record with `version` 6 is one IPv6 block. `cidr` holds its length, which the provider sets: `/64` on Scaleway and `/80` on AWS. An operator sets it on a Generic network. A block never joins the shared pool, and a tenant cannot reserve it.
+
+A System Manager attaches one block to one VM from the VM form or the block form. Both paths run the VM network checks. Atlas sends `public_ipv6` to Metal first, then sets the attach intent. The host routes the whole block into the VM and answers neighbour solicitations for it on its public interface.
+
+On AWS, a reservation picks the first free `/80` of the Atlas subnet. Attach delegates it to the host interface, and detach takes it back.
+
+VM termination releases every address of the VM. A migration moves each attached address to the destination server at cutover. A failed move is logged and does not stop the others.
+
+## Mesh MAC address
+
+`private_network_mac_address` is the MAC of the private network interface. Atlas WG Mesh identifies each peer by it. Provisioning stores it once the private address is up. Each sync reports it again, and Atlas writes it only when it changes.
+
+The `Use Unicast Networking` setting in Atlas Settings sends NDP between hosts over the IPv4 underlay. Use it when hosts share no Layer 2 network.
 
 ## Related
 

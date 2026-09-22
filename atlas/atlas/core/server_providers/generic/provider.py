@@ -81,7 +81,7 @@ class GenericProvider(ServerProvider):
 
 	@override
 	def configure_server_network(self, server: "MetalServer") -> None:
-		"""Check the private address that the operator configured."""
+		"""Check the private address that the operator configured, and store its interface MAC."""
 		self.wait_for_private_address(server)
 
 	@override
@@ -103,11 +103,11 @@ class GenericProvider(ServerProvider):
 		"""Do nothing because the operator reclaims the host."""
 
 	@override
-	def delete_public_ipv4_address(self, provider_resource_id: str) -> None:
+	def delete_public_ip_address(self, provider_resource_id: str) -> None:
 		"""Do nothing because the operator owns the address."""
 
 	@override
-	def attach_public_ipv4_address(
+	def attach_public_ip_address(
 		self, provider_resource_id: str, public_address: str, server: "MetalServer"
 	) -> str:
 		"""Return the public address, which the host network already routes."""
@@ -116,7 +116,7 @@ class GenericProvider(ServerProvider):
 		return public_address
 
 	@override
-	def detach_public_ipv4_address(
+	def detach_public_ip_address(
 		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
 	) -> None:
 		"""Do nothing because the host network keeps the route."""

@@ -7,15 +7,17 @@
  "field_order": [
   "section_break_address",
   "status",
+  "version",
   "address",
-  "provider_resource_id",
-  "host_address",
+  "cidr",
   "column_break_uoyq",
+  "provider_resource_id",
   "tenant_id",
   "reserved",
   "intent_version",
   "section_break_attachment",
   "server",
+  "host_address",
   "column_break_wlan",
   "virtual_machine",
   "section_break_tags",
@@ -37,12 +39,30 @@
    "read_only": 1
   },
   {
+   "default": "4",
+   "fieldname": "version",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Version",
+   "options": "4\n6",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
    "fieldname": "address",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "IPv4 Address",
+   "label": "Address",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "cidr",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "CIDR",
+   "set_only_once": 1
   },
   {
    "fieldname": "provider_resource_id",
@@ -130,7 +150,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-16 21:41:03.266919",
+ "modified": "2026-09-23 03:42:46.752724",
  "modified_by": "Administrator",
  "module": "Metal Server",
  "name": "Metal Server IP Address",

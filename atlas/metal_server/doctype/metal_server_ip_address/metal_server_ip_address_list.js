@@ -1,20 +1,26 @@
 function showReserveServerIPAddressDialog() {
 	const dialog = new frappe.ui.Dialog({
-		title: __("Reserve Public IPv4"),
+		title: __("Reserve Public IP"),
 		fields: [
 			{
-				fieldtype: "HTML",
-				options: `<p>${__(
-					"This adds one provider address to the shared pool for tenant claims."
-				)}</p>`,
+				fieldname: "version",
+				fieldtype: "Select",
+				label: __("Version"),
+				options: "4\n6",
+				default: "4",
+				reqd: 1,
+				description: __(
+					"IPv4 adds one address to the shared pool for tenant claims. IPv6 adds one block that you attach to a VM."
+				),
 			},
 		],
 		primary_action_label: __("Reserve"),
-		primary_action() {
+		primary_action(values) {
 			frappe.call({
 				method: "atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.reserve_for_pool",
+				args: { version: values.version },
 				freeze: true,
-				freeze_message: __("Reserving Public IPv4"),
+				freeze_message: __("Reserving Public IP"),
 				callback(response) {
 					dialog.hide();
 					frappe.set_route("Form", "Metal Server IP Address", response.message);
@@ -39,9 +45,6 @@ frappe.listview_settings["Metal Server IP Address"] = {
 
 		listview.page.clear_primary_action();
 		if (!has_common(frappe.user_roles, ["System Manager"])) return;
-		listview.page.add_inner_button(
-			__("Reserve Public IPv4"),
-			showReserveServerIPAddressDialog
-		);
+		listview.page.add_inner_button(__("Reserve Public IP"), showReserveServerIPAddressDialog);
 	},
 };

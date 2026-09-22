@@ -43,7 +43,7 @@ def read_response(connection):
 
 
 def request(method, path, headers):
-    """Return one MMDS response body, or an empty string on failure."""
+    """Return one MMDS response body, an empty string for a missing key, or None on failure."""
     lines = [f"{method} {METADATA_PATH_PREFIX}/{path} HTTP/1.1", "Host: metadata"]
     lines.extend(f"{name}: {value}" for name, value in headers.items())
     message = ("\r\n".join(lines) + "\r\n\r\n").encode()
@@ -54,10 +54,13 @@ def request(method, path, headers):
             connection.sendall(message)
             head, body = read_response(connection)
     except (OSError, ValueError):
-        return ""
+        return None
 
-    if b" 200 " not in head.split(b"\r\n", 1)[0]:
+    status = head.split(b"\r\n", 1)[0]
+    if b" 404 " in status:
         return ""
+    if b" 200 " not in status:
+        return None
     return body.decode(errors="replace").strip()
 
 
@@ -75,20 +78,26 @@ def apply_hostname(hostname):
     subprocess.run(["hostnamectl", "set-hostname", hostname], check=True)
 
 
-def mesh_drop_in(address):
-    return (
+def mesh_drop_in(address, routes):
+    """Return the mesh address and the host routes of the guest."""
+    drop_in = (
         "[Network]\n"
         f"Address={address}/128\n"
         "IPv6AcceptRA=no\n"
-        "\n"
-        "[Route]\n"
-        f"Destination={MESH_PREFIX}\n"
-        f"Gateway={MESH_GATEWAY}\n"
     )
+    for destination in [MESH_PREFIX, *routes]:
+        drop_in += "\n[Route]\n" f"Destination={destination}\n" f"Gateway={MESH_GATEWAY}\n"
+
+    return drop_in
 
 
-def apply_mesh_network(address):
-    drop_in = mesh_drop_in(ipaddress.IPv6Address(address))
+def parse_routes(value):
+    """Return the route destinations that the metadata service lists."""
+    return [entry.strip() for entry in (value or "").split(",") if entry.strip()]
+
+
+def apply_mesh_network(address, routes):
+    drop_in = mesh_drop_in(ipaddress.IPv6Address(address), routes)
     if DROP_IN_PATH.exists() and DROP_IN_PATH.read_text() == drop_in:
         return
 
@@ -126,8 +135,10 @@ def main():
             else:
                 if hostname:
                     apply_hostname(hostname)
-                if address:
-                    apply_mesh_network(address)
+                routes = read("meta-data/host-routes", token)
+                # A failed read keeps the current routes, because an empty value would remove them.
+                if address and routes is not None:
+                    apply_mesh_network(address, parse_routes(routes))
         time.sleep(POLL_SECONDS)
 
 

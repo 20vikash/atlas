@@ -99,6 +99,16 @@ class MigrationService:
 				_("Virtual Machine {0} is not ready to migrate.").format(virtual_machine.name),
 				exc=AtlasUserError,
 			)
+		if frappe.db.exists(
+			"Metal Server IP Address",
+			{"virtual_machine": virtual_machine.name, "status": ["in", ["Attaching", "Detaching"]]},
+		):
+			frappe.throw(
+				_("The public address of Virtual Machine {0} is changing. Try again later.").format(
+					virtual_machine.name
+				),
+				exc=AtlasUserError,
+			)
 		if virtual_machine.current_state not in LIVE_STATES:
 			frappe.throw(
 				_("Virtual Machine {0} must be running, stopped, or paused to migrate.").format(
@@ -164,6 +174,14 @@ class MigrationService:
 			shape.sleep_after_idle_seconds > 0,
 		)
 		requested_destination = self.migration.destination_metal_server
+		exclude_servers = {self.migration.source_metal_server}
+		if virtual_machine.is_network_gateway:
+			# A server runs one gateway, because a reply names only its VM and client.
+			exclude_servers |= set(
+				frappe.get_all(
+					"Virtual Machine", filters={"is_network_gateway": 1, "is_terminating": 0}, pluck="server"
+				)
+			)
 
 		try:
 			if requested_destination:
@@ -172,14 +190,10 @@ class MigrationService:
 						_("Choose a destination Metal Server other than {0}.").format(requested_destination)
 					)
 				destination = PlacementStrategy.reserve_server(
-					requirements,
-					requested_destination,
-					exclude_servers={self.migration.source_metal_server},
+					requirements, requested_destination, exclude_servers=exclude_servers
 				)
 			else:
-				destination = PlacementStrategy.find_server(
-					requirements, exclude_servers={self.migration.source_metal_server}
-				)
+				destination = PlacementStrategy.find_server(requirements, exclude_servers=exclude_servers)
 		except AtlasUserError as error:
 			self.record_destination_metal_server_selection_failure(error)
 			if requested_destination:
@@ -363,6 +377,21 @@ class MigrationService:
 		migration.db_set("progress_percent", 95)
 		frappe.db.commit()  # nosemgrep
 		self.migration = migration
+
+		# The VM already runs on the destination, so one failed move must not stop the others.
+		for address in frappe.get_all(
+			"Metal Server IP Address",
+			filters={"virtual_machine": virtual_machine.name, "status": "Attached"},
+			pluck="name",
+		):
+			try:
+				frappe.get_doc("Metal Server IP Address", address).move_to_server(
+					migration.destination_metal_server
+				)
+			except Exception:
+				frappe.log_error(
+					title=f"Move public address {address} to {migration.destination_metal_server}"
+				)
 
 	def finish(self) -> None:
 		"""Tell the destination that Atlas committed the VM."""

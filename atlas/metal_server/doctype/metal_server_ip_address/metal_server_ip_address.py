@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
 
 from atlas.atlas.core.background_jobs import run_as_admin
+from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.tags import validate_tags
 from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID, IPAddressService
+
+if TYPE_CHECKING:
+	from atlas.vm.core.vm_service import VirtualMachineService
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,10 +29,14 @@ class IPAddressIntent:
 	public_address: str
 	host_address: str | None
 	virtual_machine: str | None
+	is_ipv6: bool
+
+
+IPV4_PREFIX_LENGTH = 32
 
 
 class MetalServerIPAddress(Document):
-	"""One public IPv4 address owned by a server."""
+	"""One public IPv4 address, or one IPv6 block, that a server routes to a VM."""
 
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
@@ -40,6 +49,7 @@ class MetalServerIPAddress(Document):
 		from atlas.atlas.doctype.atlas_tag.atlas_tag import AtlasTag
 
 		address: DF.Data
+		cidr: DF.Int
 		host_address: DF.Data | None
 		intent_version: DF.Int
 		provider_resource_id: DF.Data
@@ -48,23 +58,18 @@ class MetalServerIPAddress(Document):
 		status: DF.Literal["Allocated", "Attaching", "Attached", "Detaching"]
 		tags: DF.Table[AtlasTag]
 		tenant_id: DF.Int
+		version: DF.Literal["4", "6"]
 		virtual_machine: DF.Link | None
 	# end: auto-generated types
+
+	def before_naming(self) -> None:
+		"""Normalize the address first, because the name is copied back into it."""
+		self.address = self.get_normalized_address()
 
 	def validate(self) -> None:
 		"""Validate the address and default it to the shared pool."""
 		validate_tags(self)
 
-		try:
-			address = ipaddress.ip_interface(self.address)
-		except ValueError:
-			frappe.throw(_("IPv4 Address must be a valid /32 address."))
-			return
-
-		if not isinstance(address, ipaddress.IPv4Interface) or address.network.prefixlen != 32:
-			frappe.throw(_("IPv4 Address must be a valid /32 address."))
-
-		self.address = str(address.ip)
 		if frappe.get_single("Atlas Settings").server_provider == "Generic":
 			self.provider_resource_id = self.address
 
@@ -75,22 +80,97 @@ class MetalServerIPAddress(Document):
 		if self.get("reserved") and self.tenant_id == UNOWNED_TENANT_ID:
 			frappe.throw(_("A reserved IP address needs a tenant."))
 
+	@property
+	def is_ipv6(self) -> bool:
+		"""Report whether this record is an IPv6 block."""
+		return self.version == "6"
+
+	@property
+	def prefix(self) -> str:
+		"""Return the address with its prefix length, such as 2001:db8:1:2::/64."""
+		return f"{self.address}/{self.cidr}"
+
+	def get_normalized_address(self) -> str:
+		"""Return the /32 address, or the network address of the IPv6 block."""
+		return self.get_ipv6_prefix() if self.is_ipv6 else self.get_ipv4_address()
+
+	def get_ipv4_address(self) -> str:
+		"""Return the normalized /32 address."""
+		try:
+			address = ipaddress.ip_interface(self.address)
+		except ValueError:
+			address = None
+
+		# Atlas routes one IPv4 address to a VM through a host address, so it has no IPv4 block.
+		if (
+			not isinstance(address, ipaddress.IPv4Interface)
+			or address.network.prefixlen != IPV4_PREFIX_LENGTH
+			or self.cidr not in (None, 0, IPV4_PREFIX_LENGTH)
+		):
+			frappe.throw(_("An IPv4 address must be one /32 address. IPv4 blocks are not supported."))
+
+		self.cidr = IPV4_PREFIX_LENGTH
+		return str(address.ip)
+
+	def get_ipv6_prefix(self) -> str:
+		"""Return the network address of the prefix. The name cannot hold a slash."""
+		prefix_length = self.get_ipv6_prefix_length()
+		text = self.address if "/" in self.address else f"{self.address}/{prefix_length}"
+		try:
+			prefix = ipaddress.ip_network(text)
+		except ValueError:
+			prefix = None
+
+		if not isinstance(prefix, ipaddress.IPv6Network):
+			frappe.throw(_("IPv6 Address must be the network address of a prefix."))
+		if prefix.prefixlen != prefix_length:
+			frappe.throw(
+				_("IPv6 Address must use the /{0} prefix length of this provider.").format(prefix_length)
+			)
+
+		self.cidr = prefix_length
+		return str(prefix.network_address)
+
+	def get_ipv6_prefix_length(self) -> int:
+		"""Return the provider block length, or the length set on the record for a Generic network."""
+		provider_length = frappe.get_single(
+			"Atlas Settings"
+		).server_provider_controller.public_ipv6_prefix_length
+		if provider_length:
+			return provider_length
+
+		if not 1 <= (self.cidr or 0) <= 128:
+			frappe.throw(_("IPv6 Address needs a CIDR between 1 and 128."))
+		return self.cidr
+
 	def on_trash(self) -> None:
 		"""Release the provider reservation before the record is removed."""
 		if self.status != "Allocated":
 			frappe.throw(_("Detach this IP address before deletion."))
-		frappe.get_single("Atlas Settings").server_provider_controller.delete_public_ipv4_address(
+		frappe.get_single("Atlas Settings").server_provider_controller.delete_public_ip_address(
 			self.provider_resource_id
 		)
 
 	def begin_assignment(self, server: str, virtual_machine: str) -> None:
-		"""Set an attach intent for this address."""
+		"""Set an attach intent for one virtual machine."""
 		if self.status != "Allocated":
 			frappe.throw(_("Metal Server IP Address {0} is not available.").format(self.name))
 
 		self.status = "Attaching"
 		self.server = server
 		self.virtual_machine = virtual_machine
+		self.host_address = None
+		self.intent_version = (self.intent_version or 0) + 1
+		self.save()
+		self.queue_reconcile()
+
+	def move_to_server(self, server: str) -> None:
+		"""Detach from the current server now, then attach to another server for the same VM."""
+		frappe.get_single("Atlas Settings").server_provider_controller.detach_public_ip_address(
+			self.provider_resource_id, self.host_address, frappe.get_doc("Metal Server", self.server)
+		)
+		self.status = "Attaching"
+		self.server = server
 		self.host_address = None
 		self.intent_version = (self.intent_version or 0) + 1
 		self.save()
@@ -112,9 +192,21 @@ class MetalServerIPAddress(Document):
 		self.queue_reconcile()
 
 	@frappe.whitelist(methods=["POST"])
+	def attach_public_ipv6(self, virtual_machine: str) -> None:
+		"""Attach this IPv6 block to one virtual machine. The VM runs its own network checks."""
+		frappe.get_doc("Virtual Machine", virtual_machine).attach_public_ipv6(self.name)
+
+	@frappe.whitelist(methods=["POST"])
+	def detach_public_ipv6(self) -> None:
+		"""Detach this IPv6 block from its virtual machine."""
+		frappe.get_doc("Virtual Machine", self.virtual_machine).detach_public_ipv6()
+
+	@frappe.whitelist(methods=["POST"])
 	def reserve(self) -> None:
-		"""Keep this address with its tenant after detach."""
+		"""Keep this IPv4 address with its tenant after detach."""
 		self.check_permission("write")
+		if self.is_ipv6:
+			frappe.throw(_("Only an IPv4 address can be reserved."), exc=AtlasUserError)
 		IPAddressService().reserve_held(self)
 
 	def release_to_pool(self) -> None:
@@ -188,6 +280,7 @@ class MetalServerIPAddress(Document):
 			public_address=self.address,
 			host_address=self.host_address,
 			virtual_machine=self.virtual_machine,
+			is_ipv6=self.is_ipv6,
 		)
 
 	def apply_intent(self, intent: IPAddressIntent) -> str | None:
@@ -196,7 +289,7 @@ class MetalServerIPAddress(Document):
 		if intent.status != "Attaching":
 			if not intent.server:
 				raise ValueError("A detach intent needs a Server")
-			provider.detach_public_ipv4_address(
+			provider.detach_public_ip_address(
 				intent.provider_resource_id,
 				intent.host_address,
 				frappe.get_doc("Metal Server", intent.server),
@@ -205,11 +298,14 @@ class MetalServerIPAddress(Document):
 
 		if not intent.server:
 			raise ValueError("An attach intent needs a Server")
-		host_address = provider.attach_public_ipv4_address(
+		host_address = provider.attach_public_ip_address(
 			intent.provider_resource_id,
 			intent.public_address,
 			frappe.get_doc("Metal Server", intent.server),
 		)
+		# The server itself routes an IPv6 block, so no VM receives a host address.
+		if intent.is_ipv6:
+			return None
 		try:
 			return str(ipaddress.IPv4Address(host_address))
 		except ipaddress.AddressValueError as error:
@@ -258,10 +354,10 @@ def enqueue_pending_ip_address_reconcilation() -> None:
 
 
 @frappe.whitelist(methods=["POST"])
-def reserve_for_pool() -> str:
-	"""Add one provider reservation to the shared pool."""
+def reserve_for_pool(version: int = 4) -> str:
+	"""Add one provider reservation. Only an IPv4 address joins the shared pool."""
 	frappe.only_for("System Manager")
-	return IPAddressService().reserve_from_provider()
+	return IPAddressService().reserve_from_provider(int(version))
 
 
 def reserve_for_tenant(tenant_id: int) -> str:

@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -11,6 +12,20 @@ from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address 
 	IPAddressIntent,
 	MetalServerIPAddress,
 )
+
+
+@contextmanager
+def provider_with_prefix_length(prefix_length: int | None):
+	"""Run with a provider that gives one IPv6 prefix length, or none."""
+
+	class Provider:
+		public_ipv6_prefix_length = prefix_length
+
+	with patch(
+		"frappe.get_single",
+		return_value=SimpleNamespace(server_provider="Scaleway", server_provider_controller=Provider()),
+	):
+		yield
 
 
 class TestServerIPAddress(UnitTestCase):
@@ -98,6 +113,7 @@ class TestServerIPAddress(UnitTestCase):
 	def test_assignment_increments_the_intent_version(self) -> None:
 		address = SimpleNamespace(
 			name="203.0.113.10",
+			is_ipv6=False,
 			status="Allocated",
 			server=None,
 			virtual_machine=None,
@@ -162,6 +178,7 @@ class TestServerIPAddress(UnitTestCase):
 				public_address="203.0.113.10",
 				host_address="10.1.8.55",
 				virtual_machine=None,
+				is_ipv6=False,
 			)
 			query = Mock()
 			query.set.return_value = query
@@ -197,6 +214,7 @@ class TestServerIPAddress(UnitTestCase):
 			"203.0.113.10",
 			None,
 			"VM-00001",
+			False,
 		)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
@@ -226,6 +244,7 @@ class TestServerIPAddress(UnitTestCase):
 			"203.0.113.10",
 			None,
 			"VM-00001",
+			False,
 		)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
@@ -253,6 +272,7 @@ class TestServerIPAddress(UnitTestCase):
 			"203.0.113.10",
 			None,
 			"VM-00001",
+			False,
 		)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
@@ -279,6 +299,101 @@ class TestServerIPAddress(UnitTestCase):
 		)
 		worker.complete_intent.assert_not_called()
 
+	def test_ipv6_prefix_is_stored_as_its_network_address(self) -> None:
+		for text in ("2001:db8:1:2::/64", "2001:db8:1:2::"):
+			with self.subTest(text=text):
+				address = self.ipv6_address(text)
+
+				with provider_with_prefix_length(64):
+					# The autoname field takes its value before validation runs.
+					address.before_naming()
+
+				self.assertEqual(address.address, "2001:db8:1:2::")
+				self.assertEqual(address.cidr, 64)
+
+	def test_ipv6_uses_the_prefix_length_of_the_provider(self) -> None:
+		address = self.ipv6_address("2001:db8:1:2::")
+
+		with provider_with_prefix_length(80):
+			address.before_naming()
+
+		self.assertEqual(address.address, "2001:db8:1:2::")
+		self.assertEqual(address.cidr, 80)
+
+	def test_ipv6_refuses_another_prefix_length(self) -> None:
+		address = self.ipv6_address("2001:db8:1:2::/64")
+
+		with provider_with_prefix_length(80), self.assertRaisesRegex(frappe.ValidationError, "/80"):
+			address.before_naming()
+
+	def test_ipv6_takes_the_record_cidr_without_a_provider_length(self) -> None:
+		address = self.ipv6_address("2001:db8:1::")
+		address.cidr = 56
+
+		with provider_with_prefix_length(None):
+			address.before_naming()
+
+		self.assertEqual(address.cidr, 56)
+
+	def test_ipv6_needs_a_cidr_without_a_provider_length(self) -> None:
+		address = self.ipv6_address("2001:db8:1:2::")
+
+		with provider_with_prefix_length(None), self.assertRaisesRegex(frappe.ValidationError, "CIDR"):
+			address.before_naming()
+
+	def test_ipv6_needs_a_network_address(self) -> None:
+		for text in ("2001:db8:1:2::5", "203.0.113.10"):
+			with self.subTest(text=text):
+				address = self.ipv6_address(text)
+
+				with provider_with_prefix_length(64), self.assertRaises(frappe.ValidationError):
+					address.before_naming()
+
+	def test_ipv4_always_uses_32(self) -> None:
+		address = frappe.get_doc(
+			{
+				"doctype": "Metal Server IP Address",
+				"address": "203.0.113.10",
+				"provider_resource_id": "provider-1",
+			}
+		)
+
+		address.before_naming()
+
+		self.assertEqual(address.cidr, 32)
+
+	@staticmethod
+	def ipv6_address(text: str) -> MetalServerIPAddress:
+		return frappe.get_doc(
+			{
+				"doctype": "Metal Server IP Address",
+				"version": "6",
+				"address": text,
+				"provider_resource_id": "fip-1",
+			}
+		)
+
+	def test_ipv6_attach_returns_no_host_address(self) -> None:
+		intent = IPAddressIntent(
+			1, "Attaching", "fip-1", "node-1", False, "2001:db8:1:2::", None, None, is_ipv6=True
+		)
+		provider = Mock()
+		provider.attach_public_ip_address.return_value = "2001:db8:1:2::"
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.get_single",
+				return_value=SimpleNamespace(server_provider_controller=provider),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.get_doc"
+			),
+		):
+			host_address = MetalServerIPAddress.apply_intent(SimpleNamespace(), intent)
+
+		self.assertIsNone(host_address)
+		provider.attach_public_ip_address.assert_called_once()
+
 	def test_attach_needs_an_ipv4_host_address(self) -> None:
 		intent = IPAddressIntent(
 			1,
@@ -289,9 +404,10 @@ class TestServerIPAddress(UnitTestCase):
 			"203.0.113.10",
 			None,
 			"VM-00001",
+			False,
 		)
 		provider = Mock()
-		provider.attach_public_ipv4_address.return_value = "not-an-address"
+		provider.attach_public_ip_address.return_value = "not-an-address"
 
 		with (
 			patch(
@@ -304,3 +420,35 @@ class TestServerIPAddress(UnitTestCase):
 			self.assertRaisesRegex(ValueError, "IPv4 host address"),
 		):
 			MetalServerIPAddress.apply_intent(SimpleNamespace(), intent)
+
+	def test_a_move_detaches_now_and_attaches_on_the_new_server(self) -> None:
+		provider = Mock()
+		address = SimpleNamespace(
+			provider_resource_id="fip-1",
+			host_address="10.0.0.9",
+			server="node-1",
+			status="Attached",
+			intent_version=4,
+			save=Mock(),
+			queue_reconcile=Mock(),
+		)
+
+		with (
+			patch("frappe.get_single", return_value=SimpleNamespace(server_provider_controller=provider)),
+			patch("frappe.get_doc", return_value="node-1-document"),
+		):
+			MetalServerIPAddress.move_to_server(address, "node-2")
+
+		provider.detach_public_ip_address.assert_called_once_with("fip-1", "10.0.0.9", "node-1-document")
+		self.assertEqual(
+			(address.status, address.server, address.host_address, address.intent_version),
+			("Attaching", "node-2", None, 5),
+		)
+		address.queue_reconcile.assert_called_once()
+
+	def test_an_ipv4_block_is_refused(self) -> None:
+		for values in ({"address": "203.0.113.0/24"}, {"address": "203.0.113.0", "cidr": 24}):
+			address = frappe.get_doc({"doctype": "Metal Server IP Address", "version": "4", **values})
+
+			with self.assertRaisesRegex(frappe.ValidationError, "IPv4 blocks are not supported"):
+				address.get_ipv4_address()

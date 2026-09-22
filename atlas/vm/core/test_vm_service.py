@@ -259,8 +259,25 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 		"""Return a service for a managed virtual machine."""
 		virtual_machine = SimpleNamespace(name="VM-00001", validate_network_change=Mock())
 		service = VirtualMachineService(virtual_machine)
-		service.get_attached_ip_address_name = Mock(return_value=attached)
+		service.get_ipv4_address_name = Mock(return_value=attached)
 		return service
+
+	def test_termination_releases_the_ipv4_address_and_the_ipv6_block(self) -> None:
+		virtual_machine = SimpleNamespace(name="VM-00001", db_set=Mock())
+		service = VirtualMachineService(virtual_machine)
+		addresses = {"203.0.113.10": Mock(), "2001:db8:1:2::": Mock()}
+
+		with (
+			patch.object(VirtualMachineService, "metal_client", Mock()),
+			patch("atlas.vm.core.vm_service.frappe.get_all", return_value=list(addresses)),
+			patch(
+				"atlas.vm.core.vm_service.frappe.get_doc", side_effect=lambda _doctype, name: addresses[name]
+			),
+		):
+			service.terminate()
+
+		for address in addresses.values():
+			address.release.assert_called_once_with()
 
 	def test_an_unknown_egress_mode_is_rejected(self) -> None:
 		service = self.build_service(None)
@@ -292,7 +309,12 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 	def test_an_unowned_pool_address_is_claimed_for_the_tenant(self) -> None:
 		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
 		address = SimpleNamespace(
-			tenant_id=-1, reserved=0, status="Allocated", virtual_machine=None, begin_assignment=Mock()
+			tenant_id=-1,
+			reserved=0,
+			status="Allocated",
+			virtual_machine=None,
+			is_ipv6=False,
+			begin_assignment=Mock(),
 		)
 
 		with patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address):
@@ -305,7 +327,7 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 	def test_an_attached_pool_address_is_not_claimed(self) -> None:
 		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
 		address = SimpleNamespace(
-			tenant_id=-1, status="Attached", virtual_machine=None, begin_assignment=Mock()
+			tenant_id=-1, status="Attached", virtual_machine=None, is_ipv6=False, begin_assignment=Mock()
 		)
 
 		with (

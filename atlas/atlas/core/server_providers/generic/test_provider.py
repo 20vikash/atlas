@@ -49,7 +49,7 @@ class TestGenericProvider(UnitTestCase):
 	def test_public_address_attaches_as_itself(self) -> None:
 		provider = GenericProvider(self.settings())
 
-		host_address = provider.attach_public_ipv4_address("203.0.113.9", "203.0.113.9", self.server())
+		host_address = provider.attach_public_ip_address("203.0.113.9", "203.0.113.9", self.server())
 
 		self.assertEqual(host_address, "203.0.113.9")
 
@@ -57,11 +57,11 @@ class TestGenericProvider(UnitTestCase):
 		provider = GenericProvider(self.settings())
 
 		with self.assertRaisesRegex(GenericError, "resource ID"):
-			provider.attach_public_ipv4_address("provider-address-1", "203.0.113.9", self.server())
+			provider.attach_public_ip_address("provider-address-1", "203.0.113.9", self.server())
 
 	def test_public_address_reservation_is_refused(self) -> None:
 		with self.assertRaises(UnsupportedProviderOperation):
-			GenericProvider(self.settings()).reserve_public_ipv4_address()
+			GenericProvider(self.settings()).reserve_public_ip_address(4)
 
 	@staticmethod
 	def settings(**values: object) -> SimpleNamespace:

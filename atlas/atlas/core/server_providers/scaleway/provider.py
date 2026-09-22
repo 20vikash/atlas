@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 class ScalewayProvider(ServerProvider):
 	"""Provide Atlas server operations through the Scaleway API."""
 
+	public_ipv6_prefix_length: ClassVar[int | None] = 64
+
 	provider_type = "Scaleway"
 	credential_fields = ("scaleway_secret_key", "scaleway_access_key")
 	error_class = ScalewayError
@@ -156,17 +158,17 @@ class ScalewayProvider(ServerProvider):
 		self.servers.delete(provider_server_id)
 
 	@override
-	def reserve_public_ipv4_address(self) -> ReservedIPAddress:
-		"""Reserve one public IPv4 address for a server."""
-		return self.ip_addresses.reserve()
+	def reserve_public_ip_address(self, version: int) -> ReservedIPAddress:
+		"""Reserve one public IPv4 address or IPv6 block."""
+		return self.ip_addresses.reserve(version)
 
 	@override
-	def delete_public_ipv4_address(self, provider_resource_id: str) -> None:
-		"""Release one reserved public IPv4 address."""
+	def delete_public_ip_address(self, provider_resource_id: str) -> None:
+		"""Release one Flexible IP."""
 		self.ip_addresses.delete(provider_resource_id)
 
 	@override
-	def attach_public_ipv4_address(
+	def attach_public_ip_address(
 		self, provider_resource_id: str, public_address: str, server: "MetalServer"
 	) -> str:
 		"""Attach a reserved address to a server."""
@@ -176,7 +178,7 @@ class ScalewayProvider(ServerProvider):
 		return public_address
 
 	@override
-	def detach_public_ipv4_address(
+	def detach_public_ip_address(
 		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
 	) -> None:
 		"""Detach an address from a server."""

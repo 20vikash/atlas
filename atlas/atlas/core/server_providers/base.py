@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
@@ -17,6 +18,9 @@ if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
 PollResult = TypeVar("PollResult")
+
+
+MAC_ADDRESS = re.compile(r"[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +121,8 @@ class ServerProvider(ABC):
 	setup_poll_interval_seconds: ClassVar[int] = 5
 	setup_poll_timeout_seconds: ClassVar[int] = 7_200
 	private_address_attempts: ClassVar[int] = 60
+	# The prefix length a provider gives for one IPv6 block. None lets the operator choose.
+	public_ipv6_prefix_length: ClassVar[int | None] = None
 
 	def __init__(self, settings: "AtlasSettings | None" = None) -> None:
 		self.settings: AtlasSettings = settings or frappe.get_single("Atlas Settings")
@@ -191,32 +197,32 @@ class ServerProvider(ABC):
 		"""Delete a provider server and its owned resources if they exist."""
 		...
 
-	def reserve_public_ipv4_address(self) -> ReservedIPAddress:
-		"""Reserve one public IPv4 address."""
-		raise UnsupportedProviderOperation("public IPv4 address reservation")
+	def reserve_public_ip_address(self, version: int) -> ReservedIPAddress:
+		"""Reserve one public IPv4 address or IPv6 block."""
+		raise UnsupportedProviderOperation(f"public IPv{version} address reservation")
 
-	def delete_public_ipv4_address(self, provider_resource_id: str) -> None:
-		"""Delete one public IPv4 address."""
-		raise UnsupportedProviderOperation("public IPv4 address deletion")
+	def delete_public_ip_address(self, provider_resource_id: str) -> None:
+		"""Delete one public IP address."""
+		raise UnsupportedProviderOperation("public IP address deletion")
 
-	def attach_public_ipv4_address(
+	def attach_public_ip_address(
 		self, provider_resource_id: str, public_address: str, server: "MetalServer"
 	) -> str:
-		"""Attach one public IPv4 address and return its host address."""
-		raise UnsupportedProviderOperation("public IPv4 address attachment")
+		"""Attach one public IP address and return its host address."""
+		raise UnsupportedProviderOperation("public IP address attachment")
 
-	def detach_public_ipv4_address(
+	def detach_public_ip_address(
 		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
 	) -> None:
-		"""Detach one public IPv4 address from its provider server."""
-		raise UnsupportedProviderOperation("public IPv4 address detachment")
+		"""Detach one public IP address from its provider server."""
+		raise UnsupportedProviderOperation("public IP address detachment")
 
 	def promote_ssh_user(self, server: "MetalServer", user: str) -> None:
 		"""Promote a provider Secure Shell user to root access."""
 		raise ProviderOperationError(f"The provider cannot promote Secure Shell user {user}")
 
 	def wait_for_private_address(self, server: "MetalServer") -> None:
-		"""Wait until the configured private address is available."""
+		"""Wait for the private address, then store the interface MAC. Atlas WG Mesh identifies each host by it."""
 		from atlas.atlas.core.ssh import SSHRunner
 
 		device = server.private_network_interface
@@ -224,25 +230,32 @@ class ServerProvider(ABC):
 		if not device or not expected_address:
 			raise self.error_class("Atlas server has no private network interface or address")
 
-		def has_private_address() -> bool | None:
-			"""Report whether the server has its private network address."""
+		def get_private_network_mac_address() -> str | None:
+			"""Return the interface MAC once the server has its private network address."""
 			try:
 				result = SSHRunner(server.public_ipv4_address).run_command(
-					f"ip -4 -o addr show dev {device} scope global", timeout_seconds=15
+					f"ip -4 -o addr show dev {device} scope global && cat /sys/class/net/{device}/address",
+					timeout_seconds=15,
 				)
 			except OSError, subprocess.TimeoutExpired:
 				return None
-			return True if result.exit_code == 0 and expected_address in result.output else None
+			lines = result.output.strip().splitlines()
+			if result.exit_code != 0 or expected_address not in result.output or not lines:
+				return None
+			return lines[-1].strip().lower() if MAC_ADDRESS.fullmatch(lines[-1].strip()) else None
 
 		try:
-			self.poll(
-				has_private_address,
+			mac_address = self.poll(
+				get_private_network_mac_address,
 				timeout_seconds=self.private_address_attempts * self.setup_poll_interval_seconds,
 				poll_interval_seconds=self.setup_poll_interval_seconds,
 				description=f"the private address {expected_address} on {device}",
 			)
 		except ProviderOperationError as error:
 			raise self.error_class(str(error), is_retryable=True) from error
+
+		if mac_address != server.private_network_mac_address:
+			frappe.db.set_value("Metal Server", server.name, "private_network_mac_address", mac_address)
 
 	def run_setup_script(
 		self,

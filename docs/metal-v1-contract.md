@@ -196,6 +196,9 @@ Network replaces the complete network object:
   "egress": "mesh",
   "public_ipv4": "",
   "wireguard_mesh_ipv6": "fdaa:1:1::1",
+  "gateway_routes": [{"destination": "2000::/3", "gateway": "fdaa:1::49"}],
+  "is_network_gateway": false,
+  "public_ipv6": "",
   "private_network_throughput_mibps": 100,
   "public_network_throughput_mibps": 0,
   "firewall": {
@@ -205,6 +208,8 @@ Network replaces the complete network object:
   }
 }
 ```
+
+`gateway_routes` sends each destination range to the mesh address of a gateway VM. The longest prefix wins. `is_network_gateway` lets the VM send a source address it does not own. `public_ipv6` is the IPv6 block that the host routes into the VM. The three fields are empty when omitted.
 
 The firewall supports `any`, `tcp`, `udp`, and `icmp`. An empty `ports` value selects all ports. Other port values select one port or one inclusive range from 1 through 65535.
 
@@ -242,9 +247,13 @@ A consumer detects the format from the content rather than the object name. A zs
 
 ## Synchronization
 
-`POST /v1/sync` replaces the complete WireGuard peer, cached image, and privileged address sets. Empty arrays remove all managed values.
+`POST /v1/sync` replaces the complete WireGuard peer, cached image, and privileged address sets. Empty arrays remove all managed values. `unicast` selects the unicast NDP transport of Atlas WG Mesh.
+
+Each peer needs `public_address` as an IPv4 address and `private_network_mac_address` as the MAC of its private network interface. `private_address` is optional. An invalid peer returns `400`, because the mesh cannot learn a VM location from it.
 
 The response contains current host capacity. CPU capacity uses `total_cpu_millicores` and `available_cpu_millicores`. Memory and storage use binary units. The virtual machine count uses a complete field name. CPU capacity is for ranking and visibility. It does not limit admission.
+
+The response contains `private_network_mac_address`, the MAC of the host mesh uplink. It is absent when Atlas WG Mesh is disabled.
 
 The response also contains `virtual_machines`. It maps each VM identifier on the host to an object with its last observed `status`. Metal reads the stored observed record of each VM, so the status is as fresh as the last reconcile pass.
 

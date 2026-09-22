@@ -29,7 +29,7 @@ class IPAddressInUse(AtlasUserError):
 
 
 class IPAddressService:
-	"""Own tenant reservations for public IPv4 addresses."""
+	"""Own tenant reservations for public IPv4 addresses and provider reservations."""
 
 	def reserve(self, tenant_id: int) -> str:
 		"""Reserve one shared pool address for a tenant."""
@@ -52,10 +52,11 @@ class IPAddressService:
 		frappe.throw(_("The shared IP address pool is empty."), exc=IPAddressPoolEmpty)
 
 	def get_pool_candidates(self) -> list[str]:
-		"""Return addresses that no tenant reserved and no virtual machine uses."""
+		"""Return IPv4 addresses that no tenant reserved and no virtual machine uses."""
 		return frappe.get_all(
 			"Metal Server IP Address",
 			filters={
+				"version": "4",
 				"tenant_id": UNOWNED_TENANT_ID,
 				"status": "Allocated",
 				"virtual_machine": ["is", "not set"],
@@ -65,14 +66,15 @@ class IPAddressService:
 			order_by="creation asc",
 		)
 
-	def reserve_from_provider(self) -> str:
-		"""Add one provider reservation to the shared pool."""
+	def reserve_from_provider(self, version: int = 4) -> str:
+		"""Add one provider reservation. An IPv4 address joins the shared pool."""
 		provider = frappe.get_single("Atlas Settings").server_provider_controller
-		reserved = provider.reserve_public_ipv4_address()
+		reserved = provider.reserve_public_ip_address(version)
 		try:
 			ip_address: MetalServerIPAddress = frappe.get_doc(
 				{
 					"doctype": "Metal Server IP Address",
+					"version": str(version),
 					"address": reserved.address,
 					"provider_resource_id": reserved.provider_resource_id,
 					"tenant_id": UNOWNED_TENANT_ID,
@@ -81,7 +83,7 @@ class IPAddressService:
 			return ip_address.name
 		except Exception:
 			try:
-				provider.delete_public_ipv4_address(reserved.provider_resource_id)
+				provider.delete_public_ip_address(reserved.provider_resource_id)
 			except Exception:
 				frappe.log_error(title="Could not delete reserved Metal Server IP Address")
 			raise

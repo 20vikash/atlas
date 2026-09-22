@@ -40,6 +40,7 @@ def source_vm(**overrides: object) -> SimpleNamespace:
 		"current_state": "running",
 		"architecture": "amd64",
 		"tenant_id": 7,
+		"is_network_gateway": 0,
 		"cpu_millicores": 1000,
 		"memory_mib": 512,
 		"disk_mib": 1024,
@@ -189,7 +190,7 @@ class TestDestinationMetalServerSelection(UnitTestCase):
 		self.assertIsNone(destination_client.put_migration.call_args.args[3])
 
 	def test_the_commit_stores_the_server_and_the_resized_shape(self) -> None:
-		virtual_machine = SimpleNamespace(server="metal-1", db_set=Mock())
+		virtual_machine = SimpleNamespace(name="vm-00001", server="metal-1", db_set=Mock())
 		migration = SimpleNamespace(
 			destination_metal_server="metal-2",
 			target_cpu_millicores=4000,
@@ -207,6 +208,7 @@ class TestDestinationMetalServerSelection(UnitTestCase):
 				),
 			),
 			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+			patch("atlas.vm.core.vm_migration.frappe.get_all", return_value=[]),
 		):
 			service.commit_destination()
 
