@@ -1,9 +1,7 @@
 """ Contains all the data models used in inputs/outputs """
 
 from .api_error_field import ApiErrorField
-from .capacity_pending_error import CapacityPendingError
-from .capacity_pending_response import CapacityPendingResponse
-from .compute_update_payload import ComputeUpdatePayload
+from .capacity_unavailable_response import CapacityUnavailableResponse
 from .configure_webhooks_payload import ConfigureWebhooksPayload
 from .console_token_payload import ConsoleTokenPayload
 from .console_token_payload_mode import ConsoleTokenPayloadMode
@@ -31,18 +29,23 @@ from .ip_address_response_tags import IPAddressResponseTags
 from .json_web_key import JSONWebKey
 from .json_web_key_set_response import JSONWebKeySetResponse
 from .list_images_image_type_type_0 import ListImagesImageTypeType0
+from .memory_snapshot_configuration_payload import MemorySnapshotConfigurationPayload
 from .metadata_replacement_payload import MetadataReplacementPayload
 from .metadata_replacement_payload_metadata import MetadataReplacementPayloadMetadata
 from .network_update_payload import NetworkUpdatePayload
 from .network_update_payload_egress_type_0 import NetworkUpdatePayloadEgressType0
+from .out_of_capacity_error import OutOfCapacityError
 from .page_image_response import PageImageResponse
 from .page_ip_address_response import PageIPAddressResponse
 from .page_virtual_machine_list_response import PageVirtualMachineListResponse
+from .placement_busy_error import PlacementBusyError
 from .reserve_ip_address_payload import ReserveIPAddressPayload
+from .resize_payload import ResizePayload
 from .snapshot_payload import SnapshotPayload
 from .snapshot_payload_image_type import SnapshotPayloadImageType
 from .snapshot_payload_tags import SnapshotPayloadTags
 from .ssh_keys_replacement_payload import SSHKeysReplacementPayload
+from .termination_protection_payload import TerminationProtectionPayload
 from .virtual_machine_compute import VirtualMachineCompute
 from .virtual_machine_detail_response import VirtualMachineDetailResponse
 from .virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags
@@ -58,9 +61,7 @@ from .webhook_configuration_response import WebhookConfigurationResponse
 
 __all__ = (
     "ApiErrorField",
-    "CapacityPendingError",
-    "CapacityPendingResponse",
-    "ComputeUpdatePayload",
+    "CapacityUnavailableResponse",
     "ConfigureWebhooksPayload",
     "ConsoleTokenPayload",
     "ConsoleTokenPayloadMode",
@@ -88,18 +89,23 @@ __all__ = (
     "JSONWebKey",
     "JSONWebKeySetResponse",
     "ListImagesImageTypeType0",
+    "MemorySnapshotConfigurationPayload",
     "MetadataReplacementPayload",
     "MetadataReplacementPayloadMetadata",
     "NetworkUpdatePayload",
     "NetworkUpdatePayloadEgressType0",
+    "OutOfCapacityError",
     "PageImageResponse",
     "PageIPAddressResponse",
     "PageVirtualMachineListResponse",
+    "PlacementBusyError",
     "ReserveIPAddressPayload",
+    "ResizePayload",
     "SnapshotPayload",
     "SnapshotPayloadImageType",
     "SnapshotPayloadTags",
     "SSHKeysReplacementPayload",
+    "TerminationProtectionPayload",
     "VirtualMachineCompute",
     "VirtualMachineDetailResponse",
     "VirtualMachineDetailResponseTags",

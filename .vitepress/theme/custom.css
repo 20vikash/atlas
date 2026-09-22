@@ -1,0 +1,322 @@
+:root {
+	--vp-c-brand-1: #3468d4;
+	--vp-c-brand-2: #2857bc;
+	--vp-c-brand-3: #204798;
+	--vp-c-brand-soft: rgba(52, 104, 212, 0.12);
+	--vp-home-hero-name-color: #3468d4;
+	--vp-layout-max-width: 1480px;
+	--vp-sidebar-width: 280px;
+	--vp-font-family-base: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.VPDoc .container {
+	max-width: 1240px;
+}
+
+.VPDoc:not(.has-sidebar) .content {
+	max-width: 900px;
+}
+
+.VPDoc.has-aside .content-container {
+	max-width: 840px;
+}
+
+.vp-doc {
+	font-size: 16px;
+	line-height: 1.75;
+}
+
+.vp-doc h1 {
+	font-size: 40px;
+	line-height: 1.15;
+	letter-spacing: -0.025em;
+}
+
+.vp-doc h2 {
+	margin-top: 52px;
+	padding-top: 14px;
+	font-size: 26px;
+	letter-spacing: -0.015em;
+}
+
+.vp-doc h3 {
+	margin-top: 34px;
+	font-size: 19px;
+}
+
+.vp-doc p,
+.vp-doc li {
+	color: var(--vp-c-text-1);
+}
+
+.vp-doc table {
+	display: table;
+	width: 100%;
+	margin: 24px 0;
+	font-size: 15px;
+}
+
+.vp-doc th {
+	background: var(--vp-c-bg-soft);
+	font-weight: 650;
+}
+
+.vp-doc th,
+.vp-doc td {
+	padding: 11px 14px;
+}
+
+.vp-doc .diagram-frame {
+	position: relative;
+	margin: 28px 0;
+	background: var(--vp-c-bg-soft);
+	border: 1px solid var(--vp-c-divider);
+	border-radius: 12px;
+	overflow: hidden;
+}
+
+.diagram-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-height: 46px;
+	padding: 8px 12px 8px 18px;
+	border-bottom: 1px solid var(--vp-c-divider);
+	color: var(--vp-c-text-2);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.diagram-toolbar button {
+	padding: 6px 12px;
+	color: var(--vp-c-brand-1);
+	background: var(--vp-c-bg);
+	border: 1px solid var(--vp-c-divider);
+	border-radius: 7px;
+	font: inherit;
+	cursor: pointer;
+}
+
+.diagram-toolbar button:hover {
+	color: var(--vp-c-brand-2);
+	border-color: var(--vp-c-brand-1);
+}
+
+.diagram-canvas {
+	padding: 24px;
+	overflow: hidden;
+}
+
+.diagram-canvas svg {
+	display: block;
+	width: 100%;
+	max-width: 100% !important;
+	height: auto;
+	margin: 0 auto;
+}
+
+.diagram-loading,
+.diagram-error {
+	display: flex;
+	min-height: 180px;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	color: var(--vp-c-text-2);
+}
+
+.diagram-error {
+	flex-direction: column;
+	gap: 6px;
+}
+
+.diagram-error span {
+	max-width: 680px;
+	font-size: 13px;
+	text-align: center;
+}
+
+.diagram-frame.is-expanded {
+	position: fixed;
+	inset: 24px;
+	z-index: 1000;
+	display: flex;
+	flex-direction: column;
+	margin: 0;
+	background: var(--vp-c-bg);
+	box-shadow: var(--vp-shadow-5);
+}
+
+.diagram-frame.is-expanded .diagram-canvas {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	overflow: auto;
+}
+
+.diagram-frame.is-expanded .diagram-canvas svg {
+	width: auto;
+	min-width: min(1100px, 100%);
+	max-width: none !important;
+	max-height: calc(100vh - 130px);
+}
+
+body.has-expanded-diagram {
+	overflow: hidden;
+}
+
+.vp-doc .custom-block {
+	margin: 24px 0;
+	padding: 18px 20px;
+	border-radius: 10px;
+}
+
+.VPHomeHero .name,
+.VPHomeHero .text {
+	letter-spacing: -0.035em;
+}
+
+.VPHomeHero .container {
+	max-width: 1080px;
+}
+
+.VPHomeHero .main {
+	max-width: 650px;
+}
+
+.VPHomeHero .tagline {
+	max-width: 620px;
+	font-size: 19px;
+	line-height: 1.55;
+}
+
+.VPHomeHero .image-container {
+	width: 220px;
+	height: 220px;
+}
+
+.VPHomeHero .image-src {
+	max-width: 180px;
+	max-height: 180px;
+}
+
+.VPHome .vp-doc.container {
+	max-width: 1080px;
+	padding-right: 0;
+	padding-bottom: 80px;
+	padding-left: 0;
+}
+
+.VPHome .vp-doc.container > div {
+	max-width: 1080px;
+}
+
+.VPHome .vp-doc h2 {
+	margin-top: 0;
+	padding-top: 32px;
+	font-size: 22px;
+}
+
+.VPHome .vp-doc h2 + p {
+	max-width: 660px;
+	color: var(--vp-c-text-2);
+}
+
+.atlas-component-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	margin-top: 30px;
+	border-top: 1px solid var(--vp-c-divider);
+	border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.atlas-component {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	padding: 27px 32px;
+	color: var(--vp-c-text-1) !important;
+	text-decoration: none !important;
+}
+
+.atlas-component:nth-child(odd) {
+	padding-left: 0;
+	border-right: 1px solid var(--vp-c-divider);
+}
+
+.atlas-component:nth-child(-n + 2) {
+	border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.atlas-component span {
+	color: var(--vp-c-text-2);
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.atlas-component strong {
+	font-size: 20px;
+	line-height: 1.35;
+}
+
+.atlas-component p {
+	margin: 0;
+	color: var(--vp-c-text-2);
+	line-height: 1.6;
+}
+
+.atlas-component:hover strong {
+	color: var(--vp-c-brand-1);
+}
+
+.atlas-home-paths {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding-top: 20px;
+	font-size: 15px;
+}
+
+.atlas-home-paths span {
+	color: var(--vp-c-text-3);
+}
+
+@media (max-width: 768px) {
+	.vp-doc h1 {
+		font-size: 34px;
+	}
+
+	.diagram-frame.is-expanded {
+		inset: 8px;
+	}
+
+	.diagram-canvas {
+		padding: 14px;
+	}
+
+	.VPHome .vp-doc.container {
+		padding-right: 24px;
+		padding-left: 24px;
+	}
+
+	.VPHomeHero .image {
+		display: none;
+	}
+
+	.atlas-component-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.atlas-component,
+	.atlas-component:nth-child(odd) {
+		padding: 22px 0;
+		border-right: 0;
+		border-bottom: 1px solid var(--vp-c-divider);
+	}
+
+	.atlas-component:last-child {
+		border-bottom: 0;
+	}
+}

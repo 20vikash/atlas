@@ -25,23 +25,39 @@ The `vm` package defines the contracts. The other packages implement or consume 
 | [network](network/SPEC.md) | VM namespaces, host rules, managed WireGuard peers, and the unicast transport. |
 | [network/traffic](network/traffic/SPEC.md) | eBPF traffic tracking and packet events. |
 | [platform](platform/SPEC.md) | Host files, commands, and systemd control. |
-| [vm_migration](vm_migration/SPEC.md) | VM live migration: lifecycle, records, and host-to-host transport. |
+| [vm/migration](vm/migration/SPEC.md) | VM live migration: lifecycle, records, and host-to-host transport. |
 
 ## Dependency graph
 
-```text
-cmd/metald
-   ├─ api -> vm.Manager, host.Service, console.SerialBroker, vm_migration
-   ├─ host -> vm, network, storage, vm_migration
-   ├─ reconciler -> vm.Manager, storage stores
-   ├─ firecracker -> vm, storage, platform, console, firecracker/api
-   ├─ storage -> vm, platform
-   ├─ network -> vm, platform, network/traffic
-   ├─ vm_migration -> vm, storage, platform
-   └─ network/traffic -> cilium/ebpf
+```mermaid
+flowchart LR
+    Main[cmd/metald]
+    API[api]
+    Host[host]
+    Reconciler[reconciler]
+    Firecracker[firecracker]
+    Storage[storage]
+    Network[network]
+    Migration[VM migration]
+    Traffic[network traffic]
+    VM[vm]
+    Platform[platform]
+    Console[console]
+    FCAPI[Firecracker API]
+    EBPF[cilium eBPF]
+
+    Main --> API & Host & Reconciler & Firecracker & Storage & Network & Migration & Traffic
+    API --> VM & Host & Console & Migration
+    Host --> VM & Network & Storage & Migration
+    Reconciler --> VM & Storage & Migration
+    Firecracker --> VM & Storage & Platform & Console & FCAPI
+    Storage --> VM & Platform
+    Network --> VM & Platform & Traffic
+    Migration --> VM & Storage & Platform
+    Traffic --> EBPF
 ```
 
-The `vm_migration` package imports `vm`; the `vm` package never imports it, and reaches migration lock state through an injected guard.
+The `vm/migration` package imports `vm`. The `vm` package does not import `vm/migration`. It reads migration lock state through an injected guard.
 
 The `vm` package defines small host service interfaces. The `vm.Manager` owns VM state, operations, and warm-image orchestration.
 

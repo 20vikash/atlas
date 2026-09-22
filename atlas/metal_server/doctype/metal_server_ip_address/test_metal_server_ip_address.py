@@ -30,9 +30,25 @@ class TestServerIPAddress(UnitTestCase):
 			}
 		)
 
-		address.validate()
+		with patch("frappe.get_single", return_value=SimpleNamespace(server_provider="AWS")):
+			address.validate()
 
 		self.assertEqual(address.tenant_id, UNOWNED_TENANT_ID)
+		self.assertEqual(address.provider_resource_id, "provider-1")
+
+	def test_generic_address_is_its_own_provider_resource_id(self) -> None:
+		address = frappe.get_doc(
+			{
+				"doctype": "Metal Server IP Address",
+				"address": "203.0.113.10",
+				"provider_resource_id": "incorrect-resource-id",
+			}
+		)
+
+		with patch("frappe.get_single", return_value=SimpleNamespace(server_provider="Generic")):
+			address.validate()
+
+		self.assertEqual(address.provider_resource_id, "203.0.113.10")
 
 	def test_reset_tenant_returns_the_address_to_the_pool(self) -> None:
 		address = SimpleNamespace(
@@ -85,6 +101,7 @@ class TestServerIPAddress(UnitTestCase):
 			status="Allocated",
 			server=None,
 			virtual_machine=None,
+			host_address=None,
 			intent_version=4,
 			save=Mock(),
 			queue_reconcile=Mock(),
@@ -102,6 +119,7 @@ class TestServerIPAddress(UnitTestCase):
 			status="Attached",
 			server=None,
 			virtual_machine="VM-00001",
+			host_address=None,
 			tenant_id=7,
 			reserved=0,
 			intent_version=1,
@@ -120,6 +138,7 @@ class TestServerIPAddress(UnitTestCase):
 			status="Attached",
 			server=None,
 			virtual_machine="VM-00001",
+			host_address=None,
 			tenant_id=7,
 			reserved=1,
 			intent_version=1,
@@ -134,28 +153,57 @@ class TestServerIPAddress(UnitTestCase):
 
 	def test_a_detach_returns_an_unreserved_address_to_the_pool(self) -> None:
 		for reserved, expects_pool_return in ((False, True), (True, False)):
-			intent = IPAddressIntent(3, "Detaching", "provider-id", "node-1", reserved=reserved)
+			intent = IPAddressIntent(
+				version=3,
+				status="Detaching",
+				provider_resource_id="provider-id",
+				server="node-1",
+				reserved=reserved,
+				public_address="203.0.113.10",
+				host_address="10.1.8.55",
+				virtual_machine=None,
+			)
 			query = Mock()
 			query.set.return_value = query
 			query.where.return_value = query
 			query_builder = Mock(DocType=Mock(), update=Mock(return_value=query))
 
-			with patch(
-				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.qb",
-				new=query_builder,
+			with (
+				patch(
+					"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.qb",
+					new=query_builder,
+				),
+				patch(
+					"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.db.get_value",
+					return_value=None,
+				),
 			):
-				MetalServerIPAddress.complete_intent(SimpleNamespace(name="203.0.113.10"), intent)
+				MetalServerIPAddress.complete_intent(
+					SimpleNamespace(doctype="Metal Server IP Address", name="203.0.113.10"),
+					intent,
+					None,
+				)
 
 			tenant_writes = [call for call in query.set.call_args_list if call.args[1] == UNOWNED_TENANT_ID]
 			self.assertEqual(bool(tenant_writes), expects_pool_return)
 
 	def test_reconcile_applies_one_intent_per_job(self) -> None:
-		intent = IPAddressIntent(1, "Attaching", "provider-id", "node-1", reserved=True)
+		intent = IPAddressIntent(
+			1,
+			"Attaching",
+			"provider-id",
+			"node-1",
+			True,
+			"203.0.113.10",
+			None,
+			"VM-00001",
+		)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
 			name="203.0.113.10",
-			apply_intent=Mock(),
-			complete_intent=Mock(),
+			apply_intent=Mock(return_value="10.1.8.55"),
+			complete_intent=Mock(return_value=True),
+			send_address_to_metal=Mock(),
 		)
 
 		with patch(
@@ -165,10 +213,47 @@ class TestServerIPAddress(UnitTestCase):
 			MetalServerIPAddress.reconcile(worker)
 
 		worker.apply_intent.assert_called_once_with(intent)
-		worker.complete_intent.assert_called_once_with(intent)
+		worker.complete_intent.assert_called_once_with(intent, worker.apply_intent.return_value)
+		worker.send_address_to_metal.assert_called_once_with("VM-00001", "10.1.8.55")
+
+	def test_reconcile_does_not_send_a_stale_intent_to_metal(self) -> None:
+		intent = IPAddressIntent(
+			1,
+			"Attaching",
+			"provider-id",
+			"node-1",
+			True,
+			"203.0.113.10",
+			None,
+			"VM-00001",
+		)
+		worker = SimpleNamespace(
+			doctype="Metal Server IP Address",
+			name="203.0.113.10",
+			apply_intent=Mock(return_value="10.1.8.55"),
+			complete_intent=Mock(return_value=False),
+			send_address_to_metal=Mock(),
+		)
+
+		with patch(
+			"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.get_doc",
+			return_value=SimpleNamespace(get_intent=Mock(return_value=intent)),
+		):
+			MetalServerIPAddress.reconcile(worker)
+
+		worker.send_address_to_metal.assert_not_called()
 
 	def test_reconcile_logs_the_resource_intent_and_version(self) -> None:
-		intent = IPAddressIntent(7, "Attaching", "provider-id", "node-1", reserved=True)
+		intent = IPAddressIntent(
+			7,
+			"Attaching",
+			"provider-id",
+			"node-1",
+			True,
+			"203.0.113.10",
+			None,
+			"VM-00001",
+		)
 		worker = SimpleNamespace(
 			doctype="Metal Server IP Address",
 			name="203.0.113.10",
@@ -193,3 +278,29 @@ class TestServerIPAddress(UnitTestCase):
 			"Metal Server IP Address 203.0.113.10 Attaching intent 7 failed",
 		)
 		worker.complete_intent.assert_not_called()
+
+	def test_attach_needs_an_ipv4_host_address(self) -> None:
+		intent = IPAddressIntent(
+			1,
+			"Attaching",
+			"provider-id",
+			"node-1",
+			True,
+			"203.0.113.10",
+			None,
+			"VM-00001",
+		)
+		provider = Mock()
+		provider.attach_public_ipv4_address.return_value = "not-an-address"
+
+		with (
+			patch(
+				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.get_single",
+				return_value=SimpleNamespace(server_provider_controller=provider),
+			),
+			patch(
+				"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.frappe.get_doc"
+			),
+			self.assertRaisesRegex(ValueError, "IPv4 host address"),
+		):
+			MetalServerIPAddress.apply_intent(SimpleNamespace(), intent)

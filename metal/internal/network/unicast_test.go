@@ -58,11 +58,11 @@ func newTestUnicastManager(t *testing.T, peers []WireGuardPeer) (*UnicastManager
 }
 
 var testDaemonPeers = []WireGuardPeer{{
-	Node:      "server-11",
-	NodeID:    11,
-	PublicKey: "key11",
-	Address:   "10.20.0.11:7373",
-	MAC:       "aa:bb:cc:dd:ee:11",
+	Node:        "server-11",
+	MeshAddress: "fdab:1::11",
+	PublicKey:   "key11",
+	Address:     "10.20.0.11:7373",
+	MAC:         "aa:bb:cc:dd:ee:11",
 }}
 
 func TestEnableStartsTheDaemonWhenPeersExist(t *testing.T) {

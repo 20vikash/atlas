@@ -13,15 +13,23 @@ import (
 )
 
 type options struct {
-	cfg             firecracker.Config
-	pool, imagesDir string
-	listen          string
-	authTokenHash   string
-	baseDir         string
-	wireGuardName   string
-	mesh            meshOptions
-	trafficMonitor  trafficMonitorOptions
-	migration       migrationOptions
+	cfg                firecracker.Config
+	pool, imagesDir    string
+	listen             string
+	baseDir            string
+	wireGuardName      string
+	mesh               meshOptions
+	trafficMonitor     trafficMonitorOptions
+	migration          migrationOptions
+	tls                tlsOptions
+	coordinationListen string
+}
+
+type tlsOptions struct {
+	caFile          string
+	certificateFile string
+	privateKeyFile  string
+	atlasCommonName string
 }
 
 // migrationOptions holds VM migration settings.
@@ -49,13 +57,14 @@ const defaultBaseDir = "/var/lib/metal"
 
 func defaultOptions() options {
 	resolvedOptions := options{
-		cfg:            firecracker.DefaultConfig(),
-		pool:           "metal",
-		baseDir:        defaultBaseDir,
-		wireGuardName:  "wg0",
-		mesh:           meshOptions{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
-		trafficMonitor: trafficMonitorOptions{enabled: true},
-		migration:      migrationOptions{finalDeltaMiB: 512, transferPort: 9001},
+		cfg:                firecracker.DefaultConfig(),
+		pool:               "metal",
+		baseDir:            defaultBaseDir,
+		wireGuardName:      "wg0",
+		mesh:               meshOptions{enabled: true, binaryPath: "/usr/local/bin/atlas-wg-mesh"},
+		trafficMonitor:     trafficMonitorOptions{enabled: true},
+		migration:          migrationOptions{finalDeltaMiB: 512, transferPort: 9002},
+		coordinationListen: "127.0.0.1:9001",
 		// TCP host:port by default; "unix:/path" for a unix socket instead.
 		listen: "127.0.0.1:8080",
 	}
@@ -78,6 +87,14 @@ type fileConfig struct {
 	WGMesh      wgMeshFile      `toml:"wg_mesh"`
 	Traffic     trafficFile     `toml:"traffic_monitor"`
 	Migration   migrationFile   `toml:"migration"`
+	TLS         tlsFile         `toml:"tls"`
+}
+
+type tlsFile struct {
+	CAFile          string `toml:"ca_file"`
+	CertificateFile string `toml:"certificate_file"`
+	PrivateKeyFile  string `toml:"private_key_file"`
+	AtlasCommonName string `toml:"atlas_common_name"`
 }
 
 // tomlDuration decodes a TOML string with time.ParseDuration.
@@ -96,9 +113,9 @@ func (duration *tomlDuration) UnmarshalText(text []byte) error {
 }
 
 type metaldFile struct {
-	BaseDir       string `toml:"base_dir"`
-	Listen        string `toml:"listen"`
-	AuthTokenHash string `toml:"auth_token_hash"`
+	BaseDir            string `toml:"base_dir"`
+	Listen             string `toml:"listen"`
+	CoordinationListen string `toml:"coordination_listen"`
 }
 
 type firecrackerFile struct {
@@ -158,7 +175,7 @@ func applyFile(resolvedOptions *options, path string) error {
 	}
 	overlay(&resolvedOptions.baseDir, fc.Metald.BaseDir)
 	overlay(&resolvedOptions.listen, fc.Metald.Listen)
-	overlay(&resolvedOptions.authTokenHash, fc.Metald.AuthTokenHash)
+	overlay(&resolvedOptions.coordinationListen, fc.Metald.CoordinationListen)
 	overlay(&resolvedOptions.cfg.FirecrackerBin, fc.Firecracker.BinaryPath)
 	overlay(&resolvedOptions.cfg.SocketsDir, fc.Firecracker.SocketsDir)
 	overlay(&resolvedOptions.cfg.JailerBin, fc.Jailer.BinaryPath)
@@ -170,6 +187,10 @@ func applyFile(resolvedOptions *options, path string) error {
 	overlayBool(&resolvedOptions.trafficMonitor.enabled, fc.Traffic.Enabled)
 	overlayInt(&resolvedOptions.migration.finalDeltaMiB, fc.Migration.FinalDeltaMiB)
 	overlayInt(&resolvedOptions.migration.transferPort, fc.Migration.TransferPort)
+	overlay(&resolvedOptions.tls.caFile, fc.TLS.CAFile)
+	overlay(&resolvedOptions.tls.certificateFile, fc.TLS.CertificateFile)
+	overlay(&resolvedOptions.tls.privateKeyFile, fc.TLS.PrivateKeyFile)
+	overlay(&resolvedOptions.tls.atlasCommonName, fc.TLS.AtlasCommonName)
 	return nil
 }
 

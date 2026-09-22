@@ -19,9 +19,8 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 | `Virtual Machine State` (DocType) | The last status a host reported for one VM. The name is the VM name. It also answers whether a live VM still needs an image. |
 | `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Metal Server IP Address. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
-| `PlacementService` | Running the selected placement strategy. |
-| `PlacementContext` | Fleet usage, placement rate, checked host selection, and host expansion. |
-| `MetalClient` | `/v1` HTTP transport and error classification. |
+| `PlacementStrategy` | Selects and reserves Metal Servers for one set of placement requirements. |
+| `MetalClient` | `/v1` mutual-TLS transport, regional CA verification, and error classification. |
 | `metal_models` | Typed read views of Metal responses. |
 | `VirtualMachineCreateRequest` | Validated create input. |
 | `vm_image_transfer`, `multipart_upload`, `image_builder` | Machine image movement and System image creation. |
@@ -29,24 +28,30 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 | `reconciliation` | Settling records whose Metal outcome was never confirmed. |
 | `vm_state` | The only writer of Virtual Machine State. The host sync job calls it. |
 | `state_webhook` | The Webhook records that deliver each stored state report to a Central. |
+| `Virtual Machine Migration` | The scheduled migration request, its lifecycle, and its typed transfer history. See [migration operation](../docs/virtual-machine-migrations.md). |
 
 ## Create
 
-```text
-validate request
-  -> select and lock a Metal Server        capacity sample minus local reservations
-  -> insert draft, COMMIT            the draft reserves capacity and fixes the name
-  -> PUT /v1/vms/{name}              idempotent on the name
-  -> clear draft
+```mermaid
+flowchart LR
+    Validate[Validate request] --> Select[Select and lock Metal Server]
+    Select --> Capacity[Subtract local reservations<br/>from capacity sample]
+    Capacity --> Draft[Insert and commit draft]
+    Draft --> Put[PUT desired state with stable VM ID]
+    Put --> Clear[Clear draft after confirmation]
 ```
 
 The commit before the Metal call is deliberate. The draft must exist on disk before Atlas asks Metal for anything, so a lost response leaves a record to reconcile rather than an orphaned VM.
 
 An uncertain response keeps the draft. Only a Metal `404` deletes it.
 
+Atlas calls the Metal API through HTTPS on the server public IPv4 address. Atlas presents its client certificate and Metal presents its node certificate. Both come from the regional Metal certificate authority.
+
 ## Placement
 
-`PlacementService` builds a `PlacementContext` and runs the strategy selected in Atlas Settings for VM creation and automatic migration. The strategy reads the snapshot, chooses hosts, and calls `placement.select(host_name)`. The context locks and rechecks each chosen host. A selection miss lets the strategy try the next host. An explicit migration target calls `placement.select` directly.
+`PlacementStrategy.find_server(requirements)` returns the name of a ready host for VM creation, migration, or resize. It does not return a document. A resize also passes `current_placement`, a `CurrentPlacement` with the current host and the memory and disk that the VM already holds there. The current host then needs room only for the increase, and every other host needs room for the full shape.
+
+`PlacementRequirements` contains the resource, architecture, tenant, and host pool constraints. A strategy owns its snapshot and lock. An explicit migration destination uses `PlacementStrategy.reserve_server`.
 
 `balanced` is the default strategy. It uses separate regular and sleepy host pools. It first keeps a start or resize on the current host when that host matches the VM pool and fits the request. Otherwise, it filters ready hosts by pool, architecture, memory, and storage, then tries them in this order:
 
@@ -55,53 +60,69 @@ An uncertain response keeps the draft. Only a Metal `404` deletes it.
 3. Less CPU shortfall, measured as requested millicores above reported free millicores.
 4. Lower maximum projected utilization across memory and storage, then host name.
 
-For a sleepy VM, `balanced` discounts sleepy memory by `sleepy_vm_overcommit_factor` when ranking hosts. It discounts no more memory than the sample reports as used. The factor does not change the memory and storage checks in `placement.select`. CPU shortfall is a preference, not a capacity limit. `balanced` requests a host marked for the VM pool when no ready host fits or when pool memory or storage pressure reaches 80%. A wake already checks its current host before the strategy runs.
+For a sleepy VM, `balanced` discounts sleepy memory by `sleepy_vm_overcommit_factor` when ranking hosts. The factor does not change hard capacity checks. CPU shortfall is a preference, not a capacity limit.
 
-`spread-3` uses only regular hosts for regular VMs and only sleepy hosts for sleepy VMs. It spreads regular VMs toward the least provisioned eligible host. It requests enough regular hosts to return to three ready hosts below 85% provisioning when the new hosts become ready. It packs sleepy VMs and requests one sleepy host when projected pool subscription reaches 90%.
+`spread-3` uses only regular hosts for regular VMs and only sleepy hosts for sleepy VMs. It spreads regular VMs toward the least provisioned eligible host and packs sleepy VMs.
 
-`best-fit` uses the same separate pools. It packs regular VMs on the most provisioned eligible host and sleepy VMs on the most subscribed eligible host. It requests one regular host when projected pool provisioning reaches 85%, and one sleepy host when projected sleepy subscription reaches 85%. Provisioning is the larger of the used memory and storage fractions. Sleepy subscription is the sum of assigned VM memory entitlements, including sleeping and stopped VMs, divided by ready sleepy host memory. CPU does not set these thresholds. Both strategies request a host when no ready host in the correct pool fits the VM.
+`best-fit` uses the same pools. It packs regular VMs by provisioning and sleepy VMs by memory subscription. Provisioning is the larger memory or storage fraction.
 
-Add a subclass of `PlacementStrategy` in `core/placement/strategies/` and register one instance in `strategies/__init__.py`. Its `select_host` method receives a `PlacementContext`. It reads `placement.request` for the VM shape, architecture, tenant ID, and sleepy status. It can read `placement.action` for the operation and `placement.current_host_name` for an existing VM in the simulator. It reads `placement.sleepy_vm_overcommit_factor`, `placement.usage`, and `placement.placement_rate(host_name=None)`. The rate counts VM records created in the last five minutes, including drafts, and returns placements per minute for one host or the fleet.
+Add a `PlacementStrategy` subclass in `core/placement/strategies/`. Register it with `@register(name)`. Its `select_host` method takes no arguments. It reads the placement data through the properties on `self`. It selects a checked host with `self.try_select(host_name)`.
+
+`self.placement_rate(host_name=None)` returns placements per minute from the five-minute snapshot, including drafts.
 
 ```python
+@register("example")
 class ExampleStrategy(PlacementStrategy):
-    def select_host(self, placement: PlacementContext) -> None:
-        for host in placement.usage.hosts:
-            if host.architecture == placement.request.architecture and placement.select(host.name):
+    def select_host(self) -> None:
+        for host in self.host_pool():
+            if self.try_select(host.name):
                 return
 ```
 
-`placement.usage` is one immutable view of ready hosts with capacity samples no more than two minutes old. It holds each host's `is_sleepy` flag, total resources, free resources after local reservations, this tenant's VM count, and memory reserved by sleepy VMs. It also holds fleet totals. The flag and overcommit factor are strategy inputs; they do not change the capacity check.
+`self.usage` is an immutable view of ready hosts with capacity samples no more than two minutes old. It contains resources, tenant counts, sleepy memory, placement counts, and fleet totals.
 
-Capacity comes from Metal Server Usage samples. The context subtracts VMs created after each sample, uncertain drafts, and migration reservations. `placement.select(host_name)` locks the Metal Server row and rechecks readiness, architecture, the sleepy flag, sample freshness, memory, and storage. It returns `True` on selection or `False` when a host changed or lacks capacity. CPU is oversubscribed and is not a capacity limit. A stale sample reports a synchronization fault.
+Placement subtracts recent VMs, drafts, and migration reservations from Metal Server Usage samples. `self.try_select(host_name)` takes a MariaDB named lock and checks current state, memory, and storage. CPU is oversubscribed.
 
-The lock is released by the commit after the draft or migration is inserted, before Atlas calls Metal.
+Atlas holds the lock until it commits the draft or migration. The lock name includes the site database and host name.
 
-`placement.spawn_host(host_type=None, count=1, is_sleepy=False)` requests new capacity. It checks the selected Metal Server Size, the provider image, the VM architecture, and its memory and disk shape when placement finishes. It uses New Host Type from Atlas Settings unless the strategy passes a size name. The context marks each new host with `is_sleepy` before it inserts the Pending record. It reuses Pending or Installing hosts only when size, architecture, and `is_sleepy` match. A larger `count` asks for more hosts of that pool. It creates only the missing hosts under a settings lock, so concurrent calls with the same count share the same pending hosts. When some capacity samples are fresh, a stale sample blocks expansion in its matching architecture and sleepy pool. Placement stops if every ready host has a stale sample.
+### Concurrent placement
 
-A strategy can still select a ready host after requesting expansion. A stale sample in the requested architecture and sleepy pool reports a synchronization error and stops expansion. If no host is selected, Atlas rolls back the caller transaction, inserts only the pending host records in a new transaction, and returns `503 capacity_pending` with `Retry-After: 15`. It creates no VM draft. The client retries after a host is Running and has a fresh capacity sample. A failed host setup reports the failed Metal Server name and requires an operator retry or removal before another automatic request for that type.
+Placement uses READ COMMITTED so a request sees committed reservations. VM creation and migration enable it at the entry point. A selected host stays locked until Atlas commits.
+
+One placement has a 0.4 second deadline. This includes retries, backoff, and lock waits. A lock wait lasts at most 150 ms.
+
+A strategy probes at most 16 hosts. A busy result randomizes the remaining hosts. If all probes are busy, placement waits on one candidate.
+
+Concurrent requests can share a one-second snapshot. The cache key contains the architecture, host pool, and tenant. Locked reads always check current capacity.
+
+Placement retries up to three times. A capacity rejection caches the shape for 500 ms. Lock contention does not cache a capacity failure.
+
+The snapshot query limits aggregates to the selected host pool. Placement does not load a Metal Server document while it holds the lock.
+
+A placement that selects no host answers `503` and creates no VM draft. Two causes share that status and `error.code` separates them.
+
+| Code | Cause | What the caller does |
+|---|---|---|
+| `out_of_capacity` | No ready host can hold the request | Retry later, or add capacity |
+| `placement_busy` | Every candidate host was held by another placement for the whole deadline | Retry at once, guided by `Retry-After` |
+
+Only `out_of_capacity` expands the fleet. Contention is not a capacity limit, so treating it as one would provision a host the fleet has no use for. When Metal auto-spawn is enabled, Atlas queues a separate capacity expansion job for the required architecture and sleepy-host pool. The job uses Default Metal Machine Size and Default Metal Machine Image. It reuses a matching Pending or Installing host and otherwise provisions one host. The client retries later after a host is Running and has a fresh capacity sample.
+
+A site-scoped database lock serializes the Pending host check and insert for each architecture and host pool. The job refreshes its transaction after it acquires the lock and commits the new host before it releases the lock.
 
 ### Simulate strategies
 
-Run every registered strategy against the same seeded tenant demand from the repository root. The simulator lives in `core/placement/simulation/`:
+Run registered strategies against the seeded workload from the repository root:
 
 ```sh
-python -m atlas.vm.core.placement.simulation --days 30 --seed 1
+python -m atlas.simulator.vm_placement --days 30 --seed 1
 ```
 
-Use `--strategy balanced` to select one strategy. Repeat `--strategy` to compare selected strategies. Use `--json` for all metrics. Change the [example scenario](core/placement/simulation/scenario.json) with `--scenario path/to/scenario.json`. The scenario contains prices, host types, shapes, demand, traffic, incidents, and timing values. Use `--cpu-oversubscription` and `--max-host-count` to override two common capacity settings.
-
-The example starts with 30 regular hosts of 128 vCPU, 512 GiB memory, and 6.5 TiB storage. Sleepy hosts are marked when a strategy provisions them. Each host costs 50,000 rupees per 30 days. New hosts take 25 to 35 minutes to start and count against the maximum as soon as they are requested. CPU oversubscription scales the simulator's admission ceiling. This CPU ceiling is a simulation rule; live `PlacementContext.select` treats CPU as strategy data.
-
-The event clock uses integer half-second ticks and skips idle time. The workload fixes tenant arrivals, actions, traffic waves, and random seeds before a strategy runs. Incidents can change later tenant behavior. A strategy receives only the simulated placement context. For start, resize, and wake, it also sees `placement.action` and `placement.current_host_name`. Selecting the current host accepts an in-place change when its resource delta fits. A create request waits and retries when its strategy requests a provisioning host. Start, resize, and wake fail when no ready host fits. The report counts create requests still pending at the horizon.
-
-A sleepy VM becomes idle after 30 minutes without traffic, never before 30 minutes after creation. It then frees CPU and memory, but keeps storage and revenue. A stopped VM keeps storage and pays no revenue. A wake uses the current host immediately when it fits. Otherwise the strategy selects another ready host for a 2 to 10 second migration. A wake with no room fails. The `sleepy_vm_overcommit_factor` is passed to the strategy for its placement estimate; it does not change hard capacity checks. The report includes host cost, VM revenue, margin, incidents, failures, migrations, and utilization.
-
-VM revenue is the configured multiplier times the initial host type's monthly price per GiB of host memory. The example multiplier is 3. Initial hosts bill from tick zero. New hosts bill from their start request until the horizon. The report includes regular and sleepy host counts and the hours when fewer than three ready regular hosts were below 85% provisioning. The simulator uses a configurable cached boot time of 2.5 seconds and idle save time of 5.5 seconds. It does not model guest readiness, image fetch, provider failures, or the DNS and ICMP traffic that kept the initial test VMs awake.
+Use `--strategy balanced` to select one strategy, repeat it to compare strategies, and use `--json` for all metrics. See the [example scenario](../simulator/vm_placement/scenario.json).
 
 ### Run a live trial
 
-Use `python -m atlas.vm.core.placement.simulation.live run --help` from the bench root to see the required site, image, host type, tenant IDs, and report options. The trial defaults to `balanced`; pass `--strategy` to select another registered strategy. The selected strategy places real VMs on ready site hosts with fresh capacity samples and reuses compatible pending hosts. The trial queues synchronization for stale hosts and waits only when no ready host has a fresh sample. It creates a provider host when the strategy requests one. The host cap and cleanup apply only to resources created by the trial. The report lists baseline resources separately from trial resources. A failed trial keeps its resources for inspection and later cleanup.
+Run `python -m atlas.simulator.vm_placement.live run --help` to see live trial options. The trial places VMs on ready hosts, can create trial hosts, and reports trial resources separately. A failed trial keeps its resources for inspection.
 
 ## Reading state
 
@@ -113,7 +134,7 @@ The list route does not call Metal. It returns `last_known_state` from Virtual M
 
 `PUT /api/atlas/webhooks` points the event deliveries of one Central at its receiver. It takes the URL, a shared secret, `central_id` (default 1), and `enabled`. Only a Central token, which carries tenant `*`, can use it. Atlas creates one state Webhook for `on_update` and one for `on_trash`. Their names use `Virtual Machine State - <Event> - Central - <central_id>`. The `on_update` Webhook sends only on insert or on a status change. A repeated call refreshes the Webhooks. `central_id` must be `1` unless developer mode is active or site configuration sets `allow_multiple_central_webhooks` to `1`.
 
-Each delivery is a signed JSON POST with `Content-Type` and `X-Atlas-Region`:
+Each delivery is a signed JSON POST with `Content-Type` and `X-FC-Source` (`atlas`). It also includes `X-FC-Region` when a region is set:
 
 ```json
 {
@@ -172,6 +193,8 @@ The image record keeps the source server, upload IDs, status, and errors. Atlas 
 ## Machine image deletion
 
 `vm_image_deletion.py` owns Machine image removal. The request marks the image `Deleting`, disables it, and queues a repeatable cleanup job.
+
+`is_termination_protected` refuses the request and the document delete. A System image is protected when it is created, because the Atlas services boot from one. A snapshot request can protect a Machine image, and the termination protection action changes it later.
 
 A live virtual machine holds its image. A virtual machine is live when it is a draft, because Metal can still pull the artifacts, or when its host reports `running`, `stopped`, or `paused`. A terminating virtual machine, and one with no reported state, does not hold the image. While an image is held, the request archives the image instead of deleting it. A job every 30 seconds reclaims an archived image after its last live virtual machine is gone.
 
@@ -235,6 +258,8 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 
 Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, throughput limits, and firewall rules can also be set during creation.
 
+An attach first records the provider intent. The provider reconcile job gets the host address and then sends that address to Metal. VM creation leaves the Metal address empty until this reconcile job succeeds.
+
 The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change one firewall field. Atlas merges it with the current desired firewall and sends the complete network to Metal.
 
 Firewall rules are allow rules for public and mesh traffic. They support `any`, `tcp`, `udp`, and `icmp`. TCP and UDP rules can select one destination port or one inclusive range. Each rule needs one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries.
@@ -253,21 +278,43 @@ A public IPv4 address needs `uplink`. Atlas refuses `mesh` and `none` while an a
 
 Active connections can stop when the public IPv4 address or the egress mode changes.
 
+## Resize
+
+`VirtualMachine.resize` changes `cpu_millicores`, `memory_mib`, `disk_mib`, and `sleep_after_idle_seconds`. The Resize VM action and `POST /api/atlas/virtual-machines/{id}/actions/resize` call it. An absent value keeps the value that Metal stores. `VirtualMachineResize` in `vm/core/vm_resize.py` owns the flow.
+
+```text
+resize request
+   │  CPU, memory, or disk change needs a stopped VM; the disk only grows
+   ▼
+find_server(target shape, current_placement)
+	├── current host ──► PUT resize ──► store the shape
+	│                      └── 409 insufficient_capacity ──┐
+   └── other host ────────────────────────────────────────┴──► resize migration
+```
+
+- An idle shutdown change alone needs no capacity. It changes in place on a VM in any state.
+- A resize migration stores `target_cpu_millicores`, `target_memory_mib`, and `target_disk_mib`. Placement reserves that target shape on the destination. Metal gives the VM the target shape on the destination, and Atlas stores it with the new server in one transaction. See [virtual machine migration](../docs/virtual-machine-migrations.md#resize-a-vm-that-does-not-fit).
+- An idle shutdown change that goes with a move changes on the source first, so the migration copies it.
+- `sleep_after_idle_seconds > 0` selects the sleepy host pool. A resize places the VM in the pool of its new value. An idle shutdown change alone does not move the VM.
+- A capacity sample can be older than the host. When Metal refuses the current host with `409 insufficient_capacity`, Atlas starts a resize migration.
+
 ## Automatic idle shutdown
 
-`sleep_after_idle_seconds` lets Metal preserve and stop an idle VM after the configured duration. `0` disables automatic idle shutdown. Set it during creation or with the Edit Idle Shutdown action.
+`sleep_after_idle_seconds` lets Metal preserve and stop an idle VM after the configured duration. `0` disables automatic idle shutdown. Set it during creation or with a resize.
 
-`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas merges each change into the desired compute object. `cpu_millicores` is the exact CPU entitlement. `1000` millicores equals one CPU core. The valid range is 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. A CPU or memory change needs a stopped VM. Atlas stores the timeout and does not implement idle or traffic behavior.
+`PUT /v1/vms/{name}/compute` replaces the complete compute object, so Atlas sends the complete CPU, memory, and idle shutdown values. `cpu_millicores` is the exact CPU entitlement. `1000` millicores equals one CPU core. The valid range is 100 through 32000 millicores. The lower limit prevents impractical VM CPU quotas. The upper limit follows Firecracker's maximum of 32 guest vCPUs. Atlas stores the timeout and does not implement idle or traffic behavior.
 
 ## Disk limits
 
 The VM configuration can set `disk_throughput_mibps` and `disk_iops`. Each limit covers reads and writes together. A value of `0` does not apply a limit.
 
-The Edit Disk Limits action sends the size and both limits with `PUT /v1/vms/{name}/disk`. Metal applies the change through reconciliation.
+The Edit Disk Limits action sends the size and both limits with `PUT /v1/vms/{name}/disk`. Metal applies the change through reconciliation. The Resize Disk action grows the disk of a running VM on its current host. When the host has no room, it returns `409 insufficient_capacity`, and the caller stops the VM and uses a resize to move it.
 
 ## Termination and deletion
 
 The Terminate action sends `DELETE /v1/vms/{name}`. Atlas keeps the request metadata. Delete the document after Metal confirms that the VM is absent.
+
+`is_termination_protected` refuses the Terminate action and the document delete. A virtual machine request can set it, and the termination protection action changes it later. Cargo Server and Proxy Server set it on their virtual machine, and their Archive action clears it before it terminates the virtual machine.
 
 ## Related
 

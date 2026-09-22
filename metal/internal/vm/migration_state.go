@@ -10,7 +10,8 @@ import (
 
 // NormalizeSourceToStopped brings the source to a clean stopped state. Saved
 // guest memory is restored and then stopped, not transferred.
-func (manager *Manager) NormalizeSourceToStopped(ctx context.Context, virtualMachineID string) error {
+func (host *MigrationHost) NormalizeSourceToStopped(ctx context.Context, virtualMachineID string) error {
+	manager := host.manager
 	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
 	if err != nil {
 		return err
@@ -44,7 +45,8 @@ func (manager *Manager) NormalizeSourceToStopped(ctx context.Context, virtualMac
 
 // LimitSourceDisk applies a temporary combined read and write limit before a
 // stream. It never raises the configured limit.
-func (manager *Manager) LimitSourceDisk(ctx context.Context, virtualMachineID string, throughputMiBps int) (int, error) {
+func (host *MigrationHost) LimitSourceDisk(ctx context.Context, virtualMachineID string, throughputMiBps int) (int, error) {
+	manager := host.manager
 	if throughputMiBps <= 0 {
 		return 0, nil
 	}
@@ -63,8 +65,9 @@ func (manager *Manager) LimitSourceDisk(ctx context.Context, virtualMachineID st
 	return throughputMiBps, nil
 }
 
-// RemoveMigrationNetwork releases the source network before target setup.
-func (manager *Manager) RemoveMigrationNetwork(ctx context.Context, virtualMachineID string) error {
+// RemoveMigrationNetwork releases the source network before destination setup.
+func (host *MigrationHost) RemoveMigrationNetwork(ctx context.Context, virtualMachineID string) error {
+	manager := host.manager
 	desired, err := manager.store.readDesired(virtualMachineID)
 	if err != nil {
 		return err
@@ -76,8 +79,9 @@ func (manager *Manager) RemoveMigrationNetwork(ctx context.Context, virtualMachi
 	})
 }
 
-// EnsureMigrationNetwork creates and records the target network for cold start.
-func (manager *Manager) EnsureMigrationNetwork(ctx context.Context, virtualMachineID string) error {
+// EnsureMigrationNetwork creates and records the destination network for cold start.
+func (host *MigrationHost) EnsureMigrationNetwork(ctx context.Context, virtualMachineID string) error {
+	manager := host.manager
 	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
 	if err != nil {
 		return err
@@ -90,18 +94,24 @@ func (manager *Manager) EnsureMigrationNetwork(ctx context.Context, virtualMachi
 	return manager.store.writeObserved(virtualMachineID, observed)
 }
 
-// ApplyMigratedTargetState applies the original state with a cold start.
-func (manager *Manager) ApplyMigratedTargetState(ctx context.Context, virtualMachineID string) error {
+// ApplyMigratedDestinationState grows the received disk to a resized shape, then
+// applies the original state with a cold start.
+func (host *MigrationHost) ApplyMigratedDestinationState(ctx context.Context, virtualMachineID string) error {
+	manager := host.manager
 	desired, err := manager.store.readDesired(virtualMachineID)
 	if err != nil {
 		return err
 	}
-	return manager.RestoreRuntimeState(ctx, virtualMachineID, desired.State)
+	if err := manager.storage.ResizeDisk(ctx, virtualMachineID, desired.Specification.DiskMiB); err != nil {
+		return fmt.Errorf("grow migrated disk %s: %w", virtualMachineID, err)
+	}
+	return host.RestoreRuntimeState(ctx, virtualMachineID, desired.State)
 }
 
 // RestoreRuntimeState cold-starts running or paused VMs, verifies the result,
 // and records state and generations. Stopped VMs stay stopped.
-func (manager *Manager) RestoreRuntimeState(ctx context.Context, virtualMachineID string, desiredState State) error {
+func (host *MigrationHost) RestoreRuntimeState(ctx context.Context, virtualMachineID string, desiredState State) error {
+	manager := host.manager
 	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
 	if err != nil {
 		return err
@@ -124,7 +134,8 @@ func (manager *Manager) RestoreRuntimeState(ctx context.Context, virtualMachineI
 
 // RemoveMigratedRuntime removes migration runtime, jail, and network. Repeats
 // are safe.
-func (manager *Manager) RemoveMigratedRuntime(ctx context.Context, virtualMachineID string) error {
+func (host *MigrationHost) RemoveMigratedRuntime(ctx context.Context, virtualMachineID string) error {
+	manager := host.manager
 	desired, err := manager.store.readDesired(virtualMachineID)
 	if err != nil {
 		return err
@@ -142,7 +153,8 @@ func (manager *Manager) RemoveMigratedRuntime(ctx context.Context, virtualMachin
 
 // RefreshSourceDisk reapplies the configured limit after an abort. It does
 // nothing for stopped or unknown VMs.
-func (manager *Manager) RefreshSourceDisk(ctx context.Context, virtualMachineID string) error {
+func (host *MigrationHost) RefreshSourceDisk(ctx context.Context, virtualMachineID string) error {
+	manager := host.manager
 	desired, observed, err := manager.newVirtualMachine(virtualMachineID).records()
 	if err != nil {
 		return err

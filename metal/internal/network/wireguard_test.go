@@ -52,14 +52,14 @@ func (commands *fakeWireGuardCommands) Output(_ context.Context, name string, ar
 }
 
 func TestValidateWireGuardPeersRejectsDuplicateIdentity(t *testing.T) {
-	base := WireGuardPeer{Node: "node-1", NodeID: 1, PublicKey: "key-1", Address: "192.0.2.1:51820"}
+	base := WireGuardPeer{Node: "node-1", MeshAddress: "fdab:1::1", PublicKey: "key-1", Address: "192.0.2.1:51820"}
 	tests := []struct {
 		name string
 		peer WireGuardPeer
 	}{
-		{name: "node", peer: WireGuardPeer{Node: "node-1", NodeID: 2, PublicKey: "key-2", Address: "192.0.2.2:51820"}},
-		{name: "node ID", peer: WireGuardPeer{Node: "node-2", NodeID: 1, PublicKey: "key-2", Address: "192.0.2.2:51820"}},
-		{name: "public key", peer: WireGuardPeer{Node: "node-2", NodeID: 2, PublicKey: "key-1", Address: "192.0.2.2:51820"}},
+		{name: "node", peer: WireGuardPeer{Node: "node-1", MeshAddress: "fdab:1::2", PublicKey: "key-2", Address: "192.0.2.2:51820"}},
+		{name: "mesh address", peer: WireGuardPeer{Node: "node-2", MeshAddress: "fdab:1::1", PublicKey: "key-2", Address: "192.0.2.2:51820"}},
+		{name: "public key", peer: WireGuardPeer{Node: "node-2", MeshAddress: "fdab:1::2", PublicKey: "key-1", Address: "192.0.2.2:51820"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -74,7 +74,7 @@ func TestWireGuardManagerPersistsAppliedPeers(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "wireguard-peers.json")
 	commands := &fakeWireGuardCommands{}
 	manager := newWireGuardManager(WireGuardConfig{InterfaceName: "wg0", StatePath: statePath}, commands)
-	peer := WireGuardPeer{Node: "node-2", NodeID: 2, PublicKey: "key-2", Address: "192.0.2.2:51820"}
+	peer := WireGuardPeer{Node: "node-2", MeshAddress: "fdab:1::2", PublicKey: "key-2", Address: "192.0.2.2:51820"}
 
 	if err := manager.Apply(context.Background(), []WireGuardPeer{peer}); err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestWireGuardManagerSerializesApplication(t *testing.T) {
 		InterfaceName: "wg0",
 		StatePath:     filepath.Join(t.TempDir(), "wireguard-peers.json"),
 	}, commands)
-	peers := []WireGuardPeer{{Node: "node-2", NodeID: 2, PublicKey: "key-2", Address: "192.0.2.2:51820"}}
+	peers := []WireGuardPeer{{Node: "node-2", MeshAddress: "fdab:1::2", PublicKey: "key-2", Address: "192.0.2.2:51820"}}
 
 	var waitGroup sync.WaitGroup
 	for range 2 {
@@ -124,17 +124,17 @@ func TestWireGuardManagerInstallsPeerRoutes(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "wireguard-peers.json")
 	commands := &fakeWireGuardCommands{}
 	manager := newWireGuardManager(WireGuardConfig{InterfaceName: "wg0", StatePath: statePath}, commands)
-	peer := WireGuardPeer{Node: "node-2", NodeID: 2, PublicKey: "key-2", Address: "192.0.2.2:51820"}
+	peer := WireGuardPeer{Node: "node-2", MeshAddress: "fdab:1::2", PublicKey: "key-2", Address: "192.0.2.2:51820"}
 
 	if err := manager.Apply(context.Background(), []WireGuardPeer{peer}); err != nil {
 		t.Fatal(err)
 	}
 
 	runs := recordedWireGuardRuns(commands)
-	if !wireGuardRunRecorded(runs, []string{"wg", "set", "wg0", "peer", "key-2", "endpoint", "192.0.2.2:51820", "allowed-ips", "fdaa:1::2/128", "persistent-keepalive", "25"}) {
+	if !wireGuardRunRecorded(runs, []string{"wg", "set", "wg0", "peer", "key-2", "endpoint", "192.0.2.2:51820", "allowed-ips", "fdab:1::2/128", "persistent-keepalive", "25"}) {
 		t.Fatalf("runs = %v, want a wg set call for the peer", runs)
 	}
-	if !wireGuardRunRecorded(runs, []string{"ip", "-6", "route", "replace", "fdaa:1::2/128", "dev", "wg0"}) {
+	if !wireGuardRunRecorded(runs, []string{"ip", "-6", "route", "replace", "fdab:1::2/128", "dev", "wg0"}) {
 		t.Fatalf("runs = %v, want a route replace for the peer address", runs)
 	}
 }

@@ -8,13 +8,24 @@ A virtual machine has persisted desired state and observed host state. The contr
 
 ## Lifecycle
 
-```text
-reservation -> unknown -> running <-> paused
-                            |
-                            +-> stopped
-
-any retained state -> desired destroyed -> cleanup -> removed
-runtime error -> failed
+```mermaid
+stateDiagram-v2
+    [*] --> unknown: reservation saved
+    unknown --> running: reconciliation starts VM
+    running --> paused: pause request
+    paused --> running: resume request
+    running --> stopped: stop request
+    paused --> stopped: stop request
+    unknown --> failed: runtime error
+    running --> failed: runtime error
+    paused --> failed: runtime error
+    stopped --> running: start request
+    unknown --> cleanup: desired state is destroyed
+    running --> cleanup: desired state is destroyed
+    paused --> cleanup: desired state is destroyed
+    stopped --> cleanup: desired state is destroyed
+    failed --> cleanup: desired state is destroyed
+    cleanup --> [*]: all resources removed
 ```
 
 Create reserves the supplied VM ID and requests `running`. Every mutation returns before host work completes. A caller polls until the desired and observed generations match.
@@ -27,10 +38,11 @@ A normal start can use a shared warm image when the image and VM shape match. If
 
 Automatic idle shutdown can preserve the memory of one VM. Metal keeps the public desired state as `running` and reports the observed state as `stopped` while Firecracker is not running.
 
-```text
-running -> idle -> save state -> stopped
-   ^                              |
-   +-------- new IP traffic ------+
+```mermaid
+stateDiagram-v2
+    running --> idle: no host-to-guest traffic
+    idle --> stopped: save memory and device state
+    stopped --> running: new IPv4 or IPv6 traffic
 ```
 
 Set `sleep_after_idle_seconds` in the compute settings. `0` disables automatic idle shutdown. Metal restores an automatically stopped VM after new host-to-guest IPv4 or IPv6 traffic. The first packet can be lost during restoration, so clients must retry.

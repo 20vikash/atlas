@@ -1,3 +1,4 @@
+import frappe
 from frappe.model.document import Document
 
 
@@ -23,3 +24,8 @@ class MetalServerUsage(Document):
 	# end: auto-generated types
 
 	"""Record one capacity sample from a Metal host."""
+
+
+def on_doctype_update() -> None:
+	"""Index the latest capacity sample lookup per host."""
+	frappe.db.add_index("Metal Server Usage", ["server", "creation"], "placement_latest_usage")

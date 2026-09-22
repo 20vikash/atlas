@@ -23,7 +23,7 @@ PollResult = TypeVar("PollResult")
 class ServerSizeData:
 	"""Store one server size from a provider."""
 
-	size: str
+	name: str
 	architecture: str
 	cpu_count: int
 	memory_mib: int
@@ -37,7 +37,7 @@ class ServerSizeData:
 class ServerImageData:
 	"""Store one server image from a provider."""
 
-	image: str
+	name: str
 	os: str
 	version: str
 	provider_metadata: Mapping[str, Any] | None = None
@@ -48,7 +48,6 @@ class ServerCreateRequest:
 	"""Store the data for one idempotent provider server request."""
 
 	name: str
-	discovery_key: str
 	server_size: str
 	server_image: str
 	size_provider_metadata: Mapping[str, Any]
@@ -132,6 +131,10 @@ class ServerProvider(ABC):
 		"""Check the provider settings."""
 		...
 
+	def validate_server(self, server: "MetalServer") -> None:
+		"""Check the Metal Server values that this provider needs."""
+		return None
+
 	@abstractmethod
 	def validate_credentials(self) -> bool:
 		"""Check that the provider credentials permit an API request."""
@@ -149,7 +152,7 @@ class ServerProvider(ABC):
 
 	@abstractmethod
 	def ensure_server(self, request: ServerCreateRequest) -> ProviderServer:
-		"""Return the server for the discovery key, creating it when absent."""
+		"""Return the server for the identity key, creating it when absent."""
 		...
 
 	@abstractmethod
@@ -162,8 +165,19 @@ class ServerProvider(ABC):
 		"""Configure the provider network after Secure Shell access is ready."""
 		...
 
+	def metald_listen_address(self, server: "MetalServer") -> str:
+		"""Return the configured metald address."""
+		address = (
+			server.public_ipv4_address
+			if self.settings.use_public_ip_for_metald
+			else server.private_ipv4_address
+		)
+		if not address:
+			raise self.error_class(f"Atlas server {server.name} has no address for metald")
+		return address
+
 	@abstractmethod
-	def get_storage_pool_device(self, server: "MetalServer") -> str:
+	def storage_pool_device(self, server: "MetalServer") -> str:
 		"""Return the raw block device for the virtual machine storage pool."""
 		...
 
@@ -185,11 +199,15 @@ class ServerProvider(ABC):
 		"""Delete one public IPv4 address."""
 		raise UnsupportedProviderOperation("public IPv4 address deletion")
 
-	def attach_public_ipv4_address(self, provider_resource_id: str, server: "MetalServer") -> None:
-		"""Attach one public IPv4 address to a provider server."""
+	def attach_public_ipv4_address(
+		self, provider_resource_id: str, public_address: str, server: "MetalServer"
+	) -> str:
+		"""Attach one public IPv4 address and return its host address."""
 		raise UnsupportedProviderOperation("public IPv4 address attachment")
 
-	def detach_public_ipv4_address(self, provider_resource_id: str) -> None:
+	def detach_public_ipv4_address(
+		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
+	) -> None:
 		"""Detach one public IPv4 address from its provider server."""
 		raise UnsupportedProviderOperation("public IPv4 address detachment")
 

@@ -68,11 +68,30 @@ Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token wit
 
 A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snapshot` only from tenant `0`. Any other tenant that sends one receives `400`, and its snapshot becomes a `machine` image. These values cannot change after the image exists.
 
+A protected resource refuses removal. `is_termination_protected` on a virtual machine refuses `DELETE /virtual-machines/{id}`, and on an image it refuses `DELETE /images/{id}`. Both return `400`. A create request and a snapshot request accept the value, the termination protection route changes it later, and a `system` image is protected when it is created.
+
+A snapshot request with `memory_snapshot` can carry `memory_snapshot_configuration` to record a different warm start shape. It accepts `virtual_cpu_count`, `memory_mib`, and `disk_mib`. Each absent value keeps the source VM value. A configuration without `memory_snapshot` returns `400`.
+
+The resize action changes CPU, memory, disk, or idle shutdown. Omitted fields keep their current values. Stop the VM before changing resources. Atlas moves it when its host cannot fit the new shape. It reports `migrating` during the move. The disk route grows a running VM disk and returns `409 insufficient_capacity` when the host is full.
+
+```bash
+curl -X POST "$ATLAS/api/atlas/virtual-machines/vm-00001/actions/resize" \
+  -H "Authorization: Bearer $TOKEN" -H "X-Tenant-ID: 7" -H "Content-Type: application/json" \
+  -d '{"cpu_millicores": 4000, "memory_mib": 8192, "disk_mib": 40960}'
+```
+
 ## Conventions
 
 An error response has `error.code`, `error.message`, and `error.fields`. Validation errors use `400`; missing authentication uses `401`; denied access uses `403`; missing resources use `404`; and invalid resource state uses `409`.
 
-When VM creation needs a new host, it returns `503` with `error.code` set to `capacity_pending`. Read the `Retry-After` response header for the number of seconds to wait before retrying.
+Creation returns `503` when it places no VM. Read `error.code` to tell the two causes apart.
+
+| `error.code` | Meaning | Retry |
+|---|---|---|
+| `out_of_capacity` | No host can accept the VM. The region needs more capacity. | Later. Atlas can start a host in a separate background job when Metal auto-spawn is enabled. |
+| `placement_busy` | The fleet has room, but every candidate host was held by another placement. | At once. The response carries `Retry-After` in seconds. |
+
+Do not treat `placement_busy` as a capacity limit. It clears as soon as the competing requests finish, and it becomes rarer as the region grows.
 
 A list response carries `items`, `offset`, `limit`, and `has_more`. The default limit is 20 and the maximum limit is 100.
 

@@ -156,7 +156,9 @@ class CargoServerProvisioner:
 			constraints={"site": {"suffix": "-svc"}},
 			lifetime=TOKEN_LIFETIME,
 		)
-		atlas_url = (frappe.conf.atlas_base_url or frappe.utils.get_url()).rstrip("/")
+		atlas_url = (frappe.conf.atlas_base_url or frappe.utils.get_url(allow_header_override=False)).rstrip(
+			"/"
+		)
 
 		return {
 			"PILOT_ADMIN_PASSWORD": generate_installer_password(),

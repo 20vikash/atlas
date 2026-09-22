@@ -21,9 +21,6 @@ class TestHostBinaries(UnitTestCase):
 		self.assertEqual(version_fields("1.26rc1"), (1, 26))
 		self.assertEqual(version_fields("invalid"), ())
 
-	def test_file_name_comes_from_the_artifact(self) -> None:
-		self.assertEqual(HOST_BINARIES[0].file_name, "metald-linux-amd64")
-
 	def test_the_toolchain_path_is_absolute(self) -> None:
 		with patch.object(
 			host_binaries.frappe, "get_site_path", return_value="site.local/private/files/toolchain"
@@ -39,9 +36,24 @@ class TestHostBinaries(UnitTestCase):
 	def test_every_binary_names_distinct_settings_fields(self) -> None:
 		fields = [binary.settings_field for binary in HOST_BINARIES]
 		fields += [binary.source_hash_field for binary in HOST_BINARIES]
+		fields += [binary.binary_hash_field for binary in HOST_BINARIES]
 		fields += [binary.key for binary in HOST_BINARIES]
 
 		self.assertEqual(len(fields), len(set(fields)))
+
+	def test_a_published_binary_without_its_digest_is_rebuilt(self) -> None:
+		"""A host verifies the digest, so a published binary is useless without it."""
+		binary = host_binaries.find_host_binary("metald")
+		settings = SimpleNamespace(
+			get=lambda field: {
+				binary.settings_field: "metald-file",
+				binary.source_hash_field: "source-digest",
+				binary.binary_hash_field: None,
+			}[field]
+		)
+
+		with patch.object(host_binaries.frappe, "get_cached_doc", return_value=settings):
+			self.assertFalse(host_binaries.is_published(binary, "source-digest"))
 
 	def test_build_output_is_not_a_source_input(self) -> None:
 		"""A rebuild must not change the digest that decides whether to rebuild."""

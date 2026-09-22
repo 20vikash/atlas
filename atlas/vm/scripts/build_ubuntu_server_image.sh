@@ -123,9 +123,13 @@ network: {config: disabled}
 EOF
 
 	install -d -m 0755 "$rootfs_directory/etc/systemd/network"
+	# Keep this equal to meshMTU in metal/internal/network/mesh.go.
 	cat > "$rootfs_directory/etc/systemd/network/10-atlas.network" <<'EOF'
 [Match]
 Name=eth0
+
+[Link]
+MTUBytes=1380
 
 [Network]
 Address=172.16.0.2/24

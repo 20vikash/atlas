@@ -105,7 +105,6 @@ after_install = [
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
 ]
 after_migrate = [
-	"atlas.atlas.doctype.atlas_settings.atlas_settings.migrate_placement_strategy",
 	"atlas.atlas.core.install.realign_scheduled_job_baselines",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
 	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
@@ -241,6 +240,7 @@ scheduler_events = {
 	"hourly": ["atlas.metal_server.usage.delete_old_usage_samples"],
 	"daily": [
 		"atlas.atlas.doctype.atlas_settings.atlas_settings.renew_expiring_wildcard_certificate",
+		"atlas.metal_server.doctype.metal_server.metal_server.renew_expiring_tls_certificates",
 	],
 }
 

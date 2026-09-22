@@ -68,6 +68,7 @@ class ProxyServer(Document):
 		proxy_server.flags.created_by_proxy_server_api = True
 		proxy_server.flags.skip_initial_provisioning = True
 		proxy_server.insert(ignore_permissions=True)
+		frappe.db.commit()  # nosemgrep
 
 		is_draft = ProxyServer.create_virtual_machine(proxy_server, values)
 		proxy_server.save(ignore_permissions=True)
@@ -86,6 +87,7 @@ class ProxyServer(Document):
 			"disk_mib": values.get("disk_mib"),
 			"tenant_id": 0,
 			"is_privileged": True,
+			"is_termination_protected": True,
 			"hostname": proxy_server.name,
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",
@@ -159,7 +161,9 @@ class ProxyServer(Document):
 		self.remove_dns_record()
 		if self.virtual_machine:
 			if frappe.db.exists("Virtual Machine", self.virtual_machine):
-				frappe.get_doc("Virtual Machine", self.virtual_machine).terminate()
+				virtual_machine = frappe.get_doc("Virtual Machine", self.virtual_machine)
+				virtual_machine.set_termination_protection(False)
+				virtual_machine.terminate()
 			self.add_comment("Info", _("Archived with Virtual Machine {0}.").format(self.virtual_machine))
 
 		self.db_set(

@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,14 +22,17 @@ const peerKeepaliveSeconds = "25"
 // ErrInvalidPeers reports an invalid desired WireGuard peer set.
 var ErrInvalidPeers = errors.New("network: invalid WireGuard peers")
 
-// WireGuardPeer describes one desired peer.
+// WireGuardPeer describes one desired peer. MeshAddress is the peer's address
+// on the mesh, which Atlas owns and sends, and which becomes its AllowedIPs.
 type WireGuardPeer struct {
-	Node      string `json:"node"`
-	NodeID    uint32 `json:"node_id"`
-	PublicKey string `json:"public_key"`
-	Address   string `json:"address"`
+	Node        string `json:"node"`
+	MeshAddress string `json:"mesh_address"`
+	PublicKey   string `json:"public_key"`
+	Address     string `json:"address"`
+	// PublicAddress is the peer address on the public uplink.
+	PublicAddress string `json:"public_address"`
 	// PrivateAddress is the peer address on the private network.
-	PrivateAddress string `json:"private_address,omitempty"`
+	PrivateAddress string `json:"private_address"`
 	// MAC is the discovery uplink MAC of the peer host.
 	MAC string `json:"mac"`
 }
@@ -81,13 +83,8 @@ func (manager *WireGuardManager) Apply(ctx context.Context, desired []WireGuardP
 	}
 	localPublicKey = strings.TrimSpace(localPublicKey)
 
-	localAddress, err := manager.wireGuardAddress(ctx)
-	if err != nil {
-		return err
-	}
-
 	managedDesired := withoutLocalPeer(desired, localPublicKey)
-	if err := manager.reconcile(ctx, current, managedDesired, localAddress); err != nil {
+	if err := manager.reconcile(ctx, current, managedDesired); err != nil {
 		return err
 	}
 	if err := saveWireGuardPeers(manager.configuration.StatePath, managedDesired); err != nil {
@@ -104,7 +101,7 @@ func newWireGuardManager(configuration WireGuardConfig, commands wireGuardComman
 // reconcile removes peers that changed or disappeared, then configures every
 // desired peer. A changed peer is removed first, because `wg set` cannot move a
 // node to a new public key in place.
-func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired []WireGuardPeer, localAddress netip.Addr) error {
+func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired []WireGuardPeer) error {
 	currentByNode := wireGuardPeersByNode(current)
 	desiredByNode := wireGuardPeersByNode(desired)
 
@@ -113,14 +110,13 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 			if err := manager.commands.Run(ctx, "wg", "set", manager.configuration.InterfaceName, "peer", peer.PublicKey, "remove"); err != nil {
 				return fmt.Errorf("remove WireGuard peer %q: %w", node, err)
 			}
-			if err := manager.removePeerRoute(ctx, localAddress, peer); err != nil {
+			if err := manager.removePeerRoute(ctx, peer); err != nil {
 				return err
 			}
 		}
 	}
 
 	for node, peer := range desiredByNode {
-		allowedAddress := peerWireGuardAddress(localAddress, peer.NodeID)
 		if err := manager.commands.Run(
 			ctx,
 			"wg",
@@ -131,13 +127,13 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 			"endpoint",
 			peer.Address,
 			"allowed-ips",
-			allowedAddress.String()+"/128",
+			peer.MeshAddress+"/128",
 			"persistent-keepalive",
 			peerKeepaliveSeconds,
 		); err != nil {
 			return fmt.Errorf("configure WireGuard peer %q: %w", node, err)
 		}
-		if err := manager.replacePeerRoute(ctx, allowedAddress); err != nil {
+		if err := manager.replacePeerRoute(ctx, peer); err != nil {
 			return err
 		}
 	}
@@ -145,19 +141,17 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 	return nil
 }
 
-// replacePeerRoute points one peer address at the WireGuard interface.
-func (manager *WireGuardManager) replacePeerRoute(ctx context.Context, address netip.Addr) error {
-	if err := manager.commands.Run(ctx, "ip", "-6", "route", "replace", address.String()+"/128", "dev", manager.configuration.InterfaceName); err != nil {
-		return fmt.Errorf("route WireGuard peer %s: %w", address, err)
+// replacePeerRoute points one peer mesh address at the WireGuard interface.
+func (manager *WireGuardManager) replacePeerRoute(ctx context.Context, peer WireGuardPeer) error {
+	if err := manager.commands.Run(ctx, "ip", "-6", "route", "replace", peer.MeshAddress+"/128", "dev", manager.configuration.InterfaceName); err != nil {
+		return fmt.Errorf("route WireGuard peer %s: %w", peer.MeshAddress, err)
 	}
 	return nil
 }
 
 // removePeerRoute drops the route of a removed peer.
-func (manager *WireGuardManager) removePeerRoute(ctx context.Context, localAddress netip.Addr, peer WireGuardPeer) error {
-	address := peerWireGuardAddress(localAddress, peer.NodeID)
-
-	present, err := manager.peerRouteExists(ctx, address)
+func (manager *WireGuardManager) removePeerRoute(ctx context.Context, peer WireGuardPeer) error {
+	present, err := manager.peerRouteExists(ctx, peer.MeshAddress)
 	if err != nil {
 		return err
 	}
@@ -165,54 +159,36 @@ func (manager *WireGuardManager) removePeerRoute(ctx context.Context, localAddre
 		return nil
 	}
 
-	if err := manager.commands.Run(ctx, "ip", "-6", "route", "del", address.String()+"/128", "dev", manager.configuration.InterfaceName); err != nil {
-		return fmt.Errorf("unroute WireGuard peer %s: %w", address, err)
+	if err := manager.commands.Run(ctx, "ip", "-6", "route", "del", peer.MeshAddress+"/128", "dev", manager.configuration.InterfaceName); err != nil {
+		return fmt.Errorf("unroute WireGuard peer %s: %w", peer.MeshAddress, err)
 	}
 	return nil
 }
 
 // peerRouteExists reports whether the peer route is installed.
-func (manager *WireGuardManager) peerRouteExists(ctx context.Context, address netip.Addr) (bool, error) {
-	output, err := manager.commands.Output(ctx, "ip", "-6", "route", "show", address.String()+"/128")
+func (manager *WireGuardManager) peerRouteExists(ctx context.Context, meshAddress string) (bool, error) {
+	output, err := manager.commands.Output(ctx, "ip", "-6", "route", "show", meshAddress+"/128")
 	if err != nil {
-		return false, fmt.Errorf("inspect WireGuard peer route %s: %w", address, err)
+		return false, fmt.Errorf("inspect WireGuard peer route %s: %w", meshAddress, err)
 	}
 	return strings.TrimSpace(output) != "", nil
 }
 
-// wireGuardAddress reads the global IPv6 address of the local interface, which
-// supplies the prefix every peer address is built from.
-func (manager *WireGuardManager) wireGuardAddress(ctx context.Context) (netip.Addr, error) {
-	output, err := manager.commands.Output(ctx, "ip", "-6", "-o", "addr", "show", "dev", manager.configuration.InterfaceName, "scope", "global")
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("read WireGuard interface address: %w", err)
-	}
-	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		for index, field := range fields {
-			if field != "inet6" || index+1 >= len(fields) {
-				continue
-			}
-			prefix, parseErr := netip.ParsePrefix(fields[index+1])
-			if parseErr == nil && prefix.Addr().Is6() {
-				return prefix.Addr(), nil
-			}
-		}
-	}
-	return netip.Addr{}, fmt.Errorf("WireGuard interface has no global IPv6 address")
-}
-
 // validateWireGuardPeers rejects a set with a missing field, an unusable
-// address, or a repeated node, node ID, or public key. The whole set is checked
-// before anything is applied, so a bad entry never lands halfway.
+// address, or a repeated node, mesh address, or public key. The whole set is
+// checked before anything is applied, so a bad entry never lands halfway.
 func validateWireGuardPeers(peers []WireGuardPeer) error {
 	nodes := make(map[string]struct{}, len(peers))
-	nodeIDs := make(map[uint32]struct{}, len(peers))
+	meshAddresses := make(map[netip.Addr]struct{}, len(peers))
 	publicKeys := make(map[string]struct{}, len(peers))
 
 	for _, peer := range peers {
-		if peer.Node == "" || peer.PublicKey == "" || peer.Address == "" {
-			return fmt.Errorf("%w: each peer requires node, public_key, and address", ErrInvalidPeers)
+		if peer.Node == "" || peer.PublicKey == "" || peer.Address == "" || peer.MeshAddress == "" {
+			return fmt.Errorf("%w: each peer requires node, mesh_address, public_key, and address", ErrInvalidPeers)
+		}
+		meshAddress, err := netip.ParseAddr(peer.MeshAddress)
+		if err != nil || !meshAddress.Is6() {
+			return fmt.Errorf("%w: peer %q has an invalid mesh address", ErrInvalidPeers, peer.Node)
 		}
 		host, port, err := net.SplitHostPort(peer.Address)
 		if err != nil || host == "" || !validWireGuardPort(port) {
@@ -221,15 +197,15 @@ func validateWireGuardPeers(peers []WireGuardPeer) error {
 		if _, found := nodes[peer.Node]; found {
 			return fmt.Errorf("%w: duplicate node %q", ErrInvalidPeers, peer.Node)
 		}
-		if _, found := nodeIDs[peer.NodeID]; found {
-			return fmt.Errorf("%w: duplicate node_id %d", ErrInvalidPeers, peer.NodeID)
+		if _, found := meshAddresses[meshAddress]; found {
+			return fmt.Errorf("%w: duplicate mesh_address %s", ErrInvalidPeers, meshAddress)
 		}
 		if _, found := publicKeys[peer.PublicKey]; found {
 			return fmt.Errorf("%w: duplicate public_key", ErrInvalidPeers)
 		}
 
 		nodes[peer.Node] = struct{}{}
-		nodeIDs[peer.NodeID] = struct{}{}
+		meshAddresses[meshAddress] = struct{}{}
 		publicKeys[peer.PublicKey] = struct{}{}
 	}
 
@@ -240,17 +216,6 @@ func validateWireGuardPeers(peers []WireGuardPeer) error {
 func validWireGuardPort(port string) bool {
 	value, err := strconv.ParseUint(port, 10, 16)
 	return err == nil && value > 0
-}
-
-// peerWireGuardAddress builds a peer address from the local prefix and the node
-// ID: the first 4 bytes are kept, and the node ID becomes the last 4.
-func peerWireGuardAddress(localAddress netip.Addr, nodeID uint32) netip.Addr {
-	address := localAddress.As16()
-	for index := 4; index < len(address); index++ {
-		address[index] = 0
-	}
-	binary.BigEndian.PutUint32(address[12:], nodeID)
-	return netip.AddrFrom16(address)
 }
 
 // wireGuardPeersByNode indexes a peer set by node name.

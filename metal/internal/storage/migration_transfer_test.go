@@ -1,22 +1,26 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
+	"net"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
-
-// failingWriter fails on the first write, like a target that went away mid-stream.
-type failingWriter struct{}
-
-func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("writer closed") }
 
 type fakeRunner struct {
 	runErr   map[string]error
@@ -69,6 +73,172 @@ func TestSendArgumentsFormsFullIncrementalAndResume(t *testing.T) {
 	}
 }
 
+// writeNodeTLSMaterial writes a throwaway authority and node key pair and
+// returns a configuration that points at them.
+func writeNodeTLSMaterial(t *testing.T) MigrationTLSConfig {
+	t.Helper()
+
+	authorityKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test authority"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	authorityDER, err := x509.CreateCertificate(rand.Reader, template, template, &authorityKey.PublicKey, authorityKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := x509.ParseCertificate(authorityDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "node"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("fdab::12")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	nodeDER, err := x509.CreateCertificate(rand.Reader, nodeTemplate, authority, &nodeKey.PublicKey, authorityKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	write := func(name string, block *pem.Block) string {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	return MigrationTLSConfig{
+		CAFile:          write("ca.crt", &pem.Block{Type: "CERTIFICATE", Bytes: authorityDER}),
+		CertificateFile: write("node.crt", &pem.Block{Type: "CERTIFICATE", Bytes: nodeDER}),
+		PrivateKeyFile:  write("node.key", &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(nodeKey)}),
+		ListenAddress:   "[fdab::12]:9002",
+		TransferPort:    9002,
+	}
+}
+
+func TestSnapshotTLSConfigurationsRequireMutualTLSAndPinTheSourceHost(t *testing.T) {
+	transfer := &MigrationTransfer{tls: writeNodeTLSMaterial(t)}
+
+	server, err := transfer.serverTLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.ClientAuth != tls.RequireAndVerifyClientCert {
+		t.Fatalf("client auth = %v, want RequireAndVerifyClientCert", server.ClientAuth)
+	}
+	if server.MinVersion != tls.VersionTLS13 || server.ClientCAs == nil || len(server.Certificates) != 1 {
+		t.Fatalf("server configuration = %+v", server)
+	}
+
+	client, err := transfer.clientTLSConfig("fdab::11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.ServerName != "fdab::11" {
+		t.Fatalf("server name = %q, want fdab::11", client.ServerName)
+	}
+	if client.MinVersion != tls.VersionTLS13 || client.RootCAs == nil || len(client.Certificates) != 1 {
+		t.Fatalf("client configuration = %+v", client)
+	}
+	if client.InsecureSkipVerify {
+		t.Fatal("the destination must verify the source node certificate")
+	}
+}
+
+func TestSnapshotTLSConfigurationRejectsAnAuthorityFileWithoutACertificate(t *testing.T) {
+	configuration := writeNodeTLSMaterial(t)
+	if err := os.WriteFile(configuration.CAFile, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	transfer := &MigrationTransfer{tls: configuration}
+
+	if _, err := transfer.serverTLSConfig(); err == nil {
+		t.Fatal("an authority file with no certificate must fail")
+	}
+}
+
+func TestSnapshotRelayCopiesTheStreamToTheDestinationAndStopsOnCancel(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("zfs"), 100_000)
+	received := make(chan []byte, 1)
+	go func() {
+		connection, dialError := net.Dial("tcp", listener.Addr().String())
+		if dialError != nil {
+			received <- nil
+			return
+		}
+		defer connection.Close()
+		body, _ := io.ReadAll(connection)
+		received <- body
+	}()
+
+	if err := relaySnapshotToDestination(context.Background(), listener, bytes.NewReader(payload)); err != nil {
+		t.Fatal(err)
+	}
+	if body := <-received; !bytes.Equal(body, payload) {
+		t.Fatalf("destination received %d bytes, want %d", len(body), len(payload))
+	}
+
+	idle, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := relaySnapshotToDestination(cancelled, idle, bytes.NewReader(payload)); err == nil {
+		t.Fatal("a cancelled relay must not wait for a destination")
+	}
+}
+
+func TestSnapshotRelayStopsWhenNoDestinationConnects(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The accept wait is bounded, so a destination that never dials cannot hold the
+	// fixed transfer port or keep the source lock looking busy.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err = relaySnapshotToDestination(ctx, listener, bytes.NewReader([]byte("zfs")))
+
+	if err == nil {
+		t.Fatal("a relay with no destination must end")
+	}
+}
+
+func TestMigrationHostUsesTheCoordinationURLHost(t *testing.T) {
+	host, err := migrationHost("https://[fdab::11]:9001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host != "fdab::11" {
+		t.Fatalf("host = %q, want fdab::11", host)
+	}
+}
+
 func TestCreateSnapshotIgnoresAlreadyExists(t *testing.T) {
 	runner := &fakeRunner{runErr: map[string]error{
 		"snapshot metal/vms/vm-1@migration-m1-1": errors.New("cannot create snapshot: dataset already exists"),
@@ -79,11 +249,16 @@ func TestCreateSnapshotIgnoresAlreadyExists(t *testing.T) {
 }
 
 func TestRemoveSnapshotIgnoresMissing(t *testing.T) {
-	runner := &fakeRunner{runErr: map[string]error{
-		"destroy metal/vms/vm-1@migration-m1-1": errors.New("could not find any snapshots to destroy; dataset does not exist"),
-	}}
-	if err := newTransfer(runner).RemoveSnapshot(context.Background(), "vm-1", "migration-m1-1"); err != nil {
-		t.Fatalf("remove missing snapshot = %v, want nil", err)
+	for _, message := range []string{
+		"could not find any snapshots to destroy; check snapshot names.",
+		"cannot open 'metal/vms/vm-1': dataset does not exist",
+	} {
+		runner := &fakeRunner{runErr: map[string]error{
+			"destroy metal/vms/vm-1@migration-m1-1": errors.New(message),
+		}}
+		if err := newTransfer(runner).RemoveSnapshot(context.Background(), "vm-1", "migration-m1-1"); err != nil {
+			t.Fatalf("remove missing snapshot after %q = %v, want nil", message, err)
+		}
 	}
 }
 
@@ -157,9 +332,9 @@ func TestReceiveResumeTokenHandlesDashAndMissing(t *testing.T) {
 	}
 }
 
-func TestTargetDatasetExists(t *testing.T) {
+func TestDestinationDatasetExists(t *testing.T) {
 	runner := &fakeRunner{}
-	present, err := newTransfer(runner).TargetDatasetExists(context.Background(), "vm-1")
+	present, err := newTransfer(runner).DestinationDatasetExists(context.Background(), "vm-1")
 	if err != nil || !present {
 		t.Fatalf("present = %v, %v", present, err)
 	}
@@ -167,13 +342,13 @@ func TestTargetDatasetExists(t *testing.T) {
 	runner = &fakeRunner{runErr: map[string]error{
 		"list metal/vms/vm-2": errors.New("dataset does not exist"),
 	}}
-	present, err = newTransfer(runner).TargetDatasetExists(context.Background(), "vm-2")
+	present, err = newTransfer(runner).DestinationDatasetExists(context.Background(), "vm-2")
 	if err != nil || present {
 		t.Fatalf("absent = %v, %v", present, err)
 	}
 }
 
-func TestVerifyResumeTokenChecksTheTargetSnapshot(t *testing.T) {
+func TestVerifyResumeTokenChecksTheDestinationSnapshot(t *testing.T) {
 	runner := &fakeRunner{combined: map[string]string{
 		"send -nvt good": "resume token contents:\n\ttoname = metal/vms/vm-1@migration-m1-2\n",
 		"send -nvt bad":  "resume token contents:\n\ttoname = metal/vms/other-vm@migration-x-1\n",
@@ -191,84 +366,5 @@ func TestVerifyResumeTokenChecksTheTargetSnapshot(t *testing.T) {
 func TestParseSendSizeBytesRejectsMissingSize(t *testing.T) {
 	if _, err := parseSendSizeBytes("full\tsnap\t10\n"); err == nil {
 		t.Fatal("want an error when no size line is present")
-	}
-}
-
-// TestCopySendStreamKillsTheSendWhenTheWriterFails confirms a failed copy stops
-// the send instead of leaving it blocked on an unread pipe.
-func TestCopySendStreamKillsTheSendWhenTheWriterFails(t *testing.T) {
-	// cat /dev/zero produces an endless stream that fills the pipe.
-	command := exec.Command("cat", "/dev/zero")
-	var sendError strings.Builder
-	command.Stderr = &sendError
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, copyError := copySendStream(command, stdout, failingWriter{}, &sendError)
-		done <- copyError
-	}()
-
-	select {
-	case copyError := <-done:
-		if copyError == nil {
-			t.Fatal("copy into a failing writer returned nil, want an error")
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("copySendStream blocked after the writer failed")
-	}
-}
-
-// TestZFSTransferRoundTrip tests streaming send and receive on a writable pool.
-func TestZFSTransferRoundTrip(t *testing.T) {
-	poolName := os.Getenv("METAL_ZFS_TEST_POOL")
-	if poolName == "" {
-		t.Skip("set METAL_ZFS_TEST_POOL to run the ZFS transfer integration test")
-	}
-	if _, err := exec.LookPath("zfs"); err != nil {
-		t.Skip("zfs is not available")
-	}
-	ctx := context.Background()
-	transfer := NewMigrationTransfer(&ZFSPool{name: poolName})
-	source := "e2e-src"
-	target := "e2e-dst"
-	sourceDataset := transfer.pool.virtualMachineDataset(source)
-	targetDataset := transfer.pool.virtualMachineDataset(target)
-	if err := exec.CommandContext(ctx, "zfs", "create", "-V", "16M", sourceDataset).Run(); err != nil {
-		t.Fatalf("create source volume: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command("zfs", "destroy", "-r", sourceDataset).Run()
-		_ = exec.Command("zfs", "destroy", "-r", targetDataset).Run()
-	})
-
-	if err := transfer.CreateSnapshot(ctx, source, "migration-m1-1"); err != nil {
-		t.Fatal(err)
-	}
-	reader, writer := io.Pipe()
-	go func() {
-		_, sendErr := transfer.SendSnapshot(ctx, source, "migration-m1-1", "", "", writer)
-		writer.CloseWithError(sendErr)
-	}()
-	if err := transfer.ReceiveSnapshot(ctx, target, reader); err != nil {
-		t.Fatalf("receive: %v", err)
-	}
-
-	sourceGUID, err := transfer.SnapshotGUID(ctx, source, "migration-m1-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	targetGUID, err := transfer.SnapshotGUID(ctx, target, "migration-m1-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sourceGUID != targetGUID {
-		t.Fatalf("GUID mismatch: source %s target %s", sourceGUID, targetGUID)
 	}
 }

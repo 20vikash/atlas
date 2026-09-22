@@ -4,19 +4,19 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import frappe
 from frappe import _
-from frappe.desk.utils import slug
 from frappe.model.document import Document
-from frappe.model.naming import make_autoname
+from frappe.utils import add_days, cint, now_datetime
 from frappe.utils.background_jobs import is_job_enqueued
 
 from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.server_providers.base import ServerCreateRequest, ServerPowerAction
+from atlas.atlas.core.tls.metal import CERTIFICATE_RENEWAL_WINDOW_DAYS, is_certificate_authority_expiring
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.metal_server.core.disk_inventory import DiskInventory
+from atlas.metal_server.core.host_inspection import HostInspection
 from atlas.metal_server.core.host_installation import (
 	METALD_INSTALL_TIMEOUT_SECONDS,
 	WIREGUARD_CONFIGURE_TIMEOUT_SECONDS,
@@ -26,6 +26,7 @@ from atlas.metal_server.core.provisioning import ServerProvisioner
 from atlas.metal_server.usage import enqueue_server_sync
 
 if TYPE_CHECKING:
+	from atlas.atlas.core.server_providers.aws.volumes import AwsVolumes
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
 
 
@@ -45,19 +46,21 @@ class MetalServer(Document):
 		architecture: DF.Literal["amd64", "arm64"]
 		disks: DF.Table[MetalServerDisk]
 		is_provisioning_completed: DF.Check
-		is_sleepy: DF.Check
-		metald_api_token: DF.Password | None
+		is_sleepy_vm_host: DF.Check
+		metald_tls_certificate: DF.Password | None
+		metald_tls_expires_on: DF.Datetime | None
+		metald_tls_private_key: DF.Password | None
 		port: DF.Int
 		private_ipv4_address: DF.Data | None
 		private_network_interface: DF.Data | None
 		provider_metadata: DF.Code | None
-		provider_discovery_key: DF.Data | None
 		provider_server_id: DF.Data | None
 		public_ipv4_address: DF.Data | None
 		public_network_interface: DF.Data | None
 		server_image: DF.Link
 		server_size: DF.Link
 		status: DF.Literal["Pending", "Installing", "Running", "Stopped", "Failed", "Deleted"]
+		title: DF.Data
 		wireguard_ip_address: DF.Data | None
 		wireguard_public_key: DF.Data | None
 	# end: auto-generated types
@@ -78,22 +81,13 @@ class MetalServer(Document):
 
 		return self._settings
 
-	def autoname(self) -> None:
-		"""Name the server from its region."""
-		if not self.settings.region_name:
-			frappe.throw(_("Atlas Settings requires a region name before creating a Metal Server"))
-
-		self.name = make_autoname(f"node-{slug(self.settings.region_name)}-.#####", doc=self)
-
 	def before_validate(self) -> None:
 		"""Fill values that depend on the selected size and image."""
-		self.settings.server_provider_controller.validate_settings()
-		self._validate_provider_catalog()
+		provider = self.settings.server_provider_controller
+		provider.validate_settings()
+		provider.validate_server(self)
 		if self.provider_server_id:
 			return
-
-		if not self.provider_discovery_key:
-			self.provider_discovery_key = uuid4().hex
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		self.architecture = size.architecture
@@ -102,14 +96,11 @@ class MetalServer(Document):
 		"""Create the provider host once, including after a worker retry."""
 		if self.provider_server_id:
 			return
-		if not self.provider_discovery_key:
-			frappe.throw(_("Metal Server {0} has no provider discovery key.").format(self.name))
 
 		size = frappe.get_doc("Metal Server Size", self.server_size)
 		image = frappe.get_doc("Metal Server Image", self.server_image)
 		request = ServerCreateRequest(
 			name=self.name,
-			discovery_key=self.provider_discovery_key,
 			server_size=self.server_size,
 			server_image=self.server_image,
 			size_provider_metadata=self._provider_metadata(size.provider_metadata),
@@ -123,9 +114,7 @@ class MetalServer(Document):
 		self.provider_metadata = frappe.as_json(provider_server.provider_metadata)
 
 	def validate(self) -> None:
-		"""Reject a server whose size, image, or region do not agree."""
-		self._validate_provider_catalog()
-		self._sync_disks_if_running()
+		"""Fill the mesh address."""
 		self._set_wireguard_ip_address_if_not_set()
 
 	def after_insert(self) -> None:
@@ -223,6 +212,9 @@ class MetalServer(Document):
 		if is_job_enqueued(self.setup_job_id):
 			frappe.throw(_("Metal Server setup is still running for {0}.").format(self.name))
 
+		if frappe.db.exists("Virtual Machine", {"server": self.name}):
+			frappe.throw(_("Delete or migrate every Virtual Machine on {0} first.").format(self.name))
+
 		self.settings.server_provider_controller.delete_server(
 			self._provider_server_id(), self._provider_metadata(self.provider_metadata)
 		)
@@ -242,12 +234,62 @@ class MetalServer(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_disks(self) -> None:
-		"""Read the block devices on the server and replace the disks table."""
+		"""Queue a read of the block devices on the server."""
 		frappe.only_for("System Manager")
 		if self.status != "Running":
 			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
 
+		self.enqueue_disk_sync()
+
+	def enqueue_disk_sync(self) -> None:
+		"""Queue the replacement of the disks table from the host."""
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_sync_disks",
+			job_id=f"atlas||server||sync-disks||{self.name}",
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	def _sync_disks(self) -> None:
 		DiskInventory(self).sync()
+
+	def onload(self) -> None:
+		self.set_onload("server_provider", self.settings.server_provider)
+
+	@frappe.whitelist(methods=["POST"])
+	def get_volume(self, kind: str) -> dict:
+		"""Return the current AWS values of the root or the storage volume."""
+		frappe.only_for("System Manager")
+		return self._aws_volumes(kind).describe(self, kind)
+
+	@frappe.whitelist(methods=["POST"])
+	def resize_volume(self, kind: str, size_gib: int, iops: int = 0, throughput_mibps: int = 0) -> None:
+		"""Change one AWS volume and queue its growth on the host."""
+		frappe.only_for("System Manager")
+		if self.status != "Running":
+			frappe.throw(_("Metal Server {0} is not running.").format(self.name))
+		self._aws_volumes(kind).modify(self, kind, cint(size_gib), cint(iops), cint(throughput_mibps))
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_grow_volume",
+			kind=kind,
+			queue="long",
+			timeout=2_400,
+			job_id=f"atlas||server||grow-volume||{kind}||{self.name}",
+			deduplicate=True,
+			enqueue_after_commit=False,
+		)
+
+	def _grow_volume(self, kind: str) -> None:
+		self._aws_volumes(kind).grow(self, kind)
+
+	def _aws_volumes(self, kind: str) -> "AwsVolumes":
+		if self.settings.server_provider != "AWS" or kind not in ("root", "storage"):
+			frappe.throw(_("Only an AWS root or storage volume can be resized."))
+		return self.settings.server_provider_controller.volumes
 
 	@frappe.whitelist(methods=["POST"])
 	def sync_state(self) -> None:
@@ -287,6 +329,33 @@ class MetalServer(Document):
 		)
 
 	@frappe.whitelist(methods=["POST"])
+	def renew_tls_certificate(self) -> None:
+		"""Queue a Metal TLS certificate renewal for this server."""
+		frappe.only_for("System Manager")
+		if self.status != "Running" or not self.is_provisioning_completed:
+			frappe.throw(_("Metal Server {0} is not ready to renew its certificate.").format(self.name))
+
+		self.enqueue_tls_certificate_renewal()
+
+	def enqueue_tls_certificate_renewal(self) -> None:
+		"""Queue the renewal worker unless another Metald operation runs."""
+		job_id = self.metald_job_id
+
+		if is_job_enqueued(job_id):
+			frappe.throw(_("Another Metald operation already runs for {0}.").format(self.name))
+
+		frappe.enqueue_doc(
+			self.doctype,
+			self.name,
+			"_renew_tls_certificate",
+			queue="long",
+			timeout=METALD_INSTALL_TIMEOUT_SECONDS,
+			job_id=job_id,
+			deduplicate=True,
+			enqueue_after_commit=True,
+		)
+
+	@frappe.whitelist(methods=["POST"])
 	def upgrade_metald(self) -> None:
 		"""Queue a metald binary upgrade for this server."""
 		frappe.only_for("System Manager")
@@ -313,20 +382,16 @@ class MetalServer(Document):
 
 	@staticmethod
 	def provision(
-		os_name: str = "Ubuntu",
-		version: str = "26.04",
-		size: str | None = None,
+		size: str,
+		image: str,
 		*,
-		is_sleepy: bool = False,
+		is_sleepy_vm_host: bool = False,
 	) -> MetalServer:
 		"""Insert a Pending Server with the selected image and size."""
-		settings: AtlasSettings = frappe.get_single("Atlas Settings")
-		image = frappe.get_doc("Metal Server Image", f"{settings.server_provider}/{os_name}_{version}")
-
 		server: "MetalServer" = frappe.new_doc("Metal Server")
-		server.server_size = size or MetalServer._find_default_server_size(settings.server_provider)
-		server.server_image = image.name
-		server.is_sleepy = is_sleepy
+		server.server_size = size
+		server.server_image = image
+		server.is_sleepy_vm_host = is_sleepy_vm_host
 		server.status = "Pending"
 		server.insert(ignore_permissions=True)
 		return server
@@ -337,27 +402,13 @@ class MetalServer(Document):
 	def _setup_server(self) -> None:
 		ServerProvisioner(self).run()
 
-	@staticmethod
-	def _find_default_server_size(provider_type: str) -> str:
-		sizes = frappe.get_all(
-			"Metal Server Size",
-			filters={
-				"enabled": 1,
-				"provider_type": provider_type,
-				"cpu_count": [">", 2],
-				"memory_mib": [">=", 32768],
-			},
-			fields=["name"],
-			order_by="memory_mib asc, cpu_count asc, disk_gib asc",
-			limit=1,
-		)
-		if not sizes:
-			frappe.throw(_("No enabled Metal Server Size has more than 2 CPUs and at least 32 GiB of memory"))
-		return sizes[0].name
-
 	def _install_metald(self) -> None:
 		"""Install metald and its host dependencies."""
 		HostInstallation(self).install_metal()
+
+	def _renew_tls_certificate(self) -> None:
+		"""Issue a current certificate and restart Metal with it."""
+		HostInstallation(self).install_tls_credentials()
 
 	def _upgrade_metald(self) -> None:
 		"""Replace the metald binary and restart its daemon."""
@@ -375,28 +426,9 @@ class MetalServer(Document):
 		"""Set the WireGuard IP address if it is not already set."""
 		HostInstallation(self).set_wireguard_ip_address()
 
-	def _sync_disks_if_running(self) -> None:
-		"""Fill the disks table once the server runs."""
-		if self.status != "Running" or self.disks:
-			return
-
-		try:
-			self.sync_disks()
-		except Exception:
-			frappe.log_error(title=f"Could not sync the disks of server {self.name}")
-
 	def _parse_disks(self, lsblk_output: str) -> list[dict[str, str]]:
 		"""Return one row for each mounted device and the raw storage pool device."""
 		return DiskInventory(self).parse(lsblk_output)
-
-	def _validate_provider_catalog(self) -> None:
-		provider_type = self.settings.server_provider
-		for doctype, name in (
-			("Metal Server Size", self.server_size),
-			("Metal Server Image", self.server_image),
-		):
-			if name and frappe.db.get_value(doctype, name, "provider_type") != provider_type:
-				frappe.throw(_("{0} must belong to the configured server provider").format(doctype))
 
 	def _validate_power_action(self) -> None:
 		"""Check that a power action can run for this Server."""
@@ -420,3 +452,61 @@ class MetalServer(Document):
 		if not isinstance(metadata, dict):
 			frappe.throw(_("Provider metadata must be a JSON object."))
 		return metadata
+
+
+def renew_expiring_tls_certificates() -> None:
+	"""Queue a renewal for every ready host whose certificate expires soon."""
+	if is_certificate_authority_expiring():
+		frappe.log_error(title="The Metal certificate authority expires soon")
+
+	servers = frappe.get_all(
+		"Metal Server",
+		filters={
+			"status": "Running",
+			"is_provisioning_completed": 1,
+			"metald_tls_expires_on": ["<=", add_days(now_datetime(), CERTIFICATE_RENEWAL_WINDOW_DAYS)],
+		},
+		pluck="name",
+	)
+	for name in servers:
+		server: MetalServer = frappe.get_doc("Metal Server", name)
+		if is_job_enqueued(server.metald_job_id):
+			continue
+		server.enqueue_tls_certificate_renewal()
+
+
+@frappe.whitelist(methods=["POST"])
+def inspect_host(public_ipv4_address: str, private_ipv4_address: str) -> str:
+	"""Queue a read-only inspection of an operator-prepared host."""
+	frappe.only_for("System Manager")
+	return HostInspection.start(public_ipv4_address, private_ipv4_address)
+
+
+@frappe.whitelist()
+def get_host_inspection(inspection_id: str) -> dict:
+	"""Return the state of one host inspection."""
+	frappe.only_for("System Manager")
+	return HostInspection(inspection_id).state
+
+
+@frappe.whitelist(methods=["POST"])
+def create_host_disk_image(inspection_id: str, size_gib: int) -> None:
+	"""Queue the creation of the disk image that holds the storage pool."""
+	frappe.only_for("System Manager")
+	HostInspection(inspection_id).start_disk_image_creation(int(size_gib))
+
+
+@frappe.whitelist(methods=["POST"])
+def register_host(inspection_id: str, storage_pool_device: str, provider_server_id: str | None = None) -> str:
+	"""Create the Metal Server for an inspected host and return its name."""
+	frappe.only_for("System Manager")
+	return HostInspection(inspection_id).register(storage_pool_device, provider_server_id).name
+
+
+def on_doctype_update() -> None:
+	"""Index the ready host pool that placement filters on."""
+	frappe.db.add_index(
+		"Metal Server",
+		["status", "is_provisioning_completed", "architecture", "is_sleepy_vm_host"],
+		"placement_ready_pool",
+	)

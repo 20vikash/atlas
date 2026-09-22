@@ -13,12 +13,11 @@ from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import (
 	EGRESS_MODES,
-	MAXIMUM_CPU_MILLICORES,
-	MINIMUM_CPU_MILLICORES,
 	FirewallConfiguration,
 	VirtualMachineCreateRequest,
 )
-from atlas.vm.core.placement.service import PlacementService
+from atlas.vm.core.placement import PlacementRequirements, PlacementStrategy
+from atlas.vm.core.placement.transaction import use_read_committed
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
@@ -33,6 +32,13 @@ class MetalOperationError(frappe.ValidationError):
 	"""Report that the assigned host could not complete the request."""
 
 	http_status_code = 502
+
+
+class InsufficientHostCapacity(AtlasUserError):
+	"""The assigned host has no room for an online increase."""
+
+	code = "insufficient_capacity"
+	http_status_code = 409
 
 
 class VirtualMachineCreateError(MetalOperationError):
@@ -57,6 +63,7 @@ class VirtualMachineService:
 		self.virtual_machine = virtual_machine
 
 	@classmethod
+	@use_read_committed
 	def create(cls, value: str | dict[str, Any] | VirtualMachineCreateRequest) -> VirtualMachineCreateResult:
 		"""Create and commit an Atlas request before the Metal request."""
 		if isinstance(value, VirtualMachineCreateRequest):
@@ -70,8 +77,16 @@ class VirtualMachineService:
 
 		image = cls.get_image(request.virtual_machine_image, request.tenant_id)
 		image.validate_compatibility(request.disk_mib)
-		server = PlacementService().select_server(request, image.architecture)
-		virtual_machine = cls.insert_draft(request, image, cast(str, server.name))
+		requirements = PlacementRequirements(
+			request.cpu_millicores,
+			request.memory_mib,
+			request.disk_mib,
+			image.architecture,
+			request.tenant_id,
+			request.sleep_after_idle_seconds > 0,
+		)
+		server_name = PlacementStrategy.find_server(requirements)
+		virtual_machine = cls.insert_draft(request, image, server_name)
 		service = cls(virtual_machine)
 		server_ip_address = (
 			service.assign_ip_address(request.server_ip_address) if request.server_ip_address else None
@@ -81,7 +96,7 @@ class VirtualMachineService:
 
 		virtual_machine_name = cast(str, virtual_machine.name)
 		try:
-			MetalClient(server).put_virtual_machine(virtual_machine_name, metal_request)
+			service.metal_client.put_virtual_machine(virtual_machine_name, metal_request)
 		except MetalClientError as error:
 			if error.uncertain:
 				return {"name": virtual_machine_name, "is_draft": True}
@@ -126,6 +141,7 @@ class VirtualMachineService:
 				"disk_mib": request.disk_mib,
 				"tenant_id": request.tenant_id,
 				"is_privileged": request.is_privileged,
+				"is_termination_protected": request.is_termination_protected,
 				"sleep_after_idle_seconds": request.sleep_after_idle_seconds,
 			}
 		)
@@ -152,7 +168,7 @@ class VirtualMachineService:
 			},
 			"image": image.get_metal_image_request(),
 			"network": {
-				"public_ipv4": server_ip_address.address if server_ip_address else "",
+				"public_ipv4": (server_ip_address.host_address or "") if server_ip_address else "",
 				"wireguard_mesh_ipv6": get_virtual_machine_mesh_address(self.virtual_machine),
 				"private_network_throughput_mibps": request.private_network_throughput_mibps,
 				"public_network_throughput_mibps": request.public_network_throughput_mibps,
@@ -252,48 +268,6 @@ class VirtualMachineService:
 		)
 		return information.as_dict()
 
-	def update_compute(self, changes: dict[str, Any]) -> dict[str, Any]:
-		"""Apply selected compute changes."""
-		cpu_millicores = changes.get("cpu_millicores")
-		if cpu_millicores is not None and (
-			not isinstance(cpu_millicores, int)
-			or isinstance(cpu_millicores, bool)
-			or not MINIMUM_CPU_MILLICORES <= cpu_millicores <= MAXIMUM_CPU_MILLICORES
-		):
-			frappe.throw(
-				_("CPU must be between {0} and {1} millicores.").format(
-					MINIMUM_CPU_MILLICORES, MAXIMUM_CPU_MILLICORES
-				),
-				exc=AtlasUserError,
-			)
-
-		information = self.require_information()
-		current_compute = information.desired.compute
-		request = {
-			"cpu_millicores": current_compute.cpu_millicores,
-			"memory_mib": current_compute.memory_mib,
-			"sleep_after_idle_seconds": self.virtual_machine.sleep_after_idle_seconds,
-			**changes,
-		}
-		is_shape_changed = (
-			request["cpu_millicores"] != current_compute.cpu_millicores
-			or request["memory_mib"] != current_compute.memory_mib
-		)
-		if is_shape_changed and information.observed.state != "stopped":
-			frappe.throw(
-				_("Stop the Virtual Machine before you change its compute values."), exc=AtlasUserError
-			)
-
-		result = self.set_compute(request)
-		if is_shape_changed:
-			self.virtual_machine.db_set(
-				{"cpu_millicores": request["cpu_millicores"], "memory_mib": request["memory_mib"]}
-			)
-		if request["sleep_after_idle_seconds"] != self.virtual_machine.sleep_after_idle_seconds:
-			self.virtual_machine.db_set("sleep_after_idle_seconds", request["sleep_after_idle_seconds"])
-
-		return result
-
 	def set_disk(self, size_mib: int, throughput_mibps: int, iops: int) -> dict[str, Any]:
 		"""Set the complete disk values in Metal."""
 		information = self.perform_metal_operation(
@@ -370,9 +344,13 @@ class VirtualMachineService:
 			raise AssertionError from error
 
 	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
-		"""Set the address intent before the Metal network request."""
-		address = self.assign_ip_address(server_ip_address)
-		return self.update_network({"egress": "uplink", "public_ipv4": address.address})
+		"""Set the address intent before provider reconciliation."""
+		self.assign_ip_address(server_ip_address)
+		return self.update_network({"egress": "uplink"})
+
+	def apply_attached_ip_address(self, host_address: str) -> None:
+		"""Send the attached host address to Metal."""
+		self.update_network({"egress": "uplink", "public_ipv4": host_address})
 
 	def detach_ip_address(self) -> dict[str, Any]:
 		"""Update Metal before the address release intent."""
@@ -435,5 +413,10 @@ class VirtualMachineService:
 	@staticmethod
 	def raise_metal_error(error: MetalClientError) -> Never:
 		"""Raise one safe Metal failure at the Frappe boundary."""
+		if error.is_insufficient_capacity:
+			frappe.throw(
+				_("The host has no room for this change. Stop the Virtual Machine and resize it to move it."),
+				exc=InsufficientHostCapacity,
+			)
 		frappe.throw(_("Metal request failed: {0}").format(error), exc=MetalOperationError)
 		raise AssertionError from error

@@ -2,18 +2,25 @@ package vm
 
 import "context"
 
-// The migration lifecycle lives in the vm_migration package. That package
-// imports this one and drives the manager through the exported methods below.
-// This package never imports vm_migration: it only holds the MigrationGuard it
-// is given, so the two packages avoid an import cycle.
-
-// MigrationGuard reports whether a migration holds a VM. The vm_migration
-// package implements it and injects it with SetMigrationGuard.
+// MigrationGuard reports whether a migration holds a VM.
 type MigrationGuard interface {
 	// IsSourceLocked reports whether a migration holds the VM as a source.
 	IsSourceLocked(virtualMachineID string) bool
-	// IsTargetReserved reports whether a migration reserves this VM ID.
-	IsTargetReserved(virtualMachineID string) bool
+	// IsDestinationReserved reports whether a migration reserves this VM ID.
+	IsDestinationReserved(virtualMachineID string) bool
+}
+
+// MigrationHost exposes the VM operations that the migration lifecycle owns.
+type MigrationHost struct {
+	manager *Manager
+}
+
+// NewMigrationHost returns the migration operations for manager.
+func NewMigrationHost(manager *Manager) *MigrationHost {
+	if manager == nil {
+		return nil
+	}
+	return &MigrationHost{manager: manager}
 }
 
 // SetMigrationGuard records the guard that answers migration lock questions.
@@ -22,64 +29,64 @@ func (manager *Manager) SetMigrationGuard(guard MigrationGuard) {
 }
 
 // ReadDesired returns the desired record of one VM.
-func (manager *Manager) ReadDesired(virtualMachineID string) (DesiredRecord, error) {
-	return manager.store.readDesired(virtualMachineID)
+func (host *MigrationHost) ReadDesired(virtualMachineID string) (DesiredRecord, error) {
+	return host.manager.store.readDesired(virtualMachineID)
 }
 
 // ReadObserved returns the observed record of one VM.
-func (manager *Manager) ReadObserved(virtualMachineID string) (ObservedRecord, error) {
-	return manager.store.readObserved(virtualMachineID)
+func (host *MigrationHost) ReadObserved(virtualMachineID string) (ObservedRecord, error) {
+	return host.manager.store.readObserved(virtualMachineID)
 }
 
 // WriteDesired replaces the desired record of one VM.
-func (manager *Manager) WriteDesired(record DesiredRecord) error {
-	return manager.store.writeDesired(record)
+func (host *MigrationHost) WriteDesired(record DesiredRecord) error {
+	return host.manager.store.writeDesired(record)
 }
 
 // WriteObserved replaces the observed record of one VM.
-func (manager *Manager) WriteObserved(virtualMachineID string, record ObservedRecord) error {
-	return manager.store.writeObserved(virtualMachineID, record)
+func (host *MigrationHost) WriteObserved(virtualMachineID string, record ObservedRecord) error {
+	return host.manager.store.writeObserved(virtualMachineID, record)
 }
 
-// RemoveRecords removes the VM records of one VM. Migration records stay.
-func (manager *Manager) RemoveRecords(virtualMachineID string) error {
-	return manager.store.remove(virtualMachineID)
+// RemoveVirtualMachineRecords removes the VM record directory, including migration state.
+func (host *MigrationHost) RemoveVirtualMachineRecords(virtualMachineID string) error {
+	return host.manager.store.remove(virtualMachineID)
 }
 
 // DesiredPath returns the desired record path of one VM.
-func (manager *Manager) DesiredPath(virtualMachineID string) string {
-	return manager.store.desiredPath(virtualMachineID)
+func (host *MigrationHost) DesiredPath(virtualMachineID string) string {
+	return host.manager.store.desiredPath(virtualMachineID)
 }
 
 // ObservedPath returns the observed record path of one VM.
-func (manager *Manager) ObservedPath(virtualMachineID string) string {
-	return manager.store.observedPath(virtualMachineID)
+func (host *MigrationHost) ObservedPath(virtualMachineID string) string {
+	return host.manager.store.observedPath(virtualMachineID)
 }
 
 // AllocateUserID returns a free host user ID. The caller holds the allocation lock.
-func (manager *Manager) AllocateUserID() (uint32, error) {
-	return manager.allocateUserID()
+func (host *MigrationHost) AllocateUserID() (uint32, error) {
+	return host.manager.allocateUserID()
 }
 
-// LockAllocation serializes user ID allocation and returns the unlock.
-func (manager *Manager) LockAllocation() func() {
-	manager.allocationMutex.Lock()
-	return manager.allocationMutex.Unlock
+// LockUserIDAllocation serializes user ID allocation and returns the unlock.
+func (host *MigrationHost) LockUserIDAllocation() func() {
+	host.manager.allocationMutex.Lock()
+	return host.manager.allocationMutex.Unlock
 }
 
 // LockOperation takes the per-VM operation lock and returns the unlock.
-func (manager *Manager) LockOperation(ctx context.Context, virtualMachineID string) (func(), error) {
-	return manager.operationLocks.Lock(ctx, virtualMachineID)
+func (host *MigrationHost) LockOperation(ctx context.Context, virtualMachineID string) (func(), error) {
+	return host.manager.operationLocks.Lock(ctx, virtualMachineID)
 }
 
 // ReleaseStorage releases one VM's disk.
-func (manager *Manager) ReleaseStorage(ctx context.Context, virtualMachineID string) error {
-	return manager.storage.Release(ctx, virtualMachineID)
+func (host *MigrationHost) ReleaseStorage(ctx context.Context, virtualMachineID string) error {
+	return host.manager.storage.Release(ctx, virtualMachineID)
 }
 
-// MachinesDirectory returns the root directory that holds VM and migration records.
-func (manager *Manager) MachinesDirectory() string {
-	return manager.configuration.MachinesDirectory
+// VirtualMachineRecordsDirectory returns the root directory that holds VM and migration records.
+func (host *MigrationHost) VirtualMachineRecordsDirectory() string {
+	return host.manager.configuration.MachinesDirectory
 }
 
 // CloneSpecification copies a specification's reference fields for safe reuse.

@@ -2,9 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
+import orjson
 from frappe.tests import UnitTestCase
 
-from atlas.api.models import VirtualMachineDetailResponse, VirtualMachineResponse
+from atlas.api.models import SnapshotPayload, VirtualMachineDetailResponse, VirtualMachineResponse
 from atlas.api.routes.virtual_machines import (
 	attach_virtual_machine_ip_address,
 	create_virtual_machine,
@@ -12,14 +13,26 @@ from atlas.api.routes.virtual_machines import (
 	detach_virtual_machine_ip_address,
 	get_virtual_machine,
 	list_virtual_machines,
+	resize_virtual_machine,
 	restart_virtual_machine,
 	start_virtual_machine,
 	stop_virtual_machine,
-	update_virtual_machine_compute,
 	update_virtual_machine_network,
 )
-from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request, call_route
+from atlas.api.tests.test_support import (
+	OTHER_TENANT_ID,
+	TENANT_ID,
+	api_request,
+	call_route,
+	route_response,
+)
+from atlas.atlas.core.tags import (
+	MAXIMUM_TAG_KEY_LENGTH,
+	MAXIMUM_TAG_VALUE_LENGTH,
+	MAXIMUM_TAGS,
+)
 from atlas.vm.core.metal_models import MetalFirewall, MetalFirewallRule
+from atlas.vm.core.placement import OutOfCapacity
 
 CREATE_BODY = {
 	"image_id": "system-image",
@@ -41,17 +54,20 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"disk_mib": 20480,
 		"sleep_after_idle_seconds": 0,
 		"is_privileged": 0,
+		"is_termination_protected": 0,
 		"is_draft": 0,
 		"is_terminating": 0,
+		"active_migration": None,
 		"creation": "2026-09-08T10:00:00+05:30",
 		"set_power_state": Mock(),
 		"reboot": Mock(),
 		"terminate": Mock(),
 		"get_metal_vm_info": Mock(return_value=None),
-		"update_compute": Mock(),
+		"resize": Mock(),
 		"attach_ip_address": Mock(),
 		"detach_ip_address": Mock(),
 		"update_network": Mock(),
+		"set_termination_protection": Mock(),
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
@@ -143,6 +159,13 @@ class TestVirtualMachineViews(UnitTestCase):
 		self.assertEqual(detail.guest.metadata, {"role": "worker"})
 		self.assertEqual(detail.error, "boot failed")
 
+	def test_a_migration_hides_the_host_state(self) -> None:
+		detail = VirtualMachineDetailResponse.from_document_and_metal(
+			build_virtual_machine(active_migration="mig-00001"), build_metal_information()
+		)
+
+		self.assertEqual(detail.current_state, "migrating")
+
 	def test_detail_hides_the_host_operation_data(self) -> None:
 		detail = VirtualMachineDetailResponse.from_document_and_metal(
 			build_virtual_machine(), build_metal_information()
@@ -184,6 +207,24 @@ class TestCreateVirtualMachine(UnitTestCase):
 		self.assertEqual(status, 201)
 		self.assertEqual(body["id"], "vm-00001")
 		self.assertEqual(create.call_args.args[0].tenant_id, TENANT_ID)
+
+	def test_create_reports_out_of_capacity_without_retry_header(self) -> None:
+		with (
+			api_request("POST", "/api/atlas/virtual-machines", tenant_id=TENANT_ID, json=CREATE_BODY),
+			patch(
+				"atlas.api.routes.virtual_machines.get_owned_image",
+				return_value=SimpleNamespace(name="system-image"),
+			),
+			patch(
+				"atlas.api.routes.virtual_machines.create_virtual_machine_request",
+				side_effect=OutOfCapacity("Retry later"),
+			),
+		):
+			response = route_response(create_virtual_machine)
+
+		self.assertEqual(response.status_code, 503)
+		self.assertEqual(orjson.loads(response.get_data())["error"]["code"], "out_of_capacity")
+		self.assertNotIn("Retry-After", response.headers)
 
 	def test_create_needs_a_tenant_header(self) -> None:
 		status, body, _ = self.create(CREATE_BODY, tenant_id=None)
@@ -375,97 +416,37 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 		self.assertEqual(status, 400)
 		virtual_machine.update_network.assert_not_called()
 
-	def test_compute_change_rejects_cpu_below_the_minimum(self) -> None:
+	def resize(self, json: dict) -> tuple[int, dict, SimpleNamespace]:
+		"""Run the resize route with one request body."""
 		with (
 			api_request(
-				"PATCH",
-				"/api/atlas/virtual-machines/vm-00001/compute",
-				tenant_id=TENANT_ID,
-				json={"cpu_millicores": 99},
+				"POST", "/api/atlas/virtual-machines/vm-00001/actions/resize", tenant_id=TENANT_ID, json=json
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
 		):
-			status, _body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+			status, body = call_route(resize_virtual_machine, virtual_machine_id="vm-00001")
+		return status, body, virtual_machine
 
-		self.assertEqual(status, 400)
-		virtual_machine.update_compute.assert_not_called()
-
-	def test_compute_change_calls_the_virtual_machine_method(self) -> None:
-		with (
-			api_request(
-				"PATCH",
-				"/api/atlas/virtual-machines/vm-00001/compute",
-				tenant_id=TENANT_ID,
-				json={"cpu_millicores": 4000},
-			),
-			owned_document(virtual_machine := build_virtual_machine()),
-		):
-			status, body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+	def test_resize_passes_only_the_given_values(self) -> None:
+		status, body, virtual_machine = self.resize({"cpu_millicores": 4000, "disk_mib": 40960})
 
 		self.assertEqual(status, 202)
 		self.assertEqual(body["id"], "vm-00001")
-		virtual_machine.update_compute.assert_called_once_with({"cpu_millicores": 4000})
+		virtual_machine.resize.assert_called_once_with(cpu_millicores=4000, disk_mib=40960)
 
-	def test_compute_change_keeps_the_value_that_is_absent(self) -> None:
-		with (
-			api_request(
-				"PATCH",
-				"/api/atlas/virtual-machines/vm-00001/compute",
-				tenant_id=TENANT_ID,
-				json={"cpu_millicores": 4000},
-			),
-			owned_document(virtual_machine := build_virtual_machine()),
-		):
-			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+	def test_resize_accepts_an_idle_shutdown_change_alone(self) -> None:
+		status, _body, virtual_machine = self.resize({"sleep_after_idle_seconds": 1800})
 
 		self.assertEqual(status, 202)
-		virtual_machine.update_compute.assert_called_once_with({"cpu_millicores": 4000})
+		virtual_machine.resize.assert_called_once_with(sleep_after_idle_seconds=1800)
 
-	def test_an_idle_timeout_change_reaches_the_virtual_machine_method(self) -> None:
-		with (
-			api_request(
-				"PATCH",
-				"/api/atlas/virtual-machines/vm-00001/compute",
-				tenant_id=TENANT_ID,
-				json={"sleep_after_idle_seconds": 1800},
-			),
-			owned_document(virtual_machine := build_virtual_machine()),
-		):
-			status, _ = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
+	def test_resize_rejects_an_invalid_body(self) -> None:
+		for json in ({}, {"cpu_millicores": 99}, {"disk_mib": 0}, {"is_sleepy": 1}):
+			status, body, virtual_machine = self.resize(json)
 
-		self.assertEqual(status, 202)
-		virtual_machine.update_compute.assert_called_once_with({"sleep_after_idle_seconds": 1800})
-
-	def test_a_patch_without_a_supported_field_is_rejected(self) -> None:
-		with (
-			api_request(
-				"PATCH",
-				"/api/atlas/virtual-machines/vm-00001/compute",
-				tenant_id=TENANT_ID,
-				json={},
-			),
-			owned_document(build_virtual_machine()),
-		):
-			status, body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
-
-		self.assertEqual(status, 400)
-		self.assertEqual(body["error"]["code"], "invalid_request")
-
-	def test_compute_change_rejects_old_idle_fields(self) -> None:
-		for field in ("is_sleepy", "idle_timeout_seconds"):
-			with (
-				api_request(
-					"PATCH",
-					"/api/atlas/virtual-machines/vm-00001/compute",
-					tenant_id=TENANT_ID,
-					json={field: 1},
-				),
-				owned_document(build_virtual_machine()),
-			):
-				status, body = call_route(update_virtual_machine_compute, virtual_machine_id="vm-00001")
-
-			self.assertEqual(status, 400)
-			self.assertIn(field, [item["name"] for item in body["error"]["fields"]])
+			self.assertEqual(status, 400, json)
+			self.assertEqual(body["error"]["code"], "invalid_request")
+			virtual_machine.resize.assert_not_called()
 
 	def attach(self, attached: str | None, requested: str):
 		"""Run the attach route with one currently attached address."""
@@ -538,3 +519,26 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		virtual_machine.detach_ip_address.assert_not_called()
+
+
+class TestSnapshotPayload(UnitTestCase):
+	def test_a_tag_map_within_every_limit_is_accepted(self) -> None:
+		tags = {"k" * MAXIMUM_TAG_KEY_LENGTH: "v" * MAXIMUM_TAG_VALUE_LENGTH}
+
+		payload = SnapshotPayload(title="image", tags=tags)
+
+		self.assertEqual(payload.tags, tags)
+
+	def test_a_long_tag_key_is_rejected(self) -> None:
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags={"k" * (MAXIMUM_TAG_KEY_LENGTH + 1): "a"})
+
+	def test_a_long_tag_value_is_rejected(self) -> None:
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags={"os": "v" * (MAXIMUM_TAG_VALUE_LENGTH + 1)})
+
+	def test_too_many_tags_are_rejected(self) -> None:
+		tags = {f"key-{index}": "a" for index in range(MAXIMUM_TAGS + 1)}
+
+		with self.assertRaises(ValueError):
+			SnapshotPayload(title="image", tags=tags)

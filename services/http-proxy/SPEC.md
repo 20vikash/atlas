@@ -41,4 +41,4 @@ From this directory, run `python -m pip install --editable 'control[test]'` and 
 
 ## Documentation
 
-Read [`README.md`](README.md), then the relevant guide in [`docs/`](docs/). See [`docs/high-availability.md`](docs/high-availability.md) for the cluster design and state.
+Read the [HTTP proxy overview](./), then the relevant guide in [`docs/`](docs/). See [`docs/high-availability.md`](docs/high-availability.md) for the cluster design and state.

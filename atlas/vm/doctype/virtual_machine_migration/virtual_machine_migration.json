@@ -1,21 +1,49 @@
 {
  "actions": [],
- "autoname": "mig-.#####",
- "creation": "2026-09-10 00:00:00.000000",
+ "autoname": "UUID",
+ "creation": "2026-09-10 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "section_break_overview",
   "virtual_machine",
   "status",
-  "abort_requested",
-  "column_break_servers",
-  "source_server",
-  "target_server",
-  "section_break_progress",
+  "progress_percent",
+  "column_break_overview",
+  "source_metal_server",
+  "destination_metal_server",
+  "section_break_time",
+  "scheduled_at",
+  "column_break_timing",
   "started_at",
-  "progress"
+  "column_break_gfjf",
+  "finished_at",
+  "column_break_twnb",
+  "duration_seconds",
+  "section_break_resize_requirements",
+  "target_cpu_millicores",
+  "column_break_resize",
+  "target_disk_mib",
+  "column_break_hbyc",
+  "target_memory_mib",
+  "section_break_transfer_history",
+  "transfers",
+  "section_break_error",
+  "error_code",
+  "error_at",
+  "column_break_error",
+  "error_message",
+  "section_break_destination_selection",
+  "destination_metal_server_selection_attempts",
+  "last_destination_metal_server_selection_at",
+  "column_break_destination_metal_server_selection",
+  "destination_metal_server_selection_message"
  ],
  "fields": [
+  {
+   "fieldname": "section_break_overview",
+   "fieldtype": "Section Break"
+  },
   {
    "fieldname": "virtual_machine",
    "fieldtype": "Link",
@@ -25,54 +53,90 @@
    "options": "Virtual Machine",
    "read_only": 1,
    "reqd": 1,
-   "search_index": 1
+   "search_index": 1,
+   "set_only_once": 1
   },
   {
-   "default": "running",
+   "default": "scheduled",
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "running\nready\ncompleted\nfailed\naborted",
+   "options": "scheduled\npreparing\ncopying\ncutting_over\nstarting\nfinalizing\ncanceling\ncompleted\nfailed\naborted",
    "read_only": 1,
    "reqd": 1,
    "search_index": 1
   },
   {
    "default": "0",
-   "fieldname": "abort_requested",
-   "fieldtype": "Check",
-   "label": "Abort Requested",
+   "fieldname": "progress_percent",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Progress (%)",
+   "non_negative": 1,
    "read_only": 1
   },
   {
-   "fieldname": "column_break_servers",
+   "fieldname": "column_break_overview",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "source_server",
+   "fieldname": "source_metal_server",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Source Server",
-   "options": "Metal Server",
-   "read_only": 1,
-   "reqd": 1
-  },
-  {
-   "fieldname": "target_server",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Target Server",
+   "in_standard_filter": 1,
+   "label": "Source Metal Server",
    "options": "Metal Server",
    "read_only": 1,
    "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "destination_metal_server",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Destination Metal Server",
+   "options": "Metal Server",
+   "read_only": 1,
    "search_index": 1
   },
   {
-   "fieldname": "section_break_progress",
+   "collapsible": 1,
+   "collapsible_depends_on": "eval: false",
+   "fieldname": "section_break_error",
    "fieldtype": "Section Break",
-   "label": "Progress"
+   "label": "Error Info"
+  },
+  {
+   "fieldname": "error_code",
+   "fieldtype": "Data",
+   "label": "Error Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_at",
+   "fieldtype": "Datetime",
+   "label": "Error At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_error",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "scheduled_at",
+   "fieldtype": "Datetime",
+   "label": "Scheduled At",
+   "read_only": 1
   },
   {
    "fieldname": "started_at",
@@ -81,19 +145,129 @@
    "read_only": 1
   },
   {
-   "fieldname": "progress",
-   "fieldtype": "Code",
-   "label": "Progress",
-   "options": "JSON",
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Finished At",
    "read_only": 1
+  },
+  {
+   "fieldname": "column_break_timing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "duration_seconds",
+   "fieldtype": "Duration",
+   "label": "Duration",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "destination_metal_server_selection_attempts",
+   "fieldtype": "Int",
+   "label": "Selection Attempts",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_destination_metal_server_selection",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_destination_metal_server_selection_at",
+   "fieldtype": "Datetime",
+   "label": "Last Selection At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "destination_metal_server_selection_message",
+   "fieldtype": "Small Text",
+   "label": "Selection Message",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_transfer_history",
+   "fieldtype": "Section Break",
+   "label": "Transfer History"
+  },
+  {
+   "fieldname": "transfers",
+   "fieldtype": "Table",
+   "label": "Transfers",
+   "options": "Virtual Machine Migration Transfer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_gfjf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_twnb",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "target_cpu_millicores",
+   "fieldtype": "Int",
+   "label": "Target CPU (Millicores)",
+   "non_negative": 1,
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "target_memory_mib",
+   "fieldtype": "Int",
+   "label": "Target Memory (MiB)",
+   "non_negative": 1,
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "column_break_resize",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "target_disk_mib",
+   "fieldtype": "Int",
+   "label": "Target Disk (MiB)",
+   "non_negative": 1,
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "section_break_time",
+   "fieldtype": "Section Break"
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "eval: false",
+   "fieldname": "section_break_destination_selection",
+   "fieldtype": "Section Break",
+   "label": "Destination Selection"
+  },
+  {
+   "collapsible": 1,
+   "collapsible_depends_on": "false",
+   "depends_on": "eval:doc.target_memory_mib",
+   "description": "The CPU, memory, and disk size the destination gives the VM. It is empty when the migration keeps the current shape.",
+   "fieldname": "section_break_resize_requirements",
+   "fieldtype": "Section Break",
+   "label": "Resize requirements",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "column_break_hbyc",
+   "fieldtype": "Column Break"
   }
  ],
  "links": [],
- "modified": "2026-09-10 00:00:00.000000",
+ "modified": "2026-09-22 18:17:10.027876",
  "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine Migration",
- "naming_rule": "Expression",
+ "naming_rule": "UUID",
  "owner": "Administrator",
  "permissions": [
   {
@@ -101,11 +275,9 @@
    "role": "Atlas Admin"
   },
   {
-   "create": 1,
    "delete": 1,
    "read": 1,
-   "role": "System Manager",
-   "write": 1
+   "role": "System Manager"
   }
  ],
  "row_format": "Dynamic",
@@ -114,11 +286,31 @@
  "states": [
   {
    "color": "Blue",
-   "title": "running"
+   "title": "scheduled"
+  },
+  {
+   "color": "Blue",
+   "title": "preparing"
+  },
+  {
+   "color": "Blue",
+   "title": "copying"
   },
   {
    "color": "Orange",
-   "title": "ready"
+   "title": "cutting_over"
+  },
+  {
+   "color": "Orange",
+   "title": "starting"
+  },
+  {
+   "color": "Orange",
+   "title": "finalizing"
+  },
+  {
+   "color": "Orange",
+   "title": "canceling"
   },
   {
    "color": "Green",

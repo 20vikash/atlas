@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import pathlib
+from datetime import datetime
+from unittest.mock import patch
 
 from frappe.tests import UnitTestCase
 
-from atlas.vm.core.metal_models import MetalVirtualMachine
+from atlas.vm.core.metal_models import MetalVirtualMachine, timestamp_field
 
 SWAGGER_PATH = pathlib.Path(__file__).parents[3] / "metal" / "internal" / "api" / "swagger.json"
 
@@ -165,6 +167,24 @@ class TestMetalVirtualMachineParsing(UnitTestCase):
 		decoded = json.loads(json.dumps(machine.as_dict()))
 
 		self.assertEqual(MetalVirtualMachine.from_dict(decoded), machine)
+
+
+class TestMetalTimestamps(UnitTestCase):
+	def test_converts_a_nanosecond_utc_timestamp_to_the_system_timezone(self) -> None:
+		with patch("frappe.utils.data.get_system_timezone", return_value="Asia/Kolkata"):
+			converted = timestamp_field({"started_at": "2026-09-20T18:55:43.02675576Z"}, "started_at")
+
+		self.assertEqual(converted, datetime(2026, 9, 21, 0, 25, 43, 26755))
+		self.assertIsNone(converted.tzinfo)
+
+	def test_reads_an_unset_go_time_as_no_value(self) -> None:
+		self.assertIsNone(timestamp_field({"finished_at": "0001-01-01T00:00:00Z"}, "finished_at"))
+		self.assertIsNone(timestamp_field({"finished_at": ""}, "finished_at"))
+		self.assertIsNone(timestamp_field({}, "finished_at"))
+
+	def test_rejects_a_timestamp_that_is_not_a_string(self) -> None:
+		with self.assertRaises(ValueError):
+			timestamp_field({"started_at": 1758393343}, "started_at")
 
 
 class TestMetalContract(UnitTestCase):

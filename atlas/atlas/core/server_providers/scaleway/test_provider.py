@@ -16,6 +16,8 @@ from atlas.atlas.core.server_providers.scaleway.client import ScalewayError
 from atlas.atlas.core.server_providers.scaleway.provider import ScalewayProvider
 from atlas.atlas.core.server_providers.scaleway.servers import ScalewayServers
 
+SERVER_NAME = "01a0c05f-e209-70ad-a183-dda2a727cd8b"
+
 
 class TestScalewayProvider(UnitTestCase):
 	def test_setup_infrastructure_saves_each_named_resource(self) -> None:
@@ -42,21 +44,6 @@ class TestScalewayProvider(UnitTestCase):
 		self.assertEqual(provider.settings.is_server_provider_setup_completed, 1)
 		provider.settings.save.assert_called_once_with()
 
-	def test_ensure_server_delegates_to_server_operations(self) -> None:
-		provider = self.provider()
-		request = Mock()
-		provider.servers.ensure.return_value = ProviderServer(
-			provider_server_id="server-id",
-			status="Installing",
-			public_ipv4_address="203.0.113.1",
-			provider_metadata={},
-		)
-
-		result = provider.ensure_server(request)
-
-		self.assertEqual(result.provider_server_id, "server-id")
-		provider.servers.ensure.assert_called_once_with(request)
-
 	def test_prepare_server_runs_provider_steps_in_order(self) -> None:
 		provider = self.provider()
 		provider.attach_private_network = Mock()
@@ -74,19 +61,12 @@ class TestScalewayProvider(UnitTestCase):
 			[call.args[0] for call in operations.call_args_list], ["attach", "network", "server"]
 		)
 
-	def test_power_action_delegates_to_server_operations(self) -> None:
-		provider = self.provider()
-
-		provider.set_power_state("server-id", ServerPowerAction.REBOOT)
-
-		provider.servers.set_power_state.assert_called_once_with("server-id", ServerPowerAction.REBOOT)
-
 	def test_ip_address_operations_use_the_ip_address_owner(self) -> None:
 		provider = self.provider()
 		server = self.server(provider_server_id="server-id")
 
-		provider.attach_public_ipv4_address("address-id", server)
-		provider.detach_public_ipv4_address("address-id")
+		provider.attach_public_ipv4_address("address-id", "203.0.113.9", server)
+		provider.detach_public_ipv4_address("address-id", "203.0.113.9", server)
 		provider.delete_public_ipv4_address("address-id")
 
 		provider.ip_addresses.attach.assert_called_once_with("address-id", "server-id")
@@ -154,7 +134,7 @@ class TestScalewayProvider(UnitTestCase):
 	@staticmethod
 	def server(provider_server_id: str | None = None) -> SimpleNamespace:
 		return SimpleNamespace(
-			name="node-test-00001",
+			name=SERVER_NAME,
 			provider_server_id=provider_server_id,
 			public_network_interface=None,
 			private_network_interface=None,
@@ -176,10 +156,9 @@ class TestScalewayServers(UnitTestCase):
 		servers.partitioning.get_schema.return_value = None
 		servers.client.request.side_effect = [{}, {"id": "server-id"}]
 		request = ServerCreateRequest(
-			name="node-test-00001",
-			discovery_key="site-specific-key",
-			server_size="Scaleway/large",
-			server_image="Scaleway/Ubuntu_26.04",
+			name=SERVER_NAME,
+			server_size="large",
+			server_image="Ubuntu_26.04",
 			size_provider_metadata={"hourly": {}, "monthly": {}},
 			image_provider_metadata={"id": "image-id"},
 		)
@@ -188,8 +167,8 @@ class TestScalewayServers(UnitTestCase):
 
 		create_request = servers.client.request.call_args_list[-1]
 		self.assertEqual(create_request.args[1], "/baremetal/v1/zones/fr-par-1/servers")
-		self.assertEqual(create_request.kwargs["json"]["name"], "node-test-00001")
-		self.assertEqual(create_request.kwargs["json"]["tags"], ["atlas-server:site-specific-key"])
+		self.assertEqual(create_request.kwargs["json"]["name"], SERVER_NAME)
+		self.assertEqual(create_request.kwargs["json"]["tags"], [f"atlas-server:{SERVER_NAME}"])
 		self.assertEqual(create_request.kwargs["json"]["option_ids"], ["network-option"])
 		self.assertEqual(create_request.kwargs["json"]["install"]["os_id"], "image-id")
 
@@ -198,19 +177,19 @@ class TestScalewayServers(UnitTestCase):
 		servers.find = Mock(return_value={"id": "server-id", "status": "ready", "ips": []})
 		servers.create = Mock()
 
-		result = servers.ensure(SimpleNamespace(name="node-test-00001", discovery_key="unique-key"))
+		result = servers.ensure(SimpleNamespace(name=SERVER_NAME))
 
 		self.assertEqual(result.provider_server_id, "server-id")
 		servers.create.assert_not_called()
-		servers.find.assert_called_once_with("unique-key")
+		servers.find.assert_called_once_with(SERVER_NAME)
 
-	def test_find_uses_discovery_key_instead_of_display_name(self) -> None:
+	def test_find_uses_the_atlas_tag_instead_of_the_display_name(self) -> None:
 		servers = self.servers()
 		servers.client.request.return_value = {"servers": []}
 
-		self.assertIsNone(servers.find("unique-key"))
+		self.assertIsNone(servers.find(SERVER_NAME))
 		self.assertEqual(
-			servers.client.request.call_args.kwargs["params"]["tags"], ["atlas-server:unique-key"]
+			servers.client.request.call_args.kwargs["params"]["tags"], [f"atlas-server:{SERVER_NAME}"]
 		)
 
 	def test_set_power_state_uses_the_explicit_action(self) -> None:

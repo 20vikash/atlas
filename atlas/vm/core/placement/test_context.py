@@ -1,521 +1,588 @@
+import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from unittest.mock import patch
+from uuid import uuid7
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
-from atlas.vm.core.models import VirtualMachineCreateRequest
-from atlas.vm.core.placement.context import CapacityPending, PlacementContext, PlacementDemand, Resources
+from atlas.vm.core.placement.context import (
+	CAPACITY_MAXIMUM_AGE,
+	LOCK_WAIT_MAXIMUM_SECONDS,
+	PLACEMENT_RATE_WINDOW,
+	PlacementContext,
+	is_pool_known_full,
+	remember_pool_is_full,
+)
+from atlas.vm.core.placement.models import CurrentPlacement, PlacementRequirements, Resources
+
+NOW = datetime(2026, 9, 17, 12)
+
+
+def host_row(name: str = "a", **overrides: object) -> frappe._dict:
+	"""Return one aggregated capacity row as the placement query reports it."""
+	row = frappe._dict(
+		name=name,
+		architecture="amd64",
+		is_sleepy_vm_host=0,
+		sample_created_at=NOW,
+		total_cpu_millicores=1000,
+		total_memory_mib=4096,
+		total_storage_mib=20480,
+		free_cpu_millicores=1000,
+		free_memory_mib=4096,
+		free_storage_mib=20480,
+		tenant_vm_count=0,
+		sleepy_reserved_memory_mib=0,
+		placement_count=0,
+	)
+	row.update(overrides)
+	return row
+
+
+def _raise(error: Exception):
+	raise error
 
 
 class TestPlacementContext(UnitTestCase):
-	@staticmethod
-	def _spawn_api() -> PlacementContext:
-		api = PlacementContext.__new__(PlacementContext)
-		api.request = PlacementDemand(2000, 2048, 10240, "amd64", 7, False)
-		api._stale_ready_servers = {}
-		api._pending_hosts = set()
-		api._host_intents = []
-		api._selected_server = None
-		return api
+	def setUp(self) -> None:
+		read_committed = patch("atlas.vm.core.placement.context.is_read_committed", return_value=True)
+		read_committed.start()
+		self.addCleanup(read_committed.stop)
+		clock = patch("atlas.vm.core.placement.context.now_datetime", return_value=NOW)
+		clock.start()
+		self.addCleanup(clock.stop)
 
 	@staticmethod
-	def _catalog(
-		host_type: str = "Scaleway/size",
-	) -> tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]:
-		settings = SimpleNamespace(new_host_type="Scaleway/size", server_provider="Scaleway")
-		size = SimpleNamespace(
-			doctype="Metal Server Size",
-			name=host_type,
-			enabled=1,
-			provider_type="Scaleway",
-			architecture="amd64",
-			cpu_count=8,
-			memory_mib=32768,
-			disk_gib=100,
-			provider_metadata='{"hourly": {"id": "offer"}}',
-		)
-		image = SimpleNamespace(
-			doctype="Metal Server Image",
-			name="Scaleway/Ubuntu_26.04",
-			enabled=1,
-			provider_type="Scaleway",
-			provider_metadata='{"id": "image"}',
-		)
-		return settings, size, image
+	def requirements(**overrides: object) -> PlacementRequirements:
+		values: dict[str, object] = {
+			"cpu_millicores": 1000,
+			"memory_mib": 1024,
+			"disk_mib": 10240,
+			"architecture": "amd64",
+			"tenant_id": 7,
+			"is_sleepy": False,
+		}
+		values.update(overrides)
+		return PlacementRequirements(**values)  # type: ignore[arg-type]
 
-	def test_spawn_uses_configured_host_type_and_strategy_override(self) -> None:
-		for host_type in (None, "Scaleway/override"):
-			api = self._spawn_api()
-			settings, size, image = self._catalog(host_type or "Scaleway/size")
-			created = SimpleNamespace(name="node-new")
-			with (
-				patch(
-					"atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image]
-				) as get_doc,
-				patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[]) as sql,
-				patch(
-					"atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision",
-					return_value=created,
-				) as provision,
-			):
-				self.assertEqual(api._ensure_pending_hosts(host_type, 1, False), ("node-new",))
+	def context(self, rows: object, **kwargs: object) -> PlacementContext:
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", side_effect=rows):
+			return PlacementContext(self.requirements(), 1.0, **kwargs)  # type: ignore[arg-type]
 
-			get_doc.assert_has_calls(
-				[call("Atlas Settings", for_update=True), call("Metal Server Size", size.name)]
+	def test_a_cached_snapshot_is_shared_between_placements(self) -> None:
+		rows = [host_row("a")]
+		store: dict[str, object] = {}
+		cache = SimpleNamespace(
+			get_value=lambda key: store.get(key),
+			set_value=lambda key, value, expires_in_sec: store.__setitem__(key, value),
+		)
+		with (
+			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=rows) as sql,
+			patch("atlas.vm.core.placement.context.frappe.cache", return_value=cache),
+		):
+			first = PlacementContext(self.requirements(), 1.0, cache_snapshot=True)
+			second = PlacementContext(self.requirements(), 1.0, cache_snapshot=True)
+
+		sql.assert_called_once()
+		self.assertEqual(first.usage.hosts, second.usage.hosts)
+		self.assertEqual(list(store), ["atlas:placement-snapshot:amd64:0:7"])
+
+	def test_a_cached_snapshot_is_separate_for_each_pool_and_tenant(self) -> None:
+		store: dict[str, object] = {}
+		cache = SimpleNamespace(
+			get_value=lambda key: store.get(key),
+			set_value=lambda key, value, expires_in_sec: store.__setitem__(key, value),
+		)
+		with (
+			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[host_row("a")]),
+			patch("atlas.vm.core.placement.context.frappe.cache", return_value=cache),
+		):
+			PlacementContext(self.requirements(), 1.0, cache_snapshot=True)
+			PlacementContext(self.requirements(tenant_id=9), 1.0, cache_snapshot=True)
+			PlacementContext(self.requirements(is_sleepy=True), 1.0, cache_snapshot=True)
+
+		self.assertEqual(
+			sorted(store),
+			[
+				"atlas:placement-snapshot:amd64:0:7",
+				"atlas:placement-snapshot:amd64:0:9",
+				"atlas:placement-snapshot:amd64:1:7",
+			],
+		)
+
+	def test_a_snapshot_is_read_fresh_unless_caching_is_asked_for(self) -> None:
+		with (
+			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[host_row("a")]) as sql,
+			patch("atlas.vm.core.placement.context.frappe.cache") as cache,
+		):
+			PlacementContext(self.requirements(), 1.0)
+			PlacementContext(self.requirements(), 1.0)
+
+		self.assertEqual(sql.call_count, 2)
+		cache.assert_not_called()
+
+	def test_a_full_pool_is_remembered_for_an_equal_or_larger_shape(self) -> None:
+		store: dict[str, object] = {}
+		cache = SimpleNamespace(
+			get_value=lambda key: store.get(key),
+			set_value=lambda key, value, expires_in_sec: store.__setitem__(key, value),
+		)
+		with patch("atlas.vm.core.placement.context.frappe.cache", return_value=cache):
+			remember_pool_is_full(self.requirements(memory_mib=2048, disk_mib=10240))
+
+			self.assertTrue(is_pool_known_full(self.requirements(memory_mib=2048, disk_mib=10240)))
+			self.assertTrue(is_pool_known_full(self.requirements(memory_mib=4096, disk_mib=20480)))
+			self.assertFalse(is_pool_known_full(self.requirements(memory_mib=1024, disk_mib=10240)))
+			self.assertFalse(is_pool_known_full(self.requirements(memory_mib=2048, disk_mib=5120)))
+			self.assertFalse(is_pool_known_full(self.requirements(is_sleepy=True)))
+
+	def test_a_full_pool_is_forgotten_when_the_entry_expires(self) -> None:
+		store: dict[str, object] = {}
+		cache = SimpleNamespace(
+			get_value=lambda key: store.get(key),
+			set_value=lambda key, value, expires_in_sec: store.__setitem__(key, value),
+		)
+		with patch("atlas.vm.core.placement.context.frappe.cache", return_value=cache):
+			remember_pool_is_full(self.requirements())
+			self.assertTrue(is_pool_known_full(self.requirements()))
+
+			for entry in store.values():
+				entry["until"] = time.time() - 1
+
+			self.assertFalse(is_pool_known_full(self.requirements()))
+
+	def test_dedicated_sleepy_hosts_keep_the_pools_apart(self) -> None:
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[]) as sql:
+			PlacementContext(self.requirements(), 1.0)
+
+		query, values = sql.call_args.args
+		self.assertIn("server.is_sleepy_vm_host = %(is_sleepy)s", query)
+		self.assertEqual(values["is_sleepy"], 0)
+
+	def test_one_pool_drops_the_sleepy_host_filter(self) -> None:
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[]) as sql:
+			placement = PlacementContext(self.requirements(), 1.0, use_dedicated_sleepy_vm_hosts=False)
+
+		self.assertNotIn("server.is_sleepy_vm_host = %(is_sleepy)s", sql.call_args.args[0])
+
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[]) as capacity_sql:
+			placement._host_has_capacity("a")
+
+		self.assertNotIn("server.is_sleepy_vm_host = %(is_sleepy)s", capacity_sql.call_args.args[0])
+
+	def test_one_pool_uses_its_own_snapshot_cache_entry(self) -> None:
+		store: dict[str, object] = {}
+		cache = SimpleNamespace(
+			get_value=lambda key: store.get(key),
+			set_value=lambda key, value, expires_in_sec: store.__setitem__(key, value),
+		)
+		with (
+			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[host_row("a")]),
+			patch("atlas.vm.core.placement.context.frappe.cache", return_value=cache),
+		):
+			PlacementContext(self.requirements(), 1.0, cache_snapshot=True)
+			PlacementContext(
+				self.requirements(), 1.0, cache_snapshot=True, use_dedicated_sleepy_vm_hosts=False
 			)
-			self.assertEqual(sql.call_args.args[1], {"server_size": size.name})
-			self.assertIn("for update", sql.call_args.args[0])
-			provision.assert_called_once_with(size=size.name, is_sleepy=False)
 
-	def test_spawn_reuses_pending_hosts_without_creating_another(self) -> None:
-		api = self._spawn_api()
-		settings, size, image = self._catalog()
-		pending = [
-			SimpleNamespace(name="node-a", status="Pending", architecture="amd64", is_sleepy=0),
-			SimpleNamespace(name="node-b", status="Installing", architecture="amd64", is_sleepy=0),
+		self.assertEqual(
+			sorted(store),
+			["atlas:placement-snapshot:amd64:0:7", "atlas:placement-snapshot:amd64:any:7"],
+		)
+
+	def test_placement_refuses_a_repeatable_read_transaction(self) -> None:
+		with (
+			patch("atlas.vm.core.placement.context.is_read_committed", return_value=False),
+			self.assertRaisesRegex(RuntimeError, "READ COMMITTED"),
+		):
+			PlacementContext(self.requirements(), 1.0)
+
+	def test_host_locks_are_scoped_to_the_site_database(self) -> None:
+		with patch.object(frappe.db, "cur_db_name", "site_a"):
+			first_site_lock = PlacementContext._host_lock_name("shared-host")
+		with patch.object(frappe.db, "cur_db_name", "site_b"):
+			second_site_lock = PlacementContext._host_lock_name("shared-host")
+
+		self.assertNotEqual(first_site_lock, second_site_lock)
+		self.assertLessEqual(len(first_site_lock), 64)
+
+	def test_snapshot_query_filters_the_required_pool_and_sample_age(self) -> None:
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[]) as sql:
+			placement = PlacementContext(self.requirements(is_sleepy=True), 1.0)
+
+		query, values = sql.call_args.args
+		self.assertNotIn("FOR UPDATE", query)
+		self.assertEqual(values["architecture"], "amd64")
+		self.assertEqual(values["is_sleepy"], 1)
+		self.assertEqual(values["tenant_id"], 7)
+		self.assertEqual(values["capacity_cutoff"], NOW - CAPACITY_MAXIMUM_AGE)
+		self.assertEqual(values["rate_cutoff"], NOW - PLACEMENT_RATE_WINDOW)
+		self.assertEqual(placement.usage.hosts, ())
+		self.assertEqual(placement.usage.total, Resources(0, 0, 0))
+
+	def test_snapshot_aggregates_hosts_and_drops_excluded_servers(self) -> None:
+		rows = [
+			host_row("a", free_memory_mib=3000, free_storage_mib=15000),
+			host_row("b", total_memory_mib=8192, free_memory_mib=6000, tenant_vm_count=2),
+			host_row("excluded"),
 		]
+		placement = self.context([rows], exclude_servers={"excluded"})
+
+		self.assertEqual([host.name for host in placement.usage.hosts], ["a", "b"])
+		self.assertEqual(placement.usage.total, Resources(2000, 12288, 40960))
+		self.assertEqual(placement.usage.free, Resources(2000, 9000, 35480))
+		self.assertEqual(placement.usage.tenant_vm_count, 2)
+		self.assertEqual(placement.action, "migration")
+
+	def test_rate_comes_from_the_snapshot_without_another_query(self) -> None:
+		rows = [host_row("a", placement_count=2), host_row("b", placement_count=1)]
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=rows) as sql:
+			placement = PlacementContext(self.requirements(), 1.0)
+
+			self.assertEqual(sql.call_args.args[1]["rate_cutoff"], NOW - timedelta(minutes=5))
+			self.assertEqual(placement.get_placement_rate(), 0.6)
+			self.assertEqual(placement.get_placement_rate("a"), 0.4)
+			self.assertEqual(placement.get_placement_rate("b"), 0.2)
+			self.assertEqual(placement.get_placement_rate("missing"), 0.0)
+
+		sql.assert_called_once()
+
+	def test_select_holds_the_host_lock_after_the_capacity_check(self) -> None:
+		placement = self.context([[host_row("a")]])
+		lock_name = placement._host_lock_name("a")
 		with (
-			patch("atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image] * 2),
-			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=pending),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision") as provision,
+			patch.object(placement, "_acquire_host_lock", return_value=True) as acquire,
+			patch.object(placement, "_host_has_capacity", return_value=True) as capacity,
+			patch.object(placement, "_keep_host_lock_for_transaction") as hold,
 		):
-			self.assertEqual(api._ensure_pending_hosts(None, 1, False), ("node-a", "node-b"))
-			self.assertEqual(api._ensure_pending_hosts(None, 1, False), ("node-a", "node-b"))
+			self.assertTrue(placement.try_select("a"))
 
-		provision.assert_not_called()
+		acquire.assert_called_once_with(lock_name, wait=False)
+		capacity.assert_called_once_with("a")
+		hold.assert_called_once_with(lock_name)
+		self.assertEqual(placement.selected_host, "a")
+		self.assertFalse(placement.has_contended_hosts)
 
-	def test_spawn_separates_pending_sleepy_and_regular_hosts(self) -> None:
-		api = self._spawn_api()
-		api.request = PlacementDemand(2000, 2048, 10240, "amd64", 7, True)
-		settings, size, image = self._catalog()
-		regular = SimpleNamespace(name="regular", status="Pending", architecture="amd64", is_sleepy=0)
-		sleepy = SimpleNamespace(name="sleepy", status="Pending", architecture="amd64", is_sleepy=1)
+	def test_a_host_without_capacity_releases_its_lock(self) -> None:
+		placement = self.context([[host_row("a")]])
+		lock_name = placement._host_lock_name("a")
 		with (
-			patch("atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image] * 2),
-			patch(
-				"atlas.vm.core.placement.context.frappe.db.sql", side_effect=[[regular], [sleepy, regular]]
-			),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision",
-				return_value=SimpleNamespace(name="sleepy"),
-			) as provision,
+			patch.object(placement, "_acquire_host_lock", return_value=True),
+			patch.object(placement, "_host_has_capacity", return_value=False),
+			patch.object(placement, "_release_host_lock") as release,
 		):
-			self.assertEqual(api._ensure_pending_hosts(None, 1, True), ("sleepy",))
-			self.assertEqual(api._ensure_pending_hosts(None, 1, True), ("sleepy",))
+			self.assertFalse(placement.try_select("a"))
 
-		provision.assert_called_once_with(size=size.name, is_sleepy=True)
+		release.assert_called_once_with(lock_name)
+		self.assertFalse(placement.has_contended_hosts)
+		self.assertEqual(placement.probe_count, 1)
 
-	def test_explicit_count_creates_only_missing_hosts(self) -> None:
-		api = self._spawn_api()
-		settings, size, image = self._catalog()
-		pending = [SimpleNamespace(name="node-a", status="Pending", architecture="amd64", is_sleepy=0)]
+	def test_every_probed_host_is_counted(self) -> None:
+		placement = self.context([[host_row("busy"), host_row("full")]])
 		with (
-			patch("atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image] * 2),
+			patch.object(placement, "_acquire_host_lock", side_effect=[False, True]),
+			patch.object(placement, "_host_has_capacity", return_value=False),
+			patch.object(placement, "_release_host_lock"),
+		):
+			self.assertFalse(placement.try_select("busy"))
+			self.assertFalse(placement.try_select("full"))
+
+		self.assertTrue(placement.has_contended_hosts)
+		self.assertEqual(placement.probe_count, 2)
+
+	def test_a_host_outside_the_snapshot_is_not_a_probe(self) -> None:
+		placement = self.context([[host_row("a")]], exclude_servers={"excluded"})
+		with patch.object(placement, "_acquire_host_lock") as acquire:
+			self.assertFalse(placement.try_select("excluded"))
+			self.assertFalse(placement.try_select("missing"))
+
+		acquire.assert_not_called()
+		self.assertEqual(placement.probe_count, 0)
+
+	def test_capacity_failure_releases_the_host_lock(self) -> None:
+		placement = self.context([[host_row("a")]])
+		with (
+			patch.object(placement, "_acquire_host_lock", return_value=True),
+			patch.object(placement, "_host_has_capacity", side_effect=RuntimeError("database fault")),
+			patch.object(placement, "_release_host_lock") as release,
+			self.assertRaisesRegex(RuntimeError, "database fault"),
+		):
+			placement.try_select("a")
+
+		release.assert_called_once()
+
+	def test_a_waiting_selection_uses_the_remaining_lock_budget(self) -> None:
+		placement = self.context([[host_row("a")]])
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[(1,)]) as sql:
+			self.assertTrue(placement._acquire_host_lock("lock-name", wait=True))
+
+		self.assertEqual(sql.call_args.args, ("SELECT GET_LOCK(%s, %s)", ("lock-name", 0.15)))
+
+	def test_a_waiting_selection_gives_up_within_the_remaining_budget(self) -> None:
+		placement = self.context([[host_row("a")]])
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[(0,)]) as sql:
+			self.assertFalse(placement.try_select("a", wait=True))
+
+		self.assertEqual(sql.call_args.args[1][1], LOCK_WAIT_MAXIMUM_SECONDS)
+		self.assertTrue(placement.has_contended_hosts)
+
+	def test_a_stuck_lock_holder_reports_contention_instead_of_failing(self) -> None:
+		placement = self.context([[host_row("a")]])
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[(0,)]):
+			self.assertFalse(placement.try_select("a", wait=True))
+
+		self.assertTrue(placement.has_contended_hosts)
+		self.assertIsNone(placement.selected_host)
+
+	def test_a_database_fault_while_locking_is_not_hidden(self) -> None:
+		placement = self.context([[host_row("a")]])
+		with (
 			patch(
 				"atlas.vm.core.placement.context.frappe.db.sql",
-				side_effect=[
-					pending,
-					[
-						*pending,
-						SimpleNamespace(name="node-b", status="Pending", architecture="amd64", is_sleepy=0),
-						SimpleNamespace(name="node-c", status="Pending", architecture="amd64", is_sleepy=0),
-					],
-				],
+				side_effect=lambda *a, **k: _raise(
+					frappe.db.OperationalError(2006, "MySQL server has gone away")
+				),
 			),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision",
-				side_effect=[SimpleNamespace(name="node-b"), SimpleNamespace(name="node-c")],
-			) as provision,
+			self.assertRaises(frappe.db.OperationalError),
 		):
-			self.assertEqual(api._ensure_pending_hosts(None, 3, False), ("node-a", "node-b", "node-c"))
-			self.assertEqual(api._ensure_pending_hosts(None, 3, False), ("node-a", "node-b", "node-c"))
+			placement.try_select("a", wait=True)
 
-		self.assertEqual(provision.call_count, 2)
-
-	def test_spawn_reports_invalid_catalog_before_creating_a_host(self) -> None:
-		for field, value in (("architecture", "arm64"), ("memory_mib", 1024), ("provider_metadata", "{}")):
-			api = self._spawn_api()
-			settings, size, image = self._catalog()
-			setattr(size, field, value)
-			with (
-				patch("atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image]),
-				patch("atlas.vm.core.placement.context.frappe.db.sql") as sql,
-				self.assertRaises(frappe.ValidationError),
-			):
-				api._ensure_pending_hosts(None, 1, False)
-
-			sql.assert_not_called()
-
-	def test_spawn_reports_latest_failed_provisioning(self) -> None:
-		api = self._spawn_api()
-		settings, size, image = self._catalog()
+	def test_a_missing_lock_is_an_error_during_placement(self) -> None:
 		with (
-			patch("atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image]),
-			patch(
-				"atlas.vm.core.placement.context.frappe.db.sql",
-				return_value=[
-					SimpleNamespace(name="node-failed", status="Failed", architecture="amd64", is_sleepy=0)
-				],
-			),
-			patch("atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision") as provision,
-			self.assertRaisesRegex(frappe.ValidationError, "node-failed"),
+			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[(None,)]),
+			self.assertRaisesRegex(RuntimeError, "RELEASE_LOCK returned None"),
 		):
-			api._ensure_pending_hosts(None, 1, False)
+			PlacementContext._release_host_lock("missing-lock")
 
-		provision.assert_not_called()
-
-	def test_failed_regular_host_does_not_block_sleepy_provisioning(self) -> None:
-		api = self._spawn_api()
-		settings, size, image = self._catalog()
-		failed = SimpleNamespace(name="regular-failed", status="Failed", architecture="amd64", is_sleepy=0)
+	def test_a_lost_lock_after_the_transaction_is_logged_without_raising(self) -> None:
 		with (
-			patch("atlas.vm.core.placement.context.frappe.get_doc", side_effect=[settings, size, image]),
-			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[failed]),
-			patch(
-				"atlas.metal_server.doctype.metal_server.metal_server.MetalServer.provision",
-				return_value=SimpleNamespace(name="sleepy-new"),
-			) as provision,
-		):
-			self.assertEqual(api._ensure_pending_hosts(None, 1, True), ("sleepy-new",))
-
-		provision.assert_called_once_with(size=size.name, is_sleepy=True)
-
-	def test_pending_result_commits_host_intent_without_a_vm_draft(self) -> None:
-		api = self._spawn_api()
-		api.spawn_host()
-		order = []
-		with (
-			patch(
-				"atlas.vm.core.placement.context.frappe.db.rollback",
-				side_effect=lambda: order.append("rollback"),
-			),
 			patch.object(
-				api,
-				"_ensure_pending_hosts",
-				side_effect=lambda *args: order.append("ensure") or ("node-new",),
+				PlacementContext,
+				"_release_host_lock",
+				side_effect=RuntimeError("connection changed"),
 			),
-			patch(
-				"atlas.vm.core.placement.context.frappe.db.commit", side_effect=lambda: order.append("commit")
-			),
-			self.assertRaisesRegex(CapacityPending, "node-new"),
+			patch("atlas.vm.core.placement.context.frappe.logger") as logger,
 		):
-			api.finish()
+			PlacementContext._release_host_lock_after_transaction("lost-lock")
 
-		self.assertEqual(order, ["rollback", "ensure", "commit"])
-
-	def test_selected_result_keeps_host_intent_in_caller_transaction(self) -> None:
-		api = self._spawn_api()
-		server = SimpleNamespace(name="ready")
-		api._selected_server = server
-		api.spawn_host()
-		with (
-			patch.object(api, "_ensure_pending_hosts", return_value=("node-new",)) as ensure,
-			patch("atlas.vm.core.placement.context.frappe.db.rollback") as rollback,
-			patch("atlas.vm.core.placement.context.frappe.db.commit") as commit,
-		):
-			self.assertIs(api.finish(), server)
-
-		ensure.assert_called_once_with(None, 1, False)
-		rollback.assert_not_called()
-		commit.assert_not_called()
-
-	def test_stale_sample_does_not_trigger_host_creation(self) -> None:
-		api = self._spawn_api()
-		api._stale_ready_servers = {"node-stale": ("amd64", False)}
-		with (
-			patch("atlas.vm.core.placement.context.frappe.get_doc") as get_doc,
-			self.assertRaisesRegex(frappe.ValidationError, "node-stale"),
-		):
-			api._ensure_pending_hosts(None, 1, False)
-
-		get_doc.assert_not_called()
-
-	def test_empty_fleet_can_request_its_first_host(self) -> None:
-		with patch("atlas.vm.core.placement.context.frappe.get_all", return_value=[]):
-			api = PlacementContext(VirtualMachineCreateRequest("image", 2000, 2048, 10240, 7), "amd64", 1.0)
-
-		self.assertEqual(api.usage.hosts, ())
-		self.assertEqual(api.usage.total, Resources(0, 0, 0))
-
-	def test_usage_aggregates_hosts_and_local_reservations(self) -> None:
-		now = datetime(2026, 9, 17, 12)
-		sample_time = now - timedelta(seconds=30)
-		servers = [
-			SimpleNamespace(name="a", architecture="amd64", is_sleepy=1),
-			SimpleNamespace(name="b", architecture="amd64", is_sleepy=0),
-		]
-		samples = [
-			SimpleNamespace(
-				server="a",
-				creation=sample_time,
-				total_cpu_millicores=8000,
-				available_cpu_millicores=6000,
-				total_memory_mib=16384,
-				available_memory_mib=10000,
-				total_storage_mib=102400,
-				available_storage_mib=80000,
-			),
-			SimpleNamespace(
-				server="b",
-				creation=sample_time,
-				total_cpu_millicores=4000,
-				available_cpu_millicores=3000,
-				total_memory_mib=8192,
-				available_memory_mib=6000,
-				total_storage_mib=50000,
-				available_storage_mib=40000,
-			),
-		]
-		virtual_machines = [
-			SimpleNamespace(
-				server="a",
-				tenant_id=7,
-				sleep_after_idle_seconds=60,
-				cpu_millicores=1000,
-				memory_mib=2048,
-				disk_mib=5000,
-				creation=sample_time - timedelta(seconds=1),
-				is_draft=0,
-			),
-			SimpleNamespace(
-				server="a",
-				tenant_id=7,
-				sleep_after_idle_seconds=0,
-				cpu_millicores=1000,
-				memory_mib=1024,
-				disk_mib=10000,
-				creation=sample_time - timedelta(seconds=1),
-				is_draft=1,
-			),
-			SimpleNamespace(
-				server="b",
-				tenant_id=8,
-				sleep_after_idle_seconds=60,
-				cpu_millicores=500,
-				memory_mib=2048,
-				disk_mib=5000,
-				creation=sample_time + timedelta(seconds=1),
-				is_draft=0,
-			),
-		]
-
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			if doctype == "Metal Server":
-				return servers
-			if doctype == "Metal Server Usage":
-				return samples
-			if doctype == "Virtual Machine Migration":
-				return [SimpleNamespace(target_server="b", virtual_machine="incoming")]
-			if doctype == "Virtual Machine" and "name" in kwargs["filters"]:
-				return [SimpleNamespace(name="incoming", cpu_millicores=200, memory_mib=512, disk_mib=1000)]
-			return virtual_machines
-
-		request = VirtualMachineCreateRequest("image", 32000, 2048, 10240, 7, sleep_after_idle_seconds=60)
-		with (
-			patch("atlas.vm.core.placement.context.now_datetime", return_value=now),
-			patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows),
-		):
-			api = PlacementContext(request, "amd64", 1.5)
-
-		self.assertTrue(api.request.is_sleepy)
-		self.assertEqual(api.request.tenant_id, 7)
-		self.assertEqual(api.sleepy_vm_overcommit_factor, 1.5)
-		self.assertEqual(api.usage.total, Resources(12000, 24576, 152400))
-		self.assertEqual(api.usage.free, Resources(7300, 12416, 104000))
-		self.assertEqual(api.usage.tenant_vm_count, 2)
-		self.assertEqual(api.usage.sleepy_reserved_memory_mib, 4096)
-		self.assertEqual(api.usage.hosts[0].free, Resources(5000, 8976, 70000))
-		self.assertTrue(api.usage.hosts[0].is_sleepy)
-		self.assertEqual(api.usage.hosts[1].free, Resources(2300, 3440, 34000))
-
-	def test_rate_counts_recent_placements_including_drafts(self) -> None:
-		now = datetime(2026, 9, 17, 12)
-		sample = SimpleNamespace(
-			server="a",
-			creation=now,
-			total_cpu_millicores=1000,
-			available_cpu_millicores=1000,
-			total_memory_mib=4096,
-			available_memory_mib=4096,
-			total_storage_mib=20480,
-			available_storage_mib=20480,
+		logger.return_value.exception.assert_called_once_with(
+			"Failed to release placement lock %s after the transaction ended", "lost-lock"
 		)
-		rate_filters: list[object] = []
 
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			if doctype == "Metal Server":
-				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
-			if doctype == "Metal Server Usage":
-				return [sample]
-			if doctype == "Virtual Machine" and "creation" in kwargs["filters"]:
-				rate_filters.append(kwargs["filters"])
-				return [SimpleNamespace(server="a"), SimpleNamespace(server="a"), SimpleNamespace(server="b")]
-			return []
+	def test_an_exhausted_budget_never_queues_on_a_host(self) -> None:
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[host_row("a")]):
+			placement = PlacementContext(self.requirements(), 1.0, deadline=time.monotonic() - 1)
 
+		with patch("atlas.vm.core.placement.context.frappe.db.sql") as sql:
+			self.assertFalse(placement.try_select("a", wait=True))
+
+		sql.assert_not_called()
+
+	def test_select_reports_contention_instead_of_waiting_for_the_lock(self) -> None:
+		placement = self.context([[host_row("a")]])
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[(0,)]):
+			self.assertFalse(placement.try_select("a"))
+
+		self.assertTrue(placement.has_contended_hosts)
+
+	def test_select_reports_a_database_lock_error(self) -> None:
+		placement = self.context([[host_row("a")]])
 		with (
-			patch("atlas.vm.core.placement.context.now_datetime", return_value=now),
-			patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows),
+			patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[(None,)]),
+			self.assertRaisesRegex(RuntimeError, "GET_LOCK returned NULL"),
 		):
-			api = PlacementContext(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
-			self.assertEqual(api.placement_rate(), 0.6)
-			self.assertEqual(api.placement_rate("a"), 0.4)
-			self.assertEqual(api.placement_rate("b"), 0.2)
+			placement.try_select("a")
 
-		self.assertEqual(rate_filters, [{"creation": [">=", now - timedelta(minutes=5)]}])
+		self.assertFalse(placement.has_contended_hosts)
 
-	def test_select_rechecks_capacity_after_lock(self) -> None:
-		now = datetime(2026, 9, 17, 12)
-		sample = SimpleNamespace(
-			server="a",
-			creation=now,
-			total_cpu_millicores=1000,
-			available_cpu_millicores=1000,
-			total_memory_mib=4096,
-			available_memory_mib=4096,
-			total_storage_mib=20480,
-			available_storage_mib=20480,
-		)
-		locked = SimpleNamespace(
-			name="a", architecture="amd64", is_sleepy=0, status="Running", is_provisioning_completed=1
-		)
-		virtual_machine_reads = 0
+	def test_select_ignores_an_unknown_or_excluded_host(self) -> None:
+		placement = self.context([[host_row("a")]], exclude_servers={"excluded"})
+		with patch("atlas.vm.core.placement.context.frappe.db.sql") as sql:
+			self.assertFalse(placement.try_select("excluded"))
+			self.assertFalse(placement.try_select("missing"))
 
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			nonlocal virtual_machine_reads
-			if doctype == "Metal Server":
-				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
-			if doctype == "Metal Server Usage":
-				return [sample]
-			if doctype == "Virtual Machine":
-				virtual_machine_reads += 1
-				if virtual_machine_reads == 2:
-					return [
-						SimpleNamespace(
-							server="a",
-							tenant_id=7,
-							sleep_after_idle_seconds=0,
-							cpu_millicores=1000,
-							memory_mib=3500,
-							disk_mib=10240,
-							creation=now,
-							is_draft=1,
-						)
-					]
-			return []
-
-		with (
-			patch("atlas.vm.core.placement.context.now_datetime", return_value=now),
-			patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows),
-			patch("atlas.vm.core.placement.context.frappe.get_doc", return_value=locked) as get_doc,
-		):
-			api = PlacementContext(VirtualMachineCreateRequest("image", 32000, 1024, 10240, 7), "amd64", 1.0)
-			self.assertFalse(api.select("a"))
-
-		get_doc.assert_called_once_with("Metal Server", "a", for_update=True)
-		self.assertIsNone(api._selected_server)
+		sql.assert_not_called()
+		self.assertFalse(placement.has_contended_hosts)
 
 	def test_select_accepts_memory_and_storage_fit_with_oversubscribed_cpu(self) -> None:
-		now = datetime(2026, 9, 17, 12)
-		sample = SimpleNamespace(
-			server="a",
-			creation=now,
-			total_cpu_millicores=1000,
-			available_cpu_millicores=0,
-			total_memory_mib=4096,
-			available_memory_mib=4096,
-			total_storage_mib=20480,
-			available_storage_mib=20480,
-		)
-		locked = SimpleNamespace(
-			name="a", architecture="amd64", is_sleepy=0, status="Running", is_provisioning_completed=1
+		placement = self.context([[host_row("a", free_cpu_millicores=0)]])
+		with patch("atlas.vm.core.placement.context.frappe.db.sql", return_value=[["a"]]) as sql:
+			self.assertTrue(placement._host_has_capacity("a"))
+
+		self.assertNotIn("available_cpu_millicores", sql.call_args.args[0])
+
+	def test_a_current_placement_marks_the_operation_as_a_resize(self) -> None:
+		placement = self.context(
+			[[host_row("a")]], current_placement=CurrentPlacement("a", memory_mib=1024, disk_mib=1024)
 		)
 
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			if doctype == "Metal Server":
-				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
-			if doctype == "Metal Server Usage":
-				return [sample]
-			return []
+		self.assertEqual(placement.action, "resize")
+		self.assertEqual(placement.current_host_name, "a")
 
+	def test_a_second_selection_is_a_programming_error(self) -> None:
+		placement = self.context([[host_row("a")]])
 		with (
-			patch("atlas.vm.core.placement.context.now_datetime", return_value=now),
-			patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows),
-			patch("atlas.vm.core.placement.context.frappe.get_doc", return_value=locked),
+			patch.object(placement, "_acquire_host_lock", return_value=True),
+			patch.object(placement, "_host_has_capacity", return_value=True),
+			patch.object(placement, "_keep_host_lock_for_transaction"),
 		):
-			api = PlacementContext(VirtualMachineCreateRequest("image", 32000, 1024, 10240, 7), "amd64", 1.0)
-			self.assertTrue(api.select("a"))
-			self.assertIs(api._selected_server, locked)
+			self.assertTrue(placement.try_select("a"))
+			with self.assertRaisesRegex(RuntimeError, "already selected"):
+				placement.try_select("a")
 
-	def test_stale_samples_report_a_sync_fault(self) -> None:
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			if doctype == "Metal Server":
-				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
-			return []
 
-		with patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows):
-			with self.assertRaisesRegex(frappe.ValidationError, "capacity sample"):
-				PlacementContext(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
+class TestPlacementLockQuery(IntegrationTestCase):
+	def setUp(self) -> None:
+		super().setUp()
+		with self.secondary_connection():
+			secondary_connection_id = frappe.db.sql("SELECT CONNECTION_ID()")[0][0]
 
-	def test_a_target_with_a_stale_sample_reports_a_sync_fault(self) -> None:
-		now = datetime(2026, 9, 17, 12)
-		sample = SimpleNamespace(
-			server="fresh",
-			creation=now,
-			total_cpu_millicores=1000,
-			available_cpu_millicores=1000,
-			total_memory_mib=4096,
-			available_memory_mib=4096,
-			total_storage_mib=20480,
-			available_storage_mib=20480,
-		)
+		# A Metal Server name column is a UUID, so it rejects any other value.
+		self.host_name = str(uuid7())
+		self.sample_name = f"test-usage-{frappe.generate_hash(length=8)}"
+		with self.primary_connection():
+			primary_connection_id = frappe.db.sql("SELECT CONNECTION_ID()")[0][0]
+			frappe.db.sql(
+				"""
+				INSERT INTO `tabMetal Server`
+					(name, creation, modified, owner, modified_by, status,
+					 is_provisioning_completed, architecture, is_sleepy_vm_host)
+				VALUES
+					(%(name)s, %(now)s, %(now)s, 'Administrator', 'Administrator',
+					 'Running', 1, 'amd64', 0)
+				""",
+				{"name": self.host_name, "now": NOW},
+			)
+			frappe.db.sql(
+				"""
+				INSERT INTO `tabMetal Server Usage`
+					(name, creation, modified, owner, modified_by, server,
+					 available_memory_mib, available_storage_mib)
+				VALUES
+					(%(name)s, %(now)s, %(now)s, 'Administrator', 'Administrator',
+					 %(server)s, 4096, 20480)
+				""",
+				{"name": self.sample_name, "server": self.host_name, "now": NOW},
+			)
 
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			if doctype == "Metal Server":
-				return [
-					SimpleNamespace(name="fresh", architecture="amd64", is_sleepy=0),
-					SimpleNamespace(name="stale", architecture="amd64", is_sleepy=0),
-				]
-			if doctype == "Metal Server Usage":
-				return [sample]
-			return []
+		self.assertNotEqual(primary_connection_id, secondary_connection_id)
 
-		with (
-			patch("atlas.vm.core.placement.context.now_datetime", return_value=now),
-			patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows),
-		):
-			api = PlacementContext(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
-			with self.assertRaisesRegex(frappe.ValidationError, "Metal Server stale"):
-				api.select("stale")
+	def placement(
+		self, current_placement: CurrentPlacement | None = None, **overrides: object
+	) -> PlacementContext:
+		placement = object.__new__(PlacementContext)
+		placement.requirements = TestPlacementContext.requirements(**overrides)
+		placement.current_placement = current_placement
+		placement._created_at = NOW
+		placement._deadline = None
+		placement._excluded_servers = frozenset()
+		placement._selected_host = None
+		placement.has_contended_hosts = False
+		placement.last_probe_was_contended = False
+		placement.probe_count = 0
+		placement.use_dedicated_sleepy_vm_hosts = True
+		placement.usage = PlacementContext._build_fleet_usage(placement, [host_row(self.host_name)])
+		return placement
 
-	def test_select_retries_when_the_sleepy_host_flag_changes(self) -> None:
-		now = datetime(2026, 9, 17, 12)
-		sample = SimpleNamespace(
-			server="a",
-			creation=now,
-			total_cpu_millicores=1000,
-			available_cpu_millicores=1000,
-			total_memory_mib=4096,
-			available_memory_mib=4096,
-			total_storage_mib=20480,
-			available_storage_mib=20480,
-		)
+	def test_capacity_query_accepts_a_fitting_host(self) -> None:
+		with self.primary_connection():
+			self.assertTrue(self.placement()._host_has_capacity(self.host_name))
 
-		def rows(doctype: str, **kwargs: object) -> list[SimpleNamespace]:
-			if doctype == "Metal Server":
-				return [SimpleNamespace(name="a", architecture="amd64", is_sleepy=0)]
-			if doctype == "Metal Server Usage":
-				return [sample]
-			return []
+	def test_capacity_query_rejects_a_host_without_capacity(self) -> None:
+		with self.primary_connection():
+			self.assertFalse(self.placement(memory_mib=8192)._host_has_capacity(self.host_name))
 
-		locked = SimpleNamespace(
-			name="a", architecture="amd64", is_sleepy=1, status="Running", is_provisioning_completed=1
-		)
-		with (
-			patch("atlas.vm.core.placement.context.now_datetime", return_value=now),
-			patch("atlas.vm.core.placement.context.frappe.get_all", side_effect=rows),
-			patch("atlas.vm.core.placement.context.frappe.get_doc", return_value=locked),
-		):
-			api = PlacementContext(VirtualMachineCreateRequest("image", 1000, 1024, 10240, 7), "amd64", 1.0)
-			self.assertFalse(api.select("a"))
+	def test_the_current_host_of_a_resize_needs_room_only_for_the_increase(self) -> None:
+		current_placement = CurrentPlacement(self.host_name, memory_mib=2048, disk_mib=0)
+		with self.primary_connection():
+			self.assertTrue(
+				self.placement(current_placement, memory_mib=6144)._host_has_capacity(self.host_name)
+			)
+			self.assertFalse(self.placement(memory_mib=6144)._host_has_capacity(self.host_name))
+
+	def test_a_resize_migration_reserves_its_target_shape(self) -> None:
+		virtual_machine_name = f"test-vm-{frappe.generate_hash(length=8)}"
+		with self.primary_connection():
+			frappe.db.sql(
+				"""
+				INSERT INTO `tabVirtual Machine`
+					(name, creation, modified, owner, modified_by, memory_mib, disk_mib)
+				VALUES
+					(%(name)s, %(created)s, %(created)s, 'Administrator', 'Administrator', 1024, 1024)
+				""",
+				{"name": virtual_machine_name, "created": NOW - timedelta(days=1)},
+			)
+			frappe.db.sql(
+				"""
+				INSERT INTO `tabVirtual Machine Migration`
+					(name, creation, modified, owner, modified_by, virtual_machine, status,
+					 destination_metal_server, target_memory_mib, target_disk_mib)
+				VALUES
+					(%(name)s, %(now)s, %(now)s, 'Administrator', 'Administrator', %(virtual_machine)s,
+					 'copying', %(server)s, 4096, 1024)
+				""",
+				{
+					"name": str(uuid7()),
+					"now": NOW,
+					"virtual_machine": virtual_machine_name,
+					"server": self.host_name,
+				},
+			)
+
+			self.assertFalse(self.placement(memory_mib=1024)._host_has_capacity(self.host_name))
+
+	def test_rejected_host_releases_its_placement_lock(self) -> None:
+		placement = self.placement(memory_mib=8192)
+		with self.primary_connection():
+			self.assertFalse(placement.try_select(self.host_name))
+
+		with self.secondary_connection():
+			lock_name = placement._host_lock_name(self.host_name)
+			try:
+				self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((1,),))
+			finally:
+				frappe.db.sql("SELECT RELEASE_LOCK(%s)", lock_name)
+
+	def test_selected_host_keeps_its_lock_until_rollback(self) -> None:
+		placement = self.placement()
+		lock_name = placement._host_lock_name(self.host_name)
+		with self.primary_connection():
+			self.assertTrue(placement.try_select(self.host_name))
+
+			with self.secondary_connection():
+				self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((0,),))
+
+			frappe.db.rollback()
+
+			with self.secondary_connection():
+				try:
+					self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((1,),))
+				finally:
+					frappe.db.sql("SELECT RELEASE_LOCK(%s)", lock_name)
+
+
+class TestPlacementLockCommit(IntegrationTestCase):
+	def test_commit_releases_the_selected_host_lock(self) -> None:
+		with self.secondary_connection():
+			secondary_connection_id = frappe.db.sql("SELECT CONNECTION_ID()")[0][0]
+
+		lock_name = f"atlas:test-placement:{frappe.generate_hash(length=16)}"
+		with self.primary_connection():
+			primary_connection_id = frappe.db.sql("SELECT CONNECTION_ID()")[0][0]
+			self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((1,),))
+			PlacementContext._keep_host_lock_for_transaction(lock_name)
+
+			with self.secondary_connection():
+				self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((0,),))
+
+			frappe.db.commit()  # nosemgrep
+
+			with self.secondary_connection():
+				try:
+					self.assertEqual(frappe.db.sql("SELECT GET_LOCK(%s, 0)", lock_name), ((1,),))
+				finally:
+					frappe.db.sql("SELECT RELEASE_LOCK(%s)", lock_name)
+
+		self.assertNotEqual(primary_connection_id, secondary_connection_id)

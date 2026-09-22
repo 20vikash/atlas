@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/frappe/atlas/metal/internal/platform"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -73,6 +74,13 @@ type SnapshotStore struct {
 	uploadsWaitGroup sync.WaitGroup
 	closed           bool
 	logger           *slog.Logger
+	runner           stagingCommandRunner
+}
+
+// stagingCommandRunner runs the ZFS commands used for staging cleanup.
+type stagingCommandRunner interface {
+	Run(ctx context.Context, name string, args ...string) error
+	Output(ctx context.Context, name string, args ...string) (string, error)
 }
 
 // Stores contains the host storage services. They share one pool and one image
@@ -113,6 +121,7 @@ func NewStores(parentContext context.Context, poolName, imagesDirectory string, 
 			rootContext: rootContext,
 			rootCancel:  rootCancel,
 			logger:      logger,
+			runner:      platform.HostRunner{},
 		},
 	}
 }

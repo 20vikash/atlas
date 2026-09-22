@@ -12,20 +12,23 @@ That is why this package is thin: it owns request validation, the public respons
 
 ## Types
 
-`New(Config, Dependencies)` validates configuration and dependencies, then returns a configured Echo router. `Server` holds the injected services and every handler.
+`New(Config, Dependencies)` returns the Atlas API router. `NewCoordination` returns the node coordination router. `Server` holds the injected services and handlers.
 
 `Dependencies` carries the VM manager, migration manager, snapshot store, host service, wake function, serial broker, and trusted key store. Each is an interface declared here, so this package depends on no implementation.
 
 ## Request flow
 
-```text
-correlation -> log -> group authentication -> handler
-                                                 |
-                             decode strict JSON -+
-                             validate            |
-                             call a service      |
-                             wake the reconciler |
-                             respond ------------+
+```mermaid
+flowchart LR
+    Request[Request] --> Correlation[Add correlation ID]
+    Correlation --> Log[Request log]
+    Log --> Auth[Authenticate route group]
+    Auth --> Handler[Handler]
+    Handler --> Decode[Decode strict JSON]
+    Decode --> Validate[Validate request]
+    Validate --> Service[Call domain service]
+    Service --> Wake[Wake reconciler when needed]
+    Wake --> Response[Write response]
 ```
 
 Correlation runs first, so every log line and every error carries the same IDs. Each request gets an `X-Request-ID` and an `X-Operation-ID`, returned as response headers and included in logs. A caller-supplied value is kept when it is safe to echo, and replaced when it is not.
@@ -59,23 +62,29 @@ POST   /v1/snapshots/:id/upload
 GET    /v1/snapshots/:id
 DELETE /v1/snapshots/:id
 
-PUT    /v1/migrations/:id          Atlas creates or resumes a target, static token
-GET    /v1/migrations/:id          Atlas reads target status, static token
-POST   /v1/migrations/:id/abort    Atlas aborts a target, static token
-POST   /v1/migrations/:id/finish   Atlas records the target finish, static token
-PUT    /v1/migrations/:id/source   the target locks the source, mesh
-POST   /v1/migrations/:id/snapshot the target asks for the next snapshot, mesh
-POST   /v1/migrations/:id/stop     the target stops the source and gets the final snapshot, mesh
-POST   /v1/migrations/:id/start    the target restores the source during rollback, mesh
-POST   /v1/migrations/:id/destroy  the target destroys the stopped source, mesh
-DELETE /v1/migrations/:id          the target unlocks the source, mesh
+PUT    /v1/migrations/:id          Atlas creates or resumes a destination
+GET    /v1/migrations/:id          Atlas reads destination status
+POST   /v1/migrations/:id/abort    Atlas aborts a destination
+POST   /v1/migrations/:id/finish   Atlas records the destination finish
 ```
 
-Atlas drives create, get, abort, and finish with the static token. The target host drives source, snapshot, stop, start, destroy, and delete on the source host over the trusted mesh with no credential. Every source route carries the VM ID as the `virtual_machine_id` query value, so the source resolves the migration without a token. The disk itself moves over a separate TCP connection, not an HTTP route. See [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md).
+The coordination server on port 9001 has these routes:
+
+```text
+PUT    /v1/migrations/:id/source   the destination locks the source
+POST   /v1/migrations/:id/snapshot the destination asks for the next snapshot
+POST   /v1/migrations/:id/stream   the destination starts the one-shot snapshot server
+POST   /v1/migrations/:id/stop     the destination acknowledges its last snapshot and stops the source
+POST   /v1/migrations/:id/start    the destination restores the source during rollback
+POST   /v1/migrations/:id/destroy  the destination destroys the stopped source
+DELETE /v1/migrations/:id          the destination unlocks the source
+```
+
+Atlas drives create, get, abort, and finish on port 9000 with its client certificate. A destination host drives the source routes on port 9001 with a regional node certificate. Every source route carries the VM ID as the `virtual_machine_id` query value. Snapshot bytes use a separate mutual-TLS connection on port 9002. See [internal/vm/migration/SPEC.md](../vm/migration/SPEC.md).
 
 The stop route normalizes the source to stopped, removes its network, and returns the final snapshot in the snapshot response form. It is idempotent.
 
-The finish route records the target finish request and returns `202`. Atlas calls it with the static token. The target then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
+The finish route records the destination finish request and returns `202`. The destination then destroys the source with the destroy route over the mesh. The destroy route removes the stopped source and returns `204`. The start route restores the source to its original desired state during a rollback and returns `204`.
 
 PUT is used wherever a request replaces desired state, so a repeat is safe. POST is used only for an action that must happen again even when nothing changed, such as a restart, or for creating an addressable resource, such as a snapshot.
 
@@ -83,7 +92,7 @@ The network PUT requires the complete network object, including `firewall`. Fire
 
 ## Capacity
 
-Compute and disk updates are checked against host memory and storage before they are stored, and an increase the host cannot satisfy is refused with `409`. Only the increase is checked, because the VM already holds what it reserves. CPU entitlement is oversubscribed, so a CPU increase is always accepted when `cpu_millicores` is in the valid range from 100 through 32000.
+Compute and disk updates are checked against host memory and storage before they are stored, and an increase the host cannot satisfy is refused with `409` and the code `insufficient_capacity`. Atlas reads that code as a request to move the VM to another host. Only the increase is checked, because the VM already holds what it reserves. CPU entitlement is oversubscribed, so a CPU increase is always accepted when `cpu_millicores` is in the valid range from 100 through 32000.
 
 Nothing else is checked this way: the remaining fields do not consume a host resource.
 
@@ -104,14 +113,14 @@ Each route group names the middleware it needs, so a route cannot inherit the wr
 
 | Middleware | Credential | Routes |
 |---|---|---|
-| `authenticate` | The static bearer token. Only its SHA-256 digest is configured, so the plain token never reaches this package, and the comparison is constant time. | The `/v1` controller group. |
-| none | The trusted WireGuard mesh. | The source-side migration routes that one Metal host calls on another. |
+| mutual TLS | The Atlas client certificate. The listener requires it and pins its common name. | The Atlas API server and every `/v1` route. |
+| mutual TLS | A node certificate from the regional Metal authority. | The coordination server and its source-side migration routes. |
 
-The source-side migration routes carry no credential. Metal hosts reach each other only over the trusted mesh, so a source route trusts its caller and reads the VM ID from the `virtual_machine_id` query value.
+Each TLS listener verifies the client certificate before its router receives a request. This package holds no credential. A source route then reads the VM ID from the `virtual_machine_id` query value.
 
 Group authentication makes the group answer every path below it. An unknown path and a wrong method under `/v1` both return `404`.
 
-The 3 public routes carry no VM data. Liveness must answer a probe that holds no token, and the documentation page is opened in a browser that cannot send one. Both stay open, so metald is expected to listen on a private control network.
+Liveness and the documentation sit outside `/v1`, but the Atlas API listener still requires the Atlas client certificate.
 
 ## Errors
 
@@ -121,6 +130,7 @@ A domain error is mapped to one status and one safe message. An unrecognized err
 |---|---|---|
 | `vm.ErrNotFound`, `storage.ErrNotFound` | `404` | `not_found` |
 | `vm.ErrConflict`, `storage.ErrInUse` | `409` | `conflict` |
+| Compute or disk increase without host capacity | `409` | `insufficient_capacity` |
 | `storage.ErrImageConflict` | `409` | `image_content_conflict` |
 | `storage.ErrImageIntegrity` | `422` | `image_integrity_failed` |
 | `storage.ErrShuttingDown` | `503` | `unavailable` |
@@ -147,5 +157,5 @@ A response omits what the controller must not see or cannot use: transport URLs,
 - [docs/api.md](../../docs/api.md) gives request and response details.
 - [internal/vm/SPEC.md](../vm/SPEC.md) defines the VM contracts and the generation model.
 - [internal/console/SPEC.md](../console/SPEC.md) owns the serial console the tty mode attaches to.
-- [internal/vm_migration/SPEC.md](../vm_migration/SPEC.md) owns the host-to-host migration transport.
+- [internal/vm/migration/SPEC.md](../vm/migration/SPEC.md) owns the host-to-host migration transport.
 - [cmd/metald/SPEC.md](../../cmd/metald/SPEC.md) injects server dependencies.

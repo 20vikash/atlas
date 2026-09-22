@@ -3,8 +3,14 @@
 
 frappe.ui.form.on("Atlas Settings", {
 	refresh(frm) {
-		frm.call("available_placement_strategies").then(({ message }) => {
-			frm.fields_dict.placement_strategy.set_data(message);
+		frm.call("get_form_autocomplete_options").then(({ message }) => {
+			frm.fields_dict.placement_strategy.set_data(message.placement_strategies);
+			frm.fields_dict.default_metal_machine_size.set_data(
+				message.available_metal_machine_sizes
+			);
+			frm.fields_dict.default_metal_machine_image.set_data(
+				message.available_metal_machine_images
+			);
 		});
 
 		if (frm.is_new()) {

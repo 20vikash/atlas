@@ -126,10 +126,14 @@ class ObjectStorageClient:
 			raise self._error("complete a multipart upload", key, error) from error
 
 	def abort_multipart_upload(self, key: str, upload_id: str) -> None:
-		"""Abort an incomplete multipart upload."""
+		"""Abort an incomplete multipart upload. Treat an absent upload as aborted."""
 		try:
 			self._client.abort_multipart_upload(Bucket=self.bucket, Key=key, UploadId=upload_id)
-		except (BotoCoreError, ClientError) as error:
+		except ClientError as error:
+			if error.response.get("Error", {}).get("Code") in {"NoSuchUpload", "404", "NotFound"}:
+				return
+			raise self._error("abort a multipart upload", key, error) from error
+		except BotoCoreError as error:
 			raise self._error("abort a multipart upload", key, error) from error
 
 	def head_object(self, key: str) -> dict[str, object] | None:

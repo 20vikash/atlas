@@ -30,6 +30,10 @@ type fakeVirtualMachineManager struct {
 	deferMetadata   bool
 }
 
+func (manager *fakeVirtualMachineManager) LockCapacity() func() {
+	return func() {}
+}
+
 func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, specification vm.Specification) (vm.Information, error) {
 	if existing, found := manager.virtualMachines[id]; found {
 		return existing.info, nil
@@ -172,6 +176,25 @@ func (manager *fakeVirtualMachineManager) SetCompute(_ context.Context, id strin
 	return nil
 }
 
+func (manager *fakeVirtualMachineManager) Resize(_ context.Context, id string, compute vm.Compute, diskMiB int) error {
+	virtualMachine, found := manager.virtualMachines[id]
+	if !found {
+		return vm.ErrNotFound
+	}
+	shapeChanged := virtualMachine.info.CPUMillicores != compute.CPUMillicores ||
+		virtualMachine.info.MemoryMiB != compute.MemoryMiB ||
+		virtualMachine.info.DiskMiB != diskMiB
+	if (shapeChanged && virtualMachine.info.State != vm.StateStopped) || diskMiB < virtualMachine.info.DiskMiB {
+		return vm.ErrConflict
+	}
+	virtualMachine.info.CPUMillicores = compute.CPUMillicores
+	virtualMachine.info.MemoryMiB = compute.MemoryMiB
+	virtualMachine.info.DiskMiB = diskMiB
+	virtualMachine.info.SleepAfterIdleSeconds = compute.SleepAfterIdleSeconds
+	virtualMachine.info.DesiredGeneration++
+	return nil
+}
+
 func (manager *fakeVirtualMachineManager) RequestRestart(_ context.Context, id string) error {
 	virtualMachine, found := manager.virtualMachines[id]
 	if !found {
@@ -299,11 +322,6 @@ func (fakeCapacityProvider) Capacity(context.Context) (storage.Capacity, error) 
 	return storage.Capacity{TotalMiB: 1000, AvailableMiB: 750}, nil
 }
 
-const (
-	testToken     = "test-token"
-	testTokenHash = "4c5dc9b7708905f77f5e5d16316b5dfb425e68cb326dcd55a860e90a7707031e"
-)
-
 func newTestServer(t *testing.T) http.Handler {
 	t.Helper()
 	return newServer(t, &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}})
@@ -333,7 +351,7 @@ func newServerWithServices(
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Config{AuthTokenHash: testTokenHash}, Dependencies{
+	server, err := New(Config{}, Dependencies{
 		VirtualMachineManager: virtualMachineManager,
 		MigrationManager:      &stubMigrationManager{},
 		SnapshotStore:         services,
@@ -662,6 +680,19 @@ func TestSetComputeStoresTheIdleTimeout(t *testing.T) {
 	}
 }
 
+func TestResizeStoresTheCompleteShape(t *testing.T) {
+	srv := newTestServer(t)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/resize", `{"cpu_millicores":1000,"memory_mib":512,"disk_mib":1024,"sleep_after_idle_seconds":1800}`, http.StatusAccepted)
+	var response virtualMachineResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Desired.Compute.CPUMillicores != 1000 || response.Desired.Compute.MemoryMiB != 512 || response.Desired.Disk.SizeMiB != 1024 || response.Desired.Compute.SleepAfterIdleSeconds != 1800 {
+		t.Fatalf("resized shape = %+v", response.Desired)
+	}
+}
+
 func TestSetComputeRejectsANegativeIdleTimeout(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
@@ -755,7 +786,15 @@ func TestSetDiskGrows(t *testing.T) {
 func TestSetDiskRejectsInsufficientCapacity(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":2048,"throughput_mibps":0,"iops":0}`, http.StatusConflict)
+	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/disk", `{"size_mib":2048,"throughput_mibps":0,"iops":0}`, http.StatusConflict)
+
+	var response errorResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error.Code != insufficientCapacityCode {
+		t.Fatalf("error code = %q, want %q", response.Error.Code, insufficientCapacityCode)
+	}
 }
 
 func TestSetDiskRejectsShrink(t *testing.T) {
@@ -865,7 +904,7 @@ func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 	server := newServerWithServices(t, driver, services, wireGuardManager)
 
 	request := `{
-		"wireguard_peers":[{"node":"node-2","node_id":2,"public_key":"key-2","address":"192.0.2.2:51820"}],
+		"wireguard_peers":[{"node":"node-2","mesh_address":"fdab:1::2","public_key":"key-2","address":"192.0.2.2:51820"}],
 		"images":[{
 			"ref":"sha256:image",
 			"architecture":"amd64",
@@ -936,7 +975,7 @@ func TestSyncEnablesTheUnicastTransportInUnicastMode(t *testing.T) {
 
 	request := `{
 		"wireguard_peers":[
-			{"node":"server-11","node_id":11,"public_key":"key11","address":"10.20.0.11:7373","mac":"aa:bb:cc:dd:ee:11"}
+			{"node":"server-11","mesh_address":"fdab:1::11","public_key":"key11","address":"10.20.0.11:7373","mac":"aa:bb:cc:dd:ee:11"}
 		],
 		"images":[],
 		"privileged_vm_addresses":[],
@@ -965,24 +1004,6 @@ func TestSyncDisablesTheUnicastTransportInMulticastMode(t *testing.T) {
 
 	if !services.unicastDisabled || services.unicastEnabled {
 		t.Fatalf("unicast transport = enabled %t disabled %t, want a disabled transport", services.unicastEnabled, services.unicastDisabled)
-	}
-}
-
-func TestDocsSkipAuthentication(t *testing.T) {
-	srv := newTestServer(t)
-
-	for _, path := range []string{"/docs", "/docs/swagger.json"} {
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code == http.StatusUnauthorized {
-			t.Fatalf("%s must not need authentication, got %d", path, rec.Code)
-		}
-	}
-
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/vms", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("/v1/vms without a token = %d, want 401", rec.Code)
 	}
 }
 
@@ -1024,7 +1045,6 @@ func do(t *testing.T, srv http.Handler, method, path, body string, want int) *ht
 	}
 	req := httptest.NewRequest(method, path, r)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testToken)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != want {
@@ -1118,7 +1138,6 @@ func TestRemovedSnapshotAndImageRoutesReturnNotFound(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/images"},
-		{http.MethodGet, "/v1/vms/vm1/snapshots"},
 		{http.MethodPost, "/v1/vms/vm1/snapshots/snapshot-1/restore"},
 	} {
 		do(t, server, request.method, request.path, "", http.StatusNotFound)

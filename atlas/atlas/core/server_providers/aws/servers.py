@@ -6,7 +6,12 @@ from typing import ClassVar
 
 from atlas.atlas.core.server_providers.aws.catalog import AwsCatalog
 from atlas.atlas.core.server_providers.aws.client import AwsClient, AwsError
-from atlas.atlas.core.server_providers.aws.configuration import AwsConfiguration
+from atlas.atlas.core.server_providers.aws.configuration import (
+	ROOT_VOLUME_SIZE_GIB,
+	STORAGE_VOLUME_DEVICE_NAME,
+	STORAGE_VOLUME_SIZE_GIB,
+	AwsConfiguration,
+)
 from atlas.atlas.core.server_providers.base import (
 	ProviderServer,
 	ServerCreateRequest,
@@ -14,6 +19,13 @@ from atlas.atlas.core.server_providers.base import (
 )
 
 MESH_MULTICAST_GROUP = "239.1.1.1"
+# Cloud-init hotplug renames an attached interface
+# back after Atlas configures it.
+USER_DATA = """#cloud-config
+updates:
+  network:
+    when: [boot-new-instance]
+"""
 
 
 class AwsServers:
@@ -42,7 +54,7 @@ class AwsServers:
 
 	def ensure(self, request: ServerCreateRequest) -> ProviderServer:
 		"""Return the named instance, and create it when it does not exist."""
-		instance = self.find(request.discovery_key)
+		instance = self.find(request.name)
 		if instance is None:
 			instance = self.create(request)
 
@@ -60,7 +72,7 @@ class AwsServers:
 		response = self.client.call(
 			"ec2",
 			"run_instances",
-			ClientToken=self.client_token("instance", request.discovery_key),
+			ClientToken=self.client_token("instance", request.name),
 			ImageId=self.catalog.image_id(request.image_provider_metadata, request.server_image),
 			InstanceType=request.server_size,
 			MinCount=1,
@@ -68,12 +80,14 @@ class AwsServers:
 			KeyName=self.configuration.key_pair_name,
 			SubnetId=self.configuration.subnet_id,
 			SecurityGroupIds=[self.configuration.security_group_id],
+			BlockDeviceMappings=[self.root_volume(request), self.storage_volume()],
+			UserData=USER_DATA,
 			TagSpecifications=[
 				{
 					"ResourceType": "instance",
 					"Tags": [
 						{"Key": "Name", "Value": request.name},
-						{"Key": self.identity_tag_key, "Value": request.discovery_key},
+						{"Key": self.identity_tag_key, "Value": request.name},
 					],
 				}
 			],
@@ -84,32 +98,52 @@ class AwsServers:
 			raise AwsError(f"AWS did not return an instance for Atlas server {request.name}")
 		return instances[0]
 
+	def root_volume(self, request: ServerCreateRequest) -> dict:
+		"""Return the resized volume mapping for the image root device."""
+		return {
+			"DeviceName": self.catalog.root_device_name(
+				request.image_provider_metadata, request.server_image
+			),
+			"Ebs": {
+				"VolumeSize": ROOT_VOLUME_SIZE_GIB,
+				"VolumeType": "gp3",
+				"DeleteOnTermination": True,
+			},
+		}
+
+	@staticmethod
+	def storage_volume() -> dict:
+		"""Return the volume mapping for the virtual machine storage pool."""
+		return {
+			"DeviceName": STORAGE_VOLUME_DEVICE_NAME,
+			"Ebs": {
+				"VolumeSize": STORAGE_VOLUME_SIZE_GIB,
+				"VolumeType": "gp3",
+				"DeleteOnTermination": True,
+			},
+		}
+
 	@staticmethod
 	def cpu_options(size_provider_metadata: Mapping) -> dict:
-		"""Return the CPU options that let a virtual instance run Atlas guests.
-
-		AWS keeps nested virtualization off until an instance asks for it at launch.
-		A bare metal instance already exposes the processor extensions and rejects
-		the option.
-		"""
+		"""Return nested virtualization options for the instance type."""
 		if size_provider_metadata.get("BareMetal"):
 			return {}
 		return {"CpuOptions": {"NestedVirtualization": "enabled"}}
 
-	def find(self, discovery_key: str) -> Mapping | None:
+	def find(self, name: str) -> Mapping | None:
 		"""Return the instance with the Atlas identity tag."""
 		reservations = self.client.paginate(
 			"ec2",
 			"describe_instances",
 			"Reservations",
 			Filters=[
-				{"Name": f"tag:{self.identity_tag_key}", "Values": [discovery_key]},
+				{"Name": f"tag:{self.identity_tag_key}", "Values": [name]},
 				{"Name": "instance-state-name", "Values": sorted(self.live_states)},
 			],
 		)
 		instances = [instance for reservation in reservations for instance in reservation["Instances"]]
 		if len(instances) > 1:
-			raise AwsError(f"AWS returned multiple instances for discovery key {discovery_key}")
+			raise AwsError(f"AWS returned multiple instances for Atlas server {name}")
 		return instances[0] if instances else None
 
 	def fetch(self, provider_server_id: str) -> Mapping:
@@ -131,7 +165,7 @@ class AwsServers:
 		return False
 
 	def ensure_mesh_interface(self, provider_server_id: str, server_name: str) -> Mapping:
-		"""Return the idempotently created mesh network interface."""
+		"""Create the mesh network interface idempotently."""
 		if not self.configuration.subnet_id or not self.configuration.security_group_id:
 			raise AwsError("Atlas Settings has no AWS subnet or security group")
 
@@ -243,6 +277,7 @@ class AwsServers:
 				TransitGatewayMulticastDomainId=self.configuration.multicast_domain_id,
 				GroupIpAddress=MESH_MULTICAST_GROUP,
 				NetworkInterfaceIds=[network_interface_id],
+				allow_existing=True,
 			)
 
 	def deregister_multicast_interface(self, network_interface_id: str) -> None:

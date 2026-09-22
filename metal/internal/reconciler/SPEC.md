@@ -14,24 +14,27 @@ This package schedules convergence work. It owns no VM, image, snapshot, or traf
 |---|---|
 | `VirtualMachineReconciler` | Runs VM reconciliation passes. |
 | `ImageReconciler` | Caches selected images and prunes unused images and staged snapshots. |
-| `MigrationReconciler` | Advances each active target migration through its handshake. |
+| `MigrationReconciler` | Advances each active destination migration through its handshake. |
 | `passScheduler` | Runs one pass at startup, on an interval, and after a nonblocking request. |
 
 ## Pass model
 
-```text
-Run(ctx)
-  |
-  +-> pass ---------------------------+
-  |                                   |
-  +-- wait: interval tick             |
-           request                    |
-           ctx canceled -> return     |
-                                      |
-  VM pass:        ListIDs -> N workers -> Reconcile(id)
-  image pass:     ImagePolicies -> EnsureImage -> EnsureMemorySnapshot
-                                -> PruneImages -> PruneStagedSnapshots
-  migration pass: ActiveTargetVirtualMachineIDs -> AdvanceTarget(id)
+```mermaid
+flowchart TD
+    Start[Run with context] --> Pass[Start reconcile pass]
+    Pass --> VM[List VM IDs]
+    VM --> Workers[Run bounded VM workers]
+    Workers --> VMApply[Reconcile each VM]
+    Pass --> Policy[Read image policies]
+    Policy --> Images[Ensure images and warm snapshots]
+    Images --> Prune[Prune images and staged snapshots]
+    Pass --> Active[Find active migration destinations]
+    Active --> Advance[Advance each migration]
+    VMApply --> Wait[Wait for interval or request]
+    Prune --> Wait
+    Advance --> Wait
+    Wait -->|interval or request| Pass
+    Wait -->|context canceled| Stop[Return]
 ```
 
 Each operation has its own timeout. The VM pass also limits concurrent operations. One slow VM cannot block all other VMs.

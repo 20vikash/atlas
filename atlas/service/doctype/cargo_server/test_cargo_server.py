@@ -76,12 +76,35 @@ class TestCargoServerProvisionRequest(UnitTestCase):
 		self.assertEqual(server.virtual_machine, "vm-00001")
 		self.assertEqual(request["tenant_id"], 0)
 		self.assertTrue(request["is_privileged"])
+		self.assertTrue(request["is_termination_protected"])
 		self.assertEqual(request["egress"], "uplink")
 		self.assertEqual(request["hostname"], "cargo")
 		self.assertEqual(request["server_ip_address"], "203.0.113.9")
 		self.assertEqual(request["cpu_millicores"], 2000)
 		self.assertEqual(request["memory_mib"], 4096)
 		self.assertEqual(request["disk_mib"], 16384)
+
+	def test_the_record_is_committed_before_the_machine_request(self) -> None:
+		cargo_server = MagicMock(name="cargo_server", status="Pending")
+		cargo_server.name = "Cargo Server"
+		calls: list[str] = []
+		cargo_server.save.side_effect = lambda *_, **__: calls.append("save")
+		cargo_server._create_virtual_machine.side_effect = lambda *_, **__: (
+			calls.append("create"),
+			False,
+		)[1]
+
+		with (
+			patch.object(cargo_server_module, "_validate_system_manager"),
+			patch.object(cargo_server_module, "cargo_lifecycle_lock", return_value=nullcontext()),
+			patch.object(cargo_server_module, "store_storage_cluster_config"),
+			patch.object(cargo_server_module.frappe, "get_single", return_value=cargo_server),
+			patch.object(cargo_server_module.frappe, "msgprint"),
+			patch.object(cargo_server_module.frappe.db, "commit", side_effect=lambda: calls.append("commit")),
+		):
+			CargoServer.provision(cargo_server, dict(VALID_REQUEST))
+
+		self.assertEqual(calls[:3], ["save", "commit", "create"])
 
 	def test_a_busy_lifecycle_lock_refuses_the_request(self) -> None:
 		with (
@@ -109,6 +132,9 @@ class TestCargoServerArchive(UnitTestCase):
 		server = MagicMock(status="Active", virtual_machine="vm-00001")
 		virtual_machine = MagicMock()
 		virtual_machine.terminate.side_effect = lambda: events.append("terminate")
+		virtual_machine.set_termination_protection.side_effect = lambda value: events.append(
+			f"unprotect:{value}"
+		)
 		provisioner = MagicMock()
 		provisioner.remove_proxy_routes.side_effect = lambda: events.append("routes")
 		with (
@@ -122,7 +148,7 @@ class TestCargoServerArchive(UnitTestCase):
 		):
 			CargoServer.archive(server)
 
-		self.assertEqual(events, ["routes", "terminate"])
+		self.assertEqual(events, ["routes", "unprotect:False", "terminate"])
 		self.assertEqual(server.status, "Archived")
 		self.assertIsNone(server.virtual_machine)
 		self.assertIsNone(server.installation_task)

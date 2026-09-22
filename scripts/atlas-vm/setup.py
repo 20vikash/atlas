@@ -125,6 +125,7 @@ def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
 	"""Return the Atlas command input from the TOML tables."""
 	route53 = atlas["route53"]
 	letsencrypt = atlas["letsencrypt"]
+	vm_scheduling = atlas["vm_scheduling"]
 	return {
 		"server_provider": atlas["server_provider"],
 		"dns_provider": atlas["dns_provider"],
@@ -140,6 +141,12 @@ def read_atlas_setup_values(atlas: dict) -> dict[str, object]:
 		"letsencrypt_email": letsencrypt["email"],
 		"is_letsencrypt_staging": letsencrypt["staging"],
 		"is_wildcard_tls_auto_renew_enabled": letsencrypt["auto_renew"],
+		"use_dedicated_sleepy_vm_hosts": vm_scheduling["use_dedicated_sleepy_vm_hosts"],
+		"placement_strategy": vm_scheduling["placement_strategy"],
+		"sleepy_vm_overcommit_factor": vm_scheduling["sleepy_vm_overcommit_factor"],
+		"auto_spawn_metal_server": vm_scheduling["auto_spawn_metal_server"],
+		"default_metal_machine_size": vm_scheduling["default_metal_machine_size"],
+		"default_metal_machine_image": vm_scheduling["default_metal_machine_image"],
 	}
 
 
@@ -162,7 +169,6 @@ def read_provider_values(atlas: dict) -> dict[str, object]:
 		"aws_availability_zone": aws["availability_zone"],
 		"aws_access_key_id": aws["access_key_id"],
 		"aws_secret_access_key": aws["secret_access_key"],
-		"aws_storage_pool_device": aws["storage_pool_device"],
 	}
 
 

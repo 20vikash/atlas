@@ -13,13 +13,10 @@ from atlas.api.core.base import (
 	get_owned_document,
 )
 from atlas.api.core.docs import api_docs
-from atlas.api.core.errors import (
-	ResourceConflict,
-)
+from atlas.api.core.errors import ResourceConflict
 from atlas.api.models import (
 	AUTO_IP_ADDRESS,
-	CapacityPendingResponse,
-	ComputeUpdatePayload,
+	CapacityUnavailableResponse,
 	ConsoleTokenPayload,
 	ConsoleTokenResponse,
 	CreateVirtualMachinePayload,
@@ -28,8 +25,10 @@ from atlas.api.models import (
 	IPAddressAssignmentPayload,
 	MetadataReplacementPayload,
 	NetworkUpdatePayload,
+	ResizePayload,
 	SnapshotPayload,
 	SSHKeysReplacementPayload,
+	TerminationProtectionPayload,
 	VirtualMachineDetailResponse,
 	VirtualMachineListResponse,
 	VirtualMachineResponse,
@@ -104,13 +103,17 @@ def get_attachable_ip_address_name(ip_address_id: str) -> str:
 	responses={
 		201: {"description": "The virtual machine request is stored."},
 		503: {
-			"description": "Host capacity is pending. Retry after the reported interval.",
-			"model": CapacityPendingResponse,
+			"description": (
+				"The virtual machine was not placed. `error.code` is `out_of_capacity` when no host "
+				"can hold it, which needs more capacity in the region, or `placement_busy` when "
+				"every candidate host was held by another placement, which only needs a retry. A "
+				"busy response carries `Retry-After` in seconds."
+			),
+			"model": CapacityUnavailableResponse,
 			"headers": {
 				"Retry-After": {
-					"description": "Seconds to wait before another create request.",
-					"required": True,
-					"schema": {"type": "integer", "minimum": 0},
+					"description": "Seconds to wait before retrying a `placement_busy` response.",
+					"schema": {"type": "integer"},
 				}
 			},
 		},
@@ -122,6 +125,8 @@ def create_virtual_machine(
 	"""Create VM.
 
 	Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.
+
+	Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route changes it later.
 	"""
 	image = get_owned_image(payload.image_id)
 	ip_address = get_available_ip_address(payload.ip_address_id) if payload.ip_address_id else None
@@ -129,6 +134,7 @@ def create_virtual_machine(
 		get_current_tenant_id(), image.name, ip_address.name if ip_address else None
 	)
 	result = create_virtual_machine_request(request)
+
 	virtual_machine: VirtualMachine = frappe.get_doc("Virtual Machine", result["name"])
 
 	return ApiResult(
@@ -165,6 +171,8 @@ def list_virtual_machines(query: ListQuery) -> Page[VirtualMachineListResponse]:
 			"sleep_after_idle_seconds",
 			"is_draft",
 			"is_terminating",
+			"is_termination_protected",
+			"active_migration",
 			"creation",
 		],
 		order_by="creation desc",
@@ -203,6 +211,8 @@ def delete_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachineR
 	"""Delete VM.
 
 	Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.
+
+	A VM with `is_termination_protected` returns `400`. Clear the protection first.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.terminate()
@@ -271,6 +281,33 @@ def restart_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachine
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
+@virtual_machine_actions.post("<virtual_machine_id>/actions/resize")
+@api_docs(
+	request_example={"cpu_millicores": 4000, "memory_mib": 8192, "disk_mib": 40960},
+	responses={
+		**ACCEPTED_RESPONSE,
+		503: {
+			"description": (
+				"No host can hold the new shape. `error.code` is `out_of_capacity` or `placement_busy`."
+			),
+			"model": CapacityUnavailableResponse,
+		},
+	},
+)
+def resize_virtual_machine(
+	virtual_machine_id: str, payload: ResizePayload
+) -> ApiResult[VirtualMachineResponse]:
+	"""Resize VM.
+
+	Changes CPU, memory, disk, or idle shutdown. Omitted fields keep their current value. The disk only grows.
+
+	Stop the VM before changing CPU, memory, or disk. Atlas resizes in place or migrates it. Idle-only changes work in any VM state. `0` disables idle shutdown.
+	"""
+	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
+	virtual_machine.resize(**payload.model_dump(exclude_none=True))
+	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
+
+
 @virtual_machine_actions.post("<virtual_machine_id>/actions/snapshot")
 @api_docs(
 	request_example={
@@ -278,6 +315,8 @@ def restart_virtual_machine(virtual_machine_id: str) -> ApiResult[VirtualMachine
 		"image_type": "machine",
 		"cache_image": False,
 		"memory_snapshot": False,
+		"memory_snapshot_configuration": {"virtual_cpu_count": 2, "memory_mib": 4096},
+		"is_termination_protected": False,
 		"tags": {"purpose": "pilot"},
 	},
 	responses={201: {"description": "The Machine image record is created."}},
@@ -291,6 +330,10 @@ def create_virtual_machine_snapshot(
 
 	If `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.
 
+	Use `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source VM value. The request needs `memory_snapshot`.
+
+	Set `is_termination_protected` to refuse deletion of the new image. A `system` image is always protected.
+
 	Use tags to label the image and filter it later, for example, `{"purpose": "pilot"}` and `?tag=purpose:pilot`.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
@@ -299,6 +342,8 @@ def create_virtual_machine_snapshot(
 		image_type=payload.image_type,
 		cache_image=payload.cache_image,
 		memory_snapshot=payload.memory_snapshot,
+		memory_snapshot_configuration=payload.memory_snapshot_configuration.model_dump(exclude_none=True),
+		is_termination_protected=payload.is_termination_protected,
 		tags=payload.tags,
 	)
 	image: VirtualMachineImage = frappe.get_doc("Virtual Machine Image", image_name)
@@ -331,36 +376,37 @@ def create_virtual_machine_console_token(
 	)
 
 
-@virtual_machine_configuration.patch("<virtual_machine_id>/compute")
+@virtual_machine_configuration.patch("<virtual_machine_id>/termination-protection")
 @api_docs(
-	request_example={"cpu_millicores": 4000, "sleep_after_idle_seconds": 1800},
+	request_example={"enabled": True},
 	responses=ACCEPTED_RESPONSE,
 )
-def update_virtual_machine_compute(
-	virtual_machine_id: str, payload: ComputeUpdatePayload
+def update_virtual_machine_termination_protection(
+	virtual_machine_id: str, payload: TerminationProtectionPayload
 ) -> ApiResult[VirtualMachineResponse]:
-	"""Update compute.
+	"""Update termination protection.
 
-	Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change needs a stopped VM.
-
-	A value of `0` disables automatic idle shutdown.
+	Sets or clears termination protection. Termination and deletion of a protected VM are refused until a later request clears it.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	virtual_machine.update_compute(payload.to_domain_changes())
+	virtual_machine.set_termination_protection(payload.enabled)
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
 @virtual_machine_configuration.patch("<virtual_machine_id>/disk")
 @api_docs(
 	request_example={"disk_mib": 40960, "disk_throughput_mibps": 100},
-	responses=ACCEPTED_RESPONSE,
+	responses={
+		**ACCEPTED_RESPONSE,
+		409: {"description": "The host has no room. `error.code` is `insufficient_capacity`."},
+	},
 )
 def update_virtual_machine_disk(
 	virtual_machine_id: str, payload: DiskUpdatePayload
 ) -> ApiResult[VirtualMachineResponse]:
-	"""Resize disk.
+	"""Update disk in-place.
 
-	Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease, and a limit of 0 removes that limit.
+	Works while the VM runs. The disk only grows, and `0` removes a limit. A full host returns `409 insufficient_capacity`. Stop the VM and use resize to move it.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.update_disk(payload.to_domain_changes())

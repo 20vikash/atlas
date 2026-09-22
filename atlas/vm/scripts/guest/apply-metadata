@@ -10,7 +10,6 @@ METADATA_PATH_PREFIX = "/latest"
 DROP_IN_PATH = pathlib.Path("/run/systemd/network/10-atlas.network.d/mesh.conf")
 MESH_GATEWAY = "fe80::1"
 MESH_PREFIX = "fdaa::/16"
-MESH_MTU = 1380
 TOKEN_TTL_SECONDS = "21600"
 POLL_SECONDS = 0.25
 TIMEOUT_SECONDS = 3
@@ -85,7 +84,6 @@ def mesh_drop_in(address):
         "[Route]\n"
         f"Destination={MESH_PREFIX}\n"
         f"Gateway={MESH_GATEWAY}\n"
-        f"MTUBytes={MESH_MTU}\n"
     )
 
 

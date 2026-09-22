@@ -58,3 +58,22 @@ jobs:
           pip install pip-audit
           cd ${GITHUB_WORKSPACE}
           pip-audit --desc on .
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: metal/go.mod
+
+      # govulncheck reads the call graph, so both modules must build first.
+      - name: Build the generated sources
+        run: |
+          sudo apt-get update && sudo apt-get install --yes clang libbpf-dev
+          make -C metal openapi bpf
+          make -C services/wg-mesh bpf
+
+      - name: Install and run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          for module in metal services/wg-mesh/cli; do
+            echo "==> $module"
+            govulncheck -C "$module" ./...
+          done

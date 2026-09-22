@@ -4,6 +4,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.aws.catalog import AwsCatalog
 from atlas.atlas.core.server_providers.aws.client import AwsError
+from atlas.atlas.core.server_providers.aws.configuration import STORAGE_VOLUME_SIZE_GIB
 
 
 class TestAwsCatalog(UnitTestCase):
@@ -16,38 +17,41 @@ class TestAwsCatalog(UnitTestCase):
 			]
 		)
 
-		self.assertEqual([size.size for size in sizes], ["c6i.metal", "m8i.2xlarge"])
+		self.assertEqual([size.name for size in sizes], ["c6i.metal", "m8i.2xlarge"])
 
-	def test_types_without_local_storage_or_a_mesh_interface_are_skipped(self) -> None:
-		without_storage = self.instance_type("m8i.2xlarge", nested_virtualization=True)
-		without_storage["InstanceStorageInfo"] = {"TotalSizeInGB": 0}
+	def test_types_with_local_storage_or_without_a_mesh_interface_are_skipped(self) -> None:
+		with_local_storage = self.instance_type(
+			"i7i.2xlarge", nested_virtualization=True, local_storage_gb=1_875
+		)
 		without_mesh_interface = self.instance_type("m8i.2xlarge", nested_virtualization=True)
 		without_mesh_interface["NetworkInfo"] = {"MaximumNetworkInterfaces": 1}
 
-		sizes = AwsCatalog().get_server_sizes([without_storage, without_mesh_interface])
+		sizes = AwsCatalog().get_server_sizes([with_local_storage, without_mesh_interface])
 
 		self.assertEqual(sizes, ())
 
-	def test_size_uses_binary_memory_and_instance_storage(self) -> None:
+	def test_size_uses_binary_memory_and_the_block_store_pool(self) -> None:
 		catalog = AwsCatalog()
 
 		size = catalog.get_server_sizes([self.instance_type("c6i.metal", bare_metal=True)])[0]
 
 		self.assertEqual(size.cpu_count, 128)
 		self.assertEqual(size.memory_mib, 262_144)
-		self.assertEqual(size.disk_gib, 7_600)
+		self.assertEqual(size.disk_gib, STORAGE_VOLUME_SIZE_GIB)
 		self.assertIsNone(size.hourly_pricing_usd_cents)
 
 	def test_the_atlas_architecture_comes_from_the_supported_architectures(self) -> None:
 		catalog = AwsCatalog()
 
 		amd64 = catalog.get_server_sizes([self.instance_type("c6i.metal", bare_metal=True)])[0]
-		arm64 = catalog.get_server_sizes(
-			[self.instance_type("c8g.metal", bare_metal=True, architectures=["arm64"])]
-		)[0]
 
 		self.assertEqual(amd64.architecture, "amd64")
-		self.assertEqual(arm64.architecture, "arm64")
+
+	def test_an_instance_type_atlas_cannot_run_fails_loudly(self) -> None:
+		with self.assertRaises(AwsError):
+			AwsCatalog().get_server_sizes(
+				[self.instance_type("c8g.metal", bare_metal=True, architectures=["arm64"])]
+			)
 
 	def test_an_instance_type_without_an_atlas_architecture_fails_loudly(self) -> None:
 		with self.assertRaises(AwsError):
@@ -69,7 +73,7 @@ class TestAwsCatalog(UnitTestCase):
 			]
 		)
 
-		self.assertEqual(sorted(image.image for image in images), ["Debian_12", "Ubuntu_24.04"])
+		self.assertEqual(sorted(image.name for image in images), ["Debian_12", "Ubuntu_24.04"])
 
 	def test_the_newest_image_of_one_version_wins(self) -> None:
 		images = AwsCatalog().get_server_images(
@@ -101,6 +105,7 @@ class TestAwsCatalog(UnitTestCase):
 		bare_metal: bool = False,
 		nested_virtualization: bool = False,
 		architectures: list[str] | None = None,
+		local_storage_gb: int = 0,
 	) -> dict:
 		return {
 			"InstanceType": name,
@@ -111,7 +116,7 @@ class TestAwsCatalog(UnitTestCase):
 			},
 			"VCpuInfo": {"DefaultVCpus": 128},
 			"MemoryInfo": {"SizeInMiB": 262_144},
-			"InstanceStorageInfo": {"TotalSizeInGB": 7_600},
+			"InstanceStorageInfo": {"TotalSizeInGB": local_storage_gb},
 			"NetworkInfo": {"MaximumNetworkInterfaces": 8},
 		}
 

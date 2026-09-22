@@ -6,9 +6,10 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+import frappe
 import requests
-from frappe.utils.password import get_decrypted_password
 
+from atlas.atlas.core.tls.metal import ca_file, client_certificate_files
 from atlas.vm.core.metal_models import MetalVirtualMachine
 
 if TYPE_CHECKING:
@@ -38,11 +39,17 @@ class MetalClientError(Exception):
 		"""Report whether Metal answered that the resource does not exist."""
 		return self.status == 404
 
+	@property
+	def is_insufficient_capacity(self) -> bool:
+		"""Report whether the host has no room for a compute or disk increase."""
+		return self.status == 409 and self.code == "insufficient_capacity"
+
 
 class MetalClient:
 	"""Call the Metal API on one bare-metal Server."""
 
 	api_port = 9000
+	coordination_port = 9001
 	timeout_seconds = (5, 60)
 	create_timeout_seconds = (5, 60)
 	status_timeout_seconds = (5, 30)
@@ -53,30 +60,39 @@ class MetalClient:
 
 	def __init__(self, server: "MetalServer") -> None:
 		self.base_url = self.get_api_url(server)
-		token = get_decrypted_password("Metal Server", server.name, "metald_api_token", raise_exception=False)
-		if not token:
-			raise MetalClientError(f"Server {server.name} has no Metal API token")
-
-		self.headers = {"Authorization": f"Bearer {token}"}
+		self.ca_file = ca_file()
+		self.client_certificate = client_certificate_files()
 
 	@classmethod
 	def get_api_url(cls, server: "MetalServer") -> str:
-		"""Return the Metal HTTP address for one Server."""
-		if not server.public_ipv4_address:
-			raise MetalClientError(f"Server {server.name} has no public IPv4 address")
+		"""Return the selected Metald IPv4 address for one server."""
+		if server.settings.use_public_ip_for_metald:
+			label, address = "public IPv4 address", server.public_ipv4_address
+		else:
+			label, address = "private IPv4 address", server.private_ipv4_address
+		if not address:
+			raise MetalClientError(f"Server {server.name} has no {label}")
 		try:
-			public_ipv4_address = ipaddress.IPv4Address(server.public_ipv4_address)
+			ipv4_address = ipaddress.IPv4Address(address)
 		except (ipaddress.AddressValueError, TypeError) as error:
-			raise MetalClientError(f"Server {server.name} has an invalid public IPv4 address") from error
-		return f"http://{public_ipv4_address}:{cls.api_port}"
+			raise MetalClientError(f"Server {server.name} has an invalid {label}") from error
+		return f"https://{ipv4_address}:{cls.api_port}"
+
+	@classmethod
+	def get_coordination_url(cls, server: "MetalServer") -> str:
+		"""Return the Metal coordination address for one server."""
+		if not server.wireguard_ip_address:
+			raise MetalClientError(f"Server {server.name} has no WireGuard IP address")
+		try:
+			wireguard_address = ipaddress.IPv6Address(server.wireguard_ip_address)
+		except (ipaddress.AddressValueError, TypeError) as error:
+			raise MetalClientError(f"Server {server.name} has an invalid WireGuard IP address") from error
+		return f"https://[{wireguard_address}]:{cls.coordination_port}"
 
 	def get_console_connection(self, virtual_machine_id: str, mode: str = "tty") -> dict[str, str]:
-		"""Return the websocket URL and auth header for a VM console."""
-		websocket_url = self.base_url.replace("http://", "ws://", 1)
-		return {
-			"url": f"{websocket_url}/v1/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}",
-			"authorization": self.headers["Authorization"],
-		}
+		"""Return the websocket URL for a VM console. The bridge holds the client certificate."""
+		websocket_url = self.base_url.replace("https://", "wss://", 1)
+		return {"url": f"{websocket_url}/v1/vms/{quote(virtual_machine_id, safe='')}/console?mode={mode}"}
 
 	def put_virtual_machine(self, virtual_machine_id: str, request: dict[str, Any]) -> MetalVirtualMachine:
 		"""Store one VM request under its stable Atlas ID."""
@@ -195,6 +211,17 @@ class MetalClient:
 		)
 		return self._virtual_machine(response)
 
+	def resize_virtual_machine(self, virtual_machine_id: str, shape: dict[str, int]) -> MetalVirtualMachine:
+		"""Replace the complete VM resource and idle shutdown shape."""
+		response = self._request(
+			"PUT",
+			f"/v1/vms/{quote(virtual_machine_id, safe='')}/resize",
+			json=shape,
+			expected_status=202,
+			uncertain_on_failure=True,
+		)
+		return self._virtual_machine(response)
+
 	def create_snapshot(self, virtual_machine_id: str) -> dict[str, Any]:
 		"""Create local image staging for one VM."""
 		return self._request(
@@ -252,12 +279,21 @@ class MetalClient:
 			request["unicast"] = True
 		return self._request("POST", "/v1/sync", json=request, uncertain_on_failure=True)
 
-	def put_migration(self, migration_id: str, virtual_machine_id: str, source: str) -> dict[str, Any]:
+	def put_migration(
+		self,
+		migration_id: str,
+		virtual_machine_id: str,
+		source: str,
+		resize: dict[str, Any] | None = None,
+	) -> dict[str, Any]:
 		"""Store one migration request at the target host. Safe to repeat."""
+		request: dict[str, Any] = {"virtual_machine_id": virtual_machine_id, "source": source}
+		if resize is not None:
+			request["resize"] = resize
 		return self._request(
 			"PUT",
 			f"/v1/migrations/{quote(migration_id, safe='')}",
-			json={"virtual_machine_id": virtual_machine_id, "source": source},
+			json=request,
 			expected_status=202,
 			uncertain_on_failure=True,
 			timeout=self.create_timeout_seconds,
@@ -337,6 +373,19 @@ class MetalClient:
 		connect, read = timeout
 		return (connect, max(0.1, min(read, deadline - monotonic())))
 
+	@property
+	def session(self) -> requests.Session:
+		"""Return this request's reusable mutual-TLS session for the host."""
+		sessions = getattr(frappe.local, "metal_client_sessions", None)
+		if sessions is None:
+			sessions = {}
+			frappe.local.metal_client_sessions = sessions
+		session = sessions.get(self.base_url)
+		if session is None:
+			session = requests.Session()
+			sessions[self.base_url] = session
+		return session
+
 	def _send(
 		self,
 		method: str,
@@ -348,11 +397,12 @@ class MetalClient:
 	) -> dict[str, Any]:
 		timeout = kwargs.pop("timeout", self.timeout_seconds)
 		try:
-			response = requests.request(
+			response = self.session.request(
 				method,
 				f"{self.base_url}{path}",
-				headers=self.headers,
 				timeout=timeout,
+				verify=self.ca_file,
+				cert=self.client_certificate,
 				**kwargs,
 			)
 		except requests.RequestException as error:

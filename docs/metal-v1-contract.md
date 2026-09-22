@@ -181,7 +181,9 @@ Compute replaces the CPU entitlement, memory shape, and idle shutdown timeout. `
 {"cpu_millicores": 4000, "memory_mib": 4096, "sleep_after_idle_seconds": 1800}
 ```
 
-Disk replaces the complete mutable disk object. Metal rejects disk shrink requests.
+Disk replaces the complete mutable disk object. Metal rejects disk shrink requests. A compute or disk increase that the host cannot hold returns `409` with the code `insufficient_capacity`.
+
+Resize replaces CPU, memory, disk, and idle shutdown as one shape. Metal checks capacity before it writes the shape.
 
 ```json
 {"size_mib": 40960, "throughput_mibps": 100, "iops": 4000}
@@ -230,9 +232,13 @@ Snapshot creation has no request body. It returns the staging identity and exact
 }
 ```
 
-The upload request supplies consecutive multipart URLs. Metal does not return these URLs.
+The upload request supplies consecutive multipart URLs and the multipart `upload_id` each artifact belongs to. Metal does not return these URLs. Metal stores the parts it has sent against that upload ID, so an upload that restarts sends only the parts the object store does not hold, and a replaced multipart upload starts again.
 
-The snapshot status reports `pending`, `uploading`, `completing`, `completed`, or `failed`. A completed response contains part numbers, ETags, sizes, and SHA-256 values.
+The part count is an upper bound. Metal stores each artifact compressed with zstd, so it uses as many of the signed parts as the compressed artifact needs and leaves the rest unused. Atlas signs one spare part beyond the uncompressed size.
+
+The snapshot status reports `pending`, `uploading`, `completing`, `completed`, or `failed`. A completed response contains part numbers, ETags, SHA-256 values, `size_bytes`, and `stored_size_bytes`. `size_bytes` is the uncompressed image, which is the size a VM disk must hold. `stored_size_bytes` is what the object store holds. The SHA-256 covers the uncompressed image, so one image keeps one digest whether it is stored raw or compressed.
+
+A consumer detects the format from the content rather than the object name. A zstd artifact begins with the frame magic `28 B5 2F FD` and a raw artifact does not, so Atlas can serve either form.
 
 ## Synchronization
 
@@ -278,6 +284,7 @@ Every HTTP error uses one safe object:
 | `403` | `forbidden` | A valid Atlas token does not allow the request. |
 | `404` | `not_found` | The resource does not exist. |
 | `409` | `conflict` | Current state or immutable identity blocks the request. |
+| `409` | `insufficient_capacity` | A compute or disk increase does not fit on this host. |
 | `409` | `image_content_conflict` | An image reference identifies different content. |
 | `422` | `image_integrity_failed` | Downloaded image data failed verification. |
 | `500` | `internal_error` | Metal failed and did not expose a host error. |

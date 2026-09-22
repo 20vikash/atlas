@@ -1,6 +1,6 @@
 # Go Anti-pattern Detection and Review Guide
 
-See [agent tooling setup](README.md) for related skills and installation commands.
+See [agent tooling setup](./) for related skills and installation commands.
 
 Adapted from the [Go anti-pattern gist](https://gist.github.com/pipethedev/0bc97d0d4a13edafbad95a00ad8b7ffe) by pipethedev.
 

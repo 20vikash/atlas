@@ -31,6 +31,12 @@ def configuration(**changes: object) -> AtlasSetupConfiguration:
 		"letsencrypt_email": "ops@example.com",
 		"is_letsencrypt_staging": False,
 		"is_wildcard_tls_auto_renew_enabled": True,
+		"use_dedicated_sleepy_vm_hosts": False,
+		"placement_strategy": "balanced",
+		"sleepy_vm_overcommit_factor": 1.0,
+		"auto_spawn_metal_server": False,
+		"default_metal_machine_size": "",
+		"default_metal_machine_image": "",
 	}
 	values.update(changes)
 	return AtlasSetupConfiguration.from_dict(values)
@@ -48,7 +54,6 @@ def aws_configuration(**changes: object) -> AtlasSetupConfiguration:
 			"aws_availability_zone": "eu-west-1a",
 			"aws_access_key_id": "key-id",
 			"aws_secret_access_key": "key-secret",
-			"aws_storage_pool_device": "/dev/nvme1n1",
 		}
 	)
 	values.update(changes)
@@ -72,6 +77,13 @@ class TestAtlasSetupConfiguration(UnitTestCase):
 
 	def test_region_name_is_normalized(self) -> None:
 		self.assertEqual(configuration(region_name=" PAR-1 ").region_name, "par-1")
+
+	def test_sleepy_vm_overcommit_factor_is_normalized(self) -> None:
+		self.assertEqual(configuration(sleepy_vm_overcommit_factor=2).sleepy_vm_overcommit_factor, 2.0)
+
+	def test_auto_spawn_needs_both_metal_catalog_names(self) -> None:
+		with self.assertRaisesRegex(ValueError, "default_metal_machine_size is required"):
+			configuration(auto_spawn_metal_server=True)
 
 	def test_aws_input_carries_only_the_aws_fields(self) -> None:
 		values = aws_configuration().settings_values()

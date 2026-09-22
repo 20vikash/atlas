@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.metal_server.usage import (
@@ -137,6 +138,55 @@ class TestServerUsage(UnitTestCase):
 		# One query keeps address lookup independent of VM count.
 		self.assertEqual(get_all.call_args.kwargs["fields"], ["name", "tenant_id"])
 		get_doc.assert_not_called()
+
+	def test_wireguard_peers_carry_the_stored_mesh_address(self) -> None:
+		"""Metal takes the address from Atlas, so it never derives one from the name."""
+		rows = [
+			frappe._dict(
+				name="01a0c05f-e209-70ad-a183-dda2a727cd8b",
+				wireguard_public_key="key-1",
+				wireguard_ip_address="fdab:1:e209:70ad:a183:dda2:a727:cd8b",
+				public_ipv4_address="203.0.113.7",
+				private_ipv4_address="10.0.0.7",
+				port=51820,
+				uplink_mac_address="aa:bb:cc:dd:ee:07",
+			)
+		]
+
+		with patch("atlas.metal_server.usage.frappe.get_all", return_value=rows):
+			peers = get_wireguard_peers()
+
+		self.assertEqual(
+			peers,
+			[
+				{
+					"node": "01a0c05f-e209-70ad-a183-dda2a727cd8b",
+					"mesh_address": "fdab:1:e209:70ad:a183:dda2:a727:cd8b",
+					"public_key": "key-1",
+					"address": "10.0.0.7:51820",
+					"public_address": "203.0.113.7",
+					"private_address": "10.0.0.7",
+					"mac": "aa:bb:cc:dd:ee:07",
+				}
+			],
+		)
+
+	def test_wireguard_peers_skip_a_server_without_a_mesh_address(self) -> None:
+		"""A host that has not configured WireGuard yet cannot be an AllowedIPs entry."""
+		rows = [
+			frappe._dict(
+				name="01a0c05f-e209-70ad-a183-dda2a727cd8b",
+				wireguard_public_key="key-1",
+				wireguard_ip_address=None,
+				public_ipv4_address="203.0.113.7",
+				private_ipv4_address="10.0.0.7",
+				port=51820,
+				uplink_mac_address="aa:bb:cc:dd:ee:07",
+			)
+		]
+
+		with patch("atlas.metal_server.usage.frappe.get_all", return_value=rows):
+			self.assertEqual(get_wireguard_peers(), [])
 
 	def test_desired_images_only_select_available_cached_images(self) -> None:
 		image = Mock()

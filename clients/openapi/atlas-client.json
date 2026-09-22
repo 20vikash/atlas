@@ -20,94 +20,32 @@
         "title": "ApiErrorField",
         "type": "object"
       },
-      "CapacityPendingError": {
-        "description": "The error returned while Atlas starts host capacity.",
-        "properties": {
-          "code": {
-            "const": "capacity_pending",
-            "title": "Code",
-            "type": "string"
-          },
-          "fields": {
-            "items": {
-              "$ref": "#/components/schemas/ApiErrorField"
-            },
-            "title": "Fields",
-            "type": "array"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "fields"
-        ],
-        "title": "CapacityPendingError",
-        "type": "object"
-      },
-      "CapacityPendingResponse": {
-        "description": "The JSON body of a pending capacity response.",
+      "CapacityUnavailableResponse": {
+        "description": "The JSON body of a 503 from virtual machine creation.\n\n`error.code` separates a fleet that is full from one that is only busy, so a\ncaller can retry a busy placement at once and escalate a full one.",
         "properties": {
           "error": {
-            "$ref": "#/components/schemas/CapacityPendingError"
+            "discriminator": {
+              "mapping": {
+                "out_of_capacity": "#/components/schemas/OutOfCapacityError",
+                "placement_busy": "#/components/schemas/PlacementBusyError"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OutOfCapacityError"
+              },
+              {
+                "$ref": "#/components/schemas/PlacementBusyError"
+              }
+            ],
+            "title": "Error"
           }
         },
         "required": [
           "error"
         ],
-        "title": "CapacityPendingResponse",
-        "type": "object"
-      },
-      "ComputeUpdatePayload": {
-        "additionalProperties": false,
-        "description": "New compute configuration.",
-        "properties": {
-          "cpu_millicores": {
-            "anyOf": [
-              {
-                "maximum": 32000,
-                "minimum": 100,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Cpu Millicores"
-          },
-          "memory_mib": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Memory Mib"
-          },
-          "sleep_after_idle_seconds": {
-            "anyOf": [
-              {
-                "maximum": 9223372036,
-                "minimum": 0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Sleep After Idle Seconds"
-          }
-        },
-        "title": "ComputeUpdatePayload",
+        "title": "CapacityUnavailableResponse",
         "type": "object"
       },
       "ConfigureWebhooksPayload": {
@@ -264,6 +202,11 @@
           "is_privileged": {
             "default": false,
             "title": "Is Privileged",
+            "type": "boolean"
+          },
+          "is_termination_protected": {
+            "default": false,
+            "title": "Is Termination Protected",
             "type": "boolean"
           },
           "memory_mib": {
@@ -694,6 +637,7 @@
             "enabled": true,
             "id": "8f1c2d3e4b5a6978",
             "image_type": "machine",
+            "is_termination_protected": false,
             "kernel_size_mib": 8,
             "memory_snapshot": false,
             "rootfs_size_mib": 20480,
@@ -732,6 +676,10 @@
           "image_type": {
             "title": "Image Type",
             "type": "string"
+          },
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
           },
           "kernel_size_mib": {
             "title": "Kernel Size Mib",
@@ -790,6 +738,7 @@
           "enabled",
           "cache_image",
           "memory_snapshot",
+          "is_termination_protected",
           "rootfs_size_mib",
           "kernel_size_mib",
           "transfer_progress",
@@ -866,6 +815,53 @@
           "keys"
         ],
         "title": "JSONWebKeySetResponse",
+        "type": "object"
+      },
+      "MemorySnapshotConfigurationPayload": {
+        "additionalProperties": false,
+        "description": "The virtual machine shape that a warm artifact serves.",
+        "properties": {
+          "disk_mib": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mib"
+          },
+          "memory_mib": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mib"
+          },
+          "virtual_cpu_count": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Virtual Cpu Count"
+          }
+        },
+        "title": "MemorySnapshotConfigurationPayload",
         "type": "object"
       },
       "MetadataReplacementPayload": {
@@ -946,6 +942,34 @@
           }
         },
         "title": "NetworkUpdatePayload",
+        "type": "object"
+      },
+      "OutOfCapacityError": {
+        "description": "No host can accept the VM. The fleet needs more capacity.",
+        "properties": {
+          "code": {
+            "const": "out_of_capacity",
+            "title": "Code",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ApiErrorField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fields"
+        ],
+        "title": "OutOfCapacityError",
         "type": "object"
       },
       "Page[IPAddressResponse]": {
@@ -1065,6 +1089,34 @@
         "title": "Page[VirtualMachineListResponse]",
         "type": "object"
       },
+      "PlacementBusyError": {
+        "description": "Every candidate host was held by another placement.\n\nThe fleet has room. Retry at once, guided by the `Retry-After` header.",
+        "properties": {
+          "code": {
+            "const": "placement_busy",
+            "title": "Code",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ApiErrorField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fields"
+        ],
+        "title": "PlacementBusyError",
+        "type": "object"
+      },
       "ReserveIPAddressPayload": {
         "additionalProperties": false,
         "description": "Optionally reserve an address the tenant already holds.",
@@ -1083,6 +1135,68 @@
           }
         },
         "title": "ReserveIPAddressPayload",
+        "type": "object"
+      },
+      "ResizePayload": {
+        "additionalProperties": false,
+        "description": "VM resource and idle shutdown changes.",
+        "properties": {
+          "cpu_millicores": {
+            "anyOf": [
+              {
+                "maximum": 32000,
+                "minimum": 100,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cpu Millicores"
+          },
+          "disk_mib": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Disk Mib"
+          },
+          "memory_mib": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Memory Mib"
+          },
+          "sleep_after_idle_seconds": {
+            "anyOf": [
+              {
+                "maximum": 9223372036,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sleep After Idle Seconds"
+          }
+        },
+        "title": "ResizePayload",
         "type": "object"
       },
       "SSHKeysReplacementPayload": {
@@ -1121,14 +1235,27 @@
             "title": "Image Type",
             "type": "string"
           },
+          "is_termination_protected": {
+            "default": false,
+            "title": "Is Termination Protected",
+            "type": "boolean"
+          },
           "memory_snapshot": {
             "default": false,
             "title": "Memory Snapshot",
             "type": "boolean"
           },
+          "memory_snapshot_configuration": {
+            "$ref": "#/components/schemas/MemorySnapshotConfigurationPayload"
+          },
           "tags": {
             "additionalProperties": {
+              "maxLength": 1000,
               "type": "string"
+            },
+            "maxProperties": 32,
+            "propertyNames": {
+              "maxLength": 128
             },
             "title": "Tags",
             "type": "object"
@@ -1143,6 +1270,21 @@
           "title"
         ],
         "title": "SnapshotPayload",
+        "type": "object"
+      },
+      "TerminationProtectionPayload": {
+        "additionalProperties": false,
+        "description": "The termination protection state to store.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "TerminationProtectionPayload",
         "type": "object"
       },
       "VirtualMachineCompute": {
@@ -1389,6 +1531,7 @@
             "disk_mib": 20480,
             "id": "vm-00001",
             "image_id": "8f1c2d3e4b5a6978",
+            "is_termination_protected": false,
             "last_known_state": "running",
             "memory_mib": 2048,
             "sleep_after_idle_seconds": 0,
@@ -1423,6 +1566,10 @@
           "image_id": {
             "title": "Image Id",
             "type": "string"
+          },
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
           },
           "last_known_state": {
             "title": "Last Known State",
@@ -1468,6 +1615,7 @@
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
+          "is_termination_protected",
           "tags",
           "created_at",
           "last_known_state",
@@ -1557,6 +1705,7 @@
             "disk_mib": 20480,
             "id": "vm-00001",
             "image_id": "8f1c2d3e4b5a6978",
+            "is_termination_protected": false,
             "memory_mib": 2048,
             "sleep_after_idle_seconds": 0,
             "tags": {
@@ -1590,6 +1739,10 @@
             "title": "Image Id",
             "type": "string"
           },
+          "is_termination_protected": {
+            "title": "Is Termination Protected",
+            "type": "boolean"
+          },
           "memory_mib": {
             "title": "Memory Mib",
             "type": "integer"
@@ -1619,6 +1772,7 @@
           "memory_mib",
           "disk_mib",
           "sleep_after_idle_seconds",
+          "is_termination_protected",
           "tags",
           "created_at"
         ],
@@ -1789,7 +1943,7 @@
     },
     "/api/atlas/images/{image_id}": {
       "delete": {
-        "description": "Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status and answers again.",
+        "description": "Retires an Available or Failed image that the tenant owns. A cleanup job removes the stored artifacts and remaining host snapshot data of an unused Machine image. Any other image becomes Archived and keeps its artifacts. An image that is already Deleting or Archived keeps that status and answers again.\n\nAn image with `is_termination_protected` returns `400`. Clear the protection first.",
         "operationId": "delete_image",
         "parameters": [
           {
@@ -1925,6 +2079,62 @@
           }
         },
         "summary": "Download image",
+        "tags": [
+          "Images"
+        ]
+      }
+    },
+    "/api/atlas/images/{image_id}/termination-protection": {
+      "patch": {
+        "description": "Sets or clears termination protection. Deletion of a protected image is refused until a later request clears it. A `system` image is protected when it is created.",
+        "operationId": "update_image_termination_protection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "enabled": true
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TerminationProtectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageResponse"
+                }
+              }
+            },
+            "description": "The termination protection state is stored."
+          }
+        },
+        "summary": "Update termination protection",
         "tags": [
           "Images"
         ]
@@ -2243,7 +2453,7 @@
         ]
       },
       "post": {
-        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.",
+        "description": "Creates a tenant VM from an image and requests the specified compute, disk, network, and guest configuration. Only tenant 0 can set `is_privileged`, which lets the VM reach every tenant through the mesh.\n\nSet `is_termination_protected` to refuse deletion of the new VM. The termination protection route changes it later.",
         "operationId": "create_virtual_machine",
         "parameters": [
           {
@@ -2293,17 +2503,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CapacityPendingResponse"
+                  "$ref": "#/components/schemas/CapacityUnavailableResponse"
                 }
               }
             },
-            "description": "Host capacity is pending. Retry after the reported interval.",
+            "description": "The virtual machine was not placed. `error.code` is `out_of_capacity` when no host can hold it, which needs more capacity in the region, or `placement_busy` when every candidate host was held by another placement, which only needs a retry. A busy response carries `Retry-After` in seconds.",
             "headers": {
               "Retry-After": {
-                "description": "Seconds to wait before another create request.",
-                "required": true,
+                "description": "Seconds to wait before retrying a `placement_busy` response.",
                 "schema": {
-                  "minimum": 0,
                   "type": "integer"
                 }
               }
@@ -2318,7 +2526,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}": {
       "delete": {
-        "description": "Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.",
+        "description": "Starts VM termination and detaches its public IP address without releasing the tenant reservation. Poll the VM until cleanup removes the record and this route returns 404.\n\nA VM with `is_termination_protected` returns `400`. Clear the protection first.",
         "operationId": "delete_virtual_machine",
         "parameters": [
           {
@@ -2499,6 +2707,74 @@
         ]
       }
     },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/actions/resize": {
+      "post": {
+        "description": "Changes CPU, memory, disk, or idle shutdown. Omitted fields keep their current value. The disk only grows.\n\nStop the VM before changing CPU, memory, or disk. Atlas resizes in place or migrates it. Idle-only changes work in any VM state. `0` disables idle shutdown.",
+        "operationId": "resize_virtual_machine",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "cpu_millicores": 4000,
+                "disk_mib": 40960,
+                "memory_mib": 8192
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ResizePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityUnavailableResponse"
+                }
+              }
+            },
+            "description": "No host can hold the new shape. `error.code` is `out_of_capacity` or `placement_busy`."
+          }
+        },
+        "summary": "Resize VM",
+        "tags": [
+          "VM Actions"
+        ]
+      }
+    },
     "/api/atlas/virtual-machines/{virtual_machine_id}/actions/restart": {
       "post": {
         "description": "Requests an in-place restart. Poll the VM route to observe completion.",
@@ -2587,7 +2863,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/actions/snapshot": {
       "post": {
-        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nUse tags to label the image and filter it later, for example, `{\"purpose\": \"pilot\"}` and `?tag=purpose:pilot`.",
+        "description": "Creates a reusable Machine image from the current VM disk. The new image belongs to the same tenant.\n\nIf `memory_snapshot` is true, Atlas also records the VM shape for compatible warm starts. Only tenant 0 can set `image_type` to `system`, which shares the image with every tenant, and only tenant 0 can set `cache_image` and `memory_snapshot`. These values cannot change after creation.\n\nUse `memory_snapshot_configuration` to record a different shape. Each absent value keeps the source VM value. The request needs `memory_snapshot`.\n\nSet `is_termination_protected` to refuse deletion of the new image. A `system` image is always protected.\n\nUse tags to label the image and filter it later, for example, `{\"purpose\": \"pilot\"}` and `?tag=purpose:pilot`.",
         "operationId": "create_virtual_machine_snapshot",
         "parameters": [
           {
@@ -2616,7 +2892,12 @@
               "example": {
                 "cache_image": false,
                 "image_type": "machine",
+                "is_termination_protected": false,
                 "memory_snapshot": false,
+                "memory_snapshot_configuration": {
+                  "memory_mib": 4096,
+                  "virtual_cpu_count": 2
+                },
                 "tags": {
                   "purpose": "pilot"
                 },
@@ -2733,66 +3014,9 @@
         ]
       }
     },
-    "/api/atlas/virtual-machines/{virtual_machine_id}/compute": {
-      "patch": {
-        "description": "Changes the CPU entitlement, the memory size, and the idle shutdown delay. A CPU or memory change needs a stopped VM.\n\nA value of `0` disables automatic idle shutdown.",
-        "operationId": "update_virtual_machine_compute",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "virtual_machine_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
-            "in": "header",
-            "name": "X-Tenant-ID",
-            "required": true,
-            "schema": {
-              "maximum": 4294967295,
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "cpu_millicores": 4000,
-                "sleep_after_idle_seconds": 1800
-              },
-              "schema": {
-                "$ref": "#/components/schemas/ComputeUpdatePayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VirtualMachineResponse"
-                }
-              }
-            },
-            "description": "The change is accepted. Poll the virtual machine route."
-          }
-        },
-        "summary": "Update compute",
-        "tags": [
-          "VM Configuration"
-        ]
-      }
-    },
     "/api/atlas/virtual-machines/{virtual_machine_id}/disk": {
       "patch": {
-        "description": "Increases the disk size or changes its throughput and IOPS limits. The disk size cannot decrease, and a limit of 0 removes that limit.",
+        "description": "Works while the VM runs. The disk only grows, and `0` removes a limit. A full host returns `409 insufficient_capacity`. Stop the VM and use resize to move it.",
         "operationId": "update_virtual_machine_disk",
         "parameters": [
           {
@@ -2839,9 +3063,12 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "409": {
+            "description": "The host has no room. `error.code` is `insufficient_capacity`."
           }
         },
-        "summary": "Resize disk",
+        "summary": "Update disk in-place",
         "tags": [
           "VM Configuration"
         ]
@@ -3125,6 +3352,62 @@
           }
         },
         "summary": "Replace SSH keys",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/termination-protection": {
+      "patch": {
+        "description": "Sets or clears termination protection. Termination and deletion of a protected VM are refused until a later request clears it.",
+        "operationId": "update_virtual_machine_termination_protection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "enabled": true
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TerminationProtectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Update termination protection",
         "tags": [
           "VM Configuration"
         ]

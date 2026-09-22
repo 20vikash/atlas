@@ -82,3 +82,7 @@ scripts/.dev-jwks-ed25519-key.pem
 
 # Local Atlas VM settings
 scripts/atlas-vm/atlas-vm.env
+
+# VitePress
+/.vitepress/cache/
+/.vitepress/dist/

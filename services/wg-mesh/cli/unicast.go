@@ -50,7 +50,7 @@ func runUnicastDaemon(peersPath string) error {
 	if uplinkName == "" {
 		return errors.New("cannot find the configured uplink")
 	}
-	peers, err := readMeshPeers(peersPath, config)
+	peers, err := readMeshPeers(peersPath)
 	if err != nil {
 		return err
 	}

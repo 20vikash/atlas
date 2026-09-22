@@ -14,12 +14,19 @@ if TYPE_CHECKING:
 
 TAG_FIELD = "tags"
 DENY_EVERYTHING = "1=0"
+MAXIMUM_TAGS = 32
+MAXIMUM_TAG_KEY_LENGTH = 128
+MAXIMUM_TAG_VALUE_LENGTH = 1000
 
 
 def validate_tags(document: Document) -> None:
-	"""Trim the tag rows of document and reject an empty or repeated key."""
+	"""Trim the tag rows of document and reject a key or value that breaks a tag limit."""
+	rows = document.get(TAG_FIELD) or []
+	if len(rows) > MAXIMUM_TAGS:
+		frappe.throw(_("A document takes at most {0} tags.").format(MAXIMUM_TAGS))
+
 	seen: set[str] = set()
-	for tag in document.get(TAG_FIELD) or []:
+	for tag in rows:
 		tag.key = (tag.key or "").strip()
 		tag.value = (tag.value or "").strip()
 
@@ -27,6 +34,14 @@ def validate_tags(document: Document) -> None:
 			frappe.throw(_("A tag needs a key."))
 		if tag.key in seen:
 			frappe.throw(_("Tag key {0} is repeated.").format(tag.key))
+		if len(tag.key) > MAXIMUM_TAG_KEY_LENGTH:
+			frappe.throw(_("A tag key takes at most {0} characters.").format(MAXIMUM_TAG_KEY_LENGTH))
+		if len(tag.value) > MAXIMUM_TAG_VALUE_LENGTH:
+			frappe.throw(
+				_("The value of tag key {0} takes at most {1} characters.").format(
+					tag.key, MAXIMUM_TAG_VALUE_LENGTH
+				)
+			)
 
 		seen.add(tag.key)
 

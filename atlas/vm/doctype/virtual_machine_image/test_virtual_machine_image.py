@@ -46,12 +46,33 @@ class TestVirtualMachineImage(UnitTestCase):
 			"memory_snapshot_virtual_cpu_count": 0,
 			"memory_snapshot_memory_mib": 0,
 			"memory_snapshot_disk_mib": 0,
+			"is_termination_protected": 0,
 		}
 		defaults.update(values)
 		image = object.__new__(VirtualMachineImage)
 		for key, value in defaults.items():
 			setattr(image, key, value)
 		return image
+
+	def test_a_system_image_is_protected_when_it_is_created(self) -> None:
+		image = self.make_image(image_type="system")
+
+		image.before_insert()
+
+		self.assertTrue(image.is_termination_protected)
+
+	def test_a_machine_image_keeps_the_requested_protection(self) -> None:
+		image = self.make_image(image_type="machine")
+
+		image.before_insert()
+
+		self.assertFalse(image.is_termination_protected)
+
+	def test_a_protected_image_refuses_removal(self) -> None:
+		image = self.make_image(is_termination_protected=1)
+
+		with self.assertRaises(frappe.ValidationError):
+			image.ensure_not_termination_protected()
 
 	def test_an_archived_image_cannot_boot_a_virtual_machine(self) -> None:
 		image = self.make_image(status="Archived")
@@ -310,6 +331,47 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		self.assertEqual(image_values["memory_snapshot_memory_mib"], 2048)
 		enqueue_transfer.assert_called_once_with("01900000-0000-7000-8000-000000000001")
 
+	def test_a_requested_shape_replaces_only_its_own_values(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="VM-00001",
+			server="server-1",
+			virtual_machine_image="system-image",
+			architecture="amd64",
+			cpu_millicores=1500,
+			memory_mib=2048,
+			disk_mib=1024,
+			tenant_id=0,
+		)
+		image_values = {}
+		metal_client = Mock()
+		metal_client.create_snapshot.return_value = {
+			"id": "01900000-0000-7000-8000-000000000004",
+			"rootfs": {"size_bytes": 1024 * 1024},
+			"kernel": {"size_bytes": 1024 * 1024},
+		}
+		service = VirtualMachineImageTransferService()
+
+		def get_doc(doctype, name=None):
+			if isinstance(doctype, dict):
+				image_values.update(doctype)
+			return Mock()
+
+		with (
+			patch("atlas.vm.core.vm_image_transfer.frappe.get_doc", side_effect=get_doc),
+			patch("atlas.vm.core.vm_image_transfer.MetalClient", return_value=metal_client),
+			patch.object(service, "enqueue"),
+		):
+			service.create_from_virtual_machine(
+				virtual_machine,
+				"Machine image",
+				memory_snapshot=True,
+				memory_snapshot_configuration={"virtual_cpu_count": 8, "memory_mib": 16384},
+			)
+
+		self.assertEqual(image_values["memory_snapshot_virtual_cpu_count"], 8)
+		self.assertEqual(image_values["memory_snapshot_memory_mib"], 16384)
+		self.assertEqual(image_values["memory_snapshot_disk_mib"], 1024)
+
 	def test_requested_tags_reach_the_new_image(self) -> None:
 		virtual_machine = SimpleNamespace(
 			name="VM-00001",
@@ -408,8 +470,12 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 
 		request = MultipartUploadService(image, object_storage_client).get_upload_request()
 
-		self.assertEqual([part["part_number"] for part in request["rootfs"]["parts"]], [1, 2])
-		self.assertEqual([part["part_number"] for part in request["kernel"]["parts"]], [1])
+		# The count is an upper bound with one spare part, because the stored
+		# artifact is compressed and its part count is not known in advance.
+		self.assertEqual([part["part_number"] for part in request["rootfs"]["parts"]], [1, 2, 3])
+		self.assertEqual([part["part_number"] for part in request["kernel"]["parts"]], [1, 2])
+		self.assertEqual(request["rootfs"]["upload_id"], "rootfs-upload")
+		self.assertEqual(request["kernel"]["upload_id"], "kernel-upload")
 		self.assertTrue(
 			all(
 				call.kwargs["expiry_seconds"] == 86400
@@ -457,8 +523,8 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 		metal_client = Mock()
 		metal_client.get_snapshot.return_value = {
 			"state": "completed",
-			"rootfs": {"sha256": "a" * 64},
-			"kernel": {"sha256": "b" * 64},
+			"rootfs": {"sha256": "a" * 64, "stored_size_bytes": 3 * 1024 * 1024},
+			"kernel": {"sha256": "b" * 64, "stored_size_bytes": 1024 * 1024},
 		}
 		settings = SimpleNamespace(get_object_storage_client=Mock(return_value=Mock()))
 		service = VirtualMachineImageTransferService()
@@ -476,6 +542,8 @@ class TestVirtualMachineImageTransfer(UnitTestCase):
 			service.advance(image)
 			self.assertEqual(image.image_sha256, "a" * 64)
 			self.assertEqual(image.kernel_sha256, "b" * 64)
+			self.assertEqual(image.image_stored_size_mib, 3)
+			self.assertEqual(image.kernel_stored_size_mib, 1)
 			self.assertEqual(image.status, "Completing")
 			metal_client.delete_snapshot.assert_not_called()
 

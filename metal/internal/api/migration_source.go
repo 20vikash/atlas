@@ -1,43 +1,46 @@
 package api
 
 import (
-	vmmigration "github.com/frappe/atlas/metal/internal/vm_migration"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/frappe/atlas/metal/internal/vm"
+	"github.com/frappe/atlas/metal/internal/vm/migration"
 )
 
-// migrationSourceResponse is portable source state for the target.
-type migrationSourceResponse struct {
-	Config        vmmigration.PortableConfig `json:"config"`
-	ObservedState vm.State                   `json:"observed_state"`
-}
-
-// prepareMigrationSource locks the source and returns portable state.
+// prepareMigrationSource locks the source and returns its definition and state.
 func (s *Server) prepareMigrationSource(c echo.Context) error {
 	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
 	if err != nil {
 		return err
 	}
-	handshake, err := s.migrationManager.LockSource(c.Request().Context(), identifier, virtualMachineID)
+	sourceDescription, err := s.migrationManager.LockSource(c.Request().Context(), identifier, virtualMachineID)
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, migrationSourceResponse{Config: handshake.Config, ObservedState: handshake.ObservedState})
+	return c.JSON(http.StatusOK, sourceDescription)
 }
 
-// nextSnapshotRequest acknowledges the last sequence.
-type nextSnapshotRequest struct {
-	ReceivedSequence int `json:"received_sequence"`
-}
-
-// snapshotResponse describes the next snapshot.
-type snapshotResponse struct {
-	Sequence  int    `json:"sequence"`
-	SizeBytes int64  `json:"size_bytes"`
-	GUID      string `json:"guid"`
+// startMigrationStream starts a one-shot mutual-TLS listener for one ZFS stream.
+func (s *Server) startMigrationStream(c echo.Context) error {
+	identifier, virtualMachineID, err := migrationSourceIdentifiers(c)
+	if err != nil {
+		return err
+	}
+	var request migration.SnapshotStreamRequest
+	if err := decodeJSONRequest(c, &request); err != nil {
+		return err
+	}
+	if request.Sequence < 1 || request.ThroughputMiBps < 0 {
+		return badRequest("invalid stream request")
+	}
+	if err := s.migrationManager.StartSourceStream(
+		c.Request().Context(), identifier, virtualMachineID,
+		request.Sequence, request.ResumeToken, request.ThroughputMiBps,
+	); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusAccepted)
 }
 
 // createMigrationSnapshot returns the next source snapshot.
@@ -46,15 +49,18 @@ func (s *Server) createMigrationSnapshot(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var request nextSnapshotRequest
+	var request migration.SnapshotAcknowledgement
 	if err := decodeOptionalJSON(c, &request); err != nil {
 		return err
+	}
+	if request.ReceivedSequence < 0 {
+		return badRequest("invalid received_sequence")
 	}
 	snapshot, err := s.migrationManager.NextSourceSnapshot(c.Request().Context(), identifier, virtualMachineID, request.ReceivedSequence)
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
+	return c.JSON(http.StatusOK, snapshot)
 }
 
 // stopMigrationSource stops the source, removes its network, and returns its
@@ -64,11 +70,18 @@ func (s *Server) stopMigrationSource(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, virtualMachineID)
+	var request migration.SnapshotAcknowledgement
+	if err := decodeOptionalJSON(c, &request); err != nil {
+		return err
+	}
+	if request.ReceivedSequence < 0 {
+		return badRequest("invalid received_sequence")
+	}
+	snapshot, err := s.migrationManager.StopSource(c.Request().Context(), identifier, virtualMachineID, request.ReceivedSequence)
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, snapshotResponse{Sequence: snapshot.Sequence, SizeBytes: snapshot.SizeBytes, GUID: snapshot.GUID})
+	return c.JSON(http.StatusOK, snapshot)
 }
 
 // startMigrationSource restores the source during rollback.
@@ -107,8 +120,8 @@ func (s *Server) deleteMigrationSource(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-// migrationSourceIdentifiers reads the migration ID and the VM ID the target
-// sends. The target and source hold the same VM ID across a migration.
+// migrationSourceIdentifiers reads the migration ID and the VM ID the destination
+// sends. The destination and source hold the same VM ID across a migration.
 func migrationSourceIdentifiers(c echo.Context) (string, string, error) {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {

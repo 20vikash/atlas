@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,9 +14,24 @@ import (
 	"time"
 )
 
-// SnapshotPartSizeBytes is the fixed multipart upload size. The controller signs
-// each part against this size, so it cannot change without breaking a signature.
-const SnapshotPartSizeBytes int64 = 2 << 30
+// SnapshotPartSizeBytes is the compressed upload part size. Atlas must use it
+// when it signs multipart URLs.
+const SnapshotPartSizeBytes int64 = 256 << 20
+
+// Artifact names for the stored upload progress of one staged snapshot.
+const (
+	rootfsArtifact = "rootfs"
+	kernelArtifact = "kernel"
+)
+
+const (
+	// uploadPartAttempts retries transient failures without restarting the artifact.
+	uploadPartAttempts = 3
+	uploadRetryDelay   = 2 * time.Second
+)
+
+// errRetryableUpload marks a part failure worth repeating.
+var errRetryableUpload = errors.New("retryable upload failure")
 
 // SnapshotUploadPart is one presigned destination for a part of an artifact.
 type SnapshotUploadPart struct {
@@ -25,7 +41,9 @@ type SnapshotUploadPart struct {
 
 // SnapshotArtifactUpload contains all upload parts for one artifact.
 type SnapshotArtifactUpload struct {
-	Parts []SnapshotUploadPart
+	// UploadID identifies the multipart upload for resumable part progress.
+	UploadID string
+	Parts    []SnapshotUploadPart
 }
 
 // SnapshotUploadRequest contains upload URLs for both image artifacts.
@@ -40,11 +58,13 @@ type UploadedPart struct {
 	ETag       string `json:"etag"`
 }
 
-// UploadedArtifact describes one uploaded artifact.
+// UploadedArtifact describes one uploaded artifact. SizeBytes is the
+// uncompressed image and StoredSizeBytes is what the object store holds.
 type UploadedArtifact struct {
-	SizeBytes int64          `json:"size_bytes"`
-	SHA256    string         `json:"sha256"`
-	Parts     []UploadedPart `json:"parts"`
+	SizeBytes       int64          `json:"size_bytes"`
+	StoredSizeBytes int64          `json:"stored_size_bytes"`
+	SHA256          string         `json:"sha256"`
+	Parts           []UploadedPart `json:"parts"`
 }
 
 // SnapshotUploadResult describes both uploaded image artifacts.
@@ -71,8 +91,7 @@ type SnapshotUploadStatus struct {
 	Error         string
 }
 
-// snapshotUpload tracks one running upload goroutine, so a delete can cancel it
-// and wait for it to stop before it removes the staging data it reads.
+// snapshotUpload lets deletion stop and wait for its upload goroutine.
 type snapshotUpload struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -91,8 +110,7 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	rootContext := store.rootContext
 	store.lifecycleMutex.Unlock()
 
-	// Shutdown waits on this counter. Every path that does not hand the upload to
-	// a goroutine must release it here.
+	// Release the shutdown counter unless a goroutine takes ownership.
 	goroutineStarted := false
 	defer func() {
 		if !goroutineStarted {
@@ -136,6 +154,9 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	store.uploads[snapshotID] = upload
 	store.uploadsMutex.Unlock()
 
+	// Remove buffers left by a crashed upload.
+	store.removeStalePartBuffers(snapshotID)
+
 	metadata.UploadState = UploadStateUploading
 	metadata.UploadError = ""
 	metadata.LastActivityAt = time.Now().UTC()
@@ -152,8 +173,7 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	return nil
 }
 
-// runUpload sends both artifacts and records the outcome. It always releases the
-// shutdown counter and signals waiters, whichever way it ends.
+// runUpload sends both artifacts and records the result.
 func (store *SnapshotStore) runUpload(ctx context.Context, snapshotID string, upload *snapshotUpload, rootfsSize, kernelSize int64, request SnapshotUploadRequest) {
 	defer func() {
 		store.removeUpload(snapshotID, upload)
@@ -161,12 +181,14 @@ func (store *SnapshotStore) runUpload(ctx context.Context, snapshotID string, up
 		store.uploadsWaitGroup.Done()
 	}()
 
-	rootfs, err := store.uploadArtifact(ctx, store.pool.stagingDevicePath(snapshotID), rootfsSize, request.Rootfs.Parts, &upload.uploaded)
+	rootfs, err := store.uploadArtifact(ctx, snapshotID, rootfsArtifact,
+		store.pool.stagingDevicePath(snapshotID), rootfsSize, request.Rootfs, &upload.uploaded)
 	if err != nil {
 		store.failUpload(ctx, snapshotID, fmt.Errorf("upload rootfs: %w", err))
 		return
 	}
-	kernel, err := store.uploadArtifact(ctx, filepath.Join(store.snapshotDirectory(snapshotID), "vmlinux"), kernelSize, request.Kernel.Parts, &upload.uploaded)
+	kernel, err := store.uploadArtifact(ctx, snapshotID, kernelArtifact,
+		filepath.Join(store.snapshotDirectory(snapshotID), "vmlinux"), kernelSize, request.Kernel, &upload.uploaded)
 	if err != nil {
 		store.failUpload(ctx, snapshotID, fmt.Errorf("upload kernel: %w", err))
 		return
@@ -183,8 +205,7 @@ func (store *SnapshotStore) finishUpload(snapshotID string, result SnapshotUploa
 	})
 }
 
-// failUpload records a failure. A canceled upload stays pending instead, so a
-// shutdown or a delete does not look like a real failure.
+// failUpload leaves cancelled uploads pending for retry.
 func (store *SnapshotStore) failUpload(ctx context.Context, snapshotID string, cause error) {
 	// Keep canceled uploads pending for retry.
 	if ctx.Err() != nil {
@@ -220,8 +241,7 @@ func (store *SnapshotStore) removeUpload(snapshotID string, upload *snapshotUplo
 	}
 }
 
-// cancelAndWaitUpload stops a running upload and blocks until its goroutine
-// returns, so the caller can safely remove the staging data it was reading.
+// cancelAndWaitUpload stops an upload before its staging data is removed.
 func (store *SnapshotStore) cancelAndWaitUpload(snapshotID string) {
 	store.uploadsMutex.Lock()
 	upload := store.uploads[snapshotID]
@@ -231,6 +251,13 @@ func (store *SnapshotStore) cancelAndWaitUpload(snapshotID string) {
 	}
 	upload.cancel()
 	<-upload.done
+}
+
+// isUploadRunning reports whether an upload goroutine owns the staging data.
+func (store *SnapshotStore) isUploadRunning(snapshotID string) bool {
+	store.uploadsMutex.Lock()
+	defer store.uploadsMutex.Unlock()
+	return store.uploads[snapshotID] != nil
 }
 
 // UploadStatus reports the current upload state of one staged snapshot. An
@@ -279,15 +306,56 @@ func (store *SnapshotStore) UploadStatus(_ context.Context, snapshotID string) (
 	return status, nil
 }
 
-// validateUploadParts checks that the parts cover the artifact exactly, are
-// numbered from 1 without gaps, and carry usable URLs.
+// isRetryableUploadStatus reports whether the object store may accept the part
+// on another try.
+func isRetryableUploadStatus(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
+// storedParts returns the parts of one artifact the object store already holds.
+func (store *SnapshotStore) storedParts(snapshotID, artifact, uploadID string) []storedPart {
+	lock := store.snapshotLock(snapshotID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	metadata, found, err := store.loadStagedSnapshot(snapshotID)
+	if err != nil || !found {
+		return nil
+	}
+	if artifact == rootfsArtifact {
+		return metadata.RootfsProgress.storedParts(uploadID)
+	}
+	return metadata.KernelProgress.storedParts(uploadID)
+}
+
+// recordParts saves the parts stored so far. A failure only costs the resume,
+// so it must not fail the upload that is working.
+func (store *SnapshotStore) recordParts(snapshotID, artifact, uploadID string, parts []storedPart) {
+	saved := make([]storedPart, len(parts))
+	copy(saved, parts)
+	progress := &artifactProgress{UploadID: uploadID, Parts: saved}
+	store.updateUploadMetadata(snapshotID, func(metadata *stagedSnapshotMetadata) {
+		if artifact == rootfsArtifact {
+			metadata.RootfsProgress = progress
+			return
+		}
+		metadata.KernelProgress = progress
+	})
+}
+
+// validateUploadParts checks that the signed parts are numbered from 1 without
+// gaps and carry usable URLs.
+//
+// The count is an upper bound, not an exact figure. The artifact is stored
+// compressed, so how many parts it needs is known only once it is written. The
+// controller signs enough parts for the uncompressed size and the upload uses
+// as many as it needs.
 func validateUploadParts(parts []SnapshotUploadPart, sizeBytes int64) error {
 	if sizeBytes <= 0 {
 		return fmt.Errorf("%w: artifact size must be positive", ErrInvalidUpload)
 	}
-	expectedCount := int((sizeBytes + SnapshotPartSizeBytes - 1) / SnapshotPartSizeBytes)
-	if len(parts) != expectedCount {
-		return fmt.Errorf("%w: expected %d parts", ErrInvalidUpload, expectedCount)
+	if len(parts) == 0 {
+		return fmt.Errorf("%w: at least one part is required", ErrInvalidUpload)
 	}
 	for index, part := range parts {
 		if part.PartNumber != index+1 {
@@ -302,33 +370,90 @@ func validateUploadParts(parts []SnapshotUploadPart, sizeBytes int64) error {
 
 // uploadArtifact sends one artifact part by part and digests it as it reads, so
 // the file is read once for both the upload and the checksum.
-func (store *SnapshotStore) uploadArtifact(ctx context.Context, path string, sizeBytes int64, parts []SnapshotUploadPart, uploaded *atomic.Int64) (UploadedArtifact, error) {
+func (store *SnapshotStore) uploadArtifact(ctx context.Context, snapshotID, artifact, path string, sizeBytes int64, request SnapshotArtifactUpload, uploaded *atomic.Int64) (UploadedArtifact, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return UploadedArtifact{}, err
 	}
 	defer file.Close()
 
-	digest := sha256.New()
-	uploadedParts := make([]UploadedPart, 0, len(parts))
-	for index, part := range parts {
-		offset := int64(index) * SnapshotPartSizeBytes
-		length := min(SnapshotPartSizeBytes, sizeBytes-offset)
-		reader := io.TeeReader(io.NewSectionReader(file, offset, length), digest)
+	// The digest is one pass over the uncompressed artifact, so an image keeps
+	// one identity whether it is stored raw or compressed. It is separate from
+	// the part bodies, because a retried part must not feed the hash twice.
+	digest, err := artifactSHA256(file, sizeBytes)
+	if err != nil {
+		return UploadedArtifact{}, err
+	}
 
-		etag, err := store.uploadPart(ctx, part, reader, length)
-		if err != nil {
-			return UploadedArtifact{}, err
-		}
-		uploaded.Add(length)
-		uploadedParts = append(uploadedParts, UploadedPart{PartNumber: part.PartNumber, ETag: etag})
+	source := &countingReader{
+		reader:  io.NewSectionReader(file, 0, sizeBytes),
+		counter: uploaded,
+	}
+	storedBytes, parts, err := store.compressArtifact(ctx, snapshotID, artifact, source, request,
+		store.storedParts(snapshotID, artifact, request.UploadID))
+	if err != nil {
+		return UploadedArtifact{}, err
 	}
 
 	return UploadedArtifact{
-		SizeBytes: sizeBytes,
-		SHA256:    hex.EncodeToString(digest.Sum(nil)),
-		Parts:     uploadedParts,
+		SizeBytes:       sizeBytes,
+		StoredSizeBytes: storedBytes,
+		SHA256:          hex.EncodeToString(digest),
+		Parts:           parts,
 	}, nil
+}
+
+// countingReader reports progress against the uncompressed artifact, which is
+// the size the controller shows.
+type countingReader struct {
+	reader  io.Reader
+	counter *atomic.Int64
+}
+
+func (reader *countingReader) Read(buffer []byte) (int, error) {
+	read, err := reader.reader.Read(buffer)
+	if read > 0 {
+		reader.counter.Add(int64(read))
+	}
+	return read, err
+}
+
+// artifactSHA256 digests exactly sizeBytes of the artifact.
+func artifactSHA256(file *os.File, sizeBytes int64) ([]byte, error) {
+	digest := sha256.New()
+	read, err := io.Copy(digest, io.NewSectionReader(file, 0, sizeBytes))
+	if err != nil {
+		return nil, err
+	}
+	if read != sizeBytes {
+		return nil, fmt.Errorf("%w: read %d of %d artifact bytes", ErrInvalidUpload, read, sizeBytes)
+	}
+	return digest.Sum(nil), nil
+}
+
+// uploadPartWithRetry sends one part, repeating a failure the object store may
+// recover from. Each attempt reads the part again, so a partial body never
+// reaches the next attempt.
+func (store *SnapshotStore) uploadPartWithRetry(ctx context.Context, part SnapshotUploadPart, file *os.File, offset, length int64) (string, error) {
+	var lastError error
+	for attempt := range uploadPartAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(time.Duration(attempt) * uploadRetryDelay):
+			}
+		}
+		etag, err := store.uploadPart(ctx, part, io.NewSectionReader(file, offset, length), length)
+		if err == nil {
+			return etag, nil
+		}
+		if ctx.Err() != nil || !errors.Is(err, errRetryableUpload) {
+			return "", err
+		}
+		lastError = err
+	}
+	return "", lastError
 }
 
 // uploadPart sends one part and returns the ETag the destination reports.
@@ -344,13 +469,17 @@ func (store *SnapshotStore) uploadPart(ctx context.Context, part SnapshotUploadP
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", fmt.Errorf("upload part %d to %s failed", part.PartNumber, redactURL(part.URL))
+		return "", fmt.Errorf("%w: upload part %d to %s failed", errRetryableUpload, part.PartNumber, redactURL(part.URL))
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("upload part %d to %s returned HTTP status %d", part.PartNumber, redactURL(part.URL), response.StatusCode)
+		failure := fmt.Errorf("upload part %d to %s returned HTTP status %d", part.PartNumber, redactURL(part.URL), response.StatusCode)
+		if isRetryableUploadStatus(response.StatusCode) {
+			return "", fmt.Errorf("%w: %s", errRetryableUpload, failure)
+		}
+		return "", failure
 	}
 	etag := response.Header.Get("ETag")
 	if etag == "" {

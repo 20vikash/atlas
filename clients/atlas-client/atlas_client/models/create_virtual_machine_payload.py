@@ -40,6 +40,7 @@ class CreateVirtualMachinePayload:
             hostname (str | Unset):  Default: ''.
             ip_address_id (None | str | Unset):
             is_privileged (bool | Unset):  Default: False.
+            is_termination_protected (bool | Unset):  Default: False.
             metadata (CreateVirtualMachinePayloadMetadata | Unset):
             private_network_throughput_mibps (int | Unset):  Default: 0.
             public_network_throughput_mibps (int | Unset):  Default: 0.
@@ -59,6 +60,7 @@ class CreateVirtualMachinePayload:
     hostname: str | Unset = ''
     ip_address_id: None | str | Unset = UNSET
     is_privileged: bool | Unset = False
+    is_termination_protected: bool | Unset = False
     metadata: CreateVirtualMachinePayloadMetadata | Unset = UNSET
     private_network_throughput_mibps: int | Unset = 0
     public_network_throughput_mibps: int | Unset = 0
@@ -104,6 +106,8 @@ class CreateVirtualMachinePayload:
 
         is_privileged = self.is_privileged
 
+        is_termination_protected = self.is_termination_protected
+
         metadata: dict[str, Any] | Unset = UNSET
         if not isinstance(self.metadata, Unset):
             metadata = self.metadata.to_dict()
@@ -145,6 +149,8 @@ class CreateVirtualMachinePayload:
             field_dict["ip_address_id"] = ip_address_id
         if is_privileged is not UNSET:
             field_dict["is_privileged"] = is_privileged
+        if is_termination_protected is not UNSET:
+            field_dict["is_termination_protected"] = is_termination_protected
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
         if private_network_throughput_mibps is not UNSET:
@@ -213,6 +219,8 @@ class CreateVirtualMachinePayload:
 
         is_privileged = d.pop("is_privileged", UNSET)
 
+        is_termination_protected = d.pop("is_termination_protected", UNSET)
+
         _metadata = d.pop("metadata", UNSET)
         metadata: CreateVirtualMachinePayloadMetadata | Unset
         if isinstance(_metadata,  Unset):
@@ -246,6 +254,7 @@ class CreateVirtualMachinePayload:
             hostname=hostname,
             ip_address_id=ip_address_id,
             is_privileged=is_privileged,
+            is_termination_protected=is_termination_protected,
             metadata=metadata,
             private_network_throughput_mibps=private_network_throughput_mibps,
             public_network_throughput_mibps=public_network_throughput_mibps,

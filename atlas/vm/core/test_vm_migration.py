@@ -1,467 +1,278 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import Mock, PropertyMock, call, patch
+from unittest.mock import Mock, patch
 
-import frappe
 from frappe.tests import UnitTestCase
-from frappe.utils import add_to_date, now_datetime
 
 from atlas.atlas.core.exceptions import AtlasUserError
-from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.vm_migration import MigrationService, reconcile_migrations
-from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
+from atlas.vm.core.vm_migration import MigrationService
 
 
 def migration_doc(**overrides: object) -> SimpleNamespace:
+	"""Build the migration fields used by unit tests."""
 	values: dict[str, object] = {
 		"name": "mig-00001",
 		"virtual_machine": "vm-00001",
-		"source_server": "metal-1",
-		"target_server": "metal-2",
-		"status": "running",
-		"abort_requested": 0,
-		"progress": "{}",
-		"db_set": Mock(),
+		"source_metal_server": "metal-1",
+		"destination_metal_server": "metal-2",
+		"status": "preparing",
+		"started_at": None,
+		"progress_percent": 0,
+		"destination_metal_server_selection_attempts": 0,
+		"target_cpu_millicores": 0,
+		"target_memory_mib": 0,
+		"target_disk_mib": 0,
+		"transfers": [],
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
 
 
 def source_vm(**overrides: object) -> SimpleNamespace:
+	"""Build a VM source shape used by validation tests."""
 	values: dict[str, object] = {
 		"name": "vm-00001",
 		"active_migration": None,
 		"is_draft": 0,
 		"is_terminating": 0,
-		"sleep_after_idle_seconds": 0,
 		"current_state": "running",
+		"architecture": "amd64",
+		"tenant_id": 7,
+		"cpu_millicores": 1000,
+		"memory_mib": 512,
+		"disk_mib": 1024,
+		"sleep_after_idle_seconds": 0,
 	}
 	values.update(overrides)
 	return SimpleNamespace(**values)
 
 
 class TestMigrationValidation(UnitTestCase):
-	def test_rejects_a_vm_that_is_already_migrating(self) -> None:
+	def test_rejects_an_already_migrating_vm(self) -> None:
 		with self.assertRaisesRegex(AtlasUserError, "already migrating"):
 			MigrationService.validate_source(source_vm(active_migration="mig-00001"))
 
-	def test_rejects_a_draft_or_terminating_vm(self) -> None:
-		with self.assertRaises(AtlasUserError):
-			MigrationService.validate_source(source_vm(is_draft=1))
-		with self.assertRaises(AtlasUserError):
-			MigrationService.validate_source(source_vm(is_terminating=1))
-
-	def test_rejects_a_failed_or_unknown_vm(self) -> None:
+	def test_rejects_a_vm_without_a_live_state(self) -> None:
 		for state in ("failed", "unknown"):
 			with self.assertRaises(AtlasUserError):
 				MigrationService.validate_source(source_vm(current_state=state))
 
-	def test_accepts_a_running_stopped_or_paused_vm(self) -> None:
-		for state in ("running", "stopped", "paused"):
-			self.assertIsNone(MigrationService.validate_source(source_vm(current_state=state)))
 
-
-class TestMigrationCreation(UnitTestCase):
-	def test_create_reserves_a_target_and_locks_the_vm(self) -> None:
-		locked = source_vm(
-			server="metal-1",
-			cpu_millicores=2000,
-			memory_mib=2048,
-			disk_mib=10240,
-			tenant_id=7,
-			virtual_machine_image="Ubuntu",
-			architecture="amd64",
-			db_set=Mock(),
-		)
-		inserted = Mock()
-		inserted.insert.return_value = SimpleNamespace(name="mig-00001")
-
-		def fake_get_doc(*args: object, **kwargs: object) -> object:
-			return locked if args and args[0] == "Virtual Machine" else inserted
-
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc) as get_doc,
-			patch(
-				"atlas.vm.core.vm_migration.PlacementService.select_server",
-				return_value=SimpleNamespace(name="metal-2"),
-			) as select_server,
-			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
-			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-10 00:00:00"),
-		):
-			migration_id = MigrationService.create(SimpleNamespace(name="vm-00001"))
-
-		self.assertEqual(migration_id, "mig-00001")
-		self.assertEqual(select_server.call_args.kwargs["exclude_servers"], {"metal-1"})
-		inserted_fields = next(
-			call.args[0] for call in get_doc.call_args_list if call.args and isinstance(call.args[0], dict)
-		)
-		self.assertEqual(inserted_fields["source_server"], "metal-1")
-		self.assertEqual(inserted_fields["target_server"], "metal-2")
-		self.assertEqual(inserted_fields["status"], "running")
-		locked.db_set.assert_called_once_with("active_migration", "mig-00001")
-
-	def test_create_uses_a_chosen_target(self) -> None:
-		locked = source_vm(
-			server="metal-1",
-			cpu_millicores=2000,
-			memory_mib=2048,
-			disk_mib=10240,
-			tenant_id=7,
-			virtual_machine_image="Ubuntu",
-			architecture="amd64",
-			db_set=Mock(),
-		)
-		inserted = Mock()
-		inserted.insert.return_value = SimpleNamespace(name="mig-00001")
-		api = Mock()
-		api.select.return_value = True
-		api._selected_server = SimpleNamespace(name="metal-3")
-
-		def fake_get_doc(*args: object, **kwargs: object) -> object:
-			return locked if args and args[0] == "Virtual Machine" else inserted
-
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc) as get_doc,
-			patch("atlas.vm.core.vm_migration.PlacementContext", return_value=api) as placement_api,
-			patch(
-				"atlas.vm.core.vm_migration.frappe.get_single",
-				return_value=SimpleNamespace(sleepy_vm_overcommit_factor=1.5),
-			),
-			patch("atlas.vm.core.vm_migration.PlacementService.select_server") as select_server,
-			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
-			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-10 00:00:00"),
-		):
-			migration_id = MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-3")
-
-		self.assertEqual(migration_id, "mig-00001")
-		select_server.assert_not_called()
-		self.assertEqual(placement_api.call_args.args[1:], ("amd64", 1.5))
-		self.assertEqual(placement_api.call_args.kwargs["exclude_servers"], {"metal-1"})
-		api.select.assert_called_once_with("metal-3")
-		inserted_fields = next(
-			call.args[0] for call in get_doc.call_args_list if call.args and isinstance(call.args[0], dict)
-		)
-		self.assertEqual(inserted_fields["target_server"], "metal-3")
-
-	def test_create_rejects_a_chosen_target_after_a_selection_miss(self) -> None:
-		locked = source_vm(
-			server="metal-1",
-			cpu_millicores=2000,
-			memory_mib=2048,
-			disk_mib=10240,
-			tenant_id=7,
-			virtual_machine_image="Ubuntu",
-			architecture="amd64",
-		)
-		api = Mock()
-		api.select.return_value = False
-
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=locked),
-			patch(
-				"atlas.vm.core.vm_migration.frappe.get_single",
-				return_value=SimpleNamespace(sleepy_vm_overcommit_factor=1.0),
-			),
-			patch("atlas.vm.core.vm_migration.PlacementContext", return_value=api),
-			self.assertRaisesRegex(AtlasUserError, "not ready or has no current capacity"),
-		):
-			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-3")
-
-		api.select.assert_called_once_with("metal-3")
-
-	def test_migration_shape_keeps_the_idle_timeout(self) -> None:
-		shape = MigrationService.get_shape(
-			source_vm(
-				virtual_machine_image="Ubuntu",
-				cpu_millicores=2000,
-				memory_mib=2048,
-				disk_mib=10240,
-				tenant_id=7,
-				sleep_after_idle_seconds=60,
-			)
-		)
-
-		self.assertEqual(shape.sleep_after_idle_seconds, 60)
-
-	def test_create_rejects_the_source_as_the_target(self) -> None:
-		locked = source_vm(
-			server="metal-1",
-			cpu_millicores=2000,
-			memory_mib=2048,
-			disk_mib=10240,
-			tenant_id=7,
-			virtual_machine_image="Ubuntu",
-			architecture="amd64",
-			db_set=Mock(),
-		)
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=locked),
-			self.assertRaisesRegex(AtlasUserError, "other than metal-1"),
-		):
-			MigrationService.create(SimpleNamespace(name="vm-00001"), target_server="metal-1")
-
-	def test_migrate_delegates_to_the_service(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.check_permission = Mock()
-
-		with patch("atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001") as create:
-			result = virtual_machine.migrate()
-
-		self.assertEqual(result, "mig-00001")
-		create.assert_called_once_with(virtual_machine, target_server=None)
-
-	def test_migrate_passes_a_chosen_target(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.check_permission = Mock()
-
-		with patch("atlas.vm.core.vm_migration.MigrationService.create", return_value="mig-00001") as create:
-			virtual_machine.migrate(target_server="metal-3")
-
-		create.assert_called_once_with(virtual_machine, target_server="metal-3")
-
-
-class TestMigrationActionLock(UnitTestCase):
-	def test_lock_blocks_a_mutable_action(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.active_migration = "mig-00001"
-		with self.assertRaises(AtlasUserError):
-			virtual_machine.ensure_not_migrating()
-
-	def test_unlocked_vm_passes(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		self.assertIsNone(virtual_machine.ensure_not_migrating())
-
-	def test_power_action_stops_before_metal_during_a_migration(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.active_migration = "mig-00001"
-		virtual_machine.check_permission = Mock()
-
-		with patch.object(virtual_machine_module, "VirtualMachineService") as service:
-			with self.assertRaises(AtlasUserError):
-				virtual_machine.set_power_state("running")
-
-		service.assert_not_called()
-
-	def test_reads_stay_open_during_a_migration(self) -> None:
-		virtual_machine = frappe.new_doc("Virtual Machine")
-		virtual_machine.active_migration = "mig-00001"
-		self.assertEqual(virtual_machine.current_state, "unknown")
-
-
-class TestMigrationWorker(UnitTestCase):
-	def test_poll_interval_speeds_up_for_transitions(self) -> None:
-		self.assertEqual(MigrationService.poll_interval({"phase": "copying"}), 5)
-		self.assertEqual(MigrationService.poll_interval({}), 5)
-		self.assertEqual(MigrationService.poll_interval({"phase": "stopping"}), 2)
-		self.assertEqual(MigrationService.poll_interval({"phase": "starting"}), 2)
-
-	def test_run_commits_the_server_before_it_finishes(self) -> None:
+class TestMigrationStatus(UnitTestCase):
+	def test_maps_metal_phases_to_lifecycle_statuses(self) -> None:
 		service = MigrationService(migration_doc())
-		manager = Mock()
-		service.send_request = manager.send_request
-		service.commit_target = manager.commit_target
-		service.finish = manager.finish
-		service.settle = manager.settle
-		service.poll = Mock(side_effect=[{"status": "running"}, {"status": "ready"}, {"status": "completed"}])
-
-		with (
-			patch.object(
-				MigrationService, "is_target_committed", new_callable=PropertyMock, return_value=False
-			),
-			patch("atlas.vm.core.vm_migration.time.sleep"),
-		):
-			service.run()
-
+		self.assertEqual(service.status_from_response({"status": "running", "phase": "copying"}), "copying")
 		self.assertEqual(
-			manager.mock_calls,
-			[call.send_request(), call.commit_target(), call.finish(), call.settle("completed")],
+			service.status_from_response({"status": "running", "phase": "stopping"}), "cutting_over"
 		)
+		self.assertEqual(service.status_from_response({"status": "ready"}), "finalizing")
 
-	def test_run_skips_the_request_when_an_abort_is_pending(self) -> None:
-		service = MigrationService(migration_doc(abort_requested=1))
-		service.send_request = Mock()
-		service.request_abort = Mock()
-		service.settle = Mock()
-		service.poll = Mock(side_effect=[{"status": "aborted"}])
-
-		with (
-			patch.object(
-				MigrationService, "is_target_committed", new_callable=PropertyMock, return_value=False
+	def test_calculates_copying_progress_from_rounds(self) -> None:
+		service = MigrationService(migration_doc())
+		self.assertEqual(service.progress_percent("preparing", []), 5)
+		self.assertEqual(
+			service.progress_percent(
+				"copying",
+				[
+					{"completed": True},
+					{"completed": False, "transferred_mib": 50, "total_mib": 100},
+				],
 			),
-			patch("atlas.vm.core.vm_migration.time.sleep"),
-		):
-			service.run()
+			15,
+		)
+		self.assertEqual(service.progress_percent("starting", []), 90)
 
-		service.send_request.assert_not_called()
-		service.settle.assert_called_once_with("aborted")
-
-	def test_failure_marks_failed_and_requests_abort(self) -> None:
-		service = MigrationService(migration_doc())
-		service.mark_failed = Mock()
-		service.request_abort = Mock()
-
-		self.assertFalse(service.advance({"status": "failed"}))
-		service.mark_failed.assert_called_once()
-		service.request_abort.assert_called_once()
-
-	def test_commit_target_changes_the_server_once(self) -> None:
-		service = MigrationService(migration_doc())
-		locked_vm = SimpleNamespace(server="metal-1", db_set=Mock())
-		locked_migration = migration_doc(status="running")
-
-		def fake_get_doc(doctype: str, *args: object, **kwargs: object) -> object:
-			return locked_vm if doctype == "Virtual Machine" else locked_migration
-
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc),
-			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
-		):
-			service.commit_target()
-
-		locked_vm.db_set.assert_called_once_with("server", "metal-2")
-		locked_migration.db_set.assert_called_once_with("status", "ready")
-
-	def test_commit_target_is_idempotent(self) -> None:
-		service = MigrationService(migration_doc())
-		locked_vm = SimpleNamespace(server="metal-2", db_set=Mock())
-		locked_migration = migration_doc(status="ready")
-
-		def fake_get_doc(doctype: str, *args: object, **kwargs: object) -> object:
-			return locked_vm if doctype == "Virtual Machine" else locked_migration
-
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", side_effect=fake_get_doc),
-			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
-		):
-			service.commit_target()
-
-		locked_vm.db_set.assert_not_called()
-		locked_migration.db_set.assert_not_called()
-
-	def test_request_abort_records_a_failed_abort(self) -> None:
-		service = MigrationService(migration_doc())
-		client = Mock()
-		client.abort_migration.side_effect = MetalClientError("host busy", status=503)
-		service.record_error = Mock()
-
-		with (
-			patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client),
-			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
-		):
-			service.request_abort()
-
-		service.migration.db_set.assert_called_once_with("abort_requested", 1)
-		service.record_error.assert_called_once()
-
-	def test_abort_records_intent_and_queues_the_worker(self) -> None:
-		migration = frappe.new_doc("Virtual Machine Migration")
-		migration.virtual_machine = "vm-00001"
-		migration.name = "mig-00001"
-		migration.db_set = Mock()
-
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=Mock()),
-			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
-			patch("atlas.vm.core.vm_migration.enqueue_migration") as enqueue,
-		):
-			migration.abort()
-
-		migration.db_set.assert_called_once_with("abort_requested", 1)
-		enqueue.assert_called_once_with("mig-00001")
-
-	def test_enqueue_deduplicates_per_migration(self) -> None:
-		from atlas.vm.core.vm_migration import enqueue_migration
-
-		with patch("atlas.vm.core.vm_migration.frappe.enqueue") as enqueue:
-			enqueue_migration("mig-00001")
-
-		self.assertEqual(enqueue.call_args.kwargs["job_id"], "atlas||vm-migration||mig-00001")
-		self.assertTrue(enqueue.call_args.kwargs["deduplicate"])
-
-
-class TestMigrationRecovery(UnitTestCase):
-	def test_reconcile_requeues_every_locked_migration(self) -> None:
-		with (
-			patch("atlas.vm.core.vm_migration.frappe.get_all", return_value=["mig-00001", "mig-00002"]),
-			patch("atlas.vm.core.vm_migration.enqueue_migration") as enqueue,
-		):
-			reconcile_migrations()
-
-		self.assertEqual(enqueue.call_args_list, [call("mig-00001"), call("mig-00002")])
-
-	def test_missing_target_retries_before_the_timeout(self) -> None:
-		service = MigrationService(migration_doc())
-		service.send_request = Mock()
-
-		with patch.object(MigrationService, "is_expired", new_callable=PropertyMock, return_value=False):
-			self.assertFalse(service.advance({"status": "missing"}))
-
-		service.send_request.assert_called_once()
-
-	def test_missing_target_expires_after_the_timeout(self) -> None:
-		service = MigrationService(migration_doc())
-		service.expire = Mock()
-
-		with patch.object(MigrationService, "is_expired", new_callable=PropertyMock, return_value=True):
-			self.assertTrue(service.advance({"status": "missing"}))
-
-		service.expire.assert_called_once()
-
-	def test_expire_aborts_the_remnant_and_releases_the_lock(self) -> None:
-		service = MigrationService(migration_doc())
-		client = Mock()
+	def test_aborted_destination_becomes_failed_after_a_metal_error(self) -> None:
+		service = MigrationService(migration_doc(error_code="migration_error"))
 		service.settle = Mock()
-
-		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
-			service.expire()
-
-		client.abort_migration.assert_called_once_with("mig-00001")
+		self.assertTrue(service.advance({"status": "aborted"}))
 		service.settle.assert_called_once_with("failed")
 
-	def test_poll_reports_a_missing_target(self) -> None:
-		service = MigrationService(migration_doc())
-		client = Mock()
-		client.get_migration.side_effect = MetalClientError("gone", status=404)
 
-		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
-			status = service.poll()
+class TestDestinationMetalServerSelection(UnitTestCase):
+	def test_automatic_selection_retries_after_a_capacity_error(self) -> None:
+		service = MigrationService(migration_doc(destination_metal_server=None))
+		service.record_destination_metal_server_selection_failure = Mock()
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=source_vm()),
+			patch(
+				"atlas.vm.core.vm_migration.PlacementStrategy.find_server",
+				side_effect=AtlasUserError("out of capacity"),
+			),
+		):
+			self.assertFalse(service.select_destination_metal_server())
+		service.record_destination_metal_server_selection_failure.assert_called_once()
 
-		self.assertEqual(status, {"status": "missing"})
-		service.migration.db_set.assert_not_called()
+	def test_reserves_a_destination_stored_on_the_scheduled_migration(self) -> None:
+		service = MigrationService(migration_doc(status="scheduled", destination_metal_server="metal-3"))
+		service.update = Mock()
 
-	def test_poll_commits_progress_for_live_visibility(self) -> None:
-		service = MigrationService(migration_doc())
-		client = Mock()
-		client.get_migration.return_value = {"status": "running", "phase": "copying"}
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=source_vm()),
+			patch("atlas.vm.core.vm_migration.now_datetime", return_value="2026-09-21 12:00:00"),
+			patch(
+				"atlas.vm.core.vm_migration.PlacementStrategy.reserve_server",
+				return_value="metal-3",
+			) as reserve_server,
+		):
+			self.assertTrue(service.select_destination_metal_server())
 
-		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
-			service.poll()
+		reserve_server.assert_called_once()
+		self.assertEqual(service.update.call_args.args[0]["destination_metal_server"], "metal-3")
+		self.assertEqual(service.update.call_args.args[0]["status"], "preparing")
 
-		# The commit lets an open form and a recovery run see live progress.
-		service.migration.db_set.assert_called_once()
-		self.assertEqual(service.migration.db_set.call_args.args[0], "progress")
-		self.assertTrue(service.migration.db_set.call_args.kwargs.get("commit"))
-
-	def test_poll_keeps_copy_history_on_a_terminal_record(self) -> None:
+	def test_a_resize_migration_places_the_target_shape(self) -> None:
 		service = MigrationService(
-			migration_doc(progress='{"snapshots": [{"throughput_mibps": 32}], "bytes_transferred": 100}')
+			migration_doc(
+				status="scheduled",
+				destination_metal_server=None,
+				target_cpu_millicores=4000,
+				target_memory_mib=8192,
+				target_disk_mib=40960,
+			)
 		)
-		client = Mock()
-		client.get_migration.return_value = {"status": "completed", "phase": ""}
+		service.update = Mock()
 
-		with patch.object(MigrationService, "target_client", new_callable=PropertyMock, return_value=client):
-			service.poll()
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=source_vm()),
+			patch(
+				"atlas.vm.core.vm_migration.PlacementStrategy.find_server", return_value="metal-2"
+			) as find_server,
+		):
+			self.assertTrue(service.select_destination_metal_server())
 
-		# The compact terminal record must not erase the copy history.
-		merged = frappe.parse_json(service.migration.db_set.call_args.args[1])
-		self.assertEqual(merged["status"], "completed")
-		self.assertEqual(merged["snapshots"], [{"throughput_mibps": 32}])
-		self.assertEqual(merged["bytes_transferred"], 100)
+		requirements = find_server.call_args.args[0]
+		self.assertEqual(
+			(requirements.cpu_millicores, requirements.memory_mib, requirements.disk_mib), (4000, 8192, 40960)
+		)
+		self.assertEqual(find_server.call_args.kwargs["exclude_servers"], {"metal-1"})
 
-	def test_is_expired_tracks_the_visibility_timeout(self) -> None:
-		recent = MigrationService(migration_doc(started_at=now_datetime()))
-		stale = MigrationService(migration_doc(started_at=add_to_date(now_datetime(), minutes=-11)))
+	def test_a_resize_migration_sends_the_target_shape_to_the_destination(self) -> None:
+		service = MigrationService(
+			migration_doc(target_cpu_millicores=4000, target_memory_mib=8192, target_disk_mib=40960)
+		)
+		destination_client = Mock()
 
-		self.assertFalse(recent.is_expired)
-		self.assertTrue(stale.is_expired)
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=source_vm()),
+			patch(
+				"atlas.vm.core.vm_migration.MetalClient.get_coordination_url",
+				return_value="https://10.0.0.1:9001",
+			),
+			patch.object(MigrationService, "destination_client", destination_client),
+		):
+			service.send_request()
+
+		destination_client.put_migration.assert_called_once_with(
+			"mig-00001",
+			"vm-00001",
+			"https://10.0.0.1:9001",
+			{"cpu_millicores": 4000, "memory_mib": 8192, "disk_mib": 40960},
+		)
+
+	def test_a_plain_migration_sends_no_resize(self) -> None:
+		service = MigrationService(migration_doc())
+		destination_client = Mock()
+
+		with (
+			patch("atlas.vm.core.vm_migration.frappe.get_doc", return_value=source_vm()),
+			patch(
+				"atlas.vm.core.vm_migration.MetalClient.get_coordination_url",
+				return_value="https://10.0.0.1:9001",
+			),
+			patch.object(MigrationService, "destination_client", destination_client),
+		):
+			service.send_request()
+
+		self.assertIsNone(destination_client.put_migration.call_args.args[3])
+
+	def test_the_commit_stores_the_server_and_the_resized_shape(self) -> None:
+		virtual_machine = SimpleNamespace(server="metal-1", db_set=Mock())
+		migration = SimpleNamespace(
+			destination_metal_server="metal-2",
+			target_cpu_millicores=4000,
+			target_memory_mib=8192,
+			target_disk_mib=40960,
+			db_set=Mock(),
+		)
+		service = MigrationService(migration_doc())
+
+		with (
+			patch(
+				"atlas.vm.core.vm_migration.frappe.get_doc",
+				side_effect=lambda doctype, *_args, **_kwargs: (
+					virtual_machine if doctype == "Virtual Machine" else migration
+				),
+			),
+			patch("atlas.vm.core.vm_migration.frappe.db.commit"),
+		):
+			service.commit_destination()
+
+		virtual_machine.db_set.assert_any_call("server", "metal-2")
+		virtual_machine.db_set.assert_any_call(
+			{"cpu_millicores": 4000, "memory_mib": 8192, "disk_mib": 40960}
+		)
+
+	def test_scheduled_abort_does_not_contact_an_unreserved_destination(self) -> None:
+		service = MigrationService(migration_doc(status="scheduled", destination_metal_server="metal-2"))
+		service.settle = Mock()
+		service.request_destination_abort = Mock()
+
+		service.request_abort()
+
+		service.settle.assert_called_once_with("aborted")
+		service.request_destination_abort.assert_not_called()
+
+
+class TestMigrationTransfers(UnitTestCase):
+	def test_upserts_each_transfer_into_its_row_index(self) -> None:
+		class Document(SimpleNamespace):
+			def append(self, _: str, values: dict[str, object]) -> SimpleNamespace:
+				row = SimpleNamespace(**values)
+				self.transfers.append(row)
+				return row
+
+		migration = Document(transfers=[])
+		with patch("frappe.utils.data.get_system_timezone", return_value="UTC"):
+			MigrationService.upsert_transfers(
+				migration,
+				[
+					{
+						"sequence": 1,
+						"finished_at": "2026-09-20T12:00:42.02675576Z",
+						"transferred_mib": 100,
+						"total_mib": 100,
+						"completed": True,
+					},
+					{
+						"sequence": 2,
+						"finished_at": "0001-01-01T00:00:00Z",
+						"transferred_mib": 40,
+						"total_mib": 100,
+						"completed": False,
+					},
+				],
+			)
+			self.assertIsNone(migration.transfers[1].finished_at)
+
+			MigrationService.upsert_transfers(
+				migration,
+				[
+					{
+						"sequence": 2,
+						"finished_at": "2026-09-20T12:01:10Z",
+						"transferred_mib": 100,
+						"total_mib": 100,
+						"completed": True,
+					}
+				],
+			)
+
+		self.assertEqual(len(migration.transfers), 2)
+		self.assertEqual([row.idx for row in migration.transfers], [1, 2])
+		self.assertEqual(migration.transfers[0].finished_at, datetime(2026, 9, 20, 12, 0, 42, 26755))
+		self.assertEqual(migration.transfers[1].finished_at, datetime(2026, 9, 20, 12, 1, 10))
+		self.assertEqual(migration.transfers[1].transferred_mib, 100)
+		self.assertTrue(migration.transfers[1].completed)

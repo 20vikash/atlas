@@ -4,17 +4,23 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.atlas.core.server_providers.aws.catalog import AwsCatalog
 from atlas.atlas.core.server_providers.aws.client import AwsError
+from atlas.atlas.core.server_providers.aws.configuration import (
+	ROOT_VOLUME_SIZE_GIB,
+	STORAGE_VOLUME_DEVICE_NAME,
+	STORAGE_VOLUME_SIZE_GIB,
+)
 from atlas.atlas.core.server_providers.aws.infrastructure import AwsInfrastructure
 from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses
 from atlas.atlas.core.server_providers.aws.provider import AwsProvider
 from atlas.atlas.core.server_providers.aws.servers import MESH_MULTICAST_GROUP, AwsServers
+from atlas.atlas.core.server_providers.aws.volumes import AwsVolumes
 from atlas.atlas.core.server_providers.base import ProviderServer, ServerCreateRequest, ServerPowerAction
 from atlas.atlas.core.server_providers.registry import get_server_provider
-from atlas.vm.core.metal_client import MetalClient
 
 
 class TestAwsInfrastructure(UnitTestCase):
@@ -22,12 +28,6 @@ class TestAwsInfrastructure(UnitTestCase):
 		infrastructure = self.infrastructure(private_network_cidr="8.8.0.0/16")
 
 		with self.assertRaisesRegex(AwsError, "private IPv4"):
-			infrastructure.validate_settings()
-
-	def test_storage_device_must_stay_below_dev(self) -> None:
-		infrastructure = self.infrastructure(storage_pool_device="/dev/../etc/passwd")
-
-		with self.assertRaisesRegex(AwsError, "path below /dev"):
 			infrastructure.validate_settings()
 
 	def test_existing_vpc_is_reconciled_by_its_stored_id(self) -> None:
@@ -61,6 +61,26 @@ class TestAwsInfrastructure(UnitTestCase):
 		with self.assertRaisesRegex(AwsError, "does not use the Atlas VPC"):
 			infrastructure.attach_transit_gateway("tgw-1", "vpc-1", "subnet-1")
 
+	def test_security_group_replaces_old_ingress_rules(self) -> None:
+		infrastructure = self.infrastructure(security_group_id="sg-1")
+		old_rule = {
+			"IpProtocol": "tcp",
+			"FromPort": 22,
+			"ToPort": 22,
+			"IpRanges": [{"CidrIp": "203.0.113.0/24"}],
+		}
+		infrastructure.find_configured_or_named = Mock(
+			return_value={"GroupId": "sg-1", "VpcId": "vpc-1", "IpPermissions": [old_rule]}
+		)
+
+		self.assertEqual(infrastructure.create_security_group("vpc-1"), "sg-1")
+
+		operations = [call.args[1] for call in infrastructure.provider.client.call.call_args_list]
+		self.assertEqual(operations, ["authorize_security_group_ingress", "revoke_security_group_ingress"])
+		self.assertEqual(
+			infrastructure.provider.client.call.call_args_list[1].kwargs["IpPermissions"], [old_rule]
+		)
+
 	@staticmethod
 	def infrastructure(**changes: object) -> AwsInfrastructure:
 		configuration = {
@@ -74,7 +94,6 @@ class TestAwsInfrastructure(UnitTestCase):
 			"transit_gateway_id": None,
 			"transit_gateway_attachment_id": None,
 			"multicast_domain_id": None,
-			"storage_pool_device": "/dev/nvme1n1",
 		}
 		settings = {"private_network_cidr": "10.1.0.0/20"}
 		for key, value in changes.items():
@@ -178,7 +197,6 @@ class TestAwsProvider(UnitTestCase):
 
 		request = ServerCreateRequest(
 			name="server-1",
-			discovery_key="discovery-1",
 			server_size="c6i.metal",
 			server_image="Ubuntu_24.04",
 			size_provider_metadata={"BareMetal": True},
@@ -269,22 +287,96 @@ class TestAwsProvider(UnitTestCase):
 		with self.assertRaises(AwsError):
 			provider.configure_server_network(server)
 
-	def test_the_storage_pool_device_comes_from_settings(self) -> None:
+	def test_metald_binds_the_primary_interface_not_the_mesh_interface(self) -> None:
+		provider = self.provider()
+		server = self.server()
+		server.provider_metadata = json.dumps(
+			{
+				"instance": {"PrivateIpAddress": "10.1.8.189", "PublicIpAddress": "56.155.92.65"},
+				"mesh_interface": {"PrivateIpAddress": "10.1.0.240"},
+			}
+		)
+
+		self.assertEqual(provider.metald_listen_address(server), "10.1.8.189")
+
+	def test_a_public_address_attaches_to_the_primary_interface(self) -> None:
+		provider = self.provider()
+		provider.ip_addresses = Mock()
+		server = self.server()
+		server.provider_metadata = json.dumps(
+			{
+				"instance": {
+					"NetworkInterfaces": [
+						{"NetworkInterfaceId": "eni-mesh", "Attachment": {"DeviceIndex": 1}},
+						{"NetworkInterfaceId": "eni-primary", "Attachment": {"DeviceIndex": 0}},
+					]
+				}
+			}
+		)
+
+		provider.attach_public_ipv4_address("eipalloc-1", "203.0.113.9", server)
+
+		provider.ip_addresses.attach.assert_called_once_with("eipalloc-1", "eni-primary")
+
+	def test_a_public_address_needs_the_primary_interface(self) -> None:
+		provider = self.provider()
+		server = self.server()
+		server.provider_metadata = json.dumps(
+			{
+				"instance": {
+					"NetworkInterfaces": [
+						{"NetworkInterfaceId": "eni-mesh", "Attachment": {"DeviceIndex": 1}}
+					]
+				}
+			}
+		)
+
+		with self.assertRaisesRegex(AwsError, "primary network interface"):
+			provider.attach_public_ipv4_address("eipalloc-1", "203.0.113.9", server)
+
+	def test_metald_needs_the_primary_private_address(self) -> None:
+		provider = self.provider()
+		server = self.server()
+		server.provider_metadata = json.dumps({"instance": {"PublicIpAddress": "56.155.92.65"}})
+
+		with self.assertRaisesRegex(AwsError, "primary private IPv4 address"):
+			provider.metald_listen_address(server)
+
+	def test_the_storage_pool_device_names_the_attached_volume(self) -> None:
+		provider = self.provider()
+		server = self.server()
+		server.provider_metadata = frappe.as_json(
+			{
+				"instance": {
+					"BlockDeviceMappings": [
+						{"DeviceName": "/dev/sda1", "Ebs": {"VolumeId": "vol-0c0bcb91d7b5a82eb"}},
+						{"DeviceName": "/dev/sdb", "Ebs": {"VolumeId": "vol-012ac512cc4f05420"}},
+					]
+				}
+			}
+		)
+
+		self.assertEqual(
+			provider.storage_pool_device(server),
+			"/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol012ac512cc4f05420",
+		)
+
+	def test_a_server_without_a_storage_volume_is_refused(self) -> None:
 		provider = self.provider()
 
-		self.assertEqual(provider.get_storage_pool_device(self.server()), "/dev/nvme1n1")
+		with self.assertRaises(AwsError):
+			provider.storage_pool_device(self.server())
 
-	def test_the_security_group_opens_every_port_atlas_needs(self) -> None:
+	def test_the_security_group_allows_all_inbound_traffic(self) -> None:
 		provider = self.provider()
 		infrastructure = AwsInfrastructure(provider)
 
 		rules = infrastructure.ingress_rules
 
 		self.assertEqual(
-			[(rule["IpProtocol"], rule.get("FromPort")) for rule in rules],
-			[("tcp", 22), ("tcp", MetalClient.api_port), ("udp", 51820), ("-1", None)],
+			[(rule["IpProtocol"], rule["IpRanges"][0]["CidrIp"]) for rule in rules],
+			[("-1", "0.0.0.0/0")],
 		)
-		self.assertEqual(rules[-1]["IpRanges"][0]["CidrIp"], "10.1.0.0/20")
 
 	def test_ubuntu_and_debian_users_can_be_promoted(self) -> None:
 		provider = self.provider()
@@ -329,12 +421,13 @@ class TestAwsProvider(UnitTestCase):
 			public_ssh_key="ssh-ed25519 key",
 			is_server_provider_setup_completed=0,
 		)
-		provider.configuration = SimpleNamespace(storage_pool_device="/dev/nvme1n1")
+		provider.configuration = SimpleNamespace()
 		provider.client = Mock()
 		provider.catalog = AwsCatalog()
 		provider.infrastructure = Mock()
 		provider.servers = Mock()
 		provider.ip_addresses = Mock()
+		provider.volumes = AwsVolumes(provider)
 		return provider
 
 	@staticmethod
@@ -386,8 +479,66 @@ class TestAwsServers(UnitTestCase):
 		self.assertEqual(servers.client.call.call_args.kwargs["ImageId"], "ami-1")
 		self.assertEqual(
 			servers.client.call.call_args.kwargs["ClientToken"],
-			AwsServers.client_token("instance", "discovery-1"),
+			AwsServers.client_token("instance", "server-1"),
 		)
+
+	def test_create_resizes_the_image_root_device(self) -> None:
+		servers = self.servers()
+		servers.client.paginate.return_value = []
+		servers.client.call.return_value = {"Instances": [self.instance()]}
+
+		servers.ensure(self.request())
+
+		self.assertEqual(
+			servers.client.call.call_args.kwargs["BlockDeviceMappings"][0],
+			{
+				"DeviceName": "/dev/sda1",
+				"Ebs": {
+					"VolumeSize": ROOT_VOLUME_SIZE_GIB,
+					"VolumeType": "gp3",
+					"DeleteOnTermination": True,
+				},
+			},
+		)
+
+	def test_create_attaches_a_block_store_volume_for_the_pool(self) -> None:
+		servers = self.servers()
+		servers.client.paginate.return_value = []
+		servers.client.call.return_value = {"Instances": [self.instance()]}
+
+		servers.ensure(self.request())
+
+		mappings = servers.client.call.call_args.kwargs["BlockDeviceMappings"]
+		self.assertEqual(
+			[mapping["DeviceName"] for mapping in mappings],
+			["/dev/sda1", STORAGE_VOLUME_DEVICE_NAME],
+		)
+		self.assertEqual(mappings[1]["Ebs"]["VolumeSize"], STORAGE_VOLUME_SIZE_GIB)
+		self.assertTrue(mappings[1]["Ebs"]["DeleteOnTermination"])
+
+	def test_create_turns_off_network_hotplug(self) -> None:
+		servers = self.servers()
+		servers.client.paginate.return_value = []
+		servers.client.call.return_value = {"Instances": [self.instance()]}
+
+		servers.ensure(self.request())
+
+		user_data = servers.client.call.call_args.kwargs["UserData"]
+		self.assertTrue(user_data.startswith("#cloud-config\n"))
+		self.assertIn("when: [boot-new-instance]", user_data)
+
+	def test_create_needs_the_image_root_device_name(self) -> None:
+		servers = self.servers()
+		request = ServerCreateRequest(
+			name="server-1",
+			server_size="c6i.metal",
+			server_image="Ubuntu_24.04",
+			size_provider_metadata={"BareMetal": True},
+			image_provider_metadata={"ImageId": "ami-1"},
+		)
+
+		with self.assertRaisesRegex(AwsError, "root device name"):
+			servers.create(request)
 
 	def test_a_virtual_instance_asks_for_nested_virtualization(self) -> None:
 		servers = self.servers()
@@ -475,6 +626,14 @@ class TestAwsServers(UnitTestCase):
 			],
 		)
 		self.assertEqual(servers.client.call.call_args.kwargs["GroupIpAddress"], MESH_MULTICAST_GROUP)
+
+	def test_registration_accepts_an_interface_it_already_registered(self) -> None:
+		servers = self.servers()
+
+		servers.register_multicast_interface("eni-1")
+
+		for call in servers.client.call.call_args_list:
+			self.assertTrue(call.kwargs["allow_existing"])
 
 	def test_registration_fails_without_a_multicast_domain(self) -> None:
 		servers = self.servers(multicast_domain_id=None)
@@ -593,11 +752,10 @@ class TestAwsServers(UnitTestCase):
 	def request(size_provider_metadata: dict | None = None) -> ServerCreateRequest:
 		return ServerCreateRequest(
 			name="server-1",
-			discovery_key="discovery-1",
 			server_size="c6i.metal",
 			server_image="Ubuntu_24.04",
 			size_provider_metadata=size_provider_metadata or {"BareMetal": True},
-			image_provider_metadata={"ImageId": "ami-1"},
+			image_provider_metadata={"ImageId": "ami-1", "RootDeviceName": "/dev/sda1"},
 		)
 
 	@staticmethod
@@ -626,21 +784,174 @@ class TestAwsIPAddresses(UnitTestCase):
 		with self.assertRaises(AwsError):
 			addresses.reserve()
 
-	def test_attach_refuses_to_steal_an_associated_address(self) -> None:
+	def test_attach_gives_the_address_its_own_private_address(self) -> None:
 		addresses = self.addresses()
+		addresses.client.call.side_effect = [
+			{"Addresses": []},
+			{"AssignedPrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.55"}]},
+			{},
+		]
 
-		addresses.attach("eipalloc-1", "i-1")
+		host_address = addresses.attach("eipalloc-1", "eni-1")
 
-		self.assertFalse(addresses.client.call.call_args.kwargs["AllowReassociation"])
+		self.assertEqual(host_address, "10.1.8.55")
+		parameters = addresses.client.call.call_args.kwargs
+		self.assertEqual(parameters["NetworkInterfaceId"], "eni-1")
+		self.assertEqual(parameters["PrivateIpAddress"], "10.1.8.55")
+		self.assertNotIn("InstanceId", parameters)
+		self.assertTrue(parameters["AllowReassociation"])
 
-	def test_detach_skips_an_address_that_is_not_associated(self) -> None:
+	def test_attach_reuses_the_private_address_it_already_assigned(self) -> None:
 		addresses = self.addresses()
-		addresses.client.call.return_value = {"Addresses": [{"AllocationId": "eipalloc-1"}]}
+		addresses.client.call.side_effect = [
+			{"Addresses": [{"NetworkInterfaceId": "eni-1", "PrivateIpAddress": "10.1.8.55"}]},
+			{
+				"NetworkInterfaces": [
+					{"PrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.4", "Primary": True}]}
+				]
+			},
+			{},
+		]
 
-		addresses.detach("eipalloc-1")
+		host_address = addresses.attach("eipalloc-1", "eni-1")
+
+		self.assertEqual(host_address, "10.1.8.55")
+		operations = [call.args[1] for call in addresses.client.call.call_args_list]
+		self.assertEqual(
+			operations, ["describe_addresses", "describe_network_interfaces", "associate_address"]
+		)
+
+	def test_attach_never_reuses_the_address_of_the_host(self) -> None:
+		addresses = self.addresses()
+		addresses.client.call.side_effect = [
+			{"Addresses": [{"NetworkInterfaceId": "eni-1", "PrivateIpAddress": "10.1.8.4"}]},
+			{
+				"NetworkInterfaces": [
+					{"PrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.4", "Primary": True}]}
+				]
+			},
+			{"AssignedPrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.55"}]},
+			{},
+		]
+
+		host_address = addresses.attach("eipalloc-1", "eni-1")
+
+		self.assertEqual(host_address, "10.1.8.55")
+		self.assertEqual(addresses.client.call.call_args.kwargs["PrivateIpAddress"], "10.1.8.55")
+
+	def test_attach_failure_removes_the_new_host_address(self) -> None:
+		addresses = self.addresses()
+		addresses.client.call.side_effect = [
+			{"Addresses": []},
+			{"AssignedPrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.55"}]},
+			AwsError("attach failed"),
+			{},
+		]
+
+		with self.assertRaisesRegex(AwsError, "attach failed"):
+			addresses.attach("eipalloc-1", "eni-1")
 
 		operations = [call.args[1] for call in addresses.client.call.call_args_list]
-		self.assertEqual(operations, ["describe_addresses"])
+		self.assertEqual(
+			operations,
+			[
+				"describe_addresses",
+				"assign_private_ip_addresses",
+				"associate_address",
+				"unassign_private_ip_addresses",
+			],
+		)
+
+	def test_detach_removes_the_private_address_it_assigned(self) -> None:
+		addresses = self.addresses()
+		addresses.client.call.side_effect = [
+			{
+				"Addresses": [
+					{
+						"AssociationId": "eipassoc-1",
+						"NetworkInterfaceId": "eni-1",
+						"PrivateIpAddress": "10.1.8.55",
+					}
+				]
+			},
+			{
+				"NetworkInterfaces": [
+					{"PrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.4", "Primary": True}]}
+				]
+			},
+			{},
+			{},
+		]
+
+		addresses.detach("eipalloc-1", "eni-1", "10.1.8.55")
+
+		operations = [call.args[1] for call in addresses.client.call.call_args_list]
+		self.assertEqual(
+			operations,
+			[
+				"describe_addresses",
+				"describe_network_interfaces",
+				"disassociate_address",
+				"unassign_private_ip_addresses",
+			],
+		)
+
+	def test_detach_recovers_a_missing_saved_host_address(self) -> None:
+		addresses = self.addresses()
+		addresses.client.call.side_effect = [
+			{
+				"Addresses": [
+					{
+						"AssociationId": "eipassoc-1",
+						"NetworkInterfaceId": "eni-1",
+						"PrivateIpAddress": "10.1.8.55",
+					}
+				]
+			},
+			{
+				"NetworkInterfaces": [
+					{"PrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.4", "Primary": True}]}
+				]
+			},
+			{},
+			{},
+		]
+
+		addresses.detach("eipalloc-1", "eni-1", None)
+
+		self.assertEqual(addresses.client.call.call_args.kwargs["PrivateIpAddresses"], ["10.1.8.55"])
+
+	def test_detach_retry_removes_the_saved_host_address(self) -> None:
+		addresses = self.addresses()
+		addresses.client.call.side_effect = [
+			{"Addresses": [{"AllocationId": "eipalloc-1"}]},
+			{
+				"NetworkInterfaces": [
+					{"PrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.4", "Primary": True}]}
+				]
+			},
+			{},
+		]
+
+		addresses.detach("eipalloc-1", "eni-1", "10.1.8.55")
+
+		operations = [call.args[1] for call in addresses.client.call.call_args_list]
+		self.assertEqual(
+			operations,
+			["describe_addresses", "describe_network_interfaces", "unassign_private_ip_addresses"],
+		)
+
+	def test_detach_refuses_to_unassign_the_primary_address(self) -> None:
+		addresses = self.addresses()
+		addresses.client.call.return_value = {
+			"NetworkInterfaces": [{"PrivateIpAddresses": [{"PrivateIpAddress": "10.1.8.4", "Primary": True}]}]
+		}
+
+		with self.assertRaisesRegex(AwsError, "Refusing to unassign primary"):
+			addresses.detach("eipalloc-1", "eni-1", "10.1.8.4")
+
+		operations = [call.args[1] for call in addresses.client.call.call_args_list]
+		self.assertEqual(operations, ["describe_addresses", "describe_network_interfaces"])
 
 	def test_delete_is_idempotent(self) -> None:
 		addresses = self.addresses()

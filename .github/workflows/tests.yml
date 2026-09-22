@@ -1,0 +1,275 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  atlas:
+    name: Atlas
+    runs-on: ubuntu-latest
+    services:
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      - name: Cache pip
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt', '**/pyproject.toml', '**/setup.py', '**/setup.cfg') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: 'echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT'
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: yarn-cache
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install system packages
+        run: |
+          sudo apt update
+          sudo apt-get install --yes mariadb-client make clang libbpf-dev linux-libc-dev
+
+      - name: Set up the bench
+        run: |
+          pip install frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --python "$(which python)" ~/frappe-bench
+
+      - name: Install the app
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench get-app atlas $GITHUB_WORKSPACE
+          bench setup requirements --dev
+          bench new-site --db-root-password root --admin-password admin test_site
+          bench --site test_site install-app atlas
+          bench build
+        env:
+          CI: 'Yes'
+
+      - name: Check the generated API client
+        working-directory: /home/runner/frappe-bench
+        run: |
+          python -m venv "$RUNNER_TEMP/openapi-generator"
+          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
+          export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
+          PYTHONPATH="$GITHUB_WORKSPACE" ./env/bin/python "$GITHUB_WORKSPACE/scripts/generate-api-client.py" atlas-client
+          git -C "$GITHUB_WORKSPACE" add --all --intent-to-add clients
+          git -C "$GITHUB_WORKSPACE" diff --exit-code -- clients \
+            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-client and commit clients/."; exit 1; }
+
+      - name: Run the tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app atlas
+        env:
+          TYPE: server
+
+  metal:
+    name: Metal
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: metal
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Find the changed paths
+        id: changes
+        working-directory: ${{ github.workspace }}
+        run: .github/scripts/changed-paths.sh '^(metal/|\.github/(workflows/tests\.yml|scripts/changed-paths\.sh)$)'
+
+      # The binary embeds the API specification, so generate it before any build.
+      - name: Generate the API specification
+        if: steps.changes.outputs.matched == 'true'
+        run: make openapi
+
+      - name: Set up Go
+        if: steps.changes.outputs.matched == 'true'
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: metal/go.mod
+          cache-dependency-path: metal/go.sum
+
+      # clang compiles the eBPF object. Its headers come from libbpf-dev and
+      # linux-libc-dev.
+      - name: Install the eBPF build dependencies
+        if: steps.changes.outputs.matched == 'true'
+        run: sudo apt-get update && sudo apt-get install --yes clang libbpf-dev
+
+      - name: Build the eBPF object
+        if: steps.changes.outputs.matched == 'true'
+        run: make bpf
+
+      - name: Check formatting
+        if: steps.changes.outputs.matched == 'true'
+        run: test -z "$(gofmt -l ./cmd ./internal)" || { gofmt -l ./cmd ./internal; exit 1; }
+
+      - name: Vet
+        if: steps.changes.outputs.matched == 'true'
+        run: make vet
+
+      - name: Run unit tests with the race detector
+        if: steps.changes.outputs.matched == 'true'
+        run: go test -race ./...
+
+      - name: Build the release binaries
+        if: steps.changes.outputs.matched == 'true'
+        run: make build
+
+  wg-mesh:
+    name: WG Mesh
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/wg-mesh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Find the changed paths
+        id: changes
+        working-directory: ${{ github.workspace }}
+        run: .github/scripts/changed-paths.sh '^(services/wg-mesh/|\.github/(workflows/tests\.yml|scripts/changed-paths\.sh)$)'
+
+      - name: Set up Go
+        if: steps.changes.outputs.matched == 'true'
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
+        with:
+          go-version-file: services/wg-mesh/cli/go.mod
+          cache-dependency-path: services/wg-mesh/cli/go.sum
+
+      - name: Install the eBPF build dependencies
+        if: steps.changes.outputs.matched == 'true'
+        run: sudo apt-get update && sudo apt-get install --yes clang libbpf-dev
+
+      # cli/bpf.go embeds the object, so nothing in cli compiles without it.
+      - name: Build the eBPF object
+        if: steps.changes.outputs.matched == 'true'
+        run: make bpf
+
+      - name: Check formatting
+        if: steps.changes.outputs.matched == 'true'
+        run: test -z "$(gofmt -l ./cli)" || { gofmt -l ./cli; exit 1; }
+
+      - name: Vet
+        if: steps.changes.outputs.matched == 'true'
+        run: go vet -C cli ./...
+
+      - name: Run unit tests with the race detector
+        if: steps.changes.outputs.matched == 'true'
+        run: go test -C cli -race ./...
+
+      - name: Build the release binaries
+        if: steps.changes.outputs.matched == 'true'
+        run: make build
+
+  http-proxy:
+    name: HTTP proxy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/http-proxy
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Find the changed paths
+        id: changes
+        working-directory: ${{ github.workspace }}
+        run: .github/scripts/changed-paths.sh '^(services/http-proxy/|scripts/generate-api-client\.py$|clients/atlas-proxy-client/|clients/openapi/atlas-proxy-client\.json$|\.github/(workflows/tests\.yml|scripts/changed-paths\.sh)$)'
+
+      - name: Set up Python
+        if: steps.changes.outputs.matched == 'true'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+
+      - name: Install control daemon unit test dependencies
+        if: steps.changes.outputs.matched == 'true'
+        run: python -m pip install -e "control[test]"
+
+      - name: Lint Python
+        if: steps.changes.outputs.matched == 'true'
+        run: python -m ruff check control tests
+
+      - name: Run control daemon unit tests
+        if: steps.changes.outputs.matched == 'true'
+        run: python -m pytest -q control/tests
+
+      - name: Check the generated API client
+        if: steps.changes.outputs.matched == 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          control_python="$(command -v python)"
+          python -m venv "$RUNNER_TEMP/openapi-generator"
+          "$RUNNER_TEMP/openapi-generator/bin/pip" install --quiet openapi-python-client==0.29.1
+          export PATH="$RUNNER_TEMP/openapi-generator/bin:$PATH"
+          "$control_python" scripts/generate-api-client.py atlas-proxy-client
+          git add --all --intent-to-add clients
+          git diff --exit-code -- clients \
+            || { echo "The committed client is stale. Run scripts/generate-api-client.py atlas-proxy-client and commit clients/."; exit 1; }
+
+      - name: Start test stack
+        if: steps.changes.outputs.matched == 'true'
+        run: docker compose -f tests/docker/docker-compose.yml up --build -d
+
+      - name: Run integration tests
+        if: steps.changes.outputs.matched == 'true'
+        run: python -m pytest -q tests
+
+      - name: Stop test stack
+        if: always() && steps.changes.outputs.matched == 'true'
+        run: docker compose -f tests/docker/docker-compose.yml down -v

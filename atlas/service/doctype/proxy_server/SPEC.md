@@ -8,8 +8,16 @@ Proxy Server owns one member of the regional HTTP proxy cluster. Atlas supports 
 
 ## Lifecycle
 
-```text
-create VM -> node DNS -> SSH -> package -> local configuration -> peer configuration -> readiness -> regional DNS and wildcard CNAME -> Active
+```mermaid
+flowchart LR
+    VM[Create VM] --> NodeDNS[Create node DNS]
+    NodeDNS --> SSH[Wait for SSH]
+    SSH --> Package[Install package]
+    Package --> Local[Apply local configuration]
+    Local --> Peer[Update peer configuration]
+    Peer --> Ready[Wait for readiness]
+    Ready --> DNS[Create regional DNS and wildcard CNAME]
+    DNS --> Active[Set Active]
 ```
 
 Creation needs one Allocated Metal Server IP Address. Atlas creates the Proxy Server before it sends the VM request to Metal. A draft VM keeps the record Pending until VM reconciliation completes. Atlas queues Pending records every minute. A failed setup changes the status to Failed and records the failed phase.

@@ -40,6 +40,7 @@ class HostBinary:
 	artifact: str
 	settings_field: str
 	source_hash_field: str
+	binary_hash_field: str
 	required_commands: tuple[str, ...] = ("make",)
 	required_headers: tuple[str, ...] = ()
 
@@ -57,6 +58,7 @@ HOST_BINARIES = (
 		artifact="dist/metald-linux-amd64",
 		settings_field="metald_binary_x86_64_file",
 		source_hash_field="metald_source_hash",
+		binary_hash_field="metald_binary_hash",
 	),
 	HostBinary(
 		key="wg-mesh",
@@ -65,6 +67,7 @@ HOST_BINARIES = (
 		artifact="dist/atlas-wg-mesh-linux-amd64",
 		settings_field="wg_mesh_binary_x86_64_file",
 		source_hash_field="wg_mesh_source_hash",
+		binary_hash_field="wg_mesh_binary_hash",
 		# clang compiles the BPF object before the Go build. Its headers come
 		# from libbpf-dev and linux-libc-dev on Debian, and from libbpf-devel
 		# and kernel-headers on Fedora.
@@ -102,10 +105,13 @@ def publish_host_binaries() -> None:
 
 def publish_host_binary(binary: HostBinary, go_binary: str, digest: str) -> str:
 	"""Build one binary, attach it as a File, and link it in Atlas Settings."""
-	artifact = build_host_binary(binary, go_binary)
-	file_name = publish_public_file(binary.file_name, binary.label, artifact.read_bytes())
+	content = build_host_binary(binary, go_binary).read_bytes()
+	file_name = publish_public_file(binary.file_name, binary.label, content)
 	frappe.db.set_single_value("Atlas Settings", binary.settings_field, file_name)
 	frappe.db.set_single_value("Atlas Settings", binary.source_hash_field, digest)
+	frappe.db.set_single_value(
+		"Atlas Settings", binary.binary_hash_field, hashlib.sha256(content).hexdigest()
+	)
 	return file_name
 
 
@@ -136,6 +142,8 @@ def is_published(binary: HostBinary, digest: str) -> bool:
 	settings = frappe.get_cached_doc("Atlas Settings")
 	file_name = settings.get(binary.settings_field)
 	if not file_name or settings.get(binary.source_hash_field) != digest:
+		return False
+	if not settings.get(binary.binary_hash_field):
 		return False
 	return bool(frappe.db.exists("File", file_name))
 

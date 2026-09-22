@@ -24,9 +24,10 @@ type peerEntry struct {
 // wireGuardPeerFileEntry is one entry of the WireGuard peer state file.
 type wireGuardPeerFileEntry struct {
 	Node           string `json:"node"`
-	NodeID         uint32 `json:"node_id"`
+	MeshAddress    string `json:"mesh_address"`
 	PublicKey      string `json:"public_key"`
 	Address        string `json:"address"`
+	PublicAddress  string `json:"public_address"`
 	PrivateAddress string `json:"private_address"`
 	MAC            string `json:"mac"`
 }
@@ -49,12 +50,7 @@ var peersSyncCommand = &cobra.Command{
 
 // syncPeers reloads the peer maps from the WireGuard peer state.
 func syncPeers(peersPath string) error {
-	config, err := readPinnedConfig()
-	if err != nil {
-		return err
-	}
-
-	peers, err := readMeshPeers(peersPath, config)
+	peers, err := readMeshPeers(peersPath)
 	if err != nil {
 		return err
 	}
@@ -71,7 +67,7 @@ func syncPeers(peersPath string) error {
 }
 
 // readMeshPeers converts the WireGuard peer state into mesh peers.
-func readMeshPeers(peersPath string, config hostConfig) ([]peerEntry, error) {
+func readMeshPeers(peersPath string) ([]peerEntry, error) {
 	contents, err := os.ReadFile(peersPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -87,7 +83,7 @@ func readMeshPeers(peersPath string, config hostConfig) ([]peerEntry, error) {
 
 	peers := make([]peerEntry, 0, len(entries))
 	for _, entry := range entries {
-		if peer, usable := meshPeer(entry, config); usable {
+		if peer, usable := meshPeer(entry); usable {
 			peers = append(peers, peer)
 		}
 	}
@@ -100,16 +96,16 @@ func readMeshPeers(peersPath string, config hostConfig) ([]peerEntry, error) {
 }
 
 // meshPeer converts one WireGuard peer state entry into a mesh peer.
-func meshPeer(entry wireGuardPeerFileEntry, config hostConfig) (peerEntry, bool) {
+func meshPeer(entry wireGuardPeerFileEntry) (peerEntry, bool) {
 	var peer peerEntry
 
-	host, _, err := net.SplitHostPort(entry.Address)
-	if err != nil {
+	address, err := netip.ParseAddr(entry.PublicAddress)
+	if err != nil || !address.Is4() {
 		return peer, false
 	}
 
-	address, err := netip.ParseAddr(host)
-	if err != nil || !address.Is4() {
+	meshAddress, err := netip.ParseAddr(entry.MeshAddress)
+	if err != nil || !meshAddress.Is6() {
 		return peer, false
 	}
 
@@ -118,10 +114,9 @@ func meshPeer(entry wireGuardPeerFileEntry, config hostConfig) (peerEntry, bool)
 		return peer, false
 	}
 
-	ipv4 := address.As4()
-	copy(peer.IPv4[:], ipv4[:])
+	peer.IPv4 = address.As4()
+	peer.WG = meshAddress.As16()
 	copy(peer.MAC[:], mac)
-	peer.WG = peerWireGuardAddress(config.WireGuardIPv6, entry.NodeID)
 
 	if entry.PrivateAddress != "" {
 		private, err := netip.ParseAddr(entry.PrivateAddress)
@@ -129,21 +124,10 @@ func meshPeer(entry wireGuardPeerFileEntry, config hostConfig) (peerEntry, bool)
 			return peer, false
 		}
 
-		privateIPv4 := private.As4()
-		copy(peer.PrivateIPv4[:], privateIPv4[:])
+		peer.PrivateIPv4 = private.As4()
 	}
 
 	return peer, true
-}
-
-// peerWireGuardAddress builds the peer address from the local prefix and node ID.
-func peerWireGuardAddress(local [16]byte, nodeID uint32) [16]byte {
-	var address [16]byte
-
-	copy(address[:4], local[:4])
-	binary.BigEndian.PutUint32(address[12:], nodeID)
-
-	return address
 }
 
 // packPeerMAC packs a MAC into the low 6 bytes of a u64 key.

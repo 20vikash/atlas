@@ -1,36 +1,56 @@
 # Metal
 
-Metal is the host daemon for Atlas virtual machines. The executable is `metald`.
+Metal is the host daemon for Atlas virtual machines. The `metald` process manages one Linux host.
 
-Metal owns desired state, observed state, reconciliation, host resources, and cleanup progress. Atlas owns provider resources and user actions.
+Metal stores desired VM state, observes host state, and reconciles the difference. It owns runtime, storage, network, and cleanup work.
 
-For Go code, follow the repository [Go anti-pattern rules](../llm/go-code-review-guide.md).
+## From desired state to a running VM
+
+```mermaid
+flowchart LR
+    Atlas[Atlas] -->|Desired VM state| API[Metal API]
+    API --> Record[(config.json)]
+    Record --> Reconciler[VM reconciler]
+    Reconciler --> Storage[ZFS disk]
+    Reconciler --> Network[Network namespace]
+    Reconciler --> Systemd[systemd unit]
+    Systemd --> Firecracker[Firecracker VM]
+    Firecracker --> Observed[(status.json)]
+    Observed --> Atlas
+```
+
+The API stores desired state before it returns `202 Accepted`. A reconciler applies host changes after the response.
+
+## Why systemd owns VM processes
+
+systemd runs each VM as a `metal-vm@` unit. A `metald` restart does not stop a running guest.
+
+Metal rebuilds its view from durable records, systemd, and ZFS after a restart. It does not rely on old process memory.
 
 ## Start here
 
-1. [Architecture](docs/architecture.md) explains what Metal is and how the parts fit.
-2. [Testing](docs/testing.md) brings up a development host and runs a VM.
-3. [Development](docs/development.md) lists the checks to run on a change.
+1. Read [Metal architecture](docs/architecture.md) to learn the state and ownership model.
+2. Read [VM functionality](docs/vm.md) to follow VM lifecycle states.
+3. Use [integration testing](docs/testing.md) to prepare a development host.
+4. Use [Metal development](docs/development.md) before you submit a change.
 
-Package detail lives in each package's `SPEC.md`. Start at [`internal/SPEC.md`](internal/SPEC.md) for the package map.
+## Choose a subsystem
 
-The [Metal `/v1` contract](../docs/metal-v1-contract.md) defines the controller API.
+| Subsystem | Responsibility | Guide |
+| --- | --- | --- |
+| VM manager | Desired state, lifecycle, locks, and cleanup | [VM functionality](docs/vm.md) |
+| Firecracker runtime | Process launch, jail, warm start, and saved state | [Firecracker specification](internal/firecracker/SPEC.md) |
+| Storage | Images, ZFS disks, snapshots, and transfer staging | [Storage](docs/storage.md) |
+| Network | Namespaces, egress, traffic limits, and WG Mesh | [Networking](docs/networking.md) |
+| Reconciler | Bounded passes that move state forward | [Reconciler specification](internal/reconciler/SPEC.md) |
+| Host service | Controller sync, image policy, and capacity | [Host specification](internal/host/SPEC.md) |
+| API | Atlas routes and node coordination routes | [HTTP API](docs/api.md) |
+| Migration | Disk copy, cutover, finish, and rollback | [Migration internals](internal/vm/migration/SPEC.md) |
 
-## Main packages
+## Development requirements
 
-| Package | Purpose |
-|---|---|
-| `cmd/metald` | Compose and start the daemon. |
-| `internal/api` | Expose controller operations. |
-| `internal/vm` | Define virtual machine domain behavior. |
-| `internal/firecracker` | Control Firecracker and its systemd unit. |
-| `internal/network` | Own Linux network and WireGuard peer operations. |
-| `internal/storage` | Own ZFS images, disks, and snapshot staging. |
-| `internal/reconciler` | Apply current desired state. |
-| `internal/host` | Synchronize controller-owned state and report capacity. |
-| `internal/console` | Serve VM serial consoles. |
-| `internal/platform` | Host files, commands, and systemd. |
+Unit tests need Go. Host tests need Linux, root access, KVM, ZFS, systemd, iptables, and Atlas WG Mesh.
 
-## Local checks
+Run Go commands from `metal/`. The repository root is not a Go module.
 
-Run everything from `metal/`. The commands are in [development](docs/development.md). Host tests need Linux, root access, KVM, ZFS, systemd, iptables, and Atlas WG Mesh.
+Use the repository [Go review guide](../llm/go-code-review-guide.md) for Go changes.

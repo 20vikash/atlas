@@ -15,6 +15,27 @@ function downloadArtifact(frm, artifact) {
 	});
 }
 
+function setTerminationProtection(frm) {
+	const protecting = !frm.doc.is_termination_protected;
+	const message = protecting
+		? __("Protect {0}? Deletion is refused until you disable this.", [frm.doc.title.bold()])
+		: __("Unprotect {0}? Anyone with write access can then delete it.", [
+				frm.doc.title.bold(),
+		  ]);
+
+	frappe.confirm(message, () =>
+		frm
+			.call({
+				method: "set_termination_protection",
+				doc: frm.doc,
+				args: { is_protected: protecting },
+				freeze: true,
+				freeze_message: __("Saving..."),
+			})
+			.then(() => frm.reload_doc())
+	);
+}
+
 frappe.ui.form.on("Virtual Machine Image", {
 	refresh(frm) {
 		if (frm.doc.status === "Failed" && frm.doc.source_server) {
@@ -22,6 +43,14 @@ frappe.ui.form.on("Virtual Machine Image", {
 				frm.call("retry_transfer").then(() => frm.reload_doc());
 			});
 		}
+
+		frm.add_custom_button(
+			frm.doc.is_termination_protected
+				? __("Disable Termination Protection")
+				: __("Enable Termination Protection"),
+			() => setTerminationProtection(frm),
+			__("Dangerous Actions")
+		);
 
 		if (["Available", "Failed"].includes(frm.doc.status)) {
 			frm.add_custom_button(

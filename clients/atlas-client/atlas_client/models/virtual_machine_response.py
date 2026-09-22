@@ -32,6 +32,7 @@ class VirtualMachineResponse:
             disk_mib (int):
             id (str):
             image_id (str):
+            is_termination_protected (bool):
             memory_mib (int):
             sleep_after_idle_seconds (int):
             tags (VirtualMachineResponseTags):
@@ -44,6 +45,7 @@ class VirtualMachineResponse:
     disk_mib: int
     id: str
     image_id: str
+    is_termination_protected: bool
     memory_mib: int
     sleep_after_idle_seconds: int
     tags: VirtualMachineResponseTags
@@ -68,6 +70,8 @@ class VirtualMachineResponse:
 
         image_id = self.image_id
 
+        is_termination_protected = self.is_termination_protected
+
         memory_mib = self.memory_mib
 
         sleep_after_idle_seconds = self.sleep_after_idle_seconds
@@ -86,6 +90,7 @@ class VirtualMachineResponse:
             "disk_mib": disk_mib,
             "id": id,
             "image_id": image_id,
+            "is_termination_protected": is_termination_protected,
             "memory_mib": memory_mib,
             "sleep_after_idle_seconds": sleep_after_idle_seconds,
             "tags": tags,
@@ -112,6 +117,8 @@ class VirtualMachineResponse:
 
         image_id = d.pop("image_id")
 
+        is_termination_protected = d.pop("is_termination_protected")
+
         memory_mib = d.pop("memory_mib")
 
         sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
@@ -130,6 +137,7 @@ class VirtualMachineResponse:
             disk_mib=disk_mib,
             id=id,
             image_id=image_id,
+            is_termination_protected=is_termination_protected,
             memory_mib=memory_mib,
             sleep_after_idle_seconds=sleep_after_idle_seconds,
             tags=tags,

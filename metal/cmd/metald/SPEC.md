@@ -6,7 +6,7 @@ For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-
 
 ## Purpose
 
-Command `metald` loads host configuration, creates runtime services, and starts the HTTP server. It is the composition root.
+Command `metald` loads host configuration, creates runtime services, and starts the HTTPS servers. It is the composition root.
 
 ## Command
 
@@ -20,27 +20,28 @@ The default configuration path is `/var/lib/metal/metald.toml`. A missing defaul
 
 | Type | Role |
 |---|---|
-| `options` | Resolved Firecracker, ZFS, WireGuard, Atlas WG Mesh, traffic monitor, listener, authentication, and base-directory settings. |
-| `fileConfig` | TOML sections for metald, Firecracker, Jailer, ZFS, WireGuard, Atlas WG Mesh, and traffic monitoring. |
+| `options` | Resolved runtime, listener, TLS, authentication, and base-directory settings. |
+| `fileConfig` | TOML sections for Metal and its runtime services. |
+| `tlsConfigurations` | TLS settings for the Atlas API, coordination server, and node client. |
 
 ## Startup wiring
 
-```text
-load configuration
-   -> create required directories
-   -> connect to systemd
-   -> create storage stores
-   -> create the WireGuard manager
-   -> optionally connect Atlas WG Mesh and configure the host
-   -> optionally create the traffic monitor
-   -> create the Firecracker runtime
-   -> validate all VM records and create the VM manager
-   -> create the host service
-   -> create the VM and image reconcilers
-   -> start the traffic listener when monitoring is enabled
-   -> load the Atlas trusted keys
-   -> create the authenticated API
-   -> listen and serve
+```mermaid
+flowchart TD
+    Config[Load configuration] --> TLS[Load node certificate and authority]
+    TLS --> Directories[Create required directories]
+    Directories --> Systemd[Connect to systemd]
+    Systemd --> Stores[Create storage stores]
+    Stores --> WireGuard[Create WireGuard manager]
+    WireGuard --> Mesh[Connect and configure WG Mesh]
+    Mesh --> Traffic[Create optional traffic monitor]
+    Traffic --> Runtime[Create Firecracker runtime]
+    Runtime --> VM[Validate records and create VM manager]
+    VM --> Host[Create host service]
+    Host --> Reconcile[Create reconcilers]
+    Reconcile --> Keys[Load Atlas trusted keys]
+    Keys --> APIs[Create Atlas and coordination APIs]
+    APIs --> Serve[Listen and serve]
 ```
 
 The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
@@ -49,7 +50,9 @@ The network constructor receives optional mesh and traffic monitor services. The
 
 The host service receives an optional mesh service, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
 
-The source migration listener binds the migration `transfer_port` (default 9001) on the API host address. The target dials it to pull the disk. Every host in a region uses the same port.
+Both servers require a client certificate from the regional authority. The Atlas API also pins `tls.atlas_common_name`, because a node certificate is valid for client use on the coordination API.
+
+The source starts a one-shot mutual-TLS listener on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The destination verifies the source WireGuard IP before it receives the stream.
 
 `connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
 
@@ -63,7 +66,11 @@ The source migration listener binds the migration `transfer_port` (default 9001)
 |---|---|---|
 | `metald.base_dir` | `/var/lib/metal` | Stores machines, images, policies, peers, and staging files. |
 | `metald.listen` | `127.0.0.1:8080` | TCP address or `unix:/path`. |
-| `metald.auth_token_hash` | none | Required lowercase SHA-256 token digest. |
+| `metald.coordination_listen` | `127.0.0.1:9001` | Mutual-TLS node coordination address. |
+| `tls.ca_file` | none | Required regional Metal authority certificate. |
+| `tls.certificate_file` | none | Required node certificate. |
+| `tls.private_key_file` | none | Required node private key. |
+| `tls.atlas_common_name` | none | Required common name of the Atlas client certificate. |
 | `firecracker.binary_path` | `/usr/bin/firecracker` | Firecracker binary. |
 | `firecracker.sockets_dir` | `/run/metal` | Short API socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
@@ -73,8 +80,8 @@ The source migration listener binds the migration `transfer_port` (default 9001)
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
 | `wg_mesh.uplink` | none | Discovery uplink. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
-| `migration.final_delta_mib` | `512` | Incremental size at or below which the target stops the source and takes the final snapshot. |
-| `migration.transfer_port` | `9001` | TCP port the source listens on for the disk stream. Use the same value on every host in the region. |
+| `migration.final_delta_mib` | `512` | Incremental size at or below which the destination stops the source and takes the final snapshot. |
+| `migration.transfer_port` | `9002` | Mutual-TLS snapshot stream port. Use the same value on every host in the region. |
 
 See `config.example.toml` for the complete file format.
 
@@ -82,7 +89,7 @@ See `config.example.toml` for the complete file format.
 
 The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data. When traffic monitoring is enabled, one traffic listener dispatches each restoration in a separate daemon-owned goroutine.
 
-The daemon owns all reconciler goroutines and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops accepting HTTP requests, cancels reconciliation, waits for workers, closes the enabled traffic monitor, stops the migration transfer listener and active transfers, closes console sessions, and closes the systemd connection. It does not stop or destroy guest virtual machines.
+The daemon owns all reconcilers, source stream processes, and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops both HTTPS servers, cancels workers, closes console sessions, and closes host services. It does not stop or destroy guest virtual machines.
 
 The daemon writes structured JSON logs. Log records include request and operation correlation fields when the operation comes from the API.
 

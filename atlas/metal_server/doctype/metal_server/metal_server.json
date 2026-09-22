@@ -1,18 +1,18 @@
 {
  "actions": [],
  "allow_bulk_edit": 1,
- "allow_rename": 1,
+ "autoname": "UUID",
  "creation": "2026-09-01 14:22:34.229534",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "title",
   "status",
   "is_provisioning_completed",
-  "is_sleepy",
   "column_break_qbap",
   "provider_server_id",
-  "provider_discovery_key",
-  "metald_api_token",
+  "metald_tls_expires_on",
+  "is_sleepy_vm_host",
   "section_break_configuration",
   "server_image",
   "column_break_njar",
@@ -34,7 +34,12 @@
   "column_break_zhfx",
   "wireguard_public_key",
   "section_break_metadata",
-  "provider_metadata"
+  "provider_metadata",
+  "hidden_data_section",
+  "column_break_xhax",
+  "metald_tls_certificate",
+  "column_break_yxha",
+  "metald_tls_private_key"
  ],
  "fields": [
   {
@@ -46,10 +51,15 @@
   },
   {
    "default": "0",
-   "description": "Placement strategies can use this flag when they select a host.",
-   "fieldname": "is_sleepy",
+   "fieldname": "is_sleepy_vm_host",
    "fieldtype": "Check",
-   "label": "Sleepy Host"
+   "label": "Sleepy VM Host"
+  },
+  {
+   "fieldname": "metald_tls_expires_on",
+   "fieldtype": "Datetime",
+   "label": "TLS Expires On",
+   "read_only": 1
   },
   {
    "default": "Pending",
@@ -64,24 +74,22 @@
   {
    "fieldname": "provider_server_id",
    "fieldtype": "Data",
-   "label": "Provider Host ID",
+   "label": "Provider Server ID",
    "no_copy": 1,
    "read_only": 1
   },
   {
-   "fieldname": "provider_discovery_key",
-   "fieldtype": "Data",
-   "hidden": 1,
-   "label": "Provider Discovery Key",
-   "no_copy": 1,
-   "read_only": 1,
-   "set_only_once": 1
-  },
-  {
-   "fieldname": "metald_api_token",
+   "fieldname": "metald_tls_certificate",
    "fieldtype": "Password",
    "hidden": 1,
-   "label": "Metal API Token",
+   "label": "Metald TLS Certificate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metald_tls_private_key",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Metald TLS Private Key",
    "read_only": 1
   },
   {
@@ -220,6 +228,26 @@
   {
    "fieldname": "column_break_iiyh",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "hidden_data_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "Hidden Data"
+  },
+  {
+   "fieldname": "column_break_xhax",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_yxha",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1
   }
  ],
  "grid_page_length": 50,
@@ -241,11 +269,11 @@
    "link_fieldname": "server"
   }
  ],
- "modified": "2026-09-09 16:54:30.933302",
- "modified_by": "Administrator",
+ "modified": "2026-09-21 01:49:05.506473",
+ "modified_by": "test@gmail.com",
  "module": "Metal Server",
  "name": "Metal Server",
- "naming_rule": "By script",
+ "naming_rule": "UUID",
  "owner": "Administrator",
  "permissions": [
   {
@@ -291,5 +319,6 @@
    "title": "Deleted"
   }
  ],
+ "title_field": "title",
  "track_changes": 1
 }

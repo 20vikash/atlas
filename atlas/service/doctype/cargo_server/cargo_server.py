@@ -84,6 +84,7 @@ class CargoServer(Document):
 			cargo_server.failure_message = None
 			cargo_server.installation_task = None
 			cargo_server.save(ignore_permissions=True)
+			frappe.db.commit()  # nosemgrep
 
 			is_draft = cargo_server._create_virtual_machine(values)
 			cargo_server.save(ignore_permissions=True)
@@ -150,7 +151,9 @@ class CargoServer(Document):
 
 				CargoServerProvisioner(cargo_server).remove_proxy_routes()
 				if frappe.db.exists("Virtual Machine", cargo_server.virtual_machine):
-					frappe.get_doc("Virtual Machine", cargo_server.virtual_machine).terminate()
+					virtual_machine = frappe.get_doc("Virtual Machine", cargo_server.virtual_machine)
+					virtual_machine.set_termination_protection(False)
+					virtual_machine.terminate()
 			except Exception as error:
 				cargo_server.status = "Failed"
 				cargo_server.failure_message = f"archive: {error}"
@@ -216,6 +219,7 @@ class CargoServer(Document):
 			"disk_mib": values.get("disk_mib"),
 			"tenant_id": 0,
 			"is_privileged": True,
+			"is_termination_protected": True,
 			"hostname": "cargo",
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",
@@ -279,7 +283,7 @@ def can_enable_pilot_release_tracker() -> bool:
 	return frappe.get_single("Atlas Settings").is_object_storage_configured and not has_site_file_images()
 
 
-def enqueue_pilot_release_tracker_enable(enqueue_after_commit: bool = True) -> None:
+def enqueue_pilot_release_tracker_enable() -> None:
 	"""Queue release tracking when bootstrap image migration makes it possible."""
 	frappe.enqueue(
 		"atlas.service.doctype.cargo_server.cargo_server.enable_pilot_release_tracker_after_migration",
@@ -287,7 +291,7 @@ def enqueue_pilot_release_tracker_enable(enqueue_after_commit: bool = True) -> N
 		timeout=120,
 		job_id="atlas||cargo-server||enable-pilot-release-tracker",
 		deduplicate=True,
-		enqueue_after_commit=enqueue_after_commit,
+		enqueue_after_commit=False,
 	)
 
 
@@ -295,7 +299,7 @@ def enqueue_pending_pilot_release_tracker_enable() -> None:
 	"""Retry automatic release tracking while it remains pending."""
 	cargo_server: CargoServer = frappe.get_single("Cargo Server")
 	if cargo_server.pilot_release_tracker_pending:
-		enqueue_pilot_release_tracker_enable(enqueue_after_commit=False)
+		enqueue_pilot_release_tracker_enable()
 
 
 @run_as_admin

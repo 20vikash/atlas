@@ -6,25 +6,31 @@ A wildcard name cannot be proved over HTTP, because there is no single host to a
 
 ## Issuance
 
-```text
-Atlas Settings
-   |
-   +-> LetsEncrypt          account key, environment, wildcard name
-          |
-          +-> AcmeClient    order, challenge, finalize, download
-          +-> DnsProvider   publish and remove the TXT record
+```mermaid
+flowchart LR
+    Settings[Atlas Settings] --> LE[Let's Encrypt service]
+    LE --> Account[Account key and environment]
+    LE --> ACME[ACME client]
+    LE --> DNS[DNS provider]
+    ACME --> Order[Order, challenge, finalize, download]
+    DNS --> TXT[Publish and remove TXT record]
 ```
 
-```text
-register account
-  -> new order for *.<domain>
-  -> read the dns-01 challenge
-  -> publish TXT _acme-challenge.<domain>
-  -> wait for propagation
-  -> submit the challenge and wait for the authorization
-  -> finalize with a new certificate request
-  -> download the chain
-  -> remove the TXT record
+```mermaid
+sequenceDiagram
+    participant Atlas
+    participant ACME as ACME server
+    participant DNS as DNS provider
+
+    Atlas->>ACME: Register account and create wildcard order
+    ACME-->>Atlas: DNS-01 challenge
+    Atlas->>DNS: Publish challenge TXT record
+    Atlas->>DNS: Wait for propagation
+    Atlas->>ACME: Submit challenge
+    ACME-->>Atlas: Authorization valid
+    Atlas->>ACME: Finalize certificate request
+    ACME-->>Atlas: Certificate chain
+    Atlas->>DNS: Remove challenge TXT record
 ```
 
 The TXT record is removed in every case, including a failed order. A cleanup failure is logged and never hides the issuance failure.

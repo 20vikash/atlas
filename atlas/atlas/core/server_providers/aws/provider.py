@@ -12,6 +12,7 @@ from atlas.atlas.core.server_providers.aws.configuration import AwsConfiguration
 from atlas.atlas.core.server_providers.aws.infrastructure import AwsInfrastructure
 from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses
 from atlas.atlas.core.server_providers.aws.servers import AwsServers
+from atlas.atlas.core.server_providers.aws.volumes import AwsVolumes
 from atlas.atlas.core.server_providers.base import (
 	ProviderServer,
 	ReservedIPAddress,
@@ -37,7 +38,6 @@ class AwsProvider(ServerProvider):
 	ssh_users = ("ubuntu", "admin", "root")
 	private_network_min_prefix = 16
 	private_network_max_prefix = 28
-	wireguard_port: ClassVar[int] = 51820
 	# AWS gives no stable guest device name, so the setup script renames the mesh
 	# interface by its MAC address. metald then uses this name as its mesh uplink.
 	private_network_interface: ClassVar[str] = "atlas-mesh"
@@ -55,6 +55,7 @@ class AwsProvider(ServerProvider):
 		self.infrastructure = AwsInfrastructure(self)
 		self.servers = AwsServers(self.client, self.configuration, self.catalog)
 		self.ip_addresses = AwsIPAddresses(self.client, self.configuration)
+		self.volumes = AwsVolumes(self)
 
 	@override
 	def validate_settings(self) -> None:
@@ -171,9 +172,21 @@ class AwsProvider(ServerProvider):
 		self.wait_for_private_address(server)
 
 	@override
-	def get_storage_pool_device(self, server: "MetalServer") -> str:
-		"""Return the raw device for the virtual machine storage pool."""
-		return self.configuration.storage_pool_device
+	def metald_listen_address(self, server: "MetalServer") -> str:
+		"""Return the primary interface address behind the internet gateway."""
+		metadata = frappe.parse_json(server.provider_metadata or "{}")
+		instance = metadata.get("instance") if isinstance(metadata, Mapping) else None
+		address = instance.get("PrivateIpAddress") if isinstance(instance, Mapping) else None
+		if not isinstance(address, str) or not address:
+			raise AwsError("Atlas server has no AWS primary private IPv4 address")
+		return address
+
+	@override
+	def storage_pool_device(self, server: "MetalServer") -> str:
+		"""Return the stable device path of the EBS volume for the storage pool."""
+		volume_id = self.volumes.volume_id(server, "storage")
+		# The NVMe serial of an EBS volume is its id without the dash.
+		return f"/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_{volume_id.replace('-', '')}"
 
 	@override
 	def set_power_state(self, provider_server_id: str, action: ServerPowerAction) -> None:
@@ -201,16 +214,38 @@ class AwsProvider(ServerProvider):
 		self.ip_addresses.delete(provider_resource_id)
 
 	@override
-	def attach_public_ipv4_address(self, provider_resource_id: str, server: "MetalServer") -> None:
-		"""Attach a reserved address to a server."""
-		if not server.provider_server_id:
-			raise AwsError("Atlas server has no AWS instance ID")
-		self.ip_addresses.attach(provider_resource_id, server.provider_server_id)
+	def attach_public_ipv4_address(
+		self, provider_resource_id: str, public_address: str, server: "MetalServer"
+	) -> str:
+		"""Attach a reserved address and return its host address."""
+		return self.ip_addresses.attach(provider_resource_id, self.primary_network_interface_id(server))
+
+	@staticmethod
+	def primary_network_interface_id(server: "MetalServer") -> str:
+		"""Return the interface that carries public traffic for one server."""
+		metadata = frappe.parse_json(server.provider_metadata or "{}")
+		instance = metadata.get("instance") if isinstance(metadata, Mapping) else None
+		interfaces = instance.get("NetworkInterfaces") if isinstance(instance, Mapping) else []
+		for interface in interfaces if isinstance(interfaces, list) else []:
+			if not isinstance(interface, Mapping):
+				continue
+			attachment = interface.get("Attachment")
+			index = attachment.get("DeviceIndex") if isinstance(attachment, Mapping) else None
+			identifier = interface.get("NetworkInterfaceId")
+			if index == 0 and isinstance(identifier, str):
+				return identifier
+		raise AwsError("Atlas server has no AWS primary network interface")
 
 	@override
-	def detach_public_ipv4_address(self, provider_resource_id: str) -> None:
+	def detach_public_ipv4_address(
+		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
+	) -> None:
 		"""Detach an address from a server."""
-		self.ip_addresses.detach(provider_resource_id)
+		self.ip_addresses.detach(
+			provider_resource_id,
+			self.primary_network_interface_id(server),
+			host_address,
+		)
 
 	@override
 	def promote_ssh_user(self, server: "MetalServer", user: str) -> None:

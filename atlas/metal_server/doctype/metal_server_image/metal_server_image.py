@@ -20,22 +20,10 @@ class MetalServerImage(Document):
 		from frappe.types import DF
 
 		enabled: DF.Check
-		image: DF.Data
+		os: DF.Data | None
+		os_version: DF.Data | None
 		provider_metadata: DF.Code | None
-		provider_type: DF.Literal["Scaleway"]
 	# end: auto-generated types
-
-	def autoname(self) -> None:
-		"""Name the image from its provider and identifier."""
-		if not self.provider_type or not self.image:
-			frappe.throw(_("Metal Server Image requires provider_type and image"))
-		self.name = f"{self.provider_type}/{self.image}"
-
-	def validate(self) -> None:
-		"""Reject an image without a provider identifier."""
-		expected = f"{self.provider_type}/{self.image}"
-		if self.name and self.name != expected:
-			frappe.throw(_("Metal Server Image name {0} does not match {1}").format(self.name, expected))
 
 	def get_provider_metadata(self, key: str) -> str:
 		"""Return the provider values this image was created from."""

@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping
 
 from atlas.atlas.core.server_providers.aws.client import AwsError
+from atlas.atlas.core.server_providers.aws.configuration import STORAGE_VOLUME_SIZE_GIB
 from atlas.atlas.core.server_providers.base import (
 	ACCEPTED_OS_VERSIONS,
 	ServerImageData,
@@ -17,7 +18,8 @@ DEBIAN_IMAGE_NAME = re.compile(r"debian-(\d+)-amd64-")
 
 
 NESTED_VIRTUALIZATION_FEATURE = "nested-virtualization"
-ARCHITECTURES: Mapping[str, str] = {"x86_64": "amd64", "arm64": "arm64"}
+BYTES_IN_GIB = 1_073_741_824
+ARCHITECTURES: Mapping[str, str] = {"x86_64": "amd64"}
 
 
 class AwsCatalog:
@@ -47,19 +49,14 @@ class AwsCatalog:
 			if accepted is None:
 				continue
 			creation_date = str(image.get("CreationDate") or "")
-			current = newest.get(accepted.image)
+			current = newest.get(accepted.name)
 			if current is None or creation_date > current[0]:
-				newest[accepted.image] = (creation_date, accepted)
+				newest[accepted.name] = (creation_date, accepted)
 		return tuple(image for _, image in newest.values())
 
 	@staticmethod
 	def is_supported(instance_type: Mapping) -> bool:
-		"""Report whether an AWS instance type can run Atlas virtual machines.
-
-		Atlas needs hardware virtualization, local storage, and a second network
-		interface. Bare metal always gives hardware virtualization. A virtual
-		instance gives it only when AWS reports the nested virtualization feature.
-		"""
+		"""Report whether a type supports Atlas without local storage."""
 		processor = instance_type.get("ProcessorInfo")
 		features = processor.get("SupportedFeatures", []) if isinstance(processor, Mapping) else []
 		network = instance_type.get("NetworkInfo")
@@ -70,7 +67,7 @@ class AwsCatalog:
 		)
 		return (
 			has_virtualization
-			and AwsCatalog._disk_gib(instance_type) > 0
+			and AwsCatalog._disk_gib(instance_type) == 0
 			and isinstance(maximum_interfaces, int)
 			and maximum_interfaces >= 2
 		)
@@ -82,6 +79,14 @@ class AwsCatalog:
 		if not isinstance(image_id, str):
 			raise AwsError(f"Metal Server Image {image_name} has no AWS machine image ID")
 		return image_id
+
+	@staticmethod
+	def root_device_name(metadata: object, image_name: str) -> str:
+		"""Return the AWS root device name from provider image metadata."""
+		device_name = metadata.get("RootDeviceName") if isinstance(metadata, Mapping) else None
+		if not isinstance(device_name, str):
+			raise AwsError(f"Metal Server Image {image_name} has no AWS root device name")
+		return device_name
 
 	def _server_size(self, instance_type: Mapping) -> ServerSizeData:
 		name = instance_type.get("InstanceType")
@@ -95,11 +100,11 @@ class AwsCatalog:
 			raise AwsError(f"AWS instance type {name} has invalid CPU or memory data")
 
 		return ServerSizeData(
-			size=name,
+			name=name,
 			architecture=self.instance_type_architecture(instance_type),
 			cpu_count=cpu_count,
 			memory_mib=memory_mib,
-			disk_gib=self._disk_gib(instance_type),
+			disk_gib=STORAGE_VOLUME_SIZE_GIB,
 			hourly_pricing_usd_cents=None,
 			monthly_pricing_usd_cents=None,
 			provider_metadata=dict(instance_type),
@@ -109,7 +114,9 @@ class AwsCatalog:
 	def instance_type_architecture(instance_type: Mapping) -> str:
 		"""Return the Atlas architecture reported by one AWS instance type.
 
-		AWS lists every architecture a type can boot, so a 64-bit type also reports i386."""
+		Atlas fetches x86_64 instance types only. AWS lists every architecture a type
+		can boot, so a 64-bit type also reports i386.
+		"""
 		name = instance_type.get("InstanceType")
 		processor = instance_type.get("ProcessorInfo")
 		supported = processor.get("SupportedArchitectures") if isinstance(processor, Mapping) else None
@@ -123,10 +130,16 @@ class AwsCatalog:
 
 	@staticmethod
 	def _disk_gib(instance_type: Mapping) -> int:
-		"""Return the instance store size, which Atlas uses for the storage pool."""
+		"""Return the instance store size, which Atlas uses for the storage pool.
+
+		AWS reports decimal gigabytes and Atlas stores binary gibibytes.
+		"""
 		storage = instance_type.get("InstanceStorageInfo")
-		disk_gib = storage.get("TotalSizeInGB", 0) if isinstance(storage, Mapping) else 0
-		return disk_gib if isinstance(disk_gib, int) else 0
+		disk_gb = storage.get("TotalSizeInGB", 0) if isinstance(storage, Mapping) else 0
+		if not isinstance(disk_gb, int):
+			return 0
+
+		return disk_gb * 1_000_000_000 // BYTES_IN_GIB
 
 	@staticmethod
 	def _accepted_image(image: Mapping) -> ServerImageData | None:
@@ -147,7 +160,7 @@ class AwsCatalog:
 			return None
 
 		return ServerImageData(
-			image=f"{os_name}_{version}",
+			name=f"{os_name}_{version}",
 			os=os_name,
 			version=version,
 			provider_metadata=dict(image),

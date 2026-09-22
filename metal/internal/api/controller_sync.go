@@ -28,9 +28,10 @@ type syncRequest struct {
 // wireGuardPeerRequest is one desired WireGuard peer.
 type wireGuardPeerRequest struct {
 	Node           string `json:"node"`
-	NodeID         uint32 `json:"node_id"`
+	MeshAddress    string `json:"mesh_address"`
 	PublicKey      string `json:"public_key"`
 	Address        string `json:"address"`
+	PublicAddress  string `json:"public_address"`
 	PrivateAddress string `json:"private_address"`
 	MAC            string `json:"mac"`
 }
@@ -161,9 +162,10 @@ func (request syncRequest) wireGuardPeers() []network.WireGuardPeer {
 	for _, peer := range request.WireGuardPeers {
 		peers = append(peers, network.WireGuardPeer{
 			Node:           peer.Node,
-			NodeID:         peer.NodeID,
+			MeshAddress:    peer.MeshAddress,
 			PublicKey:      peer.PublicKey,
 			Address:        peer.Address,
+			PublicAddress:  peer.PublicAddress,
 			PrivateAddress: peer.PrivateAddress,
 			MAC:            peer.MAC,
 		})

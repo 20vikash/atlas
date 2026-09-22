@@ -21,8 +21,8 @@ class Resources:
 
 
 @dataclass(frozen=True, slots=True)
-class PlacementDemand:
-	"""The VM shape and identity visible to a placement strategy."""
+class PlacementRequirements:
+	"""VM resources and placement constraints visible to a strategy."""
 
 	cpu_millicores: int
 	memory_mib: int
@@ -30,6 +30,15 @@ class PlacementDemand:
 	architecture: str
 	tenant_id: int
 	is_sleepy: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentPlacement:
+	"""The host of a resized VM and the memory and disk it already holds there."""
+
+	host_name: str
+	memory_mib: int
+	disk_mib: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +53,7 @@ class HostUsage:
 	free: Resources
 	tenant_vm_count: int
 	sleepy_reserved_memory_mib: int
+	placement_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,3 +65,4 @@ class FleetUsage:
 	free: Resources
 	tenant_vm_count: int
 	sleepy_reserved_memory_mib: int
+	placement_count: int

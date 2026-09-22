@@ -25,6 +25,8 @@ python scripts/generate-api-client.py atlas-proxy-client
 
 Commit the result. The `atlas-client` command needs `frappe` and the `atlas` app on the Python path, so run it from a bench environment. The `atlas-proxy-client` command needs the `atlas-proxy-control` package. It writes a temporary configuration file, because `proxy_control.main` loads its configuration at import time.
 
+`.gitattributes` marks both client packages and both OpenAPI documents as `linguist-generated`. GitHub collapses their diffs in a pull request and keeps them out of the language statistics.
+
 The generator uses no post hooks. It does not lint or format its output, so the committed client is the same for every environment.
 
 The client method names come from the OpenAPI operation IDs. Atlas uses the route function name. The HTTP proxy control daemon uses `generate_unique_id_function` to do the same.

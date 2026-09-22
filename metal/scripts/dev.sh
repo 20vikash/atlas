@@ -12,12 +12,14 @@ BULK=${METALD_BULK_DIR:-$WORKDIR}
 POOL=${METALD_POOL:-metal}
 FC_VER=${METALD_FC_VERSION:-v1.16.1}
 LISTEN=${METALD_LISTEN:-127.0.0.1:8080}
-AUTH_TOKEN=${METALD_AUTH_TOKEN:-metal-development-token}
+COORDINATION_LISTEN=${METALD_COORDINATION_LISTEN:-127.0.0.1:9001}
+ATLAS_COMMON_NAME=${METALD_ATLAS_COMMON_NAME:-atlas.metal.test}
 IMAGE_DIR=$WORKDIR/images
 VAR_DIR=$WORKDIR/machines
 BIN=$WORKDIR/bin
 KEYDIR=$WORKDIR/keys
 CONFIG=$WORKDIR/metald.toml
+TLS_DIR=$WORKDIR/tls
 ARCH=$(uname -m)
 
 case $ARCH in
@@ -128,13 +130,53 @@ if [[ -n $uplink ]] && ! iptables -t nat -C POSTROUTING -s 10.0.0.0/8 -o "$uplin
 	iptables -t nat -A POSTROUTING -s 10.0.0.0/8 -o "$uplink" -j MASQUERADE
 fi
 
+step "development certificates ($TLS_DIR)"
+install -d -m 0700 "$TLS_DIR"
+if [[ ! -s $TLS_DIR/ca.crt ]]; then
+	openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -sha256 \
+		-subj "/CN=Atlas Metal CA development" \
+		-addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+		-addext "keyUsage=critical,digitalSignature,keyCertSign,cRLSign" \
+		-keyout "$TLS_DIR/ca.key" -out "$TLS_DIR/ca.crt" 2>/dev/null
+fi
+
+# issue_certificate writes one leaf that the development CA signed.
+issue_certificate() {
+	local name=$1 common_name=$2 extensions=$3
+
+	openssl req -newkey rsa:2048 -nodes -subj "/CN=$common_name" \
+		-keyout "$TLS_DIR/$name.key" -out "$TLS_DIR/$name.csr" 2>/dev/null
+	openssl x509 -req -in "$TLS_DIR/$name.csr" -days 825 -sha256 \
+		-CA "$TLS_DIR/ca.crt" -CAkey "$TLS_DIR/ca.key" -CAcreateserial \
+		-extfile <(printf '%s\n' "$extensions") \
+		-out "$TLS_DIR/$name.crt" 2>/dev/null
+	rm -f "$TLS_DIR/$name.csr"
+}
+
+listen_host=${LISTEN%:*}
+issue_certificate node "metal-development" \
+	"basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=serverAuth,clientAuth
+subjectAltName=DNS:metal-development,IP:$listen_host,IP:${COORDINATION_LISTEN%:*}"
+issue_certificate atlas "$ATLAS_COMMON_NAME" \
+	"basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=clientAuth"
+chmod 0600 "$TLS_DIR"/*.crt "$TLS_DIR"/*.key
+
 step "config ($CONFIG)"
-AUTH_TOKEN_HASH=$(printf %s "$AUTH_TOKEN" | sha256sum | cut -d " " -f 1)
 cat > "$CONFIG" <<EOF
 [metald]
 base_dir = "$WORKDIR"
 listen   = "$LISTEN"
-auth_token_hash = "$AUTH_TOKEN_HASH"
+coordination_listen = "$COORDINATION_LISTEN"
+
+[tls]
+ca_file = "$TLS_DIR/ca.crt"
+certificate_file = "$TLS_DIR/node.crt"
+private_key_file = "$TLS_DIR/node.key"
+atlas_common_name = "$ATLAS_COMMON_NAME"
 
 [firecracker]
 binary_path = "$BIN/firecracker"
@@ -152,5 +194,5 @@ uplink  = "$uplink"
 EOF
 
 step "ready: run metald serve --config $CONFIG"
-step "API token is configured from METALD_AUTH_TOKEN"
+step "call the API with --cacert $TLS_DIR/ca.crt --cert $TLS_DIR/atlas.crt --key $TLS_DIR/atlas.key"
 step "key $KEYDIR/id_ed25519; ssh as user 'root'"

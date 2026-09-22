@@ -32,6 +32,7 @@ class VirtualMachineListResponse:
             disk_mib (int):
             id (str):
             image_id (str):
+            is_termination_protected (bool):
             last_known_state (str):
             memory_mib (int):
             sleep_after_idle_seconds (int):
@@ -46,6 +47,7 @@ class VirtualMachineListResponse:
     disk_mib: int
     id: str
     image_id: str
+    is_termination_protected: bool
     last_known_state: str
     memory_mib: int
     sleep_after_idle_seconds: int
@@ -72,6 +74,8 @@ class VirtualMachineListResponse:
 
         image_id = self.image_id
 
+        is_termination_protected = self.is_termination_protected
+
         last_known_state = self.last_known_state
 
         memory_mib = self.memory_mib
@@ -95,6 +99,7 @@ class VirtualMachineListResponse:
             "disk_mib": disk_mib,
             "id": id,
             "image_id": image_id,
+            "is_termination_protected": is_termination_protected,
             "last_known_state": last_known_state,
             "memory_mib": memory_mib,
             "sleep_after_idle_seconds": sleep_after_idle_seconds,
@@ -122,6 +127,8 @@ class VirtualMachineListResponse:
         id = d.pop("id")
 
         image_id = d.pop("image_id")
+
+        is_termination_protected = d.pop("is_termination_protected")
 
         last_known_state = d.pop("last_known_state")
 
@@ -151,6 +158,7 @@ class VirtualMachineListResponse:
             disk_mib=disk_mib,
             id=id,
             image_id=image_id,
+            is_termination_protected=is_termination_protected,
             last_known_state=last_known_state,
             memory_mib=memory_mib,
             sleep_after_idle_seconds=sleep_after_idle_seconds,

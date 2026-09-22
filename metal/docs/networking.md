@@ -8,21 +8,26 @@ Every virtual machine gets the same private addresses. That is safe because each
 
 ## Topology
 
-```text
-guest eth0
-    |
-   tap0  172.16.0.1/24
-    |
-network namespace metal-<id>
-    |
-    +- egress none:   no veth pair, no path out
-    +- egress mesh:   vg-<user-id> <-> vh-<user-id>
-    +- egress uplink: vg-<user-id> <-> vh-<user-id> -> host uplink
+```mermaid
+flowchart TB
+    Guest[Guest eth0<br/>172.16.0.2]
+    Tap[tap0<br/>gateway 172.16.0.1]
+    Mode{Egress mode}
+    None[none<br/>no veth pair]
+
+    Guest --> Tap --> Mode
+    Mode -->|none| None
+    Mode -->|mesh| Veth[VM veth pair]
+    Mode -->|uplink| Veth
+    Veth --> Mesh[WG Mesh]
+    Veth -->|uplink only| Internet[Host uplink and NAT]
 ```
 
 The guest address is `172.16.0.2`, the gateway `172.16.0.1`, and the guest MAC `06:00:ac:10:00:02`, which encodes that address. A warm VM keeps the MAC of the snapshot it resumed from, so a fixed value keeps the reported MAC true.
 
 For `uplink` and `mesh`, Metal derives one transit `/30` from the VM user ID, which removes the need for a persisted address allocator.
+
+The veth MTU is 1380, so the guest image sets `eth0` to 1380. A larger guest MTU depends on ICMP `fragmentation needed`, which some paths discard. The namespace clamps TCP MSS. UDP still depends on path MTU discovery.
 
 ## Egress modes
 
@@ -72,10 +77,14 @@ Namespace routing, proxy NDP, MTU, public IPv4 rules, and filter placement: [int
 
 Metal tracks TCP traffic from the host to the guest. It ignores other packets and all guest-to-host traffic. This prevents ARP and IPv6 housekeeping from keeping a VM awake.
 
-```text
-host TCP packet -> tap0 egress TCX hook -> record activity
-                                      |
-                                      +-> VM is armed -> send wake event -> restore VM
+```mermaid
+flowchart LR
+    Packet[Host-to-guest TCP packet] --> Hook[tap0 egress TCX hook]
+    Hook --> Activity[Record packet time]
+    Hook --> Armed{VM is armed?}
+    Armed -->|Yes| Wake[Send wake event]
+    Wake --> Restore[Restore VM]
+    Armed -->|No| Continue[Continue packet path]
 ```
 
 The eBPF program observes packets but does not change them. It stores the last packet time by VM user ID.
@@ -85,6 +94,8 @@ The first packet can be lost while Firecracker starts. Clients must retry. A met
 ## WireGuard peers
 
 `POST /v1/sync` supplies the complete managed peer set. Metal applies it to `wg0` and records what it applied, so it never disturbs peers added by other tools.
+
+Each peer carries its mesh address, which becomes its `AllowedIPs` entry. Atlas owns the mesh address of each host, so Metal applies the address it receives and does not calculate one.
 
 Each peer endpoint is a public address, so the tunnel crosses the uplink. Atlas WG Mesh discovery uses the private network. The WireGuard MTU follows the uplink MTU for this reason.
 
