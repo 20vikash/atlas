@@ -6,3 +6,6 @@ dist/
 
 # Local Go build output.
 /atlas-wg-mesh
+
+# Default go build output in cli/.
+/cli/cli

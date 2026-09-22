@@ -1,3 +1,4 @@
+// Command atlas-wg-mesh installs the Atlas WG Mesh dataplane on one host and manages its BPF state.
 package main
 
 import (
@@ -8,55 +9,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	cobra.EnableCommandSorting = false
+var version = "dev"
 
-	configureCommand.Flags().StringVar(&uplinkName, "uplink", "", "physical uplink interface")
-	configureCommand.Flags().StringVar(&wireGuardName, "wireguard", "", "WireGuard interface")
-	configureCommand.MarkFlagRequired("uplink")
-	configureCommand.MarkFlagRequired("wireguard")
-
-	addVirtualMachineCommand.Flags().StringVar(&addInterfaceName, "interface", "", "VM interface")
-	addVirtualMachineCommand.Flags().StringVar(&addAddressText, "address", "", "VM private IPv6 address")
-	addVirtualMachineCommand.Flags().Uint32Var(&addMTU, "mtu", defaultVMMTU, "VM interface MTU")
-	addVirtualMachineCommand.MarkFlagRequired("interface")
-	addVirtualMachineCommand.MarkFlagRequired("address")
-
-	removeVirtualMachineCommand.Flags().StringVar(&removeInterfaceName, "interface", "", "VM interface")
-	removeVirtualMachineCommand.Flags().StringVar(&removeAddressText, "address", "", "VM private IPv6 address")
-	removeVirtualMachineCommand.MarkFlagRequired("interface")
-	removeVirtualMachineCommand.MarkFlagRequired("address")
-	listVirtualMachinesCommand.Flags().BoolVar(&listVirtualMachinesJSON, "json", false, "print JSON")
-	addPrivilegedVMCommand.Flags().StringVar(&privilegedVMAddress, "address", "", "privileged VM IPv6 address")
-	addPrivilegedVMCommand.MarkFlagRequired("address")
-	removePrivilegedVMCommand.Flags().StringVar(&privilegedVMAddress, "address", "", "privileged VM IPv6 address")
-	removePrivilegedVMCommand.MarkFlagRequired("address")
-	listPrivilegedVMCommand.Flags().BoolVar(&listPrivilegedVMJSON, "json", false, "print JSON")
-	resetCommand.Flags().BoolVar(&resetForce, "force", false, "detach VM hooks and remove BPF state even when local VM entries remain")
-
-	inspectCommand.Flags().StringVar(&inspectAddressText, "address", "", "VM IPv6 address")
-	inspectCommand.MarkFlagRequired("address")
-
-	dumpCommand.Flags().StringVar(&dumpSourceText, "src", "", "source IPv6 address")
-	dumpCommand.Flags().StringVar(&dumpDestinationText, "dst", "", "destination IPv6 address")
-	dumpCommand.Flags().Uint32Var(&dumpTenant, "tenant", 0, "tenant ID")
-	dumpCommand.Flags().StringVar(&dumpActionText, "action", "", "accept, drop, or redirect")
-
-	topCommand.Flags().StringVar(&topSourceText, "src", "", "source IPv6 address")
-	topCommand.Flags().StringVar(&topDestinationText, "dst", "", "destination IPv6 address")
-	topCommand.Flags().Uint32Var(&topTenant, "tenant", 0, "tenant ID")
-
-	upgradeCommand.Flags().StringVar(&uplinkName, "uplink", "", "physical uplink interface")
-	upgradeCommand.Flags().StringVar(&wireGuardName, "wireguard", "", "WireGuard interface")
-	upgradeCommand.MarkFlagRequired("uplink")
-	upgradeCommand.MarkFlagRequired("wireguard")
-
-	virtualMachineCommand.AddCommand(addVirtualMachineCommand, removeVirtualMachineCommand, listVirtualMachinesCommand)
-	privilegedVMCommand.AddCommand(addPrivilegedVMCommand, removePrivilegedVMCommand, listPrivilegedVMCommand)
-	debugCommand.AddCommand(debugStatusCommand, debugEnableCommand, debugDisableCommand, inspectCommand, dumpCommand, topCommand)
-	peersCommand.AddCommand(peersSyncCommand)
-	unicastCommand.AddCommand(unicastStartCommand)
-	rootCommand.AddCommand(configureCommand, statusCommand, virtualMachineCommand, privilegedVMCommand, peersCommand, debugCommand, unicastCommand, upgradeCommand, versionCommand, resetCommand)
+var rootCommand = &cobra.Command{
+	Use:               "atlas-wg-mesh",
+	Short:             "connect VMs across hosts with eBPF and WireGuard",
+	PersistentPreRunE: requireRoot,
+	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+	SilenceUsage:      true,
+	SilenceErrors:     true,
 }
 
 func main() {
@@ -67,15 +28,9 @@ func main() {
 }
 
 func requireRoot(command *cobra.Command, _ []string) error {
-	if command.Name() == "version" {
-		return nil
-	}
-	if os.Geteuid() != 0 {
+	if command.Name() != "version" && os.Geteuid() != 0 {
 		return errors.New("run this command as root")
 	}
-	return nil
-}
 
-func showHelp(command *cobra.Command, _ []string) error {
-	return command.Help()
+	return nil
 }

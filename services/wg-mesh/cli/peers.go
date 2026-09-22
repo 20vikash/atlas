@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,205 +11,193 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Must match struct atlas_peer in bpf/state.h.
-type peerEntry struct {
-	IPv4        [4]byte
-	PrivateIPv4 [4]byte
-	MAC         [6]byte
-	_           [2]byte
-	WG          [16]byte
-}
-
-// wireGuardPeerFileEntry is one entry of the WireGuard peer state file.
-type wireGuardPeerFileEntry struct {
-	Node           string `json:"node"`
-	MeshAddress    string `json:"mesh_address"`
-	PublicKey      string `json:"public_key"`
-	Address        string `json:"address"`
-	PublicAddress  string `json:"public_address"`
-	PrivateAddress string `json:"private_address"`
-	MAC            string `json:"mac"`
-}
+// Host WireGuard addresses. A peer outside it would receive tunnels for VMs.
+var underlayPrefix = netip.MustParsePrefix("fdab::/16")
 
 var peersCommand = &cobra.Command{
 	Use:   "peers",
-	Short: "manage the mesh peer state",
+	Short: "manage mesh peers",
 	Args:  cobra.NoArgs,
-	RunE:  showHelp,
 }
 
-var peersSyncCommand = &cobra.Command{
+var syncPeersCommand = &cobra.Command{
 	Use:   "sync PEERS_JSON",
-	Short: "reload the BPF peer maps from the WireGuard peer state",
+	Short: "load the peers from the WireGuard peer state",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, arguments []string) error {
-		return syncPeers(arguments[0])
+		return syncPeers(arguments[0], peersUnicast)
 	},
 }
 
-// syncPeers reloads the peer maps from the WireGuard peer state.
-func syncPeers(peersPath string) error {
-	peers, err := readMeshPeers(peersPath)
+var peersUnicast bool
+
+func init() {
+	syncPeersCommand.Flags().BoolVar(&peersUnicast, "unicast", false, "carry NDP in IPv4 packets")
+	peersCommand.AddCommand(syncPeersCommand)
+	rootCommand.AddCommand(peersCommand)
+}
+
+// peerState is one entry of the WireGuard peer state file that metald writes.
+type peerState struct {
+	MeshAddress    string `json:"mesh_address"`
+	PublicAddress  string `json:"public_address"`
+	PrivateAddress string `json:"private_address"`
+	MAC            string `json:"private_network_mac_address"`
+}
+
+// syncPeers replaces the peer map and its NDP transport mode together.
+func syncPeers(path string, unicast bool) error {
+	peers, err := readPeerState(path)
 	if err != nil {
 		return err
 	}
-
-	if err := fillPeerList(peers); err != nil {
-		return err
-	}
-	if err := fillPeersByMAC(peers); err != nil {
-		return err
+	if unicast && len(peers) == 0 {
+		return fmt.Errorf("unicast mode needs at least one peer")
 	}
 
-	fmt.Printf("Atlas WG Mesh holds %d peers\n", len(peers))
+	unlock, err := lockFile(vmLockPath, true)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	current, err := readPeerArray()
+	if err != nil {
+		return err
+	}
+	config, err := readPinnedConfig()
+	if err != nil {
+		return err
+	}
+	uplink := deviceName(config.UplinkIfIndex)
+	wasUnicast := isHookAttached(uplink, "egress")
+
+	if err := writePeerArray(peers); err != nil {
+		_ = writePeerArray(current)
+		return err
+	}
+	if err := setUnicastMode(uplink, unicast); err != nil {
+		return errors.Join(err, writePeerArray(current), setUnicastMode(uplink, wasUnicast))
+	}
+
+	mode := "multicast"
+	if unicast {
+		mode = "unicast"
+	}
+	fmt.Printf("Atlas WG Mesh holds %d peers in %s mode\n", len(peers), mode)
 	return nil
 }
 
-// readMeshPeers converts the WireGuard peer state into mesh peers.
-func readMeshPeers(peersPath string) ([]peerEntry, error) {
-	contents, err := os.ReadFile(peersPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+// readPeerState converts the peer state file into peers. A peer uses its private address when the uplink is a private network.
+func readPeerState(path string) ([]peer, error) {
+	config, err := readPinnedConfig()
 	if err != nil {
 		return nil, err
 	}
+	isPrivateUplink := config.UplinkIfIndex != config.PublicIfIndex
 
-	var entries []wireGuardPeerFileEntry
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	peers, err := decodePeerState(contents, isPrivateUplink)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return peers, nil
+}
+
+func decodePeerState(contents []byte, isPrivateUplink bool) ([]peer, error) {
+	var entries []peerState
 	if err := json.Unmarshal(contents, &entries); err != nil {
-		return nil, fmt.Errorf("read %s: %w", peersPath, err)
+		return nil, err
 	}
 
-	peers := make([]peerEntry, 0, len(entries))
-	for _, entry := range entries {
-		if peer, usable := meshPeer(entry); usable {
-			peers = append(peers, peer)
+	peers := make([]peer, 0, len(entries))
+	ipv4Addresses := make(map[netip.Addr]bool)
+	wireGuardAddresses := make(map[netip.Addr]bool)
+	macAddresses := make(map[string]bool)
+	for index, entry := range entries {
+		ipv4Text := entry.PublicAddress
+		if isPrivateUplink && entry.PrivateAddress != "" {
+			ipv4Text = entry.PrivateAddress
 		}
+
+		ipv4, ipv4Error := netip.ParseAddr(ipv4Text)
+		wireGuard, wireGuardError := netip.ParseAddr(entry.MeshAddress)
+		mac, macError := net.ParseMAC(entry.MAC)
+		if ipv4Error != nil || !ipv4.Is4() {
+			return nil, fmt.Errorf("peer %d has no usable IPv4 address", index)
+		}
+		if wireGuardError != nil || !underlayPrefix.Contains(wireGuard) {
+			return nil, fmt.Errorf("peer %d has no WireGuard address in %s", index, underlayPrefix)
+		}
+		if macError != nil || len(mac) != 6 || mac[0]&1 != 0 {
+			return nil, fmt.Errorf("peer %d has no unicast Ethernet MAC address", index)
+		}
+		macText := mac.String()
+		if ipv4Addresses[ipv4] || wireGuardAddresses[wireGuard] || macAddresses[macText] {
+			return nil, fmt.Errorf("peer %d repeats an IPv4, WireGuard, or MAC address", index)
+		}
+		ipv4Addresses[ipv4] = true
+		wireGuardAddresses[wireGuard] = true
+		macAddresses[macText] = true
+
+		peers = append(peers, peer{IPv4: ipv4.As4(), MAC: [6]byte(mac), WireGuardIPv6: wireGuard.As16()})
 	}
 
-	if len(peers) > unicastPeerLimit {
-		return nil, fmt.Errorf("%s holds more than %d usable peers", peersPath, unicastPeerLimit)
+	if len(peers) > peerLimit {
+		return nil, fmt.Errorf("peer state holds more than %d peers", peerLimit)
 	}
 
 	return peers, nil
 }
 
-// meshPeer converts one WireGuard peer state entry into a mesh peer.
-func meshPeer(entry wireGuardPeerFileEntry) (peerEntry, bool) {
-	var peer peerEntry
-
-	address, err := netip.ParseAddr(entry.PublicAddress)
-	if err != nil || !address.Is4() {
-		return peer, false
-	}
-
-	meshAddress, err := netip.ParseAddr(entry.MeshAddress)
-	if err != nil || !meshAddress.Is6() {
-		return peer, false
-	}
-
-	mac, err := net.ParseMAC(entry.MAC)
-	if err != nil || len(mac) != 6 {
-		return peer, false
-	}
-
-	peer.IPv4 = address.As4()
-	peer.WG = meshAddress.As16()
-	copy(peer.MAC[:], mac)
-
-	if entry.PrivateAddress != "" {
-		private, err := netip.ParseAddr(entry.PrivateAddress)
-		if err != nil || !private.Is4() {
-			return peer, false
+func readPeerArray() ([]peer, error) {
+	values := make([]peer, peerLimit)
+	for index := range peerLimit {
+		value, err := readMap[peer]("peer_list", uint32(index))
+		if err != nil {
+			return nil, err
 		}
-
-		peer.PrivateIPv4 = private.As4()
+		values[index] = value
 	}
-
-	return peer, true
+	return values, nil
 }
 
-// packPeerMAC packs a MAC into the low 6 bytes of a u64 key.
-func packPeerMAC(mac [6]byte) uint64 {
-	var packed [8]byte
-
-	copy(packed[:], mac[:])
-
-	return binary.LittleEndian.Uint64(packed[:])
-}
-
-// fillPeerList rewrites the whole peer_list map.
-func fillPeerList(peers []peerEntry) error {
-	peerMap, err := openMap("peer_list")
-	if err != nil {
-		return err
-	}
-	defer peerMap.Close()
-
-	for index := uint32(0); index < unicastPeerLimit; index++ {
-		var value peerEntry
-		if int(index) < len(peers) {
+func writePeerArray(peers []peer) error {
+	for index := range peerLimit {
+		var value peer
+		if index < len(peers) {
 			value = peers[index]
 		}
-		if err := peerMap.Put(index, value); err != nil {
+		if err := writeMap("peer_list", uint32(index), value); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// fillPeersByMAC replaces the MAC index.
-func fillPeersByMAC(peers []peerEntry) error {
-	peerMap, err := openMap("peers_by_mac")
-	if err != nil {
-		return err
+func setUnicastMode(uplink string, enabled bool) error {
+	if enabled {
+		return attachHook(uplink, uplinkEgressProgram, "egress")
 	}
-	defer peerMap.Close()
-
-	var key uint64
-	var address [16]byte
-
-	keys := make([]uint64, 0, len(peers))
-	iterator := peerMap.Iterate()
-	for iterator.Next(&key, &address) {
-		keys = append(keys, key)
-	}
-	if err := iterator.Err(); err != nil {
-		return err
-	}
-
-	for _, existingKey := range keys {
-		if err := peerMap.Delete(existingKey); err != nil {
-			return err
-		}
-	}
-
-	for _, peer := range peers {
-		if err := peerMap.Put(packPeerMAC(peer.MAC), peer.WG); err != nil {
-			return err
-		}
-	}
-	return nil
+	return detachHook(uplink, "egress")
 }
 
-// meshPeerCount counts the peers in the peer_list map.
-func meshPeerCount() (int, error) {
-	peerMap, err := openMap("peer_list")
-	if err != nil {
-		return 0, err
-	}
-	defer peerMap.Close()
-
-	count := 0
-	for index := uint32(0); index < unicastPeerLimit; index++ {
-		var peer peerEntry
-		if err := peerMap.Lookup(index, &peer); err != nil {
-			return 0, err
+// readPeers returns the loaded peers. The first empty entry ends the list.
+func readPeers() ([]peer, error) {
+	var peers []peer
+	for index := range peerLimit {
+		value, err := readMap[peer]("peer_list", uint32(index))
+		if err != nil {
+			return nil, err
 		}
-		if peer.IPv4 == [4]byte{} {
+		if value.IPv4 == [4]byte{} {
 			break
 		}
-		count++
+		peers = append(peers, value)
 	}
-	return count, nil
+
+	return peers, nil
 }
