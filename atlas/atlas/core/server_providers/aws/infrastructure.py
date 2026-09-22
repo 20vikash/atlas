@@ -78,6 +78,16 @@ class AwsInfrastructure:
 		self.provider.client.call(
 			"ec2", "modify_vpc_attribute", VpcId=vpc_id, EnableDnsHostnames={"Value": True}
 		)
+		if not self.vpc_ipv6_cidr(vpc_id):
+			self.provider.client.call(
+				"ec2", "associate_vpc_cidr_block", VpcId=vpc_id, AmazonProvidedIpv6CidrBlock=True
+			)
+			self.provider.poll(
+				lambda: bool(self.vpc_ipv6_cidr(vpc_id)) or None,
+				timeout_seconds=self.provider.setup_poll_timeout_seconds,
+				poll_interval_seconds=self.provider.setup_poll_interval_seconds,
+				description=f"the IPv6 block of VPC {vpc_id}",
+			)
 		return vpc_id
 
 	def create_internet_access(self, vpc_id: str) -> None:
@@ -110,6 +120,14 @@ class AwsInfrastructure:
 				"create_route",
 				RouteTableId=route_table_id,
 				DestinationCidrBlock="0.0.0.0/0",
+				GatewayId=gateway_id,
+			)
+		if not self.has_ipv6_default_route(route_table_id):
+			self.provider.client.call(
+				"ec2",
+				"create_route",
+				RouteTableId=route_table_id,
+				DestinationIpv6CidrBlock="::/0",
 				GatewayId=gateway_id,
 			)
 
@@ -150,6 +168,14 @@ class AwsInfrastructure:
 			SubnetId=subnet_id,
 			MapPublicIpOnLaunch={"Value": True},
 		)
+		if not (existing or {}).get("Ipv6CidrBlockAssociationSet"):
+			vpc_block = ipaddress.IPv6Network(self.vpc_ipv6_cidr(vpc_id) or "")
+			self.provider.client.call(
+				"ec2",
+				"associate_subnet_cidr_block",
+				SubnetId=subnet_id,
+				Ipv6CidrBlock=str(next(vpc_block.subnets(new_prefix=64))),
+			)
 		return subnet_id
 
 	def create_security_group(self, vpc_id: str) -> str:
@@ -405,6 +431,25 @@ class AwsInfrastructure:
 		)
 		return tables[0]["RouteTableId"], default_route.get("GatewayId") if default_route else None
 
+	def vpc_ipv6_cidr(self, vpc_id: str) -> str | None:
+		"""Return the associated Amazon IPv6 /56 of the VPC. VM public IPv6 blocks come from it."""
+		vpcs = self.provider.client.call("ec2", "describe_vpcs", VpcIds=[vpc_id]).get("Vpcs", [])
+		for association in vpcs[0].get("Ipv6CidrBlockAssociationSet", []) if vpcs else []:
+			if association.get("Ipv6CidrBlockState", {}).get("State") == "associated":
+				return association.get("Ipv6CidrBlock")
+		return None
+
+	def has_ipv6_default_route(self, route_table_id: str) -> bool:
+		"""Report whether the route table sends IPv6 to a gateway."""
+		tables = self.provider.client.call(
+			"ec2", "describe_route_tables", RouteTableIds=[route_table_id]
+		).get("RouteTables", [])
+		return any(
+			route.get("DestinationIpv6CidrBlock") == "::/0"
+			for table in tables
+			for route in table.get("Routes", [])
+		)
+
 	@property
 	def private_network_cidr(self) -> str:
 		"""Return the canonical Atlas private network CIDR."""
@@ -415,11 +460,15 @@ class AwsInfrastructure:
 		"""Report whether AWS returned one required ingress rule."""
 		if not isinstance(permissions, list):
 			return False
-		expected_cidrs = {item["CidrIp"] for item in expected.get("IpRanges", [])}
+		expected_cidrs = {item["CidrIp"] for item in expected.get("IpRanges", [])} | {
+			item["CidrIpv6"] for item in expected.get("Ipv6Ranges", [])
+		}
 		for permission in permissions:
 			if not isinstance(permission, dict):
 				continue
-			actual_cidrs = {item.get("CidrIp") for item in permission.get("IpRanges", [])}
+			actual_cidrs = {item.get("CidrIp") for item in permission.get("IpRanges", [])} | {
+				item.get("CidrIpv6") for item in permission.get("Ipv6Ranges", [])
+			}
 			if (
 				permission.get("IpProtocol") == expected.get("IpProtocol")
 				and permission.get("FromPort") == expected.get("FromPort")
@@ -447,5 +496,9 @@ class AwsInfrastructure:
 			{
 				"IpProtocol": "-1",
 				"IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "Atlas development access"}],
-			}
+			},
+			{
+				"IpProtocol": "-1",
+				"Ipv6Ranges": [{"CidrIpv6": "::/0", "Description": "Atlas development access"}],
+			},
 		]

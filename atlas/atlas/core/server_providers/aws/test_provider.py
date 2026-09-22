@@ -15,7 +15,7 @@ from atlas.atlas.core.server_providers.aws.configuration import (
 	STORAGE_VOLUME_SIZE_GIB,
 )
 from atlas.atlas.core.server_providers.aws.infrastructure import AwsInfrastructure
-from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses
+from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses, AwsIPv6Prefixes
 from atlas.atlas.core.server_providers.aws.provider import AwsProvider
 from atlas.atlas.core.server_providers.aws.servers import MESH_MULTICAST_GROUP, AwsServers
 from atlas.atlas.core.server_providers.aws.volumes import AwsVolumes
@@ -33,7 +33,15 @@ class TestAwsInfrastructure(UnitTestCase):
 	def test_existing_vpc_is_reconciled_by_its_stored_id(self) -> None:
 		infrastructure = self.infrastructure(vpc_id="vpc-1", private_network_cidr="10.1.1.1/20")
 		infrastructure.provider.client.call.return_value = {
-			"Vpcs": [{"VpcId": "vpc-1", "CidrBlock": "10.1.0.0/20"}]
+			"Vpcs": [
+				{
+					"VpcId": "vpc-1",
+					"CidrBlock": "10.1.0.0/20",
+					"Ipv6CidrBlockAssociationSet": [
+						{"Ipv6CidrBlock": "2600:1f18::/56", "Ipv6CidrBlockState": {"State": "associated"}}
+					],
+				}
+			]
 		}
 
 		vpc_id = infrastructure.create_vpc()
@@ -314,7 +322,7 @@ class TestAwsProvider(UnitTestCase):
 			}
 		)
 
-		provider.attach_public_ipv4_address("eipalloc-1", "203.0.113.9", server)
+		provider.attach_public_ip_address("eipalloc-1", "203.0.113.9", server)
 
 		provider.ip_addresses.attach.assert_called_once_with("eipalloc-1", "eni-primary")
 
@@ -332,7 +340,7 @@ class TestAwsProvider(UnitTestCase):
 		)
 
 		with self.assertRaisesRegex(AwsError, "primary network interface"):
-			provider.attach_public_ipv4_address("eipalloc-1", "203.0.113.9", server)
+			provider.attach_public_ip_address("eipalloc-1", "203.0.113.9", server)
 
 	def test_metald_needs_the_primary_private_address(self) -> None:
 		provider = self.provider()
@@ -374,8 +382,11 @@ class TestAwsProvider(UnitTestCase):
 		rules = infrastructure.ingress_rules
 
 		self.assertEqual(
-			[(rule["IpProtocol"], rule["IpRanges"][0]["CidrIp"]) for rule in rules],
-			[("-1", "0.0.0.0/0")],
+			[(rule["IpProtocol"], rule.get("IpRanges"), rule.get("Ipv6Ranges")) for rule in rules],
+			[
+				("-1", [{"CidrIp": "0.0.0.0/0", "Description": "Atlas development access"}], None),
+				("-1", None, [{"CidrIpv6": "::/0", "Description": "Atlas development access"}]),
+			],
 		)
 
 	def test_ubuntu_and_debian_users_can_be_promoted(self) -> None:
@@ -963,3 +974,31 @@ class TestAwsIPAddresses(UnitTestCase):
 	@staticmethod
 	def addresses() -> AwsIPAddresses:
 		return AwsIPAddresses(client=Mock(), configuration=SimpleNamespace(resource_name_prefix="atlas-eu-"))
+
+	def test_an_ipv6_block_is_the_first_free_80_of_the_subnet(self) -> None:
+		client = Mock()
+		client.call.return_value = {
+			"Subnets": [
+				{
+					"Ipv6CidrBlockAssociationSet": [
+						{"Ipv6CidrBlock": "2600:1f18:0:1::/64", "Ipv6CidrBlockState": {"State": "associated"}}
+					]
+				}
+			]
+		}
+		prefixes = AwsIPv6Prefixes(client, SimpleNamespace(subnet_id="subnet-1"))
+
+		reserved = prefixes.reserve({"2600:1f18:0:1::/80"})
+
+		self.assertEqual(reserved.address, "2600:1f18:0:1:1::/80")
+		self.assertEqual(reserved.provider_resource_id, "2600:1f18:0:1:1::/80")
+
+	def test_an_ipv6_block_is_delegated_to_the_host_interface(self) -> None:
+		client = Mock()
+		prefixes = AwsIPv6Prefixes(client, SimpleNamespace(subnet_id="subnet-1"))
+
+		prefixes.attach("2600:1f18:0:1:1::/80", "eni-1")
+
+		client.call.assert_called_once_with(
+			"ec2", "assign_ipv6_addresses", NetworkInterfaceId="eni-1", Ipv6Prefixes=["2600:1f18:0:1:1::/80"]
+		)

@@ -129,18 +129,9 @@ step "install metald"
 install_binary /usr/bin/metald "$METALD_DOWNLOAD_URL" "$METALD_SHA256"
 
 
-# upgrade_mesh_bpf loads the BPF that one mesh binary embeds, because the CLI
-# only works with its own BPF. metald configures a new host itself.
-upgrade_mesh_bpf() {
-	[ -e /sys/fs/bpf/atlas-wg-mesh/build_hash ] || return 0
-	"$1" upgrade --uplink "$MESH_UPLINK_INTERFACE" --wireguard "$wireguard_interface"
-}
-
-
 step "install atlas-wg-mesh"
 install -d -m 0755 "$(dirname "$mesh_binary_path")"
 install_binary "$mesh_binary_path" "$WG_MESH_DOWNLOAD_URL" "$WG_MESH_SHA256"
-upgrade_mesh_bpf "$mesh_binary_path"
 
 
 step "create directories for metald"
@@ -230,9 +221,6 @@ if [ -f "$config_file" ]; then
 	else
 		mesh_sections
 	fi
-	# metald derives the peer state path from base_dir; a stale peers_file line from
-	# an older installation is ignored and removed.
-	sed -i "/^peers_file = /d" "$config_file"
 	if ! grep -q '^\[tls\]' "$config_file"; then
 		tls_sections
 	fi
@@ -316,14 +304,17 @@ TTYVHangup=yes
 Restart=no
 EOF
 
-# metald runs the unicast NDP daemon itself and owns its lifecycle, so an
-# earlier installation removes the daemon unit and the unicast peer file.
-rm -f /etc/systemd/system/atlas-wg-mesh-unicast.service "$base_dir/unicast-peers"
-
-
 step "enable IP forwarding"
-printf 'net.ipv4.ip_forward = 1\n' > /etc/sysctl.d/99-metald.conf
-sysctl -q -w net.ipv4.ip_forward=1
+# A forwarding host ignores router advertisements unless accept_ra is 2, and a
+# gateway VM needs its host to hold the IPv6 default route.
+public_interface=$(ip -4 route show default | awk 'NR == 1 { print $5 }')
+{
+	printf 'net.ipv4.ip_forward = 1\n'
+	if [ -n "$public_interface" ]; then
+		printf 'net.ipv6.conf.%s.accept_ra = 2\n' "$public_interface"
+	fi
+} > /etc/sysctl.d/99-metald.conf
+sysctl -q -p /etc/sysctl.d/99-metald.conf
 /usr/local/lib/metal/network-setup
 
 
@@ -341,7 +332,6 @@ if ! systemctl restart metal.service || ! service_is_stable; then
 	fi
 	if [ -x "$mesh_binary_path.previous" ]; then
 		mv -f "$mesh_binary_path.previous" "$mesh_binary_path"
-		upgrade_mesh_bpf "$mesh_binary_path" || true
 	fi
 	systemctl restart metal.service || true
 	journalctl -u metal.service -n 20 --no-pager -o cat >&2 || true

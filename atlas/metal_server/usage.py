@@ -26,7 +26,7 @@ def enqueue_server_syncs() -> None:
 	)
 	peers = get_wireguard_peers()
 	privileged_addresses = get_privileged_vm_addresses()
-	unicast = unicast_network_enabled()
+	unicast = is_unicast_network_enabled()
 	for server_name in servers:
 		enqueue_server_sync(server_name, peers, privileged_addresses, unicast)
 
@@ -44,7 +44,7 @@ def enqueue_server_sync(
 	if privileged_vm_addresses is None:
 		privileged_vm_addresses = get_privileged_vm_addresses()
 	if unicast is None:
-		unicast = unicast_network_enabled()
+		unicast = is_unicast_network_enabled()
 
 	frappe.enqueue(
 		sync_server,
@@ -63,9 +63,9 @@ def sync_server(
 	server_name: str,
 	wireguard_peers: list[dict[str, Any]],
 	privileged_vm_addresses: list[str],
-	unicast: bool = False,
+	unicast: bool,
 ) -> None:
-	"""Exchange state with one host, then store its capacity, VM states, and uplink MAC."""
+	"""Exchange state with one host, then store its capacity, VM states, and private network MAC."""
 	server = cast("MetalServer", frappe.get_doc("Metal Server", server_name))
 	try:
 		response = MetalClient(server).sync(
@@ -93,9 +93,9 @@ def sync_server(
 		ignore_permissions=True
 	)
 
-	uplink_mac = response.get("uplink_mac")
-	if uplink_mac and uplink_mac != server.uplink_mac_address:
-		frappe.db.set_value("Metal Server", server.name, "uplink_mac_address", uplink_mac)
+	mac_address = response.get("private_network_mac_address")
+	if mac_address and mac_address != server.private_network_mac_address:
+		frappe.db.set_value("Metal Server", server.name, "private_network_mac_address", mac_address)
 
 
 def get_desired_images() -> list[dict[str, Any]]:
@@ -142,19 +142,21 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 			"public_ipv4_address",
 			"private_ipv4_address",
 			"port",
-			"uplink_mac_address",
+			"private_network_mac_address",
 		],
 	)
 	peers = []
 	for server in servers:
-		if (
-			not server.wireguard_public_key
-			or not server.private_ipv4_address
-			or not server.wireguard_ip_address
+		# The mesh needs the public address and the MAC to reach and identify a peer.
+		if not all(
+			(
+				server.wireguard_public_key,
+				server.wireguard_ip_address,
+				server.private_ipv4_address,
+				server.public_ipv4_address,
+				server.private_network_mac_address,
+			)
 		):
-			continue
-		# The mesh drops a peer without a MAC, because it cannot identify the peer's NDP advertisements.
-		if not server.public_ipv4_address or not server.uplink_mac_address:
 			continue
 
 		peers.append(
@@ -165,13 +167,13 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 				"address": f"{server.private_ipv4_address}:{server.port}",
 				"public_address": server.public_ipv4_address,
 				"private_address": server.private_ipv4_address,
-				"mac": server.uplink_mac_address,
+				"private_network_mac_address": server.private_network_mac_address,
 			}
 		)
 	return peers
 
 
-def unicast_network_enabled() -> bool:
+def is_unicast_network_enabled() -> bool:
 	"""Report whether the region uses the unicast NDP transport."""
 	return bool(frappe.get_single("Atlas Settings").is_unicast_network_enabled)
 
