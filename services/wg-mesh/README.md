@@ -1,99 +1,46 @@
 # Atlas WG Mesh
 
-Atlas WG Mesh gives each VM a stable private IPv6 address. The address does not change when the VM moves to another host.
+Atlas WG Mesh gives each virtual machine a private IPv6 address in `fdaa::/16`.
 
-The mesh uses eBPF for packet decisions, WireGuard for encryption, and discovery messages to find the host that owns a VM.
+The address stays with the virtual machine when it moves to another host.
 
-## Start with one packet
+eBPF makes packet decisions, WireGuard encrypts host traffic, and Neighbor Discovery Protocol finds remote virtual machines.
 
-```mermaid
-flowchart LR
-    VM1[VM A<br/>fdaa::a]
+## Packet path
 
-    subgraph Host1[Host 1]
-        Hook1[eBPF VM hook]
-        WG1[WireGuard]
-    end
-
-    subgraph Host2[Host 2]
-        WG2[WireGuard]
-        Hook2[eBPF WireGuard hook]
-    end
-
-    VM2[VM B<br/>fdaa::b]
-
-    VM1 --> Hook1
-    Hook1 -->|IPv6 inside IPv6| WG1
-    WG1 -->|Encrypted host tunnel| WG2
-    WG2 --> Hook2
-    Hook2 --> VM2
+```text
+VM A -> VM hook -> WireGuard -> WireGuard hook -> VM B
 ```
 
-The eBPF hook on Host 1 finds the owner of VM B. It adds an outer IPv6 header with the WireGuard address of Host 2.
+The VM hook sends known remote traffic through WireGuard.
 
-WireGuard encrypts the host-to-host packet. The hook on Host 2 removes the outer header and sends the original packet to VM B.
+For an unknown address, the hook sends a neighbor solicitation.
 
-## How a host finds a VM
+The destination host answers through proxy NDP, and the uplink hook records its WireGuard address.
 
-A host keeps local ownership and learned remote locations in eBPF maps. It sends `WHO_HAS` when the destination is not known.
+If a virtual machine moves, the old host sends `NOT_HERE`.
 
-```mermaid
-sequenceDiagram
-    participant VM as VM A
-    participant A as Host A
-    participant Network as Discovery network
-    participant B as Host B
+The sender removes the old location and starts NDP again.
 
-    VM->>A: Packet for VM B
-    A->>A: No local or remote location
-    A->>Network: WHO_HAS VM B
-    Network->>B: Discovery message
-    B-->>A: FOUND VM B at Host B
-    A->>A: Save remote location
-    Note over VM,A: The first packet is replaced
-    VM->>A: Retried packet
-    A->>B: Encrypted tunnel through WireGuard
-```
-
-TCP normally retries the first packet after discovery. The per-VM rate limit controls discovery traffic.
-
-## Why the mesh has no central route lookup
-
-The packet path continues when Atlas is unavailable. Each host can learn a VM location directly from the trusted regional network.
-
-This design also makes planned VM moves fast. The new host sends `NOW_HERE`, and hosts update an existing learned route.
-
-## Security boundary
+## Security rules
 
 | Boundary | Rule |
 | --- | --- |
-| VM identity | A source address must match the address registered on the VM interface. |
-| Host addresses | VMs cannot reach the `fdab::/16` WireGuard host range through the mesh. |
-| Tenant isolation | Different nonzero tenants cannot communicate. |
-| Privileged VMs | Only controller-approved tenant `0` addresses can cross tenant boundaries. |
-| Discovery | The discovery network must contain trusted hosts. Discovery messages are not authenticated. |
-| Host traffic | WireGuard encrypts traffic only between configured peers. |
+| Source | A virtual machine can use only an address owned by its interface. |
+| Underlay | A virtual machine cannot reach the host range `fdab::/16`. |
+| Tenant | Different tenants cannot communicate. |
+| Privileged VM | A listed tenant-0 virtual machine can communicate with all tenants. |
+| Discovery | The hooks accept location data only from configured peers. |
 
-::: warning Trusted network required
-Use multicast discovery only on a trusted Layer-2 network. Use the unicast relay when multicast is unavailable.
-:::
+NDP does not authenticate a host. Use a trusted host network.
 
-## Scope and limits
+## Documentation
 
-WG Mesh owns private traffic between VM addresses in one region. It does not configure WireGuard peers, keys, NAT, DNS, DHCP, or host firewall rules.
-
-WG Mesh does not provide private traffic between regions.
-
-## Choose the next guide
-
-| Need | Guide |
+| Document | Purpose |
 | --- | --- |
-| Install a host or manage VM ownership | [Operations](docs/operations.md) |
-| Trace every packet and recovery scenario | [Design and packet flow](docs/design.md) |
-| Use a network without multicast | [Unicast discovery](docs/unicast-network.md) |
-| Inspect routes and packet decisions | [Debug in production](docs/debug-in-production.md) |
-| Review measured throughput and packet rate | [Benchmarks](docs/benchmark.md) |
-
-For Go changes, use the repository [Go review guide](../../llm/go-code-review-guide.md).
+| [Design](docs/design.md) | Packet paths, hooks, and maps. |
+| [Operations](docs/operations.md) | All CLI commands and examples. |
+| [Gateways](docs/gateways.md) | Public prefixes and routed destinations. |
+| [Benchmarks](docs/benchmark.md) | Measured throughput and packet rate. |
 
 Atlas WG Mesh uses the [AGPL-3.0 license](../../license.txt).
