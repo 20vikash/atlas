@@ -51,9 +51,6 @@ func syncPeers(path string, unicast bool) error {
 	if err != nil {
 		return err
 	}
-	if unicast && len(peers) == 0 {
-		return fmt.Errorf("unicast mode needs at least one peer")
-	}
 
 	unlock, err := lockFile(vmLockPath, true)
 	if err != nil {

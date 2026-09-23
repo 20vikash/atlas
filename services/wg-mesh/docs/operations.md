@@ -52,8 +52,6 @@ sudo atlas-wg-mesh peers sync /var/lib/metal/wireguard-peers.json --unicast
 
 The command validates the complete file before it changes the peer map.
 
-The `--unicast` form needs at least one peer.
-
 The command attaches or detaches the egress hook after it writes the peer map.
 
 ## Synchronize a virtual machine
