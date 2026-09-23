@@ -234,6 +234,7 @@ scheduler_events = {
 			"atlas.service.core.cargo.bucket.enqueue_pending_bucket_provisioning",
 			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_pilot_release_tracker_enable",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
+			"atlas.service.doctype.ipv6_router_server.ipv6_router_server.enqueue_pending_ipv6_router_provisioning",
 			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],
 	},
