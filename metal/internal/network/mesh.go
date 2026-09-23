@@ -289,10 +289,11 @@ func (mesh *Mesh) convergeOwnedPrefixRoutes(ctx context.Context, request request
 	return nil
 }
 
+// changeOwnedPrefixRoute uses onlink because vm sync adds the VM address route later.
 func (mesh *Mesh) changeOwnedPrefixRoute(ctx context.Context, request request, action, prefix string) error {
 	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
 	if err := platform.Run(ctx, "ip", "-6", "route", action, prefix,
-		"via", request.WireGuardMeshIPv6, "dev", hostVirtualEthernet); err != nil {
+		"via", request.WireGuardMeshIPv6, "dev", hostVirtualEthernet, "onlink"); err != nil {
 		return fmt.Errorf("%s the route of %s: %w", action, prefix, err)
 	}
 	if _, err := platform.RunInNetworkNamespace(ctx, namespaceName(request.VirtualMachineID),
