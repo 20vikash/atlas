@@ -129,6 +129,26 @@ class TestScalewayProvider(UnitTestCase):
 
 		self.assertTrue(raised.exception.is_retryable)
 
+	def test_poll_retries_a_retryable_error(self) -> None:
+		provider = self.provider()
+		operation = Mock(side_effect=[ScalewayError("unreachable", is_retryable=True), {"status": "ready"}])
+
+		with patch("atlas.atlas.core.server_providers.base.sleep"):
+			result = provider.poll(
+				operation, timeout_seconds=60, poll_interval_seconds=1, description="server"
+			)
+
+		self.assertEqual(result, {"status": "ready"})
+
+	def test_poll_raises_a_permanent_error(self) -> None:
+		provider = self.provider()
+		operation = Mock(side_effect=ScalewayError("provisioning failed"))
+
+		with self.assertRaises(ScalewayError):
+			provider.poll(operation, timeout_seconds=60, poll_interval_seconds=1, description="server")
+
+		operation.assert_called_once_with()
+
 	def provider(self) -> ScalewayProvider:
 		provider = object.__new__(ScalewayProvider)
 		provider.settings = SimpleNamespace(

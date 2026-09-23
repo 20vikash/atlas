@@ -290,10 +290,15 @@ class ServerProvider(ABC):
 		poll_interval_seconds: int,
 		description: str,
 	) -> PollResult:
-		"""Poll one operation until it returns a result or reaches its time limit."""
+		"""Poll until an operation returns a result, retrying transient provider errors."""
 		deadline = monotonic() + timeout_seconds
 		while monotonic() < deadline:
-			result = operation()
+			try:
+				result = operation()
+			except ProviderOperationError as error:
+				if not error.is_retryable:
+					raise
+				result = None
 			if result is not None:
 				return result
 			sleep(poll_interval_seconds)
