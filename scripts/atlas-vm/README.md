@@ -45,7 +45,7 @@ sudo atlas-vm resize --vcpu 8 --disk 60     # This restarts the VM. A disk can o
 
 `atlas-vm setup` updates credentials and other mutable values. It stops if the configuration changes a region or provider value after provider setup.
 
-AWS needs one subnet in one availability zone, because WG Mesh discovery uses a multicast time to live of 1. Atlas creates a transit gateway multicast domain for that discovery traffic.
+AWS uses one subnet in one availability zone, so a public IPv6 block can move to any host. An AWS region always uses unicast networking, because a VPC does not carry link-local multicast.
 
 The VM answers on port 2222, and host ports 80 and 443 reach it.
 

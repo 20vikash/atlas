@@ -17,7 +17,7 @@ from atlas.atlas.core.server_providers.aws.configuration import (
 from atlas.atlas.core.server_providers.aws.infrastructure import AwsInfrastructure
 from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses, AwsIPv6Prefixes
 from atlas.atlas.core.server_providers.aws.provider import AwsProvider
-from atlas.atlas.core.server_providers.aws.servers import MESH_MULTICAST_GROUP, AwsServers
+from atlas.atlas.core.server_providers.aws.servers import AwsServers
 from atlas.atlas.core.server_providers.aws.volumes import AwsVolumes
 from atlas.atlas.core.server_providers.base import ProviderServer, ServerCreateRequest, ServerPowerAction
 from atlas.atlas.core.server_providers.registry import get_server_provider
@@ -28,6 +28,12 @@ class TestAwsInfrastructure(UnitTestCase):
 		infrastructure = self.infrastructure(private_network_cidr="8.8.0.0/16")
 
 		with self.assertRaisesRegex(AwsError, "private IPv4"):
+			infrastructure.validate_settings()
+
+	def test_settings_need_unicast_networking(self) -> None:
+		infrastructure = self.infrastructure(is_unicast_network_enabled=0)
+
+		with self.assertRaisesRegex(AwsError, "unicast networking"):
 			infrastructure.validate_settings()
 
 	def test_existing_vpc_is_reconciled_by_its_stored_id(self) -> None:
@@ -52,22 +58,6 @@ class TestAwsInfrastructure(UnitTestCase):
 		self.assertEqual(
 			infrastructure.provider.client.call.call_args_list[1].args[1], "modify_vpc_attribute"
 		)
-
-	def test_existing_attachment_must_use_the_atlas_network(self) -> None:
-		infrastructure = self.infrastructure(transit_gateway_attachment_id="tgw-attach-1")
-		infrastructure.provider.client.call.return_value = {
-			"TransitGatewayVpcAttachments": [
-				{
-					"TransitGatewayAttachmentId": "tgw-attach-1",
-					"TransitGatewayId": "tgw-1",
-					"VpcId": "vpc-2",
-					"SubnetIds": ["subnet-2"],
-				}
-			]
-		}
-
-		with self.assertRaisesRegex(AwsError, "does not use the Atlas VPC"):
-			infrastructure.attach_transit_gateway("tgw-1", "vpc-1", "subnet-1")
 
 	def test_security_group_replaces_old_ingress_rules(self) -> None:
 		infrastructure = self.infrastructure(security_group_id="sg-1")
@@ -99,13 +89,10 @@ class TestAwsInfrastructure(UnitTestCase):
 			"subnet_id": None,
 			"security_group_id": None,
 			"key_pair_name": None,
-			"transit_gateway_id": None,
-			"transit_gateway_attachment_id": None,
-			"multicast_domain_id": None,
 		}
-		settings = {"private_network_cidr": "10.1.0.0/20"}
+		settings = {"private_network_cidr": "10.1.0.0/20", "is_unicast_network_enabled": 1}
 		for key, value in changes.items():
-			if key == "private_network_cidr":
+			if key in settings:
 				settings[key] = value
 			else:
 				configuration[key] = value
@@ -133,9 +120,6 @@ class TestAwsProvider(UnitTestCase):
 		provider.infrastructure.create_subnet.return_value = "subnet-1"
 		provider.infrastructure.create_security_group.return_value = "sg-1"
 		provider.infrastructure.create_key_pair.return_value = "atlas-eu-ssh-key"
-		provider.infrastructure.create_transit_gateway.return_value = "tgw-1"
-		provider.infrastructure.attach_transit_gateway.return_value = "tgw-attach-1"
-		provider.infrastructure.create_multicast_domain.return_value = "tgw-mcast-1"
 
 		provider.setup_infrastructure()
 
@@ -146,41 +130,10 @@ class TestAwsProvider(UnitTestCase):
 				("aws_subnet_id", "subnet-1"),
 				("aws_security_group_id", "sg-1"),
 				("aws_key_pair_name", "atlas-eu-ssh-key"),
-				("aws_transit_gateway_id", "tgw-1"),
-				("aws_transit_gateway_attachment_id", "tgw-attach-1"),
-				("aws_multicast_domain_id", "tgw-mcast-1"),
 			],
 		)
 		self.assertEqual(provider.settings.is_server_provider_setup_completed, 1)
 		provider.settings.save.assert_called_once_with()
-
-	def test_setup_waits_for_the_transit_gateway_before_it_attaches_the_vpc(self) -> None:
-		provider = self.provider()
-		provider.settings.db_set = Mock()
-		order = Mock()
-		provider.infrastructure = Mock()
-		provider.infrastructure.create_transit_gateway.side_effect = lambda: order("create") or "tgw-1"
-		provider.infrastructure.wait_for_available.side_effect = lambda *arguments, **_: order(arguments[1])
-		provider.infrastructure.attach_transit_gateway.side_effect = lambda *_: (
-			order("attach") or "tgw-attach-1"
-		)
-		provider.infrastructure.create_multicast_domain.side_effect = lambda _id: order("domain") or "d-1"
-		provider.infrastructure.associate_multicast_subnet.side_effect = lambda *_: order("associate")
-
-		provider.setup_multicast_domain("vpc-1", "subnet-1")
-
-		self.assertEqual(
-			[call.args[0] for call in order.call_args_list],
-			[
-				"create",
-				"TransitGateways",
-				"attach",
-				"TransitGatewayVpcAttachments",
-				"domain",
-				"TransitGatewayMulticastDomains",
-				"associate",
-			],
-		)
 
 	def test_prepare_server_waits_before_it_attaches_the_mesh_interface(self) -> None:
 		provider = self.provider()
@@ -230,7 +183,7 @@ class TestAwsProvider(UnitTestCase):
 
 		provider.servers.delete.assert_called_once_with("i-1", None)
 
-	def test_attach_mesh_interface_registers_multicast_and_stores_the_address(self) -> None:
+	def test_attach_mesh_interface_stores_the_address(self) -> None:
 		provider = self.provider()
 		provider.servers = Mock()
 		provider.servers.ensure_mesh_interface.return_value = {"NetworkInterfaceId": "eni-1"}
@@ -246,7 +199,6 @@ class TestAwsProvider(UnitTestCase):
 		provider.attach_mesh_interface(server)
 
 		provider.servers.attach_mesh_interface.assert_called_once_with("eni-1", "i-1")
-		provider.servers.register_multicast_interface.assert_called_once_with("eni-1")
 		self.assertEqual(server.private_ipv4_address, "10.1.0.11")
 		self.assertEqual(server.private_network_interface, "atlas-mesh")
 		self.assertEqual(provider.mesh_mac_address(server), "02:aa:bb:cc:dd:ee")
@@ -623,35 +575,6 @@ class TestAwsServers(UnitTestCase):
 		attachment = servers.client.call.call_args_list[0].kwargs["Attachment"]
 		self.assertEqual(attachment, {"AttachmentId": "eni-attach-1", "DeleteOnTermination": True})
 
-	def test_the_mesh_interface_is_registered_as_a_member_and_a_source(self) -> None:
-		servers = self.servers()
-
-		servers.register_multicast_interface("eni-1")
-
-		operations = [call.args[1] for call in servers.client.call.call_args_list]
-		self.assertEqual(
-			operations,
-			[
-				"register_transit_gateway_multicast_group_members",
-				"register_transit_gateway_multicast_group_sources",
-			],
-		)
-		self.assertEqual(servers.client.call.call_args.kwargs["GroupIpAddress"], MESH_MULTICAST_GROUP)
-
-	def test_registration_accepts_an_interface_it_already_registered(self) -> None:
-		servers = self.servers()
-
-		servers.register_multicast_interface("eni-1")
-
-		for call in servers.client.call.call_args_list:
-			self.assertTrue(call.kwargs["allow_existing"])
-
-	def test_registration_fails_without_a_multicast_domain(self) -> None:
-		servers = self.servers(multicast_domain_id=None)
-
-		with self.assertRaises(AwsError):
-			servers.register_multicast_interface("eni-1")
-
 	def test_the_power_action_uses_the_explicit_operation(self) -> None:
 		servers = self.servers()
 
@@ -660,7 +583,7 @@ class TestAwsServers(UnitTestCase):
 		self.assertEqual(servers.client.call.call_args.args[1], "stop_instances")
 		self.assertEqual(servers.client.call.call_args.kwargs["InstanceIds"], ["i-1"])
 
-	def test_delete_releases_multicast_and_deletes_attached_interface_with_instance(self) -> None:
+	def test_delete_deletes_the_attached_interface_with_the_instance(self) -> None:
 		servers = self.servers()
 		servers.client.call.return_value = {
 			"NetworkInterfaces": [
@@ -677,8 +600,6 @@ class TestAwsServers(UnitTestCase):
 		servers.delete("i-1", "eni-1")
 
 		operations = [call.args[1] for call in servers.client.call.call_args_list]
-		self.assertIn("deregister_transit_gateway_multicast_group_members", operations)
-		self.assertIn("deregister_transit_gateway_multicast_group_sources", operations)
 		self.assertIn("modify_network_interface_attribute", operations)
 		modify_call = servers.client.call.call_args_list[-2]
 		self.assertEqual(
@@ -699,8 +620,6 @@ class TestAwsServers(UnitTestCase):
 			operations,
 			[
 				"describe_network_interfaces",
-				"deregister_transit_gateway_multicast_group_members",
-				"deregister_transit_gateway_multicast_group_sources",
 				"delete_network_interface",
 				"terminate_instances",
 			],
@@ -746,14 +665,13 @@ class TestAwsServers(UnitTestCase):
 		self.assertEqual(operations, ["describe_network_interfaces"])
 
 	@staticmethod
-	def servers(*, multicast_domain_id: str | None = "tgw-mcast-1") -> AwsServers:
+	def servers() -> AwsServers:
 		return AwsServers(
 			client=Mock(),
 			configuration=SimpleNamespace(
 				subnet_id="subnet-1",
 				security_group_id="sg-1",
 				key_pair_name="atlas-eu-ssh-key",
-				multicast_domain_id=multicast_domain_id,
 				resource_name_prefix="atlas-eu-",
 			),
 			catalog=AwsCatalog(),

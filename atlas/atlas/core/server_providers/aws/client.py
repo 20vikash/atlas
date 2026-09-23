@@ -47,10 +47,9 @@ class AwsClient:
 		operation: str,
 		*,
 		allow_missing: bool = False,
-		allow_existing: bool = False,
 		**parameters: object,
 	) -> dict[str, Any]:
-		"""Return one AWS API response and allow selected idempotent results."""
+		"""Return one AWS API response, or nothing for an allowed missing resource."""
 		logger.info(
 			"Provider request started",
 			extra={"provider": "AWS", "operation": operation, "resource": service},
@@ -60,9 +59,7 @@ class AwsClient:
 			return method(**parameters)
 		except ClientError as error:
 			code = error.response.get("Error", {}).get("Code", "")
-			if (allow_missing and self.is_missing_code(code)) or (
-				allow_existing and self.is_existing_code(code)
-			):
+			if allow_missing and self.is_missing_code(code):
 				return {}
 			logger.warning(
 				"Provider request failed",
@@ -110,8 +107,3 @@ class AwsClient:
 	def is_missing_code(code: str) -> bool:
 		"""Report whether an AWS error code means the resource does not exist."""
 		return code.endswith(".NotFound") or code.endswith("NotFoundException")
-
-	@staticmethod
-	def is_existing_code(code: str) -> bool:
-		"""Report whether an AWS error code means the resource already exists."""
-		return code.endswith("AlreadyExists") or code.endswith("AlreadyExistsException")

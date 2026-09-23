@@ -192,8 +192,7 @@ class AtlasSetup:
 		"""Apply settings and complete each setup phase."""
 		self._validate_immutable_values()
 		self._clear_certificate_for_environment_change()
-		self.settings.update(self.configuration.settings_values())
-		self.settings.save(ignore_permissions=True)
+		self._apply_settings()
 
 		self._setup_server_provider()
 		self._setup_dns_provider()
@@ -203,6 +202,13 @@ class AtlasSetup:
 		self._validate_result()
 		# A site command has no request transaction. Keep the completed reconciliation.
 		frappe.db.commit()  # nosemgrep
+
+	def _apply_settings(self) -> None:
+		self.settings.update(self.configuration.settings_values())
+		# A VPC does not carry link-local multicast, so an AWS region always uses unicast NDP.
+		if self.configuration.server_provider == "AWS":
+			self.settings.is_unicast_network_enabled = 1
+		self.settings.save(ignore_permissions=True)
 
 	def _validate_immutable_values(self) -> None:
 		if self.settings.is_server_provider_setup_completed:

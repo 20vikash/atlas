@@ -56,13 +56,10 @@ class AtlasSettings(Document):
 		aws_access_key_id: DF.Data | None
 		aws_availability_zone: DF.Data | None
 		aws_key_pair_name: DF.Data | None
-		aws_multicast_domain_id: DF.Data | None
 		aws_region: DF.Data | None
 		aws_secret_access_key: DF.Password | None
 		aws_security_group_id: DF.Data | None
 		aws_subnet_id: DF.Data | None
-		aws_transit_gateway_attachment_id: DF.Data | None
-		aws_transit_gateway_id: DF.Data | None
 		aws_vpc_id: DF.Data | None
 		central_jwks: DF.JSON | None
 		central_jwks_url: DF.Data | None

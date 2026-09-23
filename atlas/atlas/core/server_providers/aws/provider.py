@@ -82,39 +82,8 @@ class AwsProvider(ServerProvider):
 		self.store("aws_security_group_id", self.infrastructure.create_security_group(vpc_id))
 		self.store("aws_key_pair_name", self.infrastructure.create_key_pair(self.settings.public_ssh_key))
 
-		self.setup_multicast_domain(vpc_id, subnet_id)
 		self.settings.is_server_provider_setup_completed = 1
 		self.settings.save()
-
-	def setup_multicast_domain(self, vpc_id: str, subnet_id: str) -> None:
-		"""Create the transit gateway that carries WG Mesh discovery traffic."""
-		transit_gateway_id = self.infrastructure.create_transit_gateway()
-		self.store("aws_transit_gateway_id", transit_gateway_id)
-		self.infrastructure.wait_for_available(
-			"describe_transit_gateways",
-			"TransitGateways",
-			f"transit gateway {transit_gateway_id}",
-			TransitGatewayIds=[transit_gateway_id],
-		)
-
-		attachment_id = self.infrastructure.attach_transit_gateway(transit_gateway_id, vpc_id, subnet_id)
-		self.store("aws_transit_gateway_attachment_id", attachment_id)
-		self.infrastructure.wait_for_available(
-			"describe_transit_gateway_vpc_attachments",
-			"TransitGatewayVpcAttachments",
-			f"transit gateway attachment {attachment_id}",
-			TransitGatewayAttachmentIds=[attachment_id],
-		)
-
-		domain_id = self.infrastructure.create_multicast_domain(transit_gateway_id)
-		self.store("aws_multicast_domain_id", domain_id)
-		self.infrastructure.wait_for_available(
-			"describe_transit_gateway_multicast_domains",
-			"TransitGatewayMulticastDomains",
-			f"multicast domain {domain_id}",
-			TransitGatewayMulticastDomainIds=[domain_id],
-		)
-		self.infrastructure.associate_multicast_subnet(domain_id, attachment_id, subnet_id)
 
 	@override
 	def fetch_server_sizes(self) -> tuple[ServerSizeData, ...]:
@@ -305,7 +274,6 @@ class AwsProvider(ServerProvider):
 		if not isinstance(private_address, str):
 			raise AwsError("AWS did not return a private IPv4 address for the mesh interface")
 
-		self.servers.register_multicast_interface(interface_id)
 		server.private_network_interface = self.private_network_interface
 		server.private_ipv4_address = private_address
 		self.update_provider_metadata(server, mesh_interface=dict(interface))
