@@ -28,6 +28,6 @@ class TestServerProviderRegistry(UnitTestCase):
 
 	def test_optional_ip_address_operation_has_a_distinct_error(self) -> None:
 		with self.assertRaises(UnsupportedProviderOperation) as raised:
-			ServerProvider.reserve_public_ipv4_address(Mock())
+			ServerProvider.reserve_public_ip_address(Mock(), 6)
 
 		self.assertEqual(raised.exception.code, "unsupported_provider_operation")

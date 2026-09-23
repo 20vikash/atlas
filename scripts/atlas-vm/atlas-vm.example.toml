@@ -46,8 +46,8 @@ machine_billing_cycle = "Hourly"
 access_key = "change-me"
 secret_key = "change-me"
 
-# Atlas puts every host in one subnet in this zone, because WG Mesh discovery
-# uses a multicast time to live of 1.
+# Atlas puts every host in one subnet in this zone, so a public IPv6 /80 block
+# can move between hosts.
 [atlas.aws]
 region = "eu-west-1"
 availability_zone = "eu-west-1a"

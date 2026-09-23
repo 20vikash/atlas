@@ -28,10 +28,10 @@ type firewallAudit struct {
 	inspectedAt time.Time
 }
 
-// meshRegistrar registers and unregisters guest mesh addresses.
+// meshRegistrar registers and removes the complete mesh state of one VM.
 type meshRegistrar interface {
-	Add(ctx context.Context, address, interfaceName string) error
-	Remove(ctx context.Context, address, interfaceName string) error
+	syncVM(ctx context.Context, request request) error
+	removeVM(ctx context.Context, address, interfaceName string) error
 }
 
 // trafficMonitor attaches packet monitoring to VM TAP devices.
@@ -79,6 +79,9 @@ func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkR
 		Egress:                        desired.Configuration.Egress,
 		PublicIPv4:                    desired.Configuration.PublicIPv4,
 		WireGuardMeshIPv6:             desired.Configuration.WireGuardMeshIPv6,
+		GatewayRoutes:                 desired.Configuration.GatewayRoutes,
+		IsNetworkGateway:              desired.Configuration.IsNetworkGateway,
+		PublicIPv6:                    desired.Configuration.PublicIPv6,
 		PrivateNetworkThroughputMiBps: desired.Configuration.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  desired.Configuration.PublicNetworkThroughputMiBps,
 		Firewall:                      desired.Configuration.Firewall,
@@ -303,7 +306,7 @@ func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request)
 		}
 	}
 	if request.Egress.HasVirtualEthernet() {
-		if err := allocator.addMeshRegistration(ctx, request.VirtualMachineID, request.UserID, request.WireGuardMeshIPv6); err != nil {
+		if err := allocator.addMeshRegistration(ctx, request); err != nil {
 			return err
 		}
 	}
@@ -324,16 +327,17 @@ func (allocator *LinuxAllocator) interfaceFor(virtualMachineID string) Interface
 
 // addMeshRegistration routes the guest mesh address through the namespace and
 // registers it with Atlas WG Mesh.
-func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, virtualMachineID string, userID uint32, address string) error {
+func (allocator *LinuxAllocator) addMeshRegistration(ctx context.Context, request request) error {
+	address := request.WireGuardMeshIPv6
 	if allocator.mesh == nil || address == "" {
 		return nil
 	}
 
-	hostVirtualEthernet, guestVirtualEthernet := virtualEthernetNames(userID)
-	if err := runNetworkNamespaceSteps(ctx, namespaceName(virtualMachineID), meshNamespaceSteps(guestVirtualEthernet, address)); err != nil {
+	_, guestVirtualEthernet := virtualEthernetNames(request.UserID)
+	if err := runNetworkNamespaceSteps(ctx, namespaceName(request.VirtualMachineID), meshNamespaceSteps(guestVirtualEthernet, address)); err != nil {
 		return fmt.Errorf("route mesh address %s: %w", address, err)
 	}
-	if err := allocator.mesh.Add(ctx, address, hostVirtualEthernet); err != nil {
+	if err := allocator.mesh.syncVM(ctx, request); err != nil {
 		return fmt.Errorf("register mesh address %s: %w", address, err)
 	}
 	return nil
@@ -346,7 +350,7 @@ func (allocator *LinuxAllocator) removeMeshRegistration(ctx context.Context, use
 	}
 
 	hostVirtualEthernet, _ := virtualEthernetNames(userID)
-	if err := allocator.mesh.Remove(ctx, address, hostVirtualEthernet); err != nil {
+	if err := allocator.mesh.removeVM(ctx, address, hostVirtualEthernet); err != nil {
 		return fmt.Errorf("unregister mesh address %s: %w", address, err)
 	}
 	return nil

@@ -134,23 +134,23 @@ func TestDisabledFirewallIgnoresRetainedRuleChanges(t *testing.T) {
 
 func TestMeshRegistrationIsSkippedWithoutAMesh(t *testing.T) {
 	allocator := NewLinuxAllocator(nil, nil)
-	if err := allocator.addMeshRegistration(context.Background(), "vm-1", 100000, "fdaa:1:0:1::1"); err != nil {
+	if err := allocator.addMeshRegistration(context.Background(), request{VirtualMachineID: "vm-1", UserID: 100000, WireGuardMeshIPv6: "fdaa:1:0:1::1"}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 type fakeMesh struct {
-	added     []string
+	synced    []request
 	removed   []string
 	removeErr error
 }
 
-func (mesh *fakeMesh) Add(_ context.Context, address, interfaceName string) error {
-	mesh.added = append(mesh.added, address+" "+interfaceName)
+func (mesh *fakeMesh) syncVM(_ context.Context, request request) error {
+	mesh.synced = append(mesh.synced, request)
 	return nil
 }
 
-func (mesh *fakeMesh) Remove(_ context.Context, address, interfaceName string) error {
+func (mesh *fakeMesh) removeVM(_ context.Context, address, interfaceName string) error {
 	mesh.removed = append(mesh.removed, address+" "+interfaceName)
 	return mesh.removeErr
 }
@@ -174,11 +174,11 @@ func TestMeshRegistrationSkipsAVirtualMachineWithoutAnAddress(t *testing.T) {
 	if err := allocator.removeMeshRegistration(context.Background(), 100000, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := allocator.addMeshRegistration(context.Background(), "vm-1", 100000, ""); err != nil {
+	if err := allocator.addMeshRegistration(context.Background(), request{VirtualMachineID: "vm-1", UserID: 100000}); err != nil {
 		t.Fatal(err)
 	}
-	if len(mesh.removed) != 0 || len(mesh.added) != 0 {
-		t.Errorf("mesh calls = %v and %v, want none", mesh.added, mesh.removed)
+	if len(mesh.removed) != 0 || len(mesh.synced) != 0 {
+		t.Errorf("mesh calls = %v and %v, want none", mesh.synced, mesh.removed)
 	}
 }
 

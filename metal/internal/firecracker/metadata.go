@@ -3,6 +3,7 @@ package firecracker
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
 	"github.com/frappe/atlas/metal/internal/vm"
@@ -46,6 +47,9 @@ func metadataServiceData(virtualMachineID, ipAddress, macAddress string, specifi
 	}
 	if specification.Network.PublicIPv4 != "" {
 		metadata["public-ipv4"] = specification.Network.PublicIPv4
+	}
+	if routes := strings.Join(vm.HostReachedDestinations(specification.Network), ","); routes != "" {
+		metadata["host-routes"] = routes
 	}
 	if specification.Network.WireGuardMeshIPv6 != "" {
 		metadata["mesh-ipv6"] = specification.Network.WireGuardMeshIPv6

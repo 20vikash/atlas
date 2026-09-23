@@ -14,11 +14,13 @@ from atlas.api.tests.test_support import TENANT_ID, api_request, call_route
 
 
 def build_ip_address(tenant_id: int = TENANT_ID, **overrides) -> SimpleNamespace:
-	"""Return one stored public IPv4 address row."""
+	"""Return one stored public IP address row."""
 	values = {
 		"name": "203.0.113.10",
 		"tenant_id": tenant_id,
 		"address": "203.0.113.10",
+		"version": "4",
+		"cidr": 32,
 		"status": "Allocated",
 		"reserved": 1,
 		"virtual_machine": None,
@@ -36,6 +38,13 @@ def owned_document(ip_address: SimpleNamespace):
 
 
 class TestIPAddressView(UnitTestCase):
+	def test_view_carries_the_version_and_prefix_length(self) -> None:
+		view = IPAddressResponse.from_document(
+			build_ip_address(address="2001:db8:1:2::", version="6", cidr=64)
+		)
+
+		self.assertEqual((view.address, view.version, view.cidr), ("2001:db8:1:2::", 6, 64))
+
 	def test_view_maps_the_status_and_hides_provider_data(self) -> None:
 		view = IPAddressResponse.from_document(build_ip_address(status="Attached", virtual_machine="vm-1"))
 

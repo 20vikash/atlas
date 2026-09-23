@@ -75,7 +75,7 @@ Before you register a host, prepare it with these items:
 - Give the host a public IPv4 address. Atlas connects as `root` with the Atlas public key.
 - Give the host a private IPv4 address inside `private_network_cidr`.
 - Put the private address on a provider network, such as a VXLAN interface. The interface must have an MTU of at least 1340.
-- Configure the provider network to carry multicast. WG Mesh uses this network as its uplink.
+- Configure the provider network to carry IPv6 multicast between hosts, or enable **Use Unicast Networking** in Atlas Settings. WG Mesh uses this network as its uplink.
 - Configure the provider network to route every VM public IPv4 address to every Metal Server.
 - Provide an empty whole disk for the storage pool. Alternatively, provide enough space on the root file system for a disk image.
 
@@ -155,29 +155,27 @@ For Generic, the IPv4 address is also the provider resource ID. Atlas sends this
 |---|---|
 | `configuration.py` | Immutable settings for low-level operations. |
 | `client.py` | boto3 sessions, pagination, and AWS errors. |
-| `infrastructure.py` | VPC, subnet, security group, key pair, and transit gateway operations. |
+| `infrastructure.py` | VPC, subnet, security group, and key pair operations. |
 | `catalog.py` | Instance type and machine image translation. |
-| `servers.py` | Instance, mesh interface, and multicast registration operations. |
+| `servers.py` | Instance and mesh interface operations. |
 | `ip_addresses.py` | Elastic IP address operations. |
 | `provider.py` | Contract composition and host network setup. |
 
-### Multicast discovery
+### Mesh discovery
 
-WG Mesh finds a virtual machine with IPv4 multicast on `239.1.1.1`. An AWS VPC subnet does not carry multicast, so Atlas creates one transit gateway multicast domain for the region.
+WG Mesh finds a virtual machine with NDP. A VPC does not carry link-local multicast, so an AWS region uses unicast networking: WG Mesh sends each solicitation to every peer over IPv4. Atlas Settings rejects AWS without **Use Unicast Networking**, and the automated setup enables it.
 
-Atlas registers each host statically as a multicast group member and a multicast group source. It does not use IGMPv2. WG Mesh reads discovery frames with an eBPF hook on the uplink and never joins the group with a socket, so the host sends no IGMP membership report and dynamic membership would leave the domain empty.
-
-WG Mesh sends discovery with a multicast time to live of 1. Atlas therefore uses one subnet in one availability zone for the whole region. Every host shares that subnet.
+Atlas uses one subnet in one availability zone for the whole region. A public IPv6 block is a /80 of that subnet, so it can move to any host.
 
 ### Host network shape
 
-An Atlas host gets a second network interface in the Atlas subnet. That interface carries mesh traffic and is the interface that Atlas registers with the multicast domain.
+An Atlas host gets a second network interface in the Atlas subnet. That interface carries mesh traffic.
 
 AWS gives no stable guest device name, so `aws/configure-private-network.sh` finds the interface by its MAC address and renames it to `atlas-mesh`. metald uses that name as its mesh uplink.
 
 The cloud-init network hotplug handler renames an attached interface back to its default name. Atlas launches each instance with user data that limits cloud-init network updates to the first boot, so the handler does not run.
 
-The script sends the IPv4 multicast range through `atlas-mesh`. It writes persistent configuration for Netplan or `systemd-networkd`.
+The script writes persistent configuration for Netplan or `systemd-networkd`.
 
 Atlas stores the mesh network interface ID before it starts the attachment. AWS deletion uses only this stored ID. It verifies the interface attachment before it deletes the interface or the instance.
 

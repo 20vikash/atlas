@@ -25,10 +25,13 @@ var ErrInvalidPeers = errors.New("network: invalid WireGuard peers")
 // WireGuardPeer describes one desired peer. MeshAddress is the peer's address
 // on the mesh, which Atlas owns and sends, and which becomes its AllowedIPs.
 type WireGuardPeer struct {
-	Node        string `json:"node"`
-	MeshAddress string `json:"mesh_address"`
-	PublicKey   string `json:"public_key"`
-	Address     string `json:"address"`
+	Node              string `json:"node"`
+	MeshAddress       string `json:"mesh_address"`
+	PublicKey         string `json:"public_key"`
+	Address           string `json:"address"`
+	PublicAddress     string `json:"public_address"`
+	PrivateAddress    string `json:"private_address"`
+	PrivateNetworkMAC string `json:"private_network_mac_address"`
 }
 
 // WireGuardConfig identifies the interface and persistent peer state.
@@ -92,17 +95,21 @@ func newWireGuardManager(configuration WireGuardConfig, commands wireGuardComman
 	return &WireGuardManager{configuration: configuration, commands: commands}
 }
 
-// reconcile removes peers that changed or disappeared, then configures every
-// desired peer. A changed peer is removed first, because `wg set` cannot move a
-// node to a new public key in place.
+// reconcile removes peers that disappeared or changed key or mesh address, then
+// configures every desired peer. `wg set` updates an endpoint in place, but it
+// cannot move a node to a new public key.
 func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired []WireGuardPeer) error {
 	currentByNode := wireGuardPeersByNode(current)
 	desiredByNode := wireGuardPeersByNode(desired)
 
 	for node, peer := range currentByNode {
-		if replacement, found := desiredByNode[node]; !found || replacement != peer {
+		replacement, found := desiredByNode[node]
+		if !found || replacement.PublicKey != peer.PublicKey || replacement.MeshAddress != peer.MeshAddress {
 			if err := manager.commands.Run(ctx, "wg", "set", manager.configuration.InterfaceName, "peer", peer.PublicKey, "remove"); err != nil {
 				return fmt.Errorf("remove WireGuard peer %q: %w", node, err)
+			}
+			if err := manager.removePeerRoute(ctx, peer); err != nil {
+				return err
 			}
 		}
 	}
@@ -124,8 +131,35 @@ func (manager *WireGuardManager) reconcile(ctx context.Context, current, desired
 		); err != nil {
 			return fmt.Errorf("configure WireGuard peer %q: %w", node, err)
 		}
+		if err := manager.replacePeerRoute(ctx, peer); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+// replacePeerRoute points one peer mesh address at the WireGuard interface.
+func (manager *WireGuardManager) replacePeerRoute(ctx context.Context, peer WireGuardPeer) error {
+	if err := manager.commands.Run(ctx, "ip", "-6", "route", "replace", peer.MeshAddress+"/128", "dev", manager.configuration.InterfaceName); err != nil {
+		return fmt.Errorf("route WireGuard peer %s: %w", peer.MeshAddress, err)
+	}
+	return nil
+}
+
+// removePeerRoute drops the route of a removed peer.
+func (manager *WireGuardManager) removePeerRoute(ctx context.Context, peer WireGuardPeer) error {
+	present, err := manager.commands.Output(ctx, "ip", "-6", "route", "show", peer.MeshAddress+"/128")
+	if err != nil {
+		return fmt.Errorf("inspect WireGuard peer route %s: %w", peer.MeshAddress, err)
+	}
+	if strings.TrimSpace(present) == "" {
+		return nil
+	}
+
+	if err := manager.commands.Run(ctx, "ip", "-6", "route", "del", peer.MeshAddress+"/128", "dev", manager.configuration.InterfaceName); err != nil {
+		return fmt.Errorf("unroute WireGuard peer %s: %w", peer.MeshAddress, err)
+	}
 	return nil
 }
 

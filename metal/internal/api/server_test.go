@@ -234,6 +234,8 @@ func (manager *fakeVirtualMachineManager) ConnectSSH(context.Context, string) (v
 type fakeRuntimeServices struct {
 	policies   []vm.Image
 	privileged []string
+	unicast    bool
+	peerSyncs  int
 	snapshots  map[string]storage.StagedSnapshot
 }
 
@@ -243,6 +245,16 @@ func (services *fakeRuntimeServices) ApplyPrivilegedAddresses(
 ) error {
 	services.privileged = append([]string(nil), addresses...)
 	return nil
+}
+
+func (services *fakeRuntimeServices) SyncPeerState(_ context.Context, unicast bool) error {
+	services.unicast = unicast
+	services.peerSyncs++
+	return nil
+}
+
+func (services *fakeRuntimeServices) PrivateNetworkMAC() (string, error) {
+	return "02:00:00:00:00:01", nil
 }
 
 func newFakeRuntimeServices() *fakeRuntimeServices {
@@ -891,7 +903,7 @@ func TestSyncAppliesControllerStateAndReturnsCapacity(t *testing.T) {
 	server := newServerWithServices(t, driver, services, wireGuardManager)
 
 	request := `{
-		"wireguard_peers":[{"node":"node-2","mesh_address":"fdab:1::2","public_key":"key-2","address":"192.0.2.2:51820"}],
+		"wireguard_peers":[{"node":"node-2","mesh_address":"fdab:1::2","public_key":"key-2","address":"192.0.2.2:51820","public_address":"192.0.2.2","private_network_mac_address":"02:00:00:00:00:02"}],
 		"images":[{
 			"ref":"sha256:image",
 			"architecture":"amd64",
@@ -953,6 +965,66 @@ func TestSyncRequiresControllerCollections(t *testing.T) {
 		`{"wireguard_peers":[],"images":[],"privileged_vm_addresses":[]}`,
 		http.StatusOK,
 	)
+}
+
+func TestSyncSelectsUnicastNDPMode(t *testing.T) {
+	services := newFakeRuntimeServices()
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
+	server := newServerWithServices(t, driver, services, &fakeWireGuardManager{})
+
+	request := `{
+		"wireguard_peers":[
+			{"node":"server-11","mesh_address":"fdab:1::11","public_key":"key11","address":"10.20.0.11:7373","public_address":"10.20.0.11","private_network_mac_address":"aa:bb:cc:dd:ee:11"}
+		],
+		"images":[],
+		"privileged_vm_addresses":[],
+		"unicast":true
+	}`
+	do(t, server, http.MethodPost, "/v1/sync", request, http.StatusOK)
+
+	if !services.unicast || services.peerSyncs != 1 {
+		t.Fatal("unicast transport was not enabled in unicast mode")
+	}
+}
+
+func TestSyncRejectsAPeerWithoutAPublicIPv4Address(t *testing.T) {
+	server := newTestServer(t)
+	request := `{
+		"wireguard_peers":[
+			{"node":"server-11","mesh_address":"fdab:1::11","public_key":"key11","address":"10.20.0.11:7373","private_network_mac_address":"aa:bb:cc:dd:ee:11"}
+		],
+		"images":[],
+		"privileged_vm_addresses":[]
+	}`
+	do(t, server, http.MethodPost, "/v1/sync", request, http.StatusBadRequest)
+}
+
+func TestSyncRejectsAPeerWithoutAMACAddress(t *testing.T) {
+	server := newTestServer(t)
+	request := `{
+		"wireguard_peers":[
+			{"node":"server-11","mesh_address":"fdab:1::11","public_key":"key11","address":"10.20.0.11:7373","public_address":"10.20.0.11"}
+		],
+		"images":[],
+		"privileged_vm_addresses":[]
+	}`
+	do(t, server, http.MethodPost, "/v1/sync", request, http.StatusBadRequest)
+}
+
+func TestSyncSelectsMulticastNDPMode(t *testing.T) {
+	services := newFakeRuntimeServices()
+	driver := &fakeVirtualMachineManager{virtualMachines: map[string]*fakeVM{}}
+	server := newServerWithServices(t, driver, services, &fakeWireGuardManager{})
+
+	do(
+		t, server, http.MethodPost, "/v1/sync",
+		`{"wireguard_peers":[],"images":[],"privileged_vm_addresses":[]}`,
+		http.StatusOK,
+	)
+
+	if services.unicast || services.peerSyncs != 1 {
+		t.Fatalf("unicast = %t, peer syncs = %d", services.unicast, services.peerSyncs)
+	}
 }
 
 func TestOpenAPIDocumentContainsOnlyTheVersionedControllerContract(t *testing.T) {

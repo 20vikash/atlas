@@ -67,9 +67,15 @@ class TestIPAddressReservation(UnitTestCase):
 		):
 			service.borrow_from_pool()
 
+	def test_the_pool_holds_only_ipv4_addresses(self) -> None:
+		with patch("atlas.metal_server.core.ip_address_service.frappe.get_all", return_value=[]) as get_all:
+			IPAddressService().get_pool_candidates()
+
+		self.assertEqual(get_all.call_args.kwargs["filters"]["version"], "4")
+
 	def test_a_provider_reservation_lands_in_the_shared_pool(self) -> None:
 		provider = Mock()
-		provider.reserve_public_ipv4_address.return_value = SimpleNamespace(
+		provider.reserve_public_ip_address.return_value = SimpleNamespace(
 			address="203.0.113.10", provider_resource_id="provider-1"
 		)
 
@@ -89,7 +95,7 @@ class TestIPAddressReservation(UnitTestCase):
 
 	def test_a_failed_insert_returns_the_provider_reservation(self) -> None:
 		provider = Mock()
-		provider.reserve_public_ipv4_address.return_value = SimpleNamespace(
+		provider.reserve_public_ip_address.return_value = SimpleNamespace(
 			address="203.0.113.10", provider_resource_id="provider-1"
 		)
 
@@ -106,7 +112,7 @@ class TestIPAddressReservation(UnitTestCase):
 		):
 			IPAddressService().reserve_from_provider()
 
-		provider.delete_public_ipv4_address.assert_called_once_with("provider-1")
+		provider.delete_public_ip_address.assert_called_once_with("provider-1")
 
 
 class TestHeldIPAddressReservation(UnitTestCase):

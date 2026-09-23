@@ -17,12 +17,16 @@ type DesiredState struct {
 	WireGuardPeers                    []network.WireGuardPeer
 	Images                            []vm.Image
 	PrivilegedVirtualMachineAddresses []string
+	// UnicastEnabled selects the unicast NDP transport.
+	UnicastEnabled bool
 }
 
 // SyncResult contains what the controller reads back from one sync exchange.
 type SyncResult struct {
 	Capacity             Capacity
 	VirtualMachineStates map[string]vm.State
+	// PrivateNetworkMAC is the MAC of the mesh uplink. It is empty when the mesh is disabled.
+	PrivateNetworkMAC string
 }
 
 // Capacity contains current host compute and storage capacity.
@@ -36,9 +40,11 @@ type Capacity struct {
 	AvailableStorageMiB    int
 }
 
-// PrivilegedMesh replaces the privileged virtual machine address set.
-type PrivilegedMesh interface {
+// Mesh applies controller-owned mesh state and reports the MAC of the mesh uplink.
+type Mesh interface {
 	ApplyPrivilegedAddresses(context.Context, []string) error
+	SyncPeerState(ctx context.Context, unicast bool) error
+	PrivateNetworkMAC() (string, error)
 }
 
 // WireGuardManager replaces controller-owned WireGuard peers.
@@ -67,7 +73,8 @@ type MigrationReservations func(context.Context) ([]migration.DestinationReserva
 
 // Dependencies contains host synchronization services.
 type Dependencies struct {
-	Mesh                  PrivilegedMesh
+	// Mesh is nil when Atlas WG Mesh is disabled.
+	Mesh                  Mesh
 	WireGuard             WireGuardManager
 	Images                ImagePolicyStore
 	VirtualMachines       VirtualMachineSource
@@ -80,7 +87,7 @@ type Dependencies struct {
 
 // Service owns controller synchronization and host capacity calculation.
 type Service struct {
-	mesh                  PrivilegedMesh
+	mesh                  Mesh
 	wireGuard             WireGuardManager
 	images                ImagePolicyStore
 	virtualMachines       VirtualMachineSource
@@ -110,14 +117,20 @@ func NewService(dependencies Dependencies) (*Service, error) {
 // Synchronize applies controller-owned state and returns the sync result. Each
 // set is replaced in full, so the controller never sends incremental changes.
 func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (SyncResult, error) {
-	addresses := desired.PrivilegedVirtualMachineAddresses
-	if service.mesh != nil {
-		if err := service.mesh.ApplyPrivilegedAddresses(ctx, addresses); err != nil {
-			return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
-		}
+	if service.mesh == nil && desired.UnicastEnabled {
+		return SyncResult{}, fmt.Errorf("enable unicast transport: Atlas WG Mesh is disabled")
 	}
 	if err := service.wireGuard.Apply(ctx, desired.WireGuardPeers); err != nil {
 		return SyncResult{}, fmt.Errorf("apply WireGuard peers: %w", err)
+	}
+	// The mesh reads the peer state that WireGuard.Apply just wrote.
+	if service.mesh != nil {
+		if err := service.mesh.ApplyPrivilegedAddresses(ctx, desired.PrivilegedVirtualMachineAddresses); err != nil {
+			return SyncResult{}, fmt.Errorf("apply privileged virtual machine addresses: %w", err)
+		}
+		if err := service.mesh.SyncPeerState(ctx, desired.UnicastEnabled); err != nil {
+			return SyncResult{}, fmt.Errorf("sync mesh peer state: %w", err)
+		}
 	}
 	if err := service.images.SetImagePolicies(ctx, desired.Images); err != nil {
 		return SyncResult{}, fmt.Errorf("apply image policies: %w", err)
@@ -140,7 +153,16 @@ func (service *Service) Synchronize(ctx context.Context, desired DesiredState) (
 		states[information.ID] = information.State
 	}
 
-	return SyncResult{Capacity: capacity, VirtualMachineStates: states}, nil
+	result := SyncResult{Capacity: capacity, VirtualMachineStates: states}
+	if service.mesh != nil {
+		mac, err := service.mesh.PrivateNetworkMAC()
+		if err != nil {
+			return SyncResult{}, fmt.Errorf("read the private network MAC: %w", err)
+		}
+		result.PrivateNetworkMAC = mac
+	}
+
+	return result, nil
 }
 
 // Capacity returns current host capacity and valid VM reservations. CPU is

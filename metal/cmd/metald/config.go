@@ -72,8 +72,7 @@ func defaultOptions() options {
 	return resolvedOptions
 }
 
-// deriveDirs places all metald directories under baseDir, so one base_dir moves
-// the complete metald state tree.
+// deriveDirs places all metald directories under baseDir, so one base_dir moves the complete metald state tree.
 func (resolvedOptions *options) deriveDirs() {
 	resolvedOptions.cfg.MachinesDir = filepath.Join(resolvedOptions.baseDir, "machines")
 	resolvedOptions.imagesDir = filepath.Join(resolvedOptions.baseDir, "images")

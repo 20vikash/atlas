@@ -167,7 +167,7 @@ class ReserveIPAddressPayload(StrictModel):
 
 
 class IPAddressResponse(BaseModel):
-	"""A tenant public IPv4 address."""
+	"""A tenant public IP address."""
 
 	model_config = ConfigDict(
 		json_schema_extra={
@@ -176,6 +176,8 @@ class IPAddressResponse(BaseModel):
 					"id": "203.0.113.10",
 					"tenant_id": 7,
 					"address": "203.0.113.10",
+					"version": 4,
+					"cidr": 32,
 					"state": "reserved",
 					"reserved": True,
 					"virtual_machine_id": None,
@@ -189,6 +191,8 @@ class IPAddressResponse(BaseModel):
 	id: str
 	tenant_id: int
 	address: str
+	version: int
+	cidr: int
 	state: str
 	reserved: bool
 	virtual_machine_id: str | None
@@ -205,6 +209,8 @@ class IPAddressResponse(BaseModel):
 			id=ip_address.name,
 			tenant_id=ip_address.tenant_id,
 			address=ip_address.address,
+			version=int(ip_address.version),
+			cidr=ip_address.cidr,
 			state=state,
 			reserved=bool(ip_address.reserved),
 			virtual_machine_id=ip_address.virtual_machine or None,

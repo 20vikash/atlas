@@ -486,14 +486,14 @@ def attach_virtual_machine_ip_address(
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	attached_ip_address_name = frappe.db.get_value(
-		"Metal Server IP Address", {"virtual_machine": virtual_machine.name}
+		"Metal Server IP Address", {"virtual_machine": virtual_machine.name, "version": "4"}
 	)
 	if attached_ip_address_name == payload.ip_address_id:
 		return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 	if attached_ip_address_name:
 		raise ResourceConflict("Detach the current IP address before you attach a different one.")
 
-	virtual_machine.attach_ip_address(get_attachable_ip_address_name(payload.ip_address_id))
+	virtual_machine.attach_public_ipv4(get_attachable_ip_address_name(payload.ip_address_id))
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
@@ -507,7 +507,7 @@ def detach_virtual_machine_ip_address(
 	Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared pool.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	if frappe.db.exists("Metal Server IP Address", {"virtual_machine": virtual_machine.name}):
-		virtual_machine.detach_ip_address()
+	if frappe.db.exists("Metal Server IP Address", {"virtual_machine": virtual_machine.name, "version": "4"}):
+		virtual_machine.detach_public_ipv4()
 
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)

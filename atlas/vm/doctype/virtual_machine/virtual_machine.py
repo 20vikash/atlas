@@ -43,7 +43,9 @@ class VirtualMachine(Document):
 		cpu_millicores: DF.Int
 		disk_mib: DF.Int
 		firewall_summary: DF.Code | None
+		gateway_routes: DF.Code | None
 		is_draft: DF.Check
+		is_network_gateway: DF.Check
 		is_privileged: DF.Check
 		is_terminating: DF.Check
 		is_termination_protected: DF.Check
@@ -86,6 +88,14 @@ class VirtualMachine(Document):
 
 		if self.is_privileged and self.tenant_id != PRIVILEGED_TENANT_ID:
 			frappe.throw(_("A privileged Virtual Machine must use tenant {0}.").format(PRIVILEGED_TENANT_ID))
+
+		if self.is_network_gateway:
+			self.validate_network_gateway()
+
+	def validate_network_gateway(self) -> None:
+		"""A gateway carries traffic for other tenants, so it must be privileged."""
+		if not self.is_privileged:
+			frappe.throw(_("A network gateway needs the privileged flag."), exc=AtlasUserError)
 
 	def on_trash(self) -> None:
 		"""Delete only after Metal confirms that the VM is absent."""
@@ -155,7 +165,19 @@ class VirtualMachine(Document):
 	@property
 	def public_ipv4(self) -> str | None:
 		"""Return the public IPv4 address assigned in Atlas."""
-		return frappe.db.get_value("Metal Server IP Address", {"virtual_machine": self.name}, "address")
+		return frappe.db.get_value(
+			"Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}, "address"
+		)
+
+	@property
+	def public_ipv6(self) -> str:
+		"""Return the IPv6 block assigned in Atlas."""
+		return VirtualMachineService(self).get_public_ipv6()
+
+	@property
+	def gateway_routes(self) -> str:
+		"""Return the gateway routes that Metal holds, with each gateway as its VM name."""
+		return json.dumps(VirtualMachineService(self).get_gateway_routes(), indent=2)
 
 	@property
 	def ssh_host(self) -> str:
@@ -241,6 +263,31 @@ class VirtualMachine(Document):
 		self.ensure_not_migrating()
 
 		self.is_privileged = strict_bool(is_privileged, "is_privileged")
+		self.save()
+
+	@frappe.whitelist(methods=["POST"])
+	def set_gateway_routes(self, routes: list[dict[str, str]] | str | None = None) -> None:
+		"""Replace which gateway VM carries each destination range."""
+		self.check_permission("write")
+		self.ensure_not_migrating()
+		self.validate_network_change()
+		VirtualMachineService(self).set_gateway_routes(frappe.parse_json(routes) or [])
+
+	@frappe.whitelist(methods=["POST"])
+	def set_network_gateway(self, is_network_gateway: bool | int | str) -> None:
+		"""Let this VM carry traffic for other VMs, or stop it."""
+		self.check_permission("write")
+		self.ensure_not_migrating()
+		self.validate_network_change()
+		service = VirtualMachineService(self)
+		self.is_network_gateway = strict_bool(is_network_gateway, "is_network_gateway")
+		if self.is_network_gateway:
+			self.validate_network_gateway()
+			if service.has_gateway_routes():
+				frappe.throw(
+					_("Remove the gateway routes of this VM before it becomes a gateway."), exc=AtlasUserError
+				)
+		service.update_network({"is_network_gateway": bool(self.is_network_gateway)})
 		self.save()
 
 	@frappe.whitelist(methods=["POST"])
@@ -359,26 +406,57 @@ class VirtualMachine(Document):
 		return VirtualMachineService(self).replace_metadata(metadata)
 
 	@frappe.whitelist(methods=["POST"])
-	def attach_ip_address(self, server_ip_address: str) -> dict[str, Any]:
+	def attach_public_ipv4(self, server_ip_address: str) -> dict[str, Any]:
 		"""Attach one reserved public IPv4 address without a VM restart."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
-		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
+		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}):
 			frappe.throw(_("Detach the current public IPv4 address first."), exc=AtlasUserError)
 
-		return VirtualMachineService(self).attach_ip_address(server_ip_address)
+		return VirtualMachineService(self).attach_public_ipv4(server_ip_address)
 
 	@frappe.whitelist(methods=["POST"])
-	def detach_ip_address(self) -> dict[str, Any]:
+	def detach_public_ipv4(self) -> dict[str, Any]:
 		"""Remove the public IPv4 address without a VM restart."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
-		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name}):
+		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}):
 			frappe.throw(_("This Virtual Machine has no public IPv4 address."), exc=AtlasUserError)
 
-		return VirtualMachineService(self).detach_ip_address()
+		return VirtualMachineService(self).detach_public_ipv4()
+
+	@frappe.whitelist(methods=["POST"])
+	def attach_public_ipv6(self, server_ip_address: str) -> dict[str, Any]:
+		"""Attach one IPv6 block. Only a System Manager assigns public blocks."""
+		frappe.only_for("System Manager")
+		self.ensure_not_migrating()
+		self.validate_network_change()
+		block = frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True)
+		if not block.is_ipv6:
+			frappe.throw(_("Choose an IPv6 block."), exc=AtlasUserError)
+
+		return VirtualMachineService(self).attach_public_ipv6(block)
+
+	@frappe.whitelist(methods=["POST"])
+	def detach_public_ipv6(self) -> dict[str, Any]:
+		"""Remove the IPv6 block without a VM restart."""
+		frappe.only_for("System Manager")
+		self.ensure_not_migrating()
+		self.validate_network_change()
+
+		# Detach also cancels an attach that the provider keeps refusing.
+		block_name = frappe.db.get_value(
+			"Metal Server IP Address",
+			{"virtual_machine": self.name, "version": "6", "status": ["in", ["Attaching", "Attached"]]},
+		)
+		if not block_name:
+			frappe.throw(_("This Virtual Machine has no IPv6 block."), exc=AtlasUserError)
+
+		return VirtualMachineService(self).detach_public_ipv6(
+			frappe.get_doc("Metal Server IP Address", block_name)
+		)
 
 	@frappe.whitelist(methods=["POST"])
 	def update_egress(self, egress: str) -> dict[str, Any]:
@@ -480,7 +558,7 @@ class VirtualMachine(Document):
 			frappe.throw(_("Resize values must be integers."), exc=AtlasUserError)
 		try:
 			changes = {field: int(value) for field, value in values.items() if value is not None}
-		except (TypeError, ValueError):
+		except TypeError, ValueError:
 			frappe.throw(_("Resize values must be integers."), exc=AtlasUserError)
 		return VirtualMachineResize(self).apply(changes)
 

@@ -112,6 +112,16 @@ class TestAtlasSetup(UnitTestCase):
 		with patch("atlas.atlas.core.setup.frappe.get_single", return_value=settings):
 			return AtlasSetup(configuration(**changes))
 
+	def test_an_aws_region_uses_unicast_networking(self) -> None:
+		settings = MagicMock(is_unicast_network_enabled=0)
+		with patch("atlas.atlas.core.setup.frappe.get_single", return_value=settings):
+			setup = AtlasSetup(aws_configuration())
+
+		setup._apply_settings()
+
+		self.assertEqual(settings.is_unicast_network_enabled, 1)
+		settings.save.assert_called_once_with(ignore_permissions=True)
+
 	def test_completed_provider_refuses_immutable_drift(self) -> None:
 		settings = MagicMock(is_server_provider_setup_completed=1, is_dns_setup_completed=0)
 		settings.get.side_effect = lambda field: (

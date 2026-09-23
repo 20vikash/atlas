@@ -73,7 +73,17 @@ def list_ip_addresses(query: ListQuery) -> Page[IPAddressResponse]:
 	rows: list[MetalServerIPAddress] = frappe.get_list(
 		"Metal Server IP Address",
 		filters=filters,
-		fields=["name", "tenant_id", "address", "status", "reserved", "virtual_machine", "creation"],
+		fields=[
+			"name",
+			"tenant_id",
+			"address",
+			"version",
+			"cidr",
+			"status",
+			"reserved",
+			"virtual_machine",
+			"creation",
+		],
 		order_by="creation desc",
 		offset=query.offset,
 		limit=query.fetch_limit,

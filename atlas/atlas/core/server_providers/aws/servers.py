@@ -18,7 +18,6 @@ from atlas.atlas.core.server_providers.base import (
 	ServerPowerAction,
 )
 
-MESH_MULTICAST_GROUP = "239.1.1.1"
 # Cloud-init hotplug renames an attached interface
 # back after Atlas configures it.
 USER_DATA = """#cloud-config
@@ -257,47 +256,6 @@ class AwsServers:
 		"""Return a stable AWS idempotency token for one server resource."""
 		return hashlib.sha256(f"atlas:{kind}:{server_name}".encode()).hexdigest()
 
-	def register_multicast_interface(self, network_interface_id: str) -> None:
-		"""Register one mesh interface as a multicast member and source.
-
-		WG Mesh reads discovery frames with an eBPF hook and never joins the group
-		with a socket, so the host sends no IGMP report. Atlas must register the
-		interface statically or the transit gateway delivers nothing.
-		"""
-		if not self.configuration.multicast_domain_id:
-			raise AwsError("Atlas Settings has no AWS multicast domain ID")
-
-		for operation in (
-			"register_transit_gateway_multicast_group_members",
-			"register_transit_gateway_multicast_group_sources",
-		):
-			self.client.call(
-				"ec2",
-				operation,
-				TransitGatewayMulticastDomainId=self.configuration.multicast_domain_id,
-				GroupIpAddress=MESH_MULTICAST_GROUP,
-				NetworkInterfaceIds=[network_interface_id],
-				allow_existing=True,
-			)
-
-	def deregister_multicast_interface(self, network_interface_id: str) -> None:
-		"""Remove one mesh interface from the multicast domain."""
-		if not self.configuration.multicast_domain_id:
-			return
-
-		for operation in (
-			"deregister_transit_gateway_multicast_group_members",
-			"deregister_transit_gateway_multicast_group_sources",
-		):
-			self.client.call(
-				"ec2",
-				operation,
-				TransitGatewayMulticastDomainId=self.configuration.multicast_domain_id,
-				GroupIpAddress=MESH_MULTICAST_GROUP,
-				NetworkInterfaceIds=[network_interface_id],
-				allow_missing=True,
-			)
-
 	def set_power_state(self, provider_server_id: str, action: ServerPowerAction) -> None:
 		"""Apply one power action to an AWS instance."""
 		self.client.call("ec2", self.power_operation_map[action], InstanceIds=[provider_server_id])
@@ -319,7 +277,6 @@ class AwsServers:
 			if attached_instance and not isinstance(attachment_id, str):
 				raise AwsError(f"AWS mesh interface {interface_id} has no attachment ID")
 
-			self.deregister_multicast_interface(interface_id)
 			if attached_instance:
 				self.client.call(
 					"ec2",

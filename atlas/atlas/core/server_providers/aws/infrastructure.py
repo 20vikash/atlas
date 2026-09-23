@@ -22,6 +22,10 @@ class AwsInfrastructure:
 
 	def validate_settings(self) -> None:
 		"""Validate the AWS region, zone, and private network settings."""
+		# A VPC does not carry link-local multicast, so WG Mesh must send NDP to each peer.
+		if not self.provider.settings.is_unicast_network_enabled:
+			raise AwsError("AWS needs unicast networking. Enable Use Unicast Networking in Atlas Settings.")
+
 		configuration = self.provider.configuration
 		if not re.fullmatch(rf"{re.escape(configuration.region)}[a-z]", configuration.availability_zone):
 			raise AwsError(
@@ -78,6 +82,16 @@ class AwsInfrastructure:
 		self.provider.client.call(
 			"ec2", "modify_vpc_attribute", VpcId=vpc_id, EnableDnsHostnames={"Value": True}
 		)
+		if not self.vpc_ipv6_cidr(vpc_id):
+			self.provider.client.call(
+				"ec2", "associate_vpc_cidr_block", VpcId=vpc_id, AmazonProvidedIpv6CidrBlock=True
+			)
+			self.provider.poll(
+				lambda: bool(self.vpc_ipv6_cidr(vpc_id)) or None,
+				timeout_seconds=self.provider.setup_poll_timeout_seconds,
+				poll_interval_seconds=self.provider.setup_poll_interval_seconds,
+				description=f"the IPv6 block of VPC {vpc_id}",
+			)
 		return vpc_id
 
 	def create_internet_access(self, vpc_id: str) -> None:
@@ -112,12 +126,20 @@ class AwsInfrastructure:
 				DestinationCidrBlock="0.0.0.0/0",
 				GatewayId=gateway_id,
 			)
+		if not self.has_ipv6_default_route(route_table_id):
+			self.provider.client.call(
+				"ec2",
+				"create_route",
+				RouteTableId=route_table_id,
+				DestinationIpv6CidrBlock="::/0",
+				GatewayId=gateway_id,
+			)
 
 	def create_subnet(self, vpc_id: str) -> str:
 		"""Return the Atlas subnet ID, or create the single Atlas subnet.
 
-		Atlas uses one subnet for the whole region. WG Mesh discovery uses a
-		multicast time to live of 1, so every host must share one subnet.
+		Atlas uses one subnet for the whole region. A public IPv6 block is a /80 of
+		that subnet, so it can move to any host.
 		"""
 		existing = self.find_configured_or_named(
 			"describe_subnets",
@@ -150,6 +172,14 @@ class AwsInfrastructure:
 			SubnetId=subnet_id,
 			MapPublicIpOnLaunch={"Value": True},
 		)
+		if not (existing or {}).get("Ipv6CidrBlockAssociationSet"):
+			vpc_block = ipaddress.IPv6Network(self.vpc_ipv6_cidr(vpc_id) or "")
+			self.provider.client.call(
+				"ec2",
+				"associate_subnet_cidr_block",
+				SubnetId=subnet_id,
+				Ipv6CidrBlock=str(next(vpc_block.subnets(new_prefix=64))),
+			)
 		return subnet_id
 
 	def create_security_group(self, vpc_id: str) -> str:
@@ -212,138 +242,6 @@ class AwsInfrastructure:
 		)
 		return name
 
-	def create_transit_gateway(self) -> str:
-		"""Return the Atlas transit gateway ID, or create a multicast transit gateway."""
-		existing = self.find_configured_or_named(
-			"describe_transit_gateways",
-			"TransitGateways",
-			"TransitGatewayIds",
-			self.provider.configuration.transit_gateway_id,
-			self.resource_name("transit-gateway"),
-			ignored_states=("deleted", "deleting"),
-		)
-		if existing is not None:
-			if existing.get("Options", {}).get("MulticastSupport") != "enable":
-				raise AwsError("AWS transit gateway does not have multicast support")
-			return existing["TransitGatewayId"]
-
-		response = self.provider.client.call(
-			"ec2",
-			"create_transit_gateway",
-			Description="Atlas WG Mesh discovery",
-			Options={"MulticastSupport": "enable", "DefaultRouteTableAssociation": "enable"},
-			TagSpecifications=[self.tag_specification("transit-gateway", "transit-gateway")],
-		)
-		return response["TransitGateway"]["TransitGatewayId"]
-
-	def attach_transit_gateway(self, transit_gateway_id: str, vpc_id: str, subnet_id: str) -> str:
-		"""Return the Atlas transit gateway attachment ID, or attach the Atlas VPC."""
-		existing = self.find_configured_or_named(
-			"describe_transit_gateway_vpc_attachments",
-			"TransitGatewayVpcAttachments",
-			"TransitGatewayAttachmentIds",
-			self.provider.configuration.transit_gateway_attachment_id,
-			self.resource_name("transit-gateway-attachment"),
-			ignored_states=("deleted", "deleting"),
-		)
-		if existing is not None:
-			if existing.get("TransitGatewayId") != transit_gateway_id:
-				raise AwsError("AWS transit gateway attachment belongs to another transit gateway")
-			if existing.get("VpcId") != vpc_id or subnet_id not in existing.get("SubnetIds", []):
-				raise AwsError("AWS transit gateway attachment does not use the Atlas VPC and subnet")
-			return existing["TransitGatewayAttachmentId"]
-
-		response = self.provider.client.call(
-			"ec2",
-			"create_transit_gateway_vpc_attachment",
-			TransitGatewayId=transit_gateway_id,
-			VpcId=vpc_id,
-			SubnetIds=[subnet_id],
-			TagSpecifications=[
-				self.tag_specification("transit-gateway-attachment", "transit-gateway-attachment")
-			],
-		)
-		return response["TransitGatewayVpcAttachment"]["TransitGatewayAttachmentId"]
-
-	def create_multicast_domain(self, transit_gateway_id: str) -> str:
-		"""Return the Atlas multicast domain ID, or create a static multicast domain.
-
-		WG Mesh reads discovery frames with an eBPF hook and never joins the group
-		with a socket, so the host sends no IGMP report. The domain must therefore
-		use static sources and static members.
-		"""
-		existing = self.find_configured_or_named(
-			"describe_transit_gateway_multicast_domains",
-			"TransitGatewayMulticastDomains",
-			"TransitGatewayMulticastDomainIds",
-			self.provider.configuration.multicast_domain_id,
-			self.resource_name("multicast-domain"),
-			ignored_states=("deleted", "deleting"),
-		)
-		if existing is not None:
-			if existing.get("TransitGatewayId") != transit_gateway_id:
-				raise AwsError("AWS multicast domain belongs to another transit gateway")
-			options = existing.get("Options", {})
-			if options.get("Igmpv2Support") != "disable" or options.get("StaticSourcesSupport") != "enable":
-				raise AwsError("AWS multicast domain does not use static membership")
-			return existing["TransitGatewayMulticastDomainId"]
-
-		response = self.provider.client.call(
-			"ec2",
-			"create_transit_gateway_multicast_domain",
-			TransitGatewayId=transit_gateway_id,
-			Options={
-				"Igmpv2Support": "disable",
-				"StaticSourcesSupport": "enable",
-				"AutoAcceptSharedAssociations": "disable",
-			},
-			TagSpecifications=[
-				self.tag_specification("transit-gateway-multicast-domain", "multicast-domain")
-			],
-		)
-		return response["TransitGatewayMulticastDomain"]["TransitGatewayMulticastDomainId"]
-
-	def associate_multicast_subnet(self, domain_id: str, attachment_id: str, subnet_id: str) -> None:
-		"""Associate the Atlas subnet with the multicast domain."""
-		associations = self.provider.client.call(
-			"ec2",
-			"get_transit_gateway_multicast_domain_associations",
-			TransitGatewayMulticastDomainId=domain_id,
-		)
-		for association in associations.get("MulticastDomainAssociations", []):
-			if association.get("Subnet", {}).get("SubnetId") == subnet_id:
-				return
-
-		self.provider.client.call(
-			"ec2",
-			"associate_transit_gateway_multicast_domain",
-			TransitGatewayMulticastDomainId=domain_id,
-			TransitGatewayAttachmentId=attachment_id,
-			SubnetIds=[subnet_id],
-		)
-
-	def wait_for_available(self, operation: str, key: str, description: str, **parameters: object) -> None:
-		"""Poll one AWS resource until it is available."""
-
-		def is_available() -> bool | None:
-			"""Report whether the resource became available."""
-			items = self.provider.client.call("ec2", operation, **parameters).get(key, [])
-			if not items:
-				raise AwsError(f"AWS did not return {description}")
-			state = items[0]["State"]
-			if state == "available":
-				return True
-			if state not in {"pending", "modifying", "initiating", "initiatingRequest"}:
-				raise AwsError(f"AWS reported state {state} for {description}")
-			return None
-
-		self.provider.poll(
-			is_available,
-			timeout_seconds=self.provider.setup_poll_timeout_seconds,
-			poll_interval_seconds=self.provider.setup_poll_interval_seconds,
-			description=description,
-		)
-
 	def find(
 		self,
 		service: str,
@@ -405,6 +303,25 @@ class AwsInfrastructure:
 		)
 		return tables[0]["RouteTableId"], default_route.get("GatewayId") if default_route else None
 
+	def vpc_ipv6_cidr(self, vpc_id: str) -> str | None:
+		"""Return the associated Amazon IPv6 /56 of the VPC. VM public IPv6 blocks come from it."""
+		vpcs = self.provider.client.call("ec2", "describe_vpcs", VpcIds=[vpc_id]).get("Vpcs", [])
+		for association in vpcs[0].get("Ipv6CidrBlockAssociationSet", []) if vpcs else []:
+			if association.get("Ipv6CidrBlockState", {}).get("State") == "associated":
+				return association.get("Ipv6CidrBlock")
+		return None
+
+	def has_ipv6_default_route(self, route_table_id: str) -> bool:
+		"""Report whether the route table sends IPv6 to a gateway."""
+		tables = self.provider.client.call(
+			"ec2", "describe_route_tables", RouteTableIds=[route_table_id]
+		).get("RouteTables", [])
+		return any(
+			route.get("DestinationIpv6CidrBlock") == "::/0"
+			for table in tables
+			for route in table.get("Routes", [])
+		)
+
 	@property
 	def private_network_cidr(self) -> str:
 		"""Return the canonical Atlas private network CIDR."""
@@ -415,11 +332,15 @@ class AwsInfrastructure:
 		"""Report whether AWS returned one required ingress rule."""
 		if not isinstance(permissions, list):
 			return False
-		expected_cidrs = {item["CidrIp"] for item in expected.get("IpRanges", [])}
+		expected_cidrs = {item["CidrIp"] for item in expected.get("IpRanges", [])} | {
+			item["CidrIpv6"] for item in expected.get("Ipv6Ranges", [])
+		}
 		for permission in permissions:
 			if not isinstance(permission, dict):
 				continue
-			actual_cidrs = {item.get("CidrIp") for item in permission.get("IpRanges", [])}
+			actual_cidrs = {item.get("CidrIp") for item in permission.get("IpRanges", [])} | {
+				item.get("CidrIpv6") for item in permission.get("Ipv6Ranges", [])
+			}
 			if (
 				permission.get("IpProtocol") == expected.get("IpProtocol")
 				and permission.get("FromPort") == expected.get("FromPort")
@@ -447,5 +368,9 @@ class AwsInfrastructure:
 			{
 				"IpProtocol": "-1",
 				"IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "Atlas development access"}],
-			}
+			},
+			{
+				"IpProtocol": "-1",
+				"Ipv6Ranges": [{"CidrIpv6": "::/0", "Description": "Atlas development access"}],
+			},
 		]

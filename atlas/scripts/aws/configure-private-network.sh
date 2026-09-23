@@ -47,9 +47,6 @@ network:
       mtu: $MTU
       addresses:
         - $ADDRESS
-      routes:
-        - to: 224.0.0.0/4
-          scope: link
 EOF
 	chmod 600 "$netplan_file"
 	netplan generate
@@ -61,10 +58,6 @@ Name=$DEVICE
 
 [Network]
 Address=$ADDRESS
-
-[Route]
-Destination=224.0.0.0/4
-Scope=link
 EOF
 else
 	echo "netplan or systemd-networkd is required to configure the private network" >&2
@@ -77,7 +70,6 @@ if [ "$current" != "$DEVICE" ]; then
 fi
 ip link set dev "$DEVICE" mtu "$MTU" up
 ip addr replace "$ADDRESS" dev "$DEVICE"
-ip route replace 224.0.0.0/4 dev "$DEVICE"
 
 if systemctl is-active --quiet systemd-networkd; then
 	networkctl reconfigure "$DEVICE"

@@ -1,59 +1,57 @@
 # Atlas WG Mesh benchmarks
 
-For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
-
-Bare metal. 1 GbE uplink. WireGuard MTU `1420`. VM interface MTU `1380`.
+Scaleway `EM-A116X-SSD` bare metal in `pl-waw-3`. Intel Xeon E3 1220. 1 GbE private network. Host kernel `7.0.0`. Guest: Firecracker, 2 vCPU, 2 GiB, Ubuntu 24.04. WireGuard MTU `1440`. VM interface MTU `1380`. Unicast NDP mode. The NDP mode changes only discovery, so throughput is the same in both modes.
 
 ## Throughput
 
-Single TCP stream. Debug disabled.
+TCP, `iperf3`, 10 seconds. A single-stream value is the median of 3 runs.
 
-| Path | Throughput | Line rate |
-| --- | ---: | ---: |
-| Raw 1 GbE | 941 Mbit/s | 100% |
-| Host-to-host WireGuard | 885 Mbit/s | 94% |
-| Atlas VM-to-VM | 847 Mbit/s | 90% |
+| Path                     | Single stream | Four streams | Line rate |
+| ------------------------ | ------------: | -----------: | --------: |
+| Raw private network      |    939 Mbit/s |   939 Mbit/s |      100% |
+| Host-to-host WireGuard   |    886 Mbit/s |   887 Mbit/s |       94% |
+| Atlas VM-to-VM, 2 hosts  |    847 Mbit/s |   834 Mbit/s |       90% |
+| Atlas VM-to-VM, one host |   14.3 Gbit/s |            - |         - |
 
-Atlas delivers 95% of WireGuard throughput. The main cost is the 40-byte tunnel header and smaller VM MTU. BPF encapsulation and decapsulation add little overhead.
-
-| Path | Single stream | Four streams |
-| --- | ---: | ---: |
-| WireGuard | 885 Mbit/s | 885 Mbit/s |
-| Atlas | 847 Mbit/s | 844 Mbit/s |
+Atlas delivers 96% of WireGuard throughput between hosts. The main cost is the 40-byte tunnel header and the smaller VM MTU. The reverse direction measured 820 Mbit/s.
 
 One stream saturates the 1 GbE link. More streams do not help. On faster links, throughput should track WireGuard until tunnel encryption becomes the limit.
 
+Traffic between VMs on one host does not use WireGuard. Linux delivers it through the VM host route.
+
 ## Packet rate
 
-With 200-byte UDP packets, Atlas reached about 230,000 packets/s and 322 Mbit/s. This is the worst case for per-packet BPF work.
+200-byte UDP packets at the highest rate `iperf3` can send.
 
-## Debug mode
+| Path                     | Received     | Loss  |
+| ------------------------ | -----------: | ----: |
+| Host-to-host WireGuard   |  221,000 pps |  2.4% |
+| Atlas VM-to-VM, 2 hosts  |  113,000 pps | 28.5% |
+| Atlas VM-to-VM, one host |  102,000 pps | 54.8% |
 
-Measured on an 8-core host over 12 seconds. One busy core equals 1,200 jiffies.
+The same-host rate is close to the cross-host rate, so the guest network path limits small packets, not the BPF programs.
 
-| Load | Mode | Throughput | Extra CPU |
-| --- | --- | ---: | --- |
-| TCP, about 77,000 packets/s | Debug disabled | 847 Mbit/s | Baseline |
-| TCP, about 77,000 packets/s | Debug enabled, no reader | 847 Mbit/s | No measurable change |
-| TCP, about 77,000 packets/s | `debug dump` draining | 847 Mbit/s | About 0.33 core, 30% more busy time |
-| UDP, about 230,000 packets/s | `debug dump` draining | 322 Mbit/s | About 0.88 core, 52% more busy time |
+## Latency
 
-Debug enabled without a reader had no measurable cost. `debug dump` uses one userspace reader thread. Its cost is single-core scale: about one-third of a core at normal TCP load and almost one core at high packet rates.
+`ping`, 200 packets, 10 ms interval.
 
-## Discovery rate limiting
+| Path                     | Average | Minimum |
+| ------------------------ | ------: | ------: |
+| Raw private network      | 0.28 ms | 0.14 ms |
+| Host-to-host WireGuard   | 0.76 ms | 0.28 ms |
+| Atlas VM-to-VM, 2 hosts  | 1.75 ms | 0.82 ms |
+| Atlas VM-to-VM, one host | 0.92 ms | 0.27 ms |
 
-The limiter runs only on remote-cache misses. It had no measurable effect on established-flow throughput at default, custom, or disabled settings.
+## Discovery and moves
 
-## VM move convergence
+Network time only, in unicast and multicast mode. A test endpoint in a network namespace is registered with `atlas-wg-mesh vm sync` while a peer VM on a third host sends a ping every 10 ms. The time starts when `vm sync` returns.
 
-`vm add` releases the state lock, then sends three spaced `NOW_HERE` announcements. Parallel adds are not delayed by notification.
+| Event                                    | Network time                                      |
+| ---------------------------------------- | ------------------------------------------------- |
+| NDP solicitation to advertisement        | 0.3 ms                                            |
+| First packet to an unknown VM            | One packet lost. The second packet arrives.       |
+| New VM reachable after registration      | 4.7 ms unicast, 5.1 ms multicast                  |
+| VM moved to another host                 | 1.5 ms to 10.5 ms in 15 moves, within one ping    |
+| Public IPv6 block moved to another host  | Traffic returns when the provider attaches the block to the new host |
 
-| Measure | Before | Current |
-| --- | ---: | ---: |
-| `vm add` wall time | 263 ms | 111 ms |
-| Announcements | 5 | 3 |
-| Lock held during announcement | Yes, 250 ms | No |
-| Two parallel adds | Serialized | 14 ms |
-| Announcement failure | Removes the VM | Warns and keeps the VM |
-
-If an observer misses `NOW_HERE`, its next packet gets `NOT_HERE`, then `WHO_HAS`/`FOUND` repairs the cache. In the 100-ping, 100 ms-interval test, this lost two packets (about 200 ms). An idle observer remains harmlessly stale until it sends traffic.
+The destination host announces a moved VM on the uplink, so peers learn the new host without a NOT_HERE round trip. The old host forwards traffic for a moved block through the mesh until the provider router uses the new host. See the [gateway design](design.md#gateways).

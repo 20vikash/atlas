@@ -64,8 +64,8 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"terminate": Mock(),
 		"get_metal_vm_info": Mock(return_value=None),
 		"resize": Mock(),
-		"attach_ip_address": Mock(),
-		"detach_ip_address": Mock(),
+		"attach_public_ipv4": Mock(),
+		"detach_public_ipv4": Mock(),
 		"update_network": Mock(),
 		"set_termination_protection": Mock(),
 	}
@@ -487,27 +487,27 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 			status, _ = call_route(attach_virtual_machine_ip_address, virtual_machine_id="vm-00001")
 
 		self.assertEqual(status, 202)
-		virtual_machine.attach_ip_address.assert_called_once_with("203.0.113.10")
+		virtual_machine.attach_public_ipv4.assert_called_once_with("203.0.113.10")
 		get_available.assert_not_called()
 
 	def test_attaching_the_same_address_again_is_safe(self) -> None:
 		status, _, service = self.attach("203.0.113.10", "203.0.113.10")
 
 		self.assertEqual(status, 202)
-		service.attach_ip_address.assert_not_called()
+		service.attach_public_ipv4.assert_not_called()
 
 	def test_attaching_a_different_address_is_rejected(self) -> None:
 		status, body, service = self.attach("203.0.113.10", "203.0.113.11")
 
 		self.assertEqual(status, 409)
 		self.assertEqual(body["error"]["code"], "conflict")
-		service.attach_ip_address.assert_not_called()
+		service.attach_public_ipv4.assert_not_called()
 
 	def test_attaching_the_first_address_reaches_the_service(self) -> None:
 		status, _, service = self.attach(None, "203.0.113.11")
 
 		self.assertEqual(status, 202)
-		service.attach_ip_address.assert_called_once_with("203.0.113.11")
+		service.attach_public_ipv4.assert_called_once_with("203.0.113.11")
 
 	def test_detaching_without_an_address_changes_nothing(self) -> None:
 		with (
@@ -518,7 +518,7 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 			status, _ = call_route(detach_virtual_machine_ip_address, virtual_machine_id="vm-00001")
 
 		self.assertEqual(status, 202)
-		virtual_machine.detach_ip_address.assert_not_called()
+		virtual_machine.detach_public_ipv4.assert_not_called()
 
 
 class TestSnapshotPayload(UnitTestCase):

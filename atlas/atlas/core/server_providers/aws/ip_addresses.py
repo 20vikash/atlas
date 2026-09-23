@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+
 from atlas.atlas.core.server_providers.aws.client import AwsClient, AwsError
 from atlas.atlas.core.server_providers.aws.configuration import AwsConfiguration
 from atlas.atlas.core.server_providers.base import ReservedIPAddress
@@ -141,3 +143,53 @@ class AwsIPAddresses:
 		for address in response.get("Addresses") or []:
 			return {key: value for key, value in address.items() if isinstance(value, str)}
 		return {}
+
+
+class AwsIPv6Prefixes:
+	"""Own the /80 IPv6 blocks that AWS delegates to a host interface.
+
+	AWS keeps no reservation. A block is a free /80 of the Atlas subnet, and it moves between hosts because every host is in that subnet.
+	"""
+
+	PREFIX_LENGTH = 80
+
+	def __init__(self, client: AwsClient, configuration: AwsConfiguration) -> None:
+		self.client = client
+		self.configuration = configuration
+
+	def reserve(self, used_prefixes: set[str]) -> ReservedIPAddress:
+		"""Return the first /80 of the subnet that no Atlas record uses."""
+		block = self.subnet_block()
+		for prefix in block.subnets(new_prefix=self.PREFIX_LENGTH):
+			# AWS reserves the first four and the last address of a subnet, so it refuses the blocks that hold them.
+			if block.network_address in prefix or block.broadcast_address in prefix:
+				continue
+			if str(prefix) not in used_prefixes:
+				return ReservedIPAddress(address=str(prefix), provider_resource_id=str(prefix))
+		raise AwsError("The Atlas subnet has no free IPv6 /80 block")
+
+	def subnet_block(self) -> ipaddress.IPv6Network:
+		"""Return the IPv6 /64 of the Atlas subnet."""
+		subnets = self.client.call("ec2", "describe_subnets", SubnetIds=[self.configuration.subnet_id]).get(
+			"Subnets", []
+		)
+		for association in subnets[0].get("Ipv6CidrBlockAssociationSet", []) if subnets else []:
+			if association.get("Ipv6CidrBlockState", {}).get("State") == "associated":
+				return ipaddress.IPv6Network(association["Ipv6CidrBlock"])
+		raise AwsError("The Atlas subnet has no IPv6 block")
+
+	def attach(self, prefix: str, network_interface_id: str) -> None:
+		"""Delegate the block to a host interface."""
+		self.client.call(
+			"ec2", "assign_ipv6_addresses", NetworkInterfaceId=network_interface_id, Ipv6Prefixes=[prefix]
+		)
+
+	def detach(self, prefix: str, network_interface_id: str) -> None:
+		"""Take the block back from a host interface."""
+		self.client.call(
+			"ec2",
+			"unassign_ipv6_addresses",
+			NetworkInterfaceId=network_interface_id,
+			Ipv6Prefixes=[prefix],
+			allow_missing=True,
+		)

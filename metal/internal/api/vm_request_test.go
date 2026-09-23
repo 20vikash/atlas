@@ -57,3 +57,77 @@ func TestFirewallValidationLimitsPrefixEntries(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestGatewayValidationAcceptsAGatewayAndItsUser(t *testing.T) {
+	tests := []networkRequest{
+		{
+			GatewayRoutes: []gatewayRouteRequest{
+				{Destination: "::/0", Gateway: "fdaa:1::49"},
+				{Destination: "fdac::/16", Gateway: "fdaa:1::7f"},
+			},
+			WireGuardMeshIPv6: "fdaa:1::4a",
+		},
+		{IsNetworkGateway: true, WireGuardMeshIPv6: "fdaa:1::49"},
+		{PublicIPv6: "2001:bc8:702:653::/64", WireGuardMeshIPv6: "fdaa:1::4a"},
+	}
+	for _, request := range tests {
+		if err := request.validateMeshRouting(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestGatewayValidationRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		request networkRequest
+		want    string
+	}{
+		{
+			"public gateway",
+			networkRequest{
+				GatewayRoutes:     []gatewayRouteRequest{{Destination: "::/0", Gateway: "2001:db8::1"}},
+				WireGuardMeshIPv6: "fdaa:1::4a",
+			},
+			"fdaa::/16",
+		},
+		{
+			"destination with host bits",
+			networkRequest{
+				GatewayRoutes:     []gatewayRouteRequest{{Destination: "fdac::5/16", Gateway: "fdaa:1::7f"}},
+				WireGuardMeshIPv6: "fdaa:1::4a",
+			},
+			"canonical",
+		},
+		{
+			"routes without a mesh address",
+			networkRequest{GatewayRoutes: []gatewayRouteRequest{{Destination: "::/0", Gateway: "fdaa:1::49"}}},
+			"wireguard_mesh_ipv6",
+		},
+		{"gateway without a mesh address", networkRequest{IsNetworkGateway: true}, "wireguard_mesh_ipv6"},
+		{"block without a mesh address", networkRequest{PublicIPv6: "2001:db8::/64"}, "wireguard_mesh_ipv6"},
+		{
+			"host bits",
+			networkRequest{PublicIPv6: "2001:db8::5/64", WireGuardMeshIPv6: "fdaa:1::49"},
+			"canonical",
+		},
+		{
+			"upper case",
+			networkRequest{PublicIPv6: "2001:DB8::/64", WireGuardMeshIPv6: "fdaa:1::49"},
+			"canonical",
+		},
+		{
+			"IPv4 block",
+			networkRequest{PublicIPv6: "203.0.113.0/24", WireGuardMeshIPv6: "fdaa:1::49"},
+			"canonical",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.request.validateMeshRouting()
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}

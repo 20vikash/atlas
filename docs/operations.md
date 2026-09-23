@@ -27,7 +27,7 @@ Use [proxy setup](../services/http-proxy/docs/setup.md) to check services and [h
 
 ## WG Mesh
 
-Use the [WG Mesh operations guide](../services/wg-mesh/docs/operations.md) for installation, VM moves, host recovery, and upgrades. Use [debug in production](../services/wg-mesh/docs/debug-in-production.md) for route decisions.
+Use the [WG Mesh operations guide](../services/wg-mesh/docs/operations.md) for installation, virtual machine state, host recovery, and upgrades. Use `atlas-wg-mesh inspect <address>` to find one VM address.
 
 ## General rule
 

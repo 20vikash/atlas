@@ -13,6 +13,7 @@ from atlas.atlas.core.server_providers.base import (
 	ServerPowerAction,
 )
 from atlas.atlas.core.server_providers.scaleway.client import ScalewayError
+from atlas.atlas.core.server_providers.scaleway.ip_addresses import ScalewayIPAddresses
 from atlas.atlas.core.server_providers.scaleway.provider import ScalewayProvider
 from atlas.atlas.core.server_providers.scaleway.servers import ScalewayServers
 
@@ -65,9 +66,9 @@ class TestScalewayProvider(UnitTestCase):
 		provider = self.provider()
 		server = self.server(provider_server_id="server-id")
 
-		provider.attach_public_ipv4_address("address-id", "203.0.113.9", server)
-		provider.detach_public_ipv4_address("address-id", "203.0.113.9", server)
-		provider.delete_public_ipv4_address("address-id")
+		provider.attach_public_ip_address("address-id", "203.0.113.9", server)
+		provider.detach_public_ip_address("address-id", "203.0.113.9", server)
+		provider.delete_public_ip_address("address-id")
 
 		provider.ip_addresses.attach.assert_called_once_with("address-id", "server-id")
 		provider.ip_addresses.detach.assert_called_once_with("address-id")
@@ -91,21 +92,24 @@ class TestScalewayProvider(UnitTestCase):
 		self.assertEqual(environment["ADDRESS"], "10.1.0.10/20")
 		provider.wait_for_private_address.assert_called_once_with(server)
 
-	def test_wait_for_private_address_accepts_the_expected_address(self) -> None:
+	def test_wait_for_private_address_stores_the_interface_mac(self) -> None:
 		provider = self.provider()
 		server = self.server()
+		server.name = "server-1"
 		server.public_ipv4_address = "203.0.113.1"
 		server.private_network_interface = "eno1.123"
 		server.private_ipv4_address = "10.1.0.2"
+		server.private_network_mac_address = None
 		runner = Mock()
 		runner.run_command.return_value = SimpleNamespace(
-			exit_code=0, output="4: eno1.123 inet 10.1.0.2/20 scope global"
+			exit_code=0, output="4: eno1.123 inet 10.1.0.2/20 scope global\nAA:BB:CC:DD:EE:07\n"
 		)
 
 		with patch("atlas.atlas.core.ssh.SSHRunner", return_value=runner):
 			provider.wait_for_private_address(server)
 
 		self.assertIn("eno1.123", runner.run_command.call_args.args[0])
+		self.assertEqual(server.private_network_mac_address, "aa:bb:cc:dd:ee:07")
 
 	def test_wait_for_private_address_marks_a_timeout_as_retryable(self) -> None:
 		provider = self.provider()
@@ -119,6 +123,26 @@ class TestScalewayProvider(UnitTestCase):
 			provider.wait_for_private_address(server)
 
 		self.assertTrue(raised.exception.is_retryable)
+
+	def test_poll_retries_a_retryable_error(self) -> None:
+		provider = self.provider()
+		operation = Mock(side_effect=[ScalewayError("unreachable", is_retryable=True), {"status": "ready"}])
+
+		with patch("atlas.atlas.core.server_providers.base.sleep"):
+			result = provider.poll(
+				operation, timeout_seconds=60, poll_interval_seconds=1, description="server"
+			)
+
+		self.assertEqual(result, {"status": "ready"})
+
+	def test_poll_raises_a_permanent_error(self) -> None:
+		provider = self.provider()
+		operation = Mock(side_effect=ScalewayError("provisioning failed"))
+
+		with self.assertRaises(ScalewayError):
+			provider.poll(operation, timeout_seconds=60, poll_interval_seconds=1, description="server")
+
+		operation.assert_called_once_with()
 
 	def provider(self) -> ScalewayProvider:
 		provider = object.__new__(ScalewayProvider)
@@ -224,3 +248,18 @@ class TestScalewayServers(UnitTestCase):
 			catalog=Mock(),
 			partitioning=Mock(),
 		)
+
+
+class TestScalewayIPAddresses(UnitTestCase):
+	def test_reserve_requests_the_address_version(self) -> None:
+		for version, is_ipv6, address in ((4, False, "203.0.113.9"), (6, True, "2001:db8:1:2::/64")):
+			with self.subTest(version=version):
+				client = Mock()
+				client.request.return_value = {"id": "fip-id", "ip_address": address}
+
+				reserved = ScalewayIPAddresses(
+					client, SimpleNamespace(zone="fr-par-1", project_id="project-id")
+				).reserve(version)
+
+				self.assertEqual(client.request.call_args.kwargs["json"]["is_ipv6"], is_ipv6)
+				self.assertEqual((reserved.address, reserved.provider_resource_id), (address, "fip-id"))

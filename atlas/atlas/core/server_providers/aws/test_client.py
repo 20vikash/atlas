@@ -36,20 +36,6 @@ class TestAwsClient(UnitTestCase):
 		with self.assertRaises(AwsError):
 			client.call("ec2", "terminate_instances")
 
-	def test_an_existing_resource_is_empty_when_allowed(self) -> None:
-		client = self.client(error=self.client_error("TransitGatewayMulticastGroupMemberAlreadyExists"))
-
-		self.assertEqual(
-			client.call("ec2", "register_transit_gateway_multicast_group_members", allow_existing=True),
-			{},
-		)
-
-	def test_an_existing_resource_still_fails_when_not_allowed(self) -> None:
-		client = self.client(error=self.client_error("TransitGatewayMulticastGroupMemberAlreadyExists"))
-
-		with self.assertRaises(AwsError):
-			client.call("ec2", "register_transit_gateway_multicast_group_members")
-
 	def test_a_transport_failure_is_retryable(self) -> None:
 		client = self.client(error=EndpointConnectionError(endpoint_url="https://ec2.example"))
 
@@ -85,7 +71,6 @@ class TestAwsClient(UnitTestCase):
 		client._clients["ec2"] = Mock(
 			describe_instances=operation,
 			terminate_instances=operation,
-			register_transit_gateway_multicast_group_members=operation,
 		)
 		return client
 

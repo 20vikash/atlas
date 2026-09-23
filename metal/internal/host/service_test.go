@@ -14,6 +14,8 @@ import (
 type testHostDependencies struct {
 	privilegedAddresses []string
 	wireGuardPeers      []network.WireGuardPeer
+	unicast             bool
+	peerSyncs           int
 	images              []vm.Image
 	virtualMachines     []vm.Information
 	wakeCount           int
@@ -32,6 +34,16 @@ func (dependencies *testHostDependencies) Apply(_ context.Context, peers []netwo
 func (dependencies *testHostDependencies) SetImagePolicies(_ context.Context, images []vm.Image) error {
 	dependencies.images = append([]vm.Image(nil), images...)
 	return nil
+}
+
+func (dependencies *testHostDependencies) SyncPeerState(_ context.Context, unicast bool) error {
+	dependencies.unicast = unicast
+	dependencies.peerSyncs++
+	return nil
+}
+
+func (dependencies *testHostDependencies) PrivateNetworkMAC() (string, error) {
+	return "02:00:00:00:00:01", nil
 }
 
 func (dependencies *testHostDependencies) List(context.Context) ([]vm.Information, error) {
@@ -123,5 +135,44 @@ func TestSynchronizeAllowsMeshToBeDisabled(t *testing.T) {
 	}
 	if _, err := service.Synchronize(t.Context(), DesiredState{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSynchronizeSelectsTheNDPMode(t *testing.T) {
+	for _, unicast := range []bool{true, false} {
+		dependencies := &testHostDependencies{}
+		service, err := NewService(Dependencies{
+			WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
+			Mesh: dependencies, Wake: func() {},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := service.Synchronize(t.Context(), DesiredState{UnicastEnabled: unicast}); err != nil {
+			t.Fatal(err)
+		}
+
+		if dependencies.unicast != unicast || dependencies.peerSyncs != 1 {
+			t.Fatalf("unicast = %t, peer syncs = %d, want unicast %t", dependencies.unicast, dependencies.peerSyncs, unicast)
+		}
+	}
+}
+
+func TestSynchronizeRefusesUnicastWithoutTheMesh(t *testing.T) {
+	dependencies := &testHostDependencies{}
+	service, err := NewService(Dependencies{
+		WireGuard: dependencies, Images: dependencies, VirtualMachines: dependencies, Storage: dependencies,
+		Wake: func() {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.Synchronize(t.Context(), DesiredState{UnicastEnabled: true}); err == nil {
+		t.Fatal("unicast sync without the mesh succeeded")
+	}
+	if dependencies.wireGuardPeers != nil {
+		t.Fatal("WireGuard peers were applied before the refusal")
 	}
 }

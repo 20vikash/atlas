@@ -357,7 +357,7 @@ class TestVirtualMachineService(UnitTestCase):
 	def test_create_request_waits_for_the_provider_host_address(self) -> None:
 		request = VirtualMachineCreateRequest("machine-image", 2000, 2048, 10240, 7)
 		image = SimpleNamespace(get_metal_image_request=Mock(return_value={}))
-		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
+		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001", is_network_gateway=0)
 		server_ip_address = SimpleNamespace(host_address=None)
 
 		with patch.object(
@@ -378,7 +378,7 @@ class TestVirtualMachineService(UnitTestCase):
 			"kernel": {"url": "machine-kernel", "sha256": "b" * 64},
 		}
 		image = SimpleNamespace(get_metal_image_request=Mock(return_value=image_request))
-		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
+		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001", is_network_gateway=0)
 
 		with patch.object(
 			virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa::1"
@@ -399,7 +399,7 @@ class TestVirtualMachineService(UnitTestCase):
 			public_network_throughput_mibps=50,
 		)
 		image = SimpleNamespace(get_metal_image_request=Mock(return_value={}))
-		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001")
+		virtual_machine = SimpleNamespace(tenant_id=7, name="VM-00001", is_network_gateway=0)
 
 		with patch.object(
 			virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa::1"
@@ -435,7 +435,7 @@ class TestVirtualMachineVirtualFields(UnitTestCase):
 			self.assertEqual(virtual_machine.public_ipv4, "203.0.113.10")
 
 		self.assertEqual(get_value.call_args.args[0], "Metal Server IP Address")
-		self.assertEqual(get_value.call_args.args[1], {"virtual_machine": "vm-0000001"})
+		self.assertEqual(get_value.call_args.args[1], {"virtual_machine": "vm-0000001", "version": "4"})
 
 	def test_virtual_fields_read_the_nested_model(self) -> None:
 		virtual_machine = VirtualMachine.__new__(VirtualMachine)
@@ -546,6 +546,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				"egress": "uplink",
 				"public_ipv4": "203.0.113.10",
 				"wireguard_mesh_ipv6": "fdaa:1::1",
+				"gateway_routes": [],
+				"is_network_gateway": False,
+				"public_ipv6": "",
 				"private_network_throughput_mibps": 100,
 				"public_network_throughput_mibps": 25,
 				"firewall": {"enabled": False, "inbound": [], "outbound": []},
@@ -615,7 +618,165 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				{"public_network_throughput_mibps": 25}
 			)
 
-	def test_attach_ip_address_waits_for_the_host_address(self) -> None:
+	def test_a_gateway_route_sends_the_mesh_address_of_its_gateway_vm(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.is_network_gateway = 0
+		gateway = frappe._dict(name="VM-00049", tenant_id=0)
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+			patch.object(virtual_machine_service_module.frappe.db, "get_value", return_value=gateway),
+			patch.object(
+				virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa:1::49"
+			),
+			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
+		):
+			VirtualMachineService(virtual_machine).set_gateway_routes(
+				[{"destination": "::/0", "gateway": "VM-00049"}]
+			)
+
+		self.assertEqual(
+			client.set_virtual_machine_network.call_args.args[1]["gateway_routes"],
+			[{"destination": "::/0", "gateway": "fdaa:1::49"}],
+		)
+
+	def test_a_route_to_a_vm_that_is_not_a_gateway_is_refused(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.is_network_gateway = 0
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_service_module.frappe.db, "get_value", return_value=None),
+			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
+			self.assertRaisesRegex(AtlasUserError, "not an active network gateway"),
+		):
+			VirtualMachineService(virtual_machine).set_gateway_routes(
+				[{"destination": "::/0", "gateway": "VM-00007"}]
+			)
+
+		client.set_virtual_machine_network.assert_not_called()
+
+	def test_a_vm_with_a_block_has_no_gateway_routes(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.is_network_gateway = 0
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(VirtualMachineService, "get_public_ipv6", return_value="2001:db8:1:2::/64"),
+			self.assertRaisesRegex(AtlasUserError, "every destination"),
+		):
+			VirtualMachineService(virtual_machine).set_gateway_routes(
+				[{"destination": "::/0", "gateway": "VM-00049"}]
+			)
+
+		client.set_virtual_machine_network.assert_not_called()
+
+	def test_the_ipv4_path_refuses_an_ipv6_block(self) -> None:
+		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.tenant_id = 7
+		block = SimpleNamespace(tenant_id=7, is_ipv6=True, status="Allocated", virtual_machine=None)
+
+		with (
+			patch.object(virtual_machine_service_module.frappe, "get_doc", return_value=block),
+			self.assertRaisesRegex(AtlasUserError, "IPv6 block"),
+		):
+			VirtualMachineService(virtual_machine).assign_ip_address("2001:db8:1:2::")
+
+	def test_a_network_gateway_needs_the_privileged_flag(self) -> None:
+		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.is_privileged = 0
+
+		with self.assertRaisesRegex(AtlasUserError, "privileged flag"):
+			virtual_machine.validate_network_gateway()
+
+	def test_attaching_a_block_sends_it_to_metal(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.tenant_id = 7
+		prefix = SimpleNamespace(
+			prefix="2001:db8:1:2::/64", status="Allocated", tenant_id=7, begin_assignment=Mock()
+		)
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
+			patch.object(VirtualMachineService, "has_gateway_routes", return_value=False),
+		):
+			VirtualMachineService(virtual_machine).attach_public_ipv6(prefix)
+
+		prefix.begin_assignment.assert_called_once_with("node-1", "VM-00001")
+		self.assertEqual(
+			client.set_virtual_machine_network.call_args.args[1]["public_ipv6"], "2001:db8:1:2::/64"
+		)
+
+	def test_detaching_a_block_removes_it_from_metal_first(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		calls = Mock()
+		client.set_virtual_machine_network = calls.set_network
+		prefix = SimpleNamespace(address="2001:db8:1:2::", cidr=64, release=calls.release)
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+		):
+			VirtualMachineService(virtual_machine).detach_public_ipv6(prefix)
+
+		self.assertEqual(
+			[call[0] for call in calls.mock_calls if "." not in call[0]], ["set_network", "release"]
+		)
+		self.assertEqual(calls.set_network.call_args.args[1]["public_ipv6"], "")
+
+	def test_detach_cancels_a_block_that_is_still_attaching(self) -> None:
+		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.ensure_not_migrating = Mock()
+		virtual_machine.validate_network_change = Mock()
+
+		with (
+			patch.object(virtual_machine_module.frappe, "only_for"),
+			patch.object(
+				virtual_machine_module.frappe.db, "get_value", return_value="2001:db8:1:2::"
+			) as get_value,
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value="block"),
+			patch.object(VirtualMachineService, "detach_public_ipv6") as detach,
+		):
+			virtual_machine.detach_public_ipv6()
+
+		self.assertEqual(get_value.call_args.args[1]["status"], ["in", ["Attaching", "Attached"]])
+		detach.assert_called_once_with("block")
+
+	def test_a_second_block_is_refused(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.tenant_id = 7
+		prefix = SimpleNamespace(
+			prefix="2001:db8:1:3::/64", status="Allocated", tenant_id=7, begin_assignment=Mock()
+		)
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(VirtualMachineService, "get_public_ipv6", return_value="2001:db8:1:2::/64"),
+			self.assertRaisesRegex(AtlasUserError, "already has"),
+		):
+			VirtualMachineService(virtual_machine).attach_public_ipv6(prefix)
+
+		prefix.begin_assignment.assert_not_called()
+
+	def test_a_block_of_another_tenant_is_refused(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.tenant_id = 7
+		prefix = SimpleNamespace(
+			prefix="2001:db8:1:2::/64", status="Allocated", tenant_id=9, begin_assignment=Mock()
+		)
+
+		with (
+			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			self.assertRaises(frappe.PermissionError),
+		):
+			VirtualMachineService(virtual_machine).attach_public_ipv6(prefix)
+
+		prefix.begin_assignment.assert_not_called()
+
+	def test_attach_public_ipv4_waits_for_the_host_address(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "none", "public_ipv4": ""})
 		address = SimpleNamespace(address="203.0.113.10", host_address=None)
 		metal_client, get_doc, check_permission, database = self.patches(client, None)
@@ -627,23 +788,23 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			database,
 			patch.object(VirtualMachineService, "assign_ip_address", return_value=address) as assign,
 		):
-			virtual_machine.attach_ip_address("203.0.113.10")
+			virtual_machine.attach_public_ipv4("203.0.113.10")
 
 		assign.assert_called_once_with("203.0.113.10")
 		request = client.set_virtual_machine_network.call_args.args[1]
 		self.assertEqual(request["egress"], "uplink")
 		self.assertEqual(request["public_ipv4"], "")
 
-	def test_attach_ip_address_rejects_a_second_address(self) -> None:
+	def test_attach_public_ipv4_rejects_a_second_address(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 		metal_client, get_doc, check_permission, database = self.patches(client, "203.0.113.10")
 
 		with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
-			virtual_machine.attach_ip_address("203.0.113.11")
+			virtual_machine.attach_public_ipv4("203.0.113.11")
 
 		client.set_virtual_machine_network.assert_not_called()
 
-	def test_detach_ip_address_updates_metal_before_the_release(self) -> None:
+	def test_detach_public_ipv4_updates_metal_before_the_release(self) -> None:
 		virtual_machine, client = self.build_virtual_machine(
 			{"egress": "uplink", "public_ipv4": "203.0.113.10"}
 		)
@@ -661,11 +822,11 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			database,
 			patch.object(
 				VirtualMachineService,
-				"release_ip_address",
+				"release_ipv4_address",
 				side_effect=lambda self=None: calls.append("release"),
 			),
 		):
-			virtual_machine.detach_ip_address()
+			virtual_machine.detach_public_ipv4()
 
 		self.assertEqual(calls, ["metal", "release"])
 		request = client.set_virtual_machine_network.call_args.args[1]
@@ -879,6 +1040,7 @@ class TestVirtualMachinePrivilege(UnitTestCase):
 		virtual_machine.name = "VM-00001"
 		virtual_machine.tenant_id = tenant_id
 		virtual_machine.is_privileged = is_privileged
+		virtual_machine.is_network_gateway = 0
 		virtual_machine.is_draft = 0
 		virtual_machine.is_terminating = 0
 		virtual_machine.active_migration = None

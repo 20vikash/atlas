@@ -1,273 +1,131 @@
 # Atlas WG Mesh design
 
-For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+This document describes the active packet paths and their state.
 
-This document explains packet paths, BPF state, and recovery behavior. Read the [operations guide](operations.md) for setup and host commands.
+Read [Operations](operations.md) for the CLI commands.
 
-## Read this page in order
+## Addresses
 
-1. Read [addressing and state](#addressing-and-state) to learn which addresses the mesh owns.
-2. Read [trust model](#trust-model) before you change discovery or tenant filtering.
-3. Read [system view](#system-view) to see the packet hooks.
-4. Use the scenarios to trace one packet or one VM move.
-5. Use [debug in production](debug-in-production.md) when you need live map and event data.
-
-The mesh uses eBPF for the fast packet decision, WireGuard for host-to-host encryption, and discovery for VM location. The design avoids a controller lookup for every packet.
-
-```mermaid
-flowchart TD
-    Packet[Packet from a VM] --> Local{Destination is local?}
-    Local -->|Yes| Linux[Linux routes to local VM]
-    Local -->|No| Known{Remote location is known?}
-    Known -->|Yes| Tunnel[Add tunnel header and send through WireGuard]
-    Known -->|No| Discover[Send WHO_HAS and replace this packet]
-    Discover --> Learn[Receive FOUND and cache location]
-    Learn --> Tunnel
-```
-
-## Addressing and state
-
-Each host has a WireGuard address in `fdab::/16`. Each VM has an address in `fdaa::/16`.
-
-| Bytes | Field | Purpose |
-| --- | --- | --- |
-| `0-1` | `fdaa` | Atlas WG Mesh VM prefix |
-| `2-3` | Region | Region identifier |
-| `4-7` | Tenant | Tenant identifier |
-| `8-15` | VM ID | Virtual machine identifier |
-
-The data path uses the tenant field. Region and VM ID fields are available to provisioning.
-
-Atlas WG Mesh owns traffic between VM addresses. A source address must be registered on the ingress VM interface, and VMs cannot reach host WireGuard addresses in `fdab::/16`. Linux owns other host traffic. WireGuard encrypts host-to-host traffic. Atlas WG Mesh does not configure WireGuard, NAT, DNS, DHCP, or firewall rules.
-
-## Trust model
-
-VMs use `fdaa::/16`; host WireGuard addresses use `fdab::/16`. The VM hook drops traffic to `fdab::/16`, so VMs cannot reach the host subnet through Atlas WG Mesh.
-
-Nonzero tenant IDs are isolated from each other. Cross-tenant traffic is permitted only when either endpoint is a privileged tenant-`0` VM whose full IPv6 address is in the controller-managed whitelist. This allows request and response traffic while preventing access to every other tenant-`0` VM.
-
-Discovery runs on a trusted multicast Layer-2 domain. `WHO_HAS`, `FOUND`, and `NOW_HERE` messages are not authenticated, so a host on that network can influence learned VM locations. On networks that use the [discovery relay](unicast-network.md), allow UDP port `7373` only between trusted relay peers; unicast discovery is not limited to the multicast TTL. WireGuard encrypts traffic only to configured peers.
-
-Each VM defaults to 10 `WHO_HAS` messages per second with a burst of 50. This limits multicast floods from a VM; it does not authenticate discovery messages.
-
-## BPF interface
-
-| Hook | Program | Purpose |
-| --- | --- | --- |
-| VM interface | `handle_vm_packet` | Route local traffic, discover remote VMs, and add tunnel headers. |
-| Physical uplink | `handle_uplink_packet` | Process discovery messages. |
-| WireGuard interface | `handle_wireguard_packet` | Remove tunnel headers and send `NOT_HERE`. |
-
-| Map | Purpose |
+| Range | Use |
 | --- | --- |
-| `config` | Host configuration, the discovery interface, and discovery limits. |
-| `local_vms`, `remote_vms` | Local ownership and learned remote locations. |
-| `privileged_tenant_allowed_addresses` | Privileged-tenant VM addresses permitted to communicate across tenants. |
-| `discovery_limits` | Per-VM discovery rate-limit state. |
-| `debug_config`, `debug_stats`, `debug_events` | Optional debug state and events. |
-| `build_hash` | Installed BPF object hash. |
+| `fdaa::/16` | Virtual machine addresses. |
+| `fdab::/16` | Host WireGuard addresses. |
 
-## System view
+The virtual machine address has this format:
 
-```mermaid
-flowchart LR
-    subgraph Host_A["Host A"]
-        VM_A[VM A]
-        INTERFACE_A[VM interface]
-        VM_HOOK["vm_hook.h<br/>TC ingress"]
-        WG_A[wg0]
-        VM_A --> INTERFACE_A --> VM_HOOK --> WG_A
-    end
-
-    UNDERLAY["Physical network<br/>IPv4 multicast and WireGuard UDP"]
-
-    subgraph Host_B["Host B"]
-        WG_B[wg0]
-        WG_HOOK["wireguard_hook.h<br/>TC ingress"]
-        INTERFACE_B[VM interface]
-        VM_B[VM B]
-        WG_B --> WG_HOOK --> INTERFACE_B --> VM_B
-    end
-
-    WG_A --> UNDERLAY --> WG_B
+```text
+fdaa | region 16 bits | tenant 32 bits | virtual machine ID 64 bits
 ```
 
-The VM hook processes a packet from a VM interface. The WireGuard hook processes a packet after WireGuard decrypts it. The uplink hook processes Atlas WG Mesh discovery messages from the physical network.
+Example: `fdaa:0001:0000:0002:0000:0000:0000:0003` identifies region `1`, tenant `2`, and virtual machine `3`.
 
-## Scenario 1: local VM delivery
+The data path uses the tenant field for isolation.
 
-This path applies when both VMs are connected to the same host.
+## BPF files
 
-```mermaid
-sequenceDiagram
-    participant A as VM A
-    participant H as Host A vm_hook.h
-    participant M as local_vms map
-    participant B as VM B
+All hooks use one BPF object and one set of pinned maps.
 
-    A->>H: IPv6 packet for VM B
-    H->>M: Is VM B local?
-    M-->>H: Yes
-    H-->>B: Return packet to Linux routing
-```
-
-`vm_hook.h` returns `TC_ACT_OK`. Linux uses the host route for VM B and sends the packet to the destination interface. Atlas WG Mesh adds no tunnel header.
-
-## Scenario 2: known remote VM
-
-This path applies when `remote_vms` already has a location for the destination.
-
-```mermaid
-sequenceDiagram
-    participant A as VM A
-    participant HA as Host A vm_hook.h
-    participant R as remote_vms map
-    participant WGA as Host A wg0
-    participant WGB as Host B wg0
-    participant HB as Host B wireguard_hook.h
-    participant B as VM B
-
-    A->>HA: IPv6 packet for VM B
-    HA->>R: Get location for VM B
-    R-->>HA: Host B WireGuard address
-    HA->>WGA: Add outer IPv6 header
-    WGA->>WGB: WireGuard encrypted packet
-    WGB->>HB: Decrypted tunnel packet
-    HB-->>B: Remove outer header and route to VM interface
-```
-
-The outer IPv6 destination is the WireGuard address of Host B. The inner IPv6 packet stays unchanged.
-
-## Scenario 3: first packet to a remote VM
-
-This path applies when the host has no location for the destination VM.
-
-```mermaid
-sequenceDiagram
-    participant A as VM A
-    participant HA as Host A vm_hook.h
-    participant U as Physical uplink
-    participant HB as Host B uplink_hook.h
-    participant R as Host A remote_vms
-
-    A->>HA: IPv6 packet for VM B
-    HA->>HA: No remote_vms record
-    HA->>U: WHO_HAS VM B
-    Note over HA,U: The first guest packet is replaced.
-    U->>HB: Multicast WHO_HAS
-    HB->>U: FOUND VM B and Host B address
-    U->>HA: Unicast FOUND
-    HA->>R: Save Host B location
-```
-
-The next packet from VM A uses Scenario 2. TCP normally sends the first packet again after the discovery exchange. The per-VM rate limit drops excess discovery packets.
-
-## Scenario 4: receive an Atlas WG Mesh tunnel
-
-This path applies after a remote host sends an Atlas WG Mesh IPv6-in-IPv6 tunnel.
-
-```mermaid
-flowchart LR
-    A["WireGuard decrypts packet"] --> B["wireguard_hook.h reads outer IPv6 header"]
-    B --> C{"Inner destination in local_vms?"}
-    C -->|Yes| D["Remove outer IPv6 header"]
-    D --> E["Linux routes inner packet to VM interface"]
-    C -->|No| F["Send NOT_HERE to sender"]
-```
-
-The destination host never forwards an Atlas WG Mesh tunnel to another host. It either delivers the inner packet locally or sends `NOT_HERE`.
-
-## Scenario 5: planned VM move
-
-Use this path for a stopped VM. Register the VM on the new host before you start the guest.
-
-```mermaid
-sequenceDiagram
-    participant C as Host C VM setup
-    participant U as Physical uplink
-    participant A as Host A uplink_hook.h
-    participant R as Host A remote_vms
-
-    C->>C: Register VM X
-    C->>U: NOW_HERE VM X and Host C address
-    U->>A: NOW_HERE
-    A->>R: Update existing VM X record to Host C
-```
-
-`NOW_HERE` updates an existing record only. A host that never contacted VM X does not add VM X to its cache.
-
-## Scenario 6: missed move announcement
-
-This path applies when all `NOW_HERE` messages are lost but the old host still runs.
-
-```mermaid
-sequenceDiagram
-    participant A as Host A
-    participant B as Old Host B
-    participant U as Physical uplink
-    participant C as New Host C
-
-    A->>B: Tunnel for VM X
-    B->>A: NOT_HERE VM X
-    A->>A: Delete stale remote_vms record
-    A->>U: WHO_HAS VM X
-    U->>C: WHO_HAS VM X
-    C->>A: FOUND VM X and Host C address
-```
-
-Host A starts discovery when it receives `NOT_HERE`. It does not wait for the guest to send another packet. The tunnel packet sent to Host B is still lost.
-
-## Scenario 7: old host failure
-
-This path applies when the old host is down and the move announcement did not reach every host.
-
-```mermaid
-flowchart LR
-    A["Host A has VM X -> old Host B"] --> B{"Host B responds?"}
-    B -->|No| C["Host A cannot learn the new location"]
-    C --> D["Liveness process detects Host B failure"]
-    D --> E["Host setup deletes locations that name Host B"]
-    E --> F["Host A has no location for VM X"]
-    F --> G["Next guest packet sends WHO_HAS"]
-    G --> H["New Host C replies FOUND"]
-```
-
-Atlas WG Mesh has no timer for remote locations. A liveness process must delete locations that name a host after it leaves the deployment. If the host later returns, use Scenario 8 before allowing it to rejoin.
-
-## Scenario 8: falsely declared-dead host returns
-
-This path applies when liveness declares Host B dead during a partition, but Host B was still running when VM X moved to Host C. Host B retains VM X in `local_vms`.
-
-```mermaid
-sequenceDiagram
-    participant A as Host A
-    participant B as Returned Host B
-    participant C as Current Host C
-    participant R as Controller
-    A->>B: WHO_HAS VM X
-    B->>A: FOUND VM X, Host B
-    A->>B: Tunnel for VM X
-    B->>B: local_vms says VM X is local
-    Note over B: Delivers the tunnel, does not send NOT_HERE
-    R->>B: vm list --json
-    R->>B: vm remove stale VM X
-    A->>C: Next WHO_HAS / FOUND path reaches Host C
-```
-
-The stale owner suppresses the `NOT_HERE` repair path, so recovery is not automatic. On reconnect, the controller must compare `vm list --json` with current desired state and remove every stale ownership entry before the host resumes normal service. Do not replay a stale local manifest at boot.
-
-## Code map
-
-| File | Main responsibility |
+| File | Purpose |
 | --- | --- |
-| `bpf/bpf.c` | Build one BPF object from all source fragments. |
-| `bpf/vm_hook.h` | Process packets from VM interfaces. |
-| `bpf/uplink_hook.h` | Process `WHO_HAS`, `FOUND`, and `NOW_HERE` messages. |
-| `bpf/wireguard_hook.h` | Process Atlas WG Mesh tunnels and `NOT_HERE` messages. |
-| `bpf/control.h` | Build discovery and recovery packets. |
-| `bpf/state.h` | Define host and VM BPF state. |
-| `bpf/discovery_limit.h` | Define per-VM discovery rate limiting. |
-| `bpf/debug.h` | Define debug maps and event helpers. |
-| `bpf/protocol.h` | Define on-wire protocol values and structures. |
-| `bpf/address.h` | Define VM address helpers. |
-| `bpf/packet.h` | Define packet checksum and length helpers. |
+| `bpf/mesh.h` | Address and packet functions. |
+| `bpf/maps.h` | Maps and map lookups. |
+| `bpf/vm.h` | Ingress hook for a virtual machine interface. |
+| `bpf/wireguard.h` | Ingress hook for the WireGuard interface. |
+| `bpf/uplink.h` | Uplink, public interface, and unicast NDP hooks. |
+| `bpf/bpf.c` | One BPF build entry point. |
+
+## Maps
+
+| Map | Value |
+| --- | --- |
+| `config` | Host interfaces, addresses, and MAC addresses. |
+| `local_vms` | Virtual machine address to local interface. |
+| `remote_vms` | Remote virtual machine address to host WireGuard address. |
+| `privileged_vms` | Privileged tenant-0 addresses. |
+| `peer_list` | Peer IPv4, MAC, and WireGuard addresses. |
+| `discovery_limits` | NDP request limit for each virtual machine interface. |
+| `gateways` | Interfaces of the gateway virtual machines on this host. |
+| `owned_prefixes` | Public prefix to owner interface. |
+| `moved_prefixes` | Public prefix of a VM that left this host, to that VM address and an expiry time. |
+| `announcement_limits` | Next allowed advertisement for each moved prefix address. |
+| `gateway_routes` | Virtual machine and destination prefix to gateway address. |
+| `build_hash` | Hash of the active BPF object. |
+
+`remote_vms` uses least recently used eviction.
+
+A location stays until eviction or a valid `NOT_HERE` packet removes it.
+
+`vm sync` sends an unsolicited neighbor advertisement for the VM address on the uplink. Every peer learns the new host of a moved VM at once, and `NOT_HERE` repairs only a missed advertisement.
+
+## Virtual machine traffic
+
+The virtual machine hook applies these rules in order:
+
+1. Drop traffic to `fdab::/16`.
+2. Send a configured external destination to its gateway.
+3. Check source ownership.
+4. Check tenant access.
+5. Leave local delivery to Linux.
+6. Tunnel a known remote destination through WireGuard.
+7. Start NDP for an unknown destination.
+
+Each interface can start 10 NDP requests each second, with a burst of 50 requests.
+
+## Discovery
+
+Neighbor Discovery Protocol (NDP) finds the host of an unknown virtual machine.
+
+```text
+VM hook -> neighbor solicitation -> destination host proxy NDP
+        <- neighbor advertisement <-
+uplink hook -> remote_vms
+```
+
+The uplink hook maps the peer MAC address to its WireGuard address.
+
+`configure` sets `proxy_delay` to `0` on the uplink. Linux otherwise delays a proxied answer by up to 0.8 seconds. The mesh drops packets until the answer arrives.
+
+The virtual machine retries its packet after NDP completes.
+
+In unicast mode, the egress hook puts each NDP packet in IPv4 protocol 41.
+
+It sends one copy to each peer.
+
+The receiving uplink hook checks the peer IPv4 address and removes the IPv4 header.
+
+Linux NDP and proxy NDP work the same in both modes.
+
+## WireGuard traffic
+
+The WireGuard hook handles packets only between addresses in `fdab::/16`.
+
+| Packet | Action |
+| --- | --- |
+| Tunnel to a local virtual machine | Remove the outer IPv6 header. |
+| Tunnel to a missing virtual machine | Return `NOT_HERE` to the sender. |
+| Gateway tunnel for an external client | Send the packet to the local gateway that the tunnel names. |
+| Client packet for a local prefix | Advertise the address on the public interface once, then deliver later packets. |
+| Valid `NOT_HERE` | Remove the old location and start NDP. |
+
+`NOT_HERE` uses IPv6 next header `253` and contains one virtual machine address.
+
+A gateway tunnel uses IPv6 next header `254`. The gateway address comes first, then the client packet. A gateway that is not on the host also returns `NOT_HERE`.
+
+Only the host stored in `remote_vms` can remove that location.
+
+## Gateways
+
+A route selects a gateway by the longest destination prefix.
+
+A host can run several gateways. The tunnel names the gateway, so the receiving host delivers to that VM. The 16-byte gateway address fits the MTU: 1380 + 40 + 16 is 1436, and WireGuard carries 1440.
+
+The public interface hook answers NDP for an address in an owned prefix.
+
+The provider router keeps each prefix address on the MAC of the host that answered, and does not ask again after the VM moves. `vm remove` keeps the prefix in `moved_prefixes` for 5 minutes. During that time the old host sends client packets for the prefix through the mesh to the VM. The new host answers the first packet with an unsolicited advertisement from its public interface, so the router sends later packets to the new host.
+
+```text
+client -> router -> old host -> mesh -> new host -> VM
+                    router <- unsolicited advertisement <- new host
+```
+
+Read [Gateways](gateways.md) for the configuration model.

@@ -9,7 +9,6 @@ METADATA_ADDRESS = ("169.254.169.254", 80)
 METADATA_PATH_PREFIX = "/latest"
 DROP_IN_PATH = pathlib.Path("/run/systemd/network/10-atlas.network.d/mesh.conf")
 MESH_GATEWAY = "fe80::1"
-MESH_PREFIX = "fdaa::/16"
 TOKEN_TTL_SECONDS = "21600"
 POLL_SECONDS = 0.25
 TIMEOUT_SECONDS = 3
@@ -43,7 +42,7 @@ def read_response(connection):
 
 
 def request(method, path, headers):
-    """Return one MMDS response body, or an empty string on failure."""
+    """Return one MMDS response body, an empty string for a missing key, or None on failure."""
     lines = [f"{method} {METADATA_PATH_PREFIX}/{path} HTTP/1.1", "Host: metadata"]
     lines.extend(f"{name}: {value}" for name, value in headers.items())
     message = ("\r\n".join(lines) + "\r\n\r\n").encode()
@@ -54,10 +53,13 @@ def request(method, path, headers):
             connection.sendall(message)
             head, body = read_response(connection)
     except (OSError, ValueError):
-        return ""
+        return None
 
-    if b" 200 " not in head.split(b"\r\n", 1)[0]:
+    status = head.split(b"\r\n", 1)[0]
+    if b" 404 " in status:
         return ""
+    if b" 200 " not in status:
+        return None
     return body.decode(errors="replace").strip()
 
 
@@ -72,29 +74,44 @@ def read(path, token):
 def apply_hostname(hostname):
     if hostname == socket.gethostname():
         return
-    subprocess.run(["hostnamectl", "set-hostname", hostname], check=True)
+    # A failure before D-Bus starts is retried on the next poll.
+    subprocess.run(["hostnamectl", "set-hostname", hostname], check=False)
 
 
-def mesh_drop_in(address):
-    return (
+def mesh_drop_in(address, routes):
+    """Return the mesh address and the host routes of the guest."""
+    drop_in = (
         "[Network]\n"
         f"Address={address}/128\n"
         "IPv6AcceptRA=no\n"
-        "\n"
-        "[Route]\n"
-        f"Destination={MESH_PREFIX}\n"
-        f"Gateway={MESH_GATEWAY}\n"
     )
+    for destination in routes:
+        drop_in += "\n[Route]\n" f"Destination={destination}\n" f"Gateway={MESH_GATEWAY}\n"
+
+    return drop_in
 
 
-def apply_mesh_network(address):
-    drop_in = mesh_drop_in(ipaddress.IPv6Address(address))
+def parse_routes(value):
+    """Return the route destinations that the metadata service lists."""
+    return [entry.strip() for entry in (value or "").split(",") if entry.strip()]
+
+
+def apply_mesh_network(address, routes):
+    drop_in = mesh_drop_in(ipaddress.IPv6Address(address), routes)
     if DROP_IN_PATH.exists() and DROP_IN_PATH.read_text() == drop_in:
         return
 
+    # Netlink works before D-Bus starts. The drop-in preserves the state through networkd.
+    subprocess.run(["ip", "-6", "address", "replace", f"{address}/128", "dev", "eth0", "nodad"], check=False)
+    for destination in routes:
+        subprocess.run(["ip", "-6", "route", "replace", destination, "via", MESH_GATEWAY, "dev", "eth0"], check=False)
+
     DROP_IN_PATH.parent.mkdir(parents=True, exist_ok=True)
     DROP_IN_PATH.write_text(drop_in)
-    subprocess.run(["networkctl", "reload"], check=True)
+    # Remove the file when networkd is not ready, so the next poll retries.
+    if subprocess.run(["networkctl", "reload"], check=False).returncode != 0:
+        DROP_IN_PATH.unlink()
+        return
     reset_network_services()
 
 
@@ -126,8 +143,10 @@ def main():
             else:
                 if hostname:
                     apply_hostname(hostname)
-                if address:
-                    apply_mesh_network(address)
+                routes = read("meta-data/host-routes", token)
+                # A failed read keeps the current routes, because an empty value would remove them.
+                if address and routes is not None:
+                    apply_mesh_network(address, parse_routes(routes))
         time.sleep(POLL_SECONDS)
 
 

@@ -226,7 +226,9 @@ Use `Grant Privilege` and `Revoke Privilege` under `Dangerous Actions` to change
 
 ## Per-VM metadata
 
-The image is shared, so nothing per VM can be baked into it. `atlas-metadata.service` reads MMDS and applies the hostname and the mesh address. It writes a systemd-networkd drop-in with the address and the `fdaa::/16` route, then reloads networkd. Each step does nothing when the value already matches.
+The image is shared, so nothing per VM can be baked into it. The image holds the `fdaa::/16` route, which is the same for every VM. `atlas-metadata.service` reads MMDS and applies the hostname, the mesh address, and the host routes. It starts before `sysinit.target` and applies the address with `ip` at once, because networkd answers only after D-Bus starts. It then writes a systemd-networkd drop-in with the same values and reloads networkd. Each step does nothing when the value already matches.
+
+The service also reads `meta-data/host-routes`, a comma-separated list of destinations that the guest routes through the host. A missing key means no routes. A failed read keeps the current routes.
 
 `atlas-metadata.service` reads MMDS every 250 ms. This lets a warm VM receive its own hostname and address after resume. cloud-init uses `preserve_hostname`, so the service owns the hostname.
 
@@ -250,11 +252,17 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 
 | Action | Behavior |
 |---|---|
-| Attach IP Address | Sets an attach intent and sends the address with `uplink` egress. |
-| Detach IP Address | Sends an empty address and sets a detach intent. |
+| Attach IPv4 Address | Sets an attach intent and sends the address with `uplink` egress. |
+| Detach IPv4 Address | Sends an empty address and sets a detach intent. |
 | Edit Network Throughput | Sends private and public limits in MiB/s. `0` removes a limit. |
 | Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
 | Change Egress Mode | Sends `uplink`, `mesh`, or `none`. |
+| Edit Gateway Routes | Sends each destination range with the mesh address of its gateway VM. The gateway must be an active network gateway VM. |
+| Make Network Gateway | Sets `is_network_gateway`. It needs the privileged flag. |
+| Attach IPv6 Block | Sends `public_ipv6`, then sets the provider attach intent. A VM holds one block. System Manager only. |
+| Detach IPv6 Block | Sends an empty `public_ipv6`, then sets a detach intent. System Manager only. |
+
+Metal owns the gateway routes. Atlas shows them as a read-only virtual field. A gateway or a VM with a block has no gateway routes, because it reaches every destination through its host. Migration moves each attached public address to the destination server at cutover. A scheduled job retries a move that failed.
 
 Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, throughput limits, and firewall rules can also be set during creation.
 

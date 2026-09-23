@@ -270,6 +270,25 @@ class TestMetalClientPaths(UnitTestCase):
 			request.call_args.args[:2], ("POST", "https://10.0.0.2:9000/v1/snapshots/SNAP-1/upload")
 		)
 
+	def test_sync_carries_the_unicast_mode_flag(self) -> None:
+		client = build_client()
+
+		with patch(
+			"atlas.vm.core.metal_client.requests.Session.request",
+			return_value=build_response(200, {"capacity": {}}),
+		) as request:
+			client.sync([], [], [], unicast=True)
+
+		self.assertEqual(
+			request.call_args.kwargs["json"],
+			{
+				"wireguard_peers": [],
+				"images": [],
+				"privileged_vm_addresses": [],
+				"unicast": True,
+			},
+		)
+
 
 def virtual_machine_response() -> dict:
 	"""Return the virtual machine body that every mutation route answers with."""
@@ -464,7 +483,9 @@ class TestMetalClientVirtualMachineRoutes(UnitTestCase):
 			"atlas.vm.core.metal_client.requests.Session.request",
 			return_value=build_response(200, {"capacity": {}}),
 		) as request:
-			result = client.sync([{"node": "node-1"}], [{"ref": "sha256:image"}], ["fdaa:1::1"])
+			result = client.sync(
+				[{"node": "node-1"}], [{"ref": "sha256:image"}], ["fdaa:1::1"], unicast=False
+			)
 
 		self.assertEqual(result, {"capacity": {}})
 		self.assertEqual(request.call_args.args[:2], ("POST", "https://10.0.0.2:9000/v1/sync"))
@@ -474,6 +495,7 @@ class TestMetalClientVirtualMachineRoutes(UnitTestCase):
 				"wireguard_peers": [{"node": "node-1"}],
 				"images": [{"ref": "sha256:image"}],
 				"privileged_vm_addresses": ["fdaa:1::1"],
+				"unicast": False,
 			},
 		)
 
@@ -490,7 +512,7 @@ class TestMetalClientVirtualMachineRoutes(UnitTestCase):
 			"disk": lambda: client.set_virtual_machine_disk("VM-00001", {}),
 			"compute": lambda: client.set_virtual_machine_compute("VM-00001", COMPUTE_REQUEST),
 			"snapshot_upload": lambda: client.start_snapshot_upload("image-1", {}),
-			"sync": lambda: client.sync([], [], []),
+			"sync": lambda: client.sync([], [], [], unicast=False),
 		}
 
 		for operation_name, write_operation in write_operations.items():

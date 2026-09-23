@@ -22,6 +22,7 @@
   "region_id",
   "private_network_config_section",
   "private_network_cidr",
+  "is_unicast_network_enabled",
   "column_break_jzip",
   "private_network_mtu",
   "ssh_section",
@@ -68,11 +69,8 @@
   "section_break_aijf",
   "aws_subnet_id",
   "aws_security_group_id",
-  "aws_multicast_domain_id",
   "column_break_qavs",
   "aws_key_pair_name",
-  "aws_transit_gateway_id",
-  "aws_transit_gateway_attachment_id",
   "proxy_tab",
   "dns_provider",
   "column_break_caqd",
@@ -214,6 +212,14 @@
    "fieldtype": "Int",
    "label": "MTU",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Atlas WG Mesh transports NDP between hosts over the routed IPv4 underlay instead of the shared Layer-2 VLAN. AWS requires it.",
+   "fieldname": "is_unicast_network_enabled",
+   "fieldtype": "Check",
+   "label": "Use Unicast Networking",
+   "show_description_on_click": 1
   },
   {
    "fieldname": "private_network_config_section",
@@ -689,24 +695,6 @@
    "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
   },
   {
-   "fieldname": "aws_transit_gateway_id",
-   "fieldtype": "Data",
-   "label": "Transit Gateway ID",
-   "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
-  },
-  {
-   "fieldname": "aws_transit_gateway_attachment_id",
-   "fieldtype": "Data",
-   "label": "Transit Gateway Attachment ID",
-   "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
-  },
-  {
-   "fieldname": "aws_multicast_domain_id",
-   "fieldtype": "Data",
-   "label": "Multicast Domain ID",
-   "read_only_depends_on": "eval: doc.is_server_provider_setup_completed"
-  },
-  {
    "default": "balanced",
    "fieldname": "placement_strategy",
    "fieldtype": "Autocomplete",
@@ -790,8 +778,8 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-22 12:00:00.000000",
- "modified_by": "test@gmail.com",
+ "modified": "2026-09-23 03:59:49.903882",
+ "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",
  "owner": "Administrator",

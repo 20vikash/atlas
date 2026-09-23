@@ -1,225 +1,145 @@
-# Atlas WG Mesh operations guide
+# Atlas WG Mesh operations
 
-For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+The `atlas-wg-mesh` command embeds the BPF object and manages one host.
 
-The `atlas-wg-mesh` CLI configures local host and VM lifecycle state. It embeds the BPF object. It does not run as a daemon. Atlas WG Mesh discovers remote VM owners and routes packets in BPF after the CLI exits.
+It does not run a daemon.
 
-## Contents
+Run all commands except `version` as root.
 
-- [Atlas WG Mesh operations guide](#atlas-wg-mesh-operations-guide)
-  - [Contents](#contents)
-  - [Requirements](#requirements)
-  - [Network and security](#network-and-security)
-  - [Build a release](#build-a-release)
-  - [Install a host](#install-a-host)
-  - [Add a VM](#add-a-vm)
-    - [VMs behind a router](#vms-behind-a-router)
-  - [Move a VM](#move-a-vm)
-  - [Remove a VM](#remove-a-vm)
-  - [List local VM ownership](#list-local-vm-ownership)
-  - [Manage privileged VMs](#manage-privileged-vms)
-  - [Rejoin after a dead declaration](#rejoin-after-a-dead-declaration)
-  - [Check status](#check-status)
-  - [Debug in production](#debug-in-production)
-  - [Upgrade BPF programs](#upgrade-bpf-programs)
-  - [Remove remote entries](#remove-remote-entries)
-  - [Remove a host installation](#remove-a-host-installation)
-  - [Force reset fallback](#force-reset-fallback)
+Pinned state is in `/sys/fs/bpf/atlas-wg-mesh`.
 
-## Requirements
-
-Run the CLI as root. Configure WireGuard before you install Atlas WG Mesh. Give each host a global `fdab::/16` address on its WireGuard interface. Use a prefix that covers every other host, because the VM hook returns the tunnel packet to Linux routing and the host must have a route to the remote host address. Add a WireGuard peer for every other host. Set each peer `AllowedIPs` value to that peer's `/128` address.
-
-Atlas WG Mesh pins state at `/sys/fs/bpf/atlas-wg-mesh`.
-
-## Network and security
-
-| Use                        | Value                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------- |
-| VM address range           | `fdaa::/16`                                                                                 |
-| WireGuard address range    | `fdab::/16`                                                                                 |
-| Discovery destination      | `239.1.1.1:7373`, or each peer on UDP `7373` with the [discovery relay](unicast-network.md) |
-| Uplink MTU                 | 1500 or greater                                                                             |
-| WireGuard MTU              | 1420                                                                                        |
-| VM interface and guest MTU | 1380                                                                                        |
-
-Discovery uses IPv4 multicast with a time to live of `1`. Restrict this Layer-2 domain to trusted participating hosts: `WHO_HAS`, `FOUND`, and `NOW_HERE` messages are not authenticated. Cross-tenant traffic is permitted only when one endpoint is a controller-whitelisted privileged tenant-`0` VM address, so reserve those addresses for trusted platform services.
-
-## Build a release
-
-Run this command on a Linux build host with Go and clang:
+## Build
 
 ```sh
 make build
+make build VERSION=v1.2.3
+make bpf
 ```
 
-Set a release version with `make build VERSION=v1.2.3`.
+The built command does not need Clang or bpftool on the target host.
 
-The command creates these self-contained binaries:
-
-```text
-dist/atlas-wg-mesh-linux-amd64
-dist/atlas-wg-mesh-linux-arm64
-```
-
-Each binary embeds the BPF object. Copy the binary that matches the host CPU architecture. The host does not need `clang`, `bpftool`, or a separate BPF object file.
-
-Use `make bpf` to build only the embedded BPF object. Use `make clean` to remove generated BPF and release files.
-
-## Install a host
-
-Run this command once on each host:
+## Configure a host
 
 ```sh
-atlas-wg-mesh configure --uplink eth0 --wireguard wg0
+sudo atlas-wg-mesh configure --uplink eno1.1680 --wireguard wg0
 ```
 
-The command mounts BPF file storage when necessary, enables IPv6 forwarding, enables uplink multicast, writes the host configuration, pins BPF state, and attaches the uplink and WireGuard hooks.
+The uplink needs IPv4, IPv6, and an Ethernet MAC address.
 
-Each VM defaults to 10 `WHO_HAS` messages per second with a burst of 50. Change the limits with `--who-has-rate` and `--who-has-burst`; use `--who-has-rate 0` to disable rate limiting.
+The WireGuard interface needs an address in `fdab::/16`.
 
-## Add a VM
+Run the same command after you install a new binary.
 
-Create the VM interface with your virtualization system. Then register the VM address on the host:
+The command loads the candidate programs before it replaces any hook.
+
+If a hook replacement fails, the command restores the old programs.
+
+The command rejects an incompatible map layout and keeps the active release.
+
+## Synchronize peers
+
+Use multicast Neighbor Discovery Protocol (NDP) on a shared host network:
 
 ```sh
-atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1 --mtu 1380
+sudo atlas-wg-mesh peers sync /var/lib/metal/wireguard-peers.json
 ```
 
-The command configures the host interface, adds the VM to the local BPF map, attaches the VM hook, and announces the VM location with multicast.
-
-`--mtu` defaults to `1380`. Set the guest address to `fdaa:1:0:7::1/128`, gateway to `fe80::1`, and MTU to the same value. Do not exceed the WireGuard MTU minus 40 bytes.
-
-### VMs behind a router
-
-`vm add` adds an on-link host route for the VM address on `--interface`. When the VM is not directly behind that interface, for example a Metal VM in its own network namespace, the router between them must forward IPv6, hold a route to the VM address, and answer neighbour solicitations for it with proxy NDP.
-
-## Move a VM
-
-Stop the VM on the old host. Remove it from the old host. Add it on the new host. Then start the VM on the new host.
+Use IPv4-wrapped unicast NDP:
 
 ```sh
-atlas-wg-mesh vm remove --interface veth0 --address fdaa:1:0:7::1
-atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1
+sudo atlas-wg-mesh peers sync /var/lib/metal/wireguard-peers.json --unicast
 ```
 
-The `vm add` command sends three `NOW_HERE` messages. Hosts that already know the VM update the learned WireGuard path. The VM keeps its private IPv6 address.
+The command validates the complete file before it changes the peer map.
 
-## Remove a VM
+The command attaches or detaches the egress hook after it writes the peer map.
 
-Run this command before you delete the VM interface:
+## Synchronize a virtual machine
+
+Use one command for the complete virtual machine state:
 
 ```sh
-atlas-wg-mesh vm remove --interface veth0 --address fdaa:1:0:7::1
+sudo atlas-wg-mesh vm sync \
+  --interface vh-100001 \
+  --address fdaa:1:10:20::5 \
+  --mtu 1380
 ```
 
-The command removes the VM hook, the local BPF map entry, and the host route. It does not change privileged-VM policy: when an address is retired or reassigned, the controller must remove it from the privileged VM whitelist separately.
-
-## List local VM ownership
-
-Use this command to reconcile a host with the controller:
+Add gateway state when the virtual machine needs it:
 
 ```sh
-atlas-wg-mesh vm list
-atlas-wg-mesh vm list --json
+sudo atlas-wg-mesh vm sync \
+  --interface vh-100002 \
+  --address fdaa:1:0:0::1 \
+  --mtu 1380 \
+  --gateway \
+  --prefix 2001:db8:100::/64 \
+  --route 2000::/3=fdaa:1:0:0::2
 ```
 
-Each line contains the VM address and the owning host interface:
+Each `--prefix` gives the virtual machine ownership of one public prefix.
 
-```text
-fdaa:1:0:7::1	veth0
-```
+Each `--route` has the form `DESTINATION=GATEWAY`.
 
-`--json` returns an array of objects with `address` and `interface` fields for controller automation.
+The command replaces all prefixes and routes for that virtual machine.
 
-An `ifindex:N` value means the registered interface no longer exists.
+Omit `--gateway`, `--prefix`, or `--route` to remove old state of that type.
 
-To clear that single orphaned ownership entry, run `vm remove` with the missing interface name and VM address. The command removes the map entry without resetting the rest of the host.
-
-## Manage privileged VMs
-
-Tenant-`0` is the privileged tenant. A privileged VM can communicate with other tenants only after the controller adds its full IPv6 address to the whitelist on each host. Other tenants can communicate only with those whitelisted privileged VMs, which preserves request and response traffic without exposing every tenant-`0` VM:
+List or remove local virtual machines:
 
 ```sh
-atlas-wg-mesh privileged-vm add --address fdaa:1:0:0::1
-atlas-wg-mesh privileged-vm remove --address fdaa:1:0:0::1
-atlas-wg-mesh privileged-vm list
-atlas-wg-mesh privileged-vm list --json
+sudo atlas-wg-mesh vm list
+sudo atlas-wg-mesh vm list --json
+sudo atlas-wg-mesh vm remove --interface vh-100001 --address fdaa:1:10:20::5
 ```
 
-`list --json` returns an array of objects with an `address` field, matching the shape used by `vm list --json`. The controller owns reconciliation: compare those addresses with the desired privileged-tenant VM addresses, and use `add` and `remove` to apply the difference. The whitelist is BPF state shared by all local hooks, so its desired contents must be synced to every Atlas WG Mesh host.
+The remove command also removes the gateway state owned by the virtual machine.
 
-## Rejoin after a dead declaration
+## Synchronize privileged virtual machines
 
-This is the normal controller rejoin path. It preserves the uplink and WireGuard hooks, healthy VM registrations, and learned remote locations:
+A privileged virtual machine is a listed tenant-0 virtual machine.
 
-1. Run `atlas-wg-mesh vm list --json`.
-2. Compare the result with the controller's current desired state.
-3. Remove addresses that the controller no longer assigns to this host.
-4. Add addresses assigned to this host but missing from the list.
+It can communicate with all tenants.
 
-For example, remove one stale ownership entry without interrupting other VMs:
+Replace the complete set:
 
 ```sh
-atlas-wg-mesh vm remove --interface fc-zomb --address fdaa:1:0:2::20
+sudo atlas-wg-mesh privileged-vm replace \
+  fdaa:1:0:0::1 \
+  fdaa:1:0:0::2
 ```
 
-Reconcile immediately when the host reconnects. Until stale entries are removed, the host can still answer `WHO_HAS` for them. Do not replay a stale local manifest at boot; always use the controller's current desired state.
-
-## Check status
-
-Run this command to show the host configuration, local VM count, and privileged-VM count:
+List or remove the complete set:
 
 ```sh
-atlas-wg-mesh status
+sudo atlas-wg-mesh privileged-vm list
+sudo atlas-wg-mesh privileged-vm list --json
+sudo atlas-wg-mesh privileged-vm clear
 ```
 
-
-## Debug in production
-
-Read [Debug in production](debug-in-production.md).
-
-## Upgrade BPF programs
-
-Run the newer CLI binary on the host:
+## Check a host
 
 ```sh
-atlas-wg-mesh upgrade
+sudo atlas-wg-mesh status
+sudo atlas-wg-mesh status --json
+sudo atlas-wg-mesh inspect fdaa:1:10:20::5
+sudo atlas-wg-mesh inspect fdaa:1:10:20::5 --json
+atlas-wg-mesh version
 ```
 
-It compares the embedded BPF hash, keeps compatible pinned maps including `privileged_tenant_allowed_addresses`, and replaces every Atlas WG Mesh hook. If the embedded BPF hash differs and maps are incompatible, run `atlas-wg-mesh upgrade --force`; it rebuilds BPF state, restores local VMs from their routes, and clears learned remote locations. When the hashes already match, `upgrade --force` does nothing.
+`status` shows the interfaces, NDP mode, BPF hash, and map counts.
 
-Use `atlas-wg-mesh version` to show CLI and BPF hashes.
+`inspect` shows local state, a learned remote host, or an unknown location.
 
-## Remove remote entries
+An unknown location is normal before a local virtual machine contacts the address.
 
-When a host is permanently unavailable, clear learned entries for its WireGuard address:
+## Remove the mesh
 
 ```sh
-atlas-wg-mesh remote purge --host fdab::10
+sudo atlas-wg-mesh reset
+sudo atlas-wg-mesh reset --force
 ```
 
-## Remove a host installation
+`reset` refuses to run while local virtual machines remain.
 
-Remove every VM from the host first. Then remove the host hooks and pinned BPF state:
-
-```sh
-atlas-wg-mesh reset
-```
-
-## Force reset fallback
-
-Use `reset --force` only when surgical reconciliation is not safe: for example, the pinned configuration cannot identify its uplink after a NIC change, the controller cannot establish desired state, or an operator needs a clean slate. It detaches every still-present VM hook, then clears local VM ownership and all pinned BPF state:
-
-```sh
-atlas-wg-mesh reset --force
-```
-
-Reconfigure the host and re-register only the VMs in the controller's current desired state:
-
-```sh
-atlas-wg-mesh configure --uplink eth0 --wireguard wg0
-atlas-wg-mesh vm add --interface veth0 --address fdaa:1:0:7::1 --mtu 1380
-```
-
-A forced reset also clears `remote_vms` and `privileged_tenant_allowed_addresses`; discovery rebuilds remote locations, while the controller must reconcile privileged VMs again.
+`reset --force` also removes their hooks and proxy NDP entries.

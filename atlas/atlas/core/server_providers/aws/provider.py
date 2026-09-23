@@ -10,7 +10,7 @@ from atlas.atlas.core.server_providers.aws.catalog import IMAGE_OWNERS, AwsCatal
 from atlas.atlas.core.server_providers.aws.client import AwsClient, AwsError
 from atlas.atlas.core.server_providers.aws.configuration import AwsConfiguration
 from atlas.atlas.core.server_providers.aws.infrastructure import AwsInfrastructure
-from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses
+from atlas.atlas.core.server_providers.aws.ip_addresses import AwsIPAddresses, AwsIPv6Prefixes
 from atlas.atlas.core.server_providers.aws.servers import AwsServers
 from atlas.atlas.core.server_providers.aws.volumes import AwsVolumes
 from atlas.atlas.core.server_providers.base import (
@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 @register
 class AwsProvider(ServerProvider):
 	"""Provide Atlas server operations through the AWS API."""
+
+	public_ipv6_prefix_length: ClassVar[int | None] = 80
 
 	provider_type = "AWS"
 	credential_fields = ("aws_secret_access_key", "aws_access_key_id")
@@ -55,6 +57,7 @@ class AwsProvider(ServerProvider):
 		self.infrastructure = AwsInfrastructure(self)
 		self.servers = AwsServers(self.client, self.configuration, self.catalog)
 		self.ip_addresses = AwsIPAddresses(self.client, self.configuration)
+		self.ipv6_prefixes = AwsIPv6Prefixes(self.client, self.configuration)
 		self.volumes = AwsVolumes(self)
 
 	@override
@@ -79,39 +82,8 @@ class AwsProvider(ServerProvider):
 		self.store("aws_security_group_id", self.infrastructure.create_security_group(vpc_id))
 		self.store("aws_key_pair_name", self.infrastructure.create_key_pair(self.settings.public_ssh_key))
 
-		self.setup_multicast_domain(vpc_id, subnet_id)
 		self.settings.is_server_provider_setup_completed = 1
 		self.settings.save()
-
-	def setup_multicast_domain(self, vpc_id: str, subnet_id: str) -> None:
-		"""Create the transit gateway that carries WG Mesh discovery traffic."""
-		transit_gateway_id = self.infrastructure.create_transit_gateway()
-		self.store("aws_transit_gateway_id", transit_gateway_id)
-		self.infrastructure.wait_for_available(
-			"describe_transit_gateways",
-			"TransitGateways",
-			f"transit gateway {transit_gateway_id}",
-			TransitGatewayIds=[transit_gateway_id],
-		)
-
-		attachment_id = self.infrastructure.attach_transit_gateway(transit_gateway_id, vpc_id, subnet_id)
-		self.store("aws_transit_gateway_attachment_id", attachment_id)
-		self.infrastructure.wait_for_available(
-			"describe_transit_gateway_vpc_attachments",
-			"TransitGatewayVpcAttachments",
-			f"transit gateway attachment {attachment_id}",
-			TransitGatewayAttachmentIds=[attachment_id],
-		)
-
-		domain_id = self.infrastructure.create_multicast_domain(transit_gateway_id)
-		self.store("aws_multicast_domain_id", domain_id)
-		self.infrastructure.wait_for_available(
-			"describe_transit_gateway_multicast_domains",
-			"TransitGatewayMulticastDomains",
-			f"multicast domain {domain_id}",
-			TransitGatewayMulticastDomainIds=[domain_id],
-		)
-		self.infrastructure.associate_multicast_subnet(domain_id, attachment_id, subnet_id)
 
 	@override
 	def fetch_server_sizes(self) -> tuple[ServerSizeData, ...]:
@@ -204,21 +176,33 @@ class AwsProvider(ServerProvider):
 		)
 
 	@override
-	def reserve_public_ipv4_address(self) -> ReservedIPAddress:
-		"""Reserve one public IPv4 address for a server."""
+	def reserve_public_ip_address(self, version: int) -> ReservedIPAddress:
+		"""Reserve one Elastic IP address, or choose one free IPv6 /80 block."""
+		if version == 6:
+			used = set(
+				frappe.get_all(
+					"Metal Server IP Address", filters={"version": "6"}, pluck="provider_resource_id"
+				)
+			)
+			return self.ipv6_prefixes.reserve(used)
 		return self.ip_addresses.reserve()
 
 	@override
-	def delete_public_ipv4_address(self, provider_resource_id: str) -> None:
-		"""Release one reserved public IPv4 address."""
-		self.ip_addresses.delete(provider_resource_id)
+	def delete_public_ip_address(self, provider_resource_id: str) -> None:
+		"""Release one Elastic IP address. An IPv6 block has no AWS resource while it is detached."""
+		if not is_ipv6_prefix(provider_resource_id):
+			self.ip_addresses.delete(provider_resource_id)
 
 	@override
-	def attach_public_ipv4_address(
+	def attach_public_ip_address(
 		self, provider_resource_id: str, public_address: str, server: "MetalServer"
 	) -> str:
-		"""Attach a reserved address and return its host address."""
-		return self.ip_addresses.attach(provider_resource_id, self.primary_network_interface_id(server))
+		"""Attach an address and return its host address. A block returns itself, because the host routes it."""
+		interface_id = self.primary_network_interface_id(server)
+		if is_ipv6_prefix(provider_resource_id):
+			self.ipv6_prefixes.attach(provider_resource_id, interface_id)
+			return provider_resource_id
+		return self.ip_addresses.attach(provider_resource_id, interface_id)
 
 	@staticmethod
 	def primary_network_interface_id(server: "MetalServer") -> str:
@@ -237,15 +221,15 @@ class AwsProvider(ServerProvider):
 		raise AwsError("Atlas server has no AWS primary network interface")
 
 	@override
-	def detach_public_ipv4_address(
+	def detach_public_ip_address(
 		self, provider_resource_id: str, host_address: str | None, server: "MetalServer"
 	) -> None:
 		"""Detach an address from a server."""
-		self.ip_addresses.detach(
-			provider_resource_id,
-			self.primary_network_interface_id(server),
-			host_address,
-		)
+		interface_id = self.primary_network_interface_id(server)
+		if is_ipv6_prefix(provider_resource_id):
+			self.ipv6_prefixes.detach(provider_resource_id, interface_id)
+			return
+		self.ip_addresses.detach(provider_resource_id, interface_id, host_address)
 
 	@override
 	def promote_ssh_user(self, server: "MetalServer", user: str) -> None:
@@ -290,7 +274,6 @@ class AwsProvider(ServerProvider):
 		if not isinstance(private_address, str):
 			raise AwsError("AWS did not return a private IPv4 address for the mesh interface")
 
-		self.servers.register_multicast_interface(interface_id)
 		server.private_network_interface = self.private_network_interface
 		server.private_ipv4_address = private_address
 		self.update_provider_metadata(server, mesh_interface=dict(interface))
@@ -344,3 +327,8 @@ class AwsProvider(ServerProvider):
 		if not isinstance(mac_address, str):
 			raise AwsError("Atlas server has no AWS mesh interface MAC address")
 		return mac_address
+
+
+def is_ipv6_prefix(provider_resource_id: str) -> bool:
+	"""Report whether a provider resource is an IPv6 block. An Elastic IP allocation ID holds no colon."""
+	return ":" in provider_resource_id

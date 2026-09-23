@@ -139,6 +139,10 @@ DNS=1.1.1.1
 [Route]
 Destination=169.254.169.254/32
 Scope=link
+
+[Route]
+Destination=fdaa::/16
+Gateway=fe80::1
 EOF
 }
 
@@ -146,6 +150,8 @@ EOF
 # unit before cloud-init.service: that service uses DefaultDependencies=no and
 # runs before sysinit.target, so the order makes a cycle. systemd breaks the
 # cycle by dropping cloud-init.service, which then never generates SSH host keys.
+# The unit also uses DefaultDependencies=no, so the mesh address does not wait
+# for sysinit.target, which cloud-init holds for several seconds after boot.
 install_metadata_service() {
 	install -d -m 0755 "$rootfs_directory/etc/cloud/cloud.cfg.d"
 	cat > "$rootfs_directory/etc/cloud/cloud.cfg.d/99-atlas-hostname.cfg" <<'EOF'
@@ -157,8 +163,11 @@ EOF
 	cat > "$rootfs_directory/etc/systemd/system/atlas-metadata.service" <<'EOF'
 [Unit]
 Description=Apply the per-VM Atlas metadata
-After=network-online.target
-Wants=network-online.target
+DefaultDependencies=no
+After=local-fs.target systemd-networkd.service
+Wants=systemd-networkd.service
+Conflicts=shutdown.target
+Before=shutdown.target
 
 [Service]
 Type=exec

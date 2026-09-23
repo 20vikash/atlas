@@ -56,13 +56,10 @@ class AtlasSettings(Document):
 		aws_access_key_id: DF.Data | None
 		aws_availability_zone: DF.Data | None
 		aws_key_pair_name: DF.Data | None
-		aws_multicast_domain_id: DF.Data | None
 		aws_region: DF.Data | None
 		aws_secret_access_key: DF.Password | None
 		aws_security_group_id: DF.Data | None
 		aws_subnet_id: DF.Data | None
-		aws_transit_gateway_attachment_id: DF.Data | None
-		aws_transit_gateway_id: DF.Data | None
 		aws_vpc_id: DF.Data | None
 		central_jwks: DF.JSON | None
 		central_jwks_url: DF.Data | None
@@ -75,6 +72,7 @@ class AtlasSettings(Document):
 		is_letsencrypt_staging: DF.Check
 		is_server_provider_setup_completed: DF.Check
 		is_setup_completed: DF.Check
+		is_unicast_network_enabled: DF.Check
 		is_wildcard_tls_auto_renew_enabled: DF.Check
 		jwt_signing_key_id: DF.Data | None
 		jwt_signing_private_key: DF.Password | None
@@ -82,8 +80,8 @@ class AtlasSettings(Document):
 		letsencrypt_email: DF.Data
 		metal_tls_ca_certificate: DF.Password | None
 		metal_tls_ca_private_key: DF.Password | None
-		metald_binary_x86_64_file: DF.Link | None
 		metald_binary_hash: DF.Data | None
+		metald_binary_x86_64_file: DF.Link | None
 		metald_source_hash: DF.Data | None
 		object_storage_access_key_id: DF.Data | None
 		object_storage_bucket: DF.Data | None
@@ -126,8 +124,8 @@ class AtlasSettings(Document):
 		sleepy_vm_overcommit_factor: DF.Float
 		use_dedicated_sleepy_vm_hosts: DF.Check
 		use_public_ip_for_metald: DF.Check
-		wg_mesh_binary_x86_64_file: DF.Link | None
 		wg_mesh_binary_hash: DF.Data | None
+		wg_mesh_binary_x86_64_file: DF.Link | None
 		wg_mesh_source_hash: DF.Data | None
 		wildcard_domain: DF.Data
 		wildcard_tls_certificate: DF.Password | None

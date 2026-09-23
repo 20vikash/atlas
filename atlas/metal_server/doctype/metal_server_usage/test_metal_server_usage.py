@@ -13,6 +13,7 @@ from atlas.metal_server.usage import (
 	get_privileged_vm_addresses,
 	get_usage_values,
 	get_wireguard_peers,
+	is_unicast_network_enabled,
 	sync_server,
 )
 from atlas.vm.core.metal_client import MetalClientError
@@ -40,7 +41,7 @@ class TestServerUsage(UnitTestCase):
 			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
 			patch("atlas.metal_server.usage.frappe.log_error") as log_error,
 		):
-			sync_server("server-1", [], [])
+			sync_server("server-1", [], [], False)
 
 		self.assertEqual(log_error.call_args.args[1], "Metal synchronization failed for Server server-1")
 
@@ -55,7 +56,7 @@ class TestServerUsage(UnitTestCase):
 			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
 			patch("atlas.metal_server.usage.frappe.log_error") as log_error,
 		):
-			sync_server("server-1", [], [])
+			sync_server("server-1", [], [], False)
 
 		self.assertEqual(log_error.call_args.args[1], "Invalid synchronization response from Server server-1")
 
@@ -71,7 +72,7 @@ class TestServerUsage(UnitTestCase):
 			patch("atlas.metal_server.usage.store_reported_states", side_effect=ValueError("bad")),
 			patch("atlas.metal_server.usage.frappe.log_error") as log_error,
 		):
-			sync_server("server-1", [], [])
+			sync_server("server-1", [], [], False)
 
 		self.assertEqual(log_error.call_args.args[1], "Invalid synchronization response from Server server-1")
 
@@ -82,6 +83,7 @@ class TestServerUsage(UnitTestCase):
 			patch("atlas.metal_server.usage.frappe.get_all", return_value=["server-1"]),
 			patch("atlas.metal_server.usage.get_wireguard_peers", return_value=peers),
 			patch("atlas.metal_server.usage.get_privileged_vm_addresses", return_value=addresses),
+			patch("atlas.metal_server.usage.is_unicast_network_enabled", return_value=False),
 			patch("atlas.metal_server.usage.frappe.enqueue") as enqueue,
 		):
 			enqueue_server_syncs()
@@ -93,6 +95,7 @@ class TestServerUsage(UnitTestCase):
 			server_name="server-1",
 			wireguard_peers=peers,
 			privileged_vm_addresses=addresses,
+			unicast=False,
 			job_id="atlas||server-sync||server-1",
 			deduplicate=True,
 		)
@@ -104,12 +107,14 @@ class TestServerUsage(UnitTestCase):
 		with (
 			patch("atlas.metal_server.usage.get_wireguard_peers", return_value=peers),
 			patch("atlas.metal_server.usage.get_privileged_vm_addresses", return_value=addresses),
+			patch("atlas.metal_server.usage.is_unicast_network_enabled", return_value=True),
 			patch("atlas.metal_server.usage.frappe.enqueue") as enqueue,
 		):
 			enqueue_server_sync("server-1")
 
 		self.assertEqual(enqueue.call_args.kwargs["wireguard_peers"], peers)
 		self.assertEqual(enqueue.call_args.kwargs["privileged_vm_addresses"], addresses)
+		self.assertTrue(enqueue.call_args.kwargs["unicast"])
 		self.assertEqual(enqueue.call_args.kwargs["job_id"], "atlas||server-sync||server-1")
 
 	def test_privileged_addresses_select_live_privileged_vms(self) -> None:
@@ -141,8 +146,10 @@ class TestServerUsage(UnitTestCase):
 				name="01a0c05f-e209-70ad-a183-dda2a727cd8b",
 				wireguard_public_key="key-1",
 				wireguard_ip_address="fdab:1:e209:70ad:a183:dda2:a727:cd8b",
+				public_ipv4_address="203.0.113.7",
 				private_ipv4_address="10.0.0.7",
 				port=51820,
+				private_network_mac_address="aa:bb:cc:dd:ee:07",
 			)
 		]
 
@@ -157,6 +164,9 @@ class TestServerUsage(UnitTestCase):
 					"mesh_address": "fdab:1:e209:70ad:a183:dda2:a727:cd8b",
 					"public_key": "key-1",
 					"address": "10.0.0.7:51820",
+					"public_address": "203.0.113.7",
+					"private_address": "10.0.0.7",
+					"private_network_mac_address": "aa:bb:cc:dd:ee:07",
 				}
 			],
 		)
@@ -168,13 +178,52 @@ class TestServerUsage(UnitTestCase):
 				name="01a0c05f-e209-70ad-a183-dda2a727cd8b",
 				wireguard_public_key="key-1",
 				wireguard_ip_address=None,
+				public_ipv4_address="203.0.113.7",
 				private_ipv4_address="10.0.0.7",
 				port=51820,
+				private_network_mac_address="aa:bb:cc:dd:ee:07",
 			)
 		]
 
 		with patch("atlas.metal_server.usage.frappe.get_all", return_value=rows):
 			self.assertEqual(get_wireguard_peers(), [])
+
+	def test_wireguard_peers_skip_a_server_without_a_mac_address(self) -> None:
+		"""The mesh learns a location only from a peer MAC, so such a peer would stay unreachable."""
+		rows = [
+			frappe._dict(
+				name="server-7",
+				wireguard_public_key="key-1",
+				wireguard_ip_address="fdab:1::7",
+				public_ipv4_address="203.0.113.7",
+				private_ipv4_address="10.0.0.7",
+				port=51820,
+				private_network_mac_address=None,
+			)
+		]
+
+		with patch("atlas.metal_server.usage.frappe.get_all", return_value=rows):
+			self.assertEqual(get_wireguard_peers(), [])
+
+	def test_sync_stores_the_reported_private_network_mac_address(self) -> None:
+		server = Mock(private_network_mac_address=None)
+		server.name = "server-1"
+		client = Mock()
+		client.sync.return_value = {"capacity": CAPACITY, "private_network_mac_address": "aa:bb:cc:dd:ee:07"}
+
+		with (
+			patch("atlas.metal_server.usage.frappe.get_doc", return_value=server),
+			patch("atlas.metal_server.usage.MetalClient", return_value=client),
+			patch("atlas.metal_server.usage.get_desired_images", return_value=[]),
+			patch("atlas.metal_server.usage.store_reported_states"),
+			patch("atlas.metal_server.usage.get_usage_values", return_value={}),
+			patch("atlas.metal_server.usage.frappe.db.set_value") as set_value,
+		):
+			sync_server("server-1", [], [], False)
+
+		set_value.assert_called_once_with(
+			"Metal Server", "server-1", "private_network_mac_address", "aa:bb:cc:dd:ee:07"
+		)
 
 	def test_desired_images_only_select_available_cached_images(self) -> None:
 		image = Mock()

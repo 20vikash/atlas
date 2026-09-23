@@ -11,13 +11,13 @@
   "active_migration",
   "tenant_id",
   "is_privileged",
-  "is_termination_protected",
   "column_break_status",
   "server",
   "virtual_machine_image",
   "architecture",
   "hostname",
   "error",
+  "is_termination_protected",
   "section_break_compute_and_storage",
   "cpu_millicores",
   "memory_mib",
@@ -27,18 +27,20 @@
   "disk_throughput_mibps",
   "disk_iops",
   "section_break_network",
-  "egress",
+  "mac",
   "wireguard_mesh_ipv6",
-  "private_network_throughput_mibps",
+  "egress",
+  "is_network_gateway",
   "column_break_network",
   "public_ipv4",
-  "mac",
+  "public_ipv6",
+  "private_network_throughput_mibps",
   "public_network_throughput_mibps",
   "other_data_section",
-  "firewall_summary",
+  "gateway_routes",
   "ssh_keys",
+  "firewall_summary",
   "metadata",
-  "section_break_tags",
   "tags"
  ],
  "fields": [
@@ -220,6 +222,32 @@
    "read_only": 1
   },
   {
+   "description": "The gateway VM that carries each destination range. Metal holds the routes. A ::/0 route is the fallback, such as the IPv6 internet gateway.",
+   "fieldname": "gateway_routes",
+   "fieldtype": "Code",
+   "is_virtual": 1,
+   "label": "Gateway Routes",
+   "options": "JSON",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "default": "0",
+   "description": "This VM carries traffic for other VMs, so it may send a source address it does not own. It needs the privileged flag.",
+   "fieldname": "is_network_gateway",
+   "fieldtype": "Check",
+   "label": "Network Gateway",
+   "read_only": 1,
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "public_ipv6",
+   "fieldtype": "Data",
+   "is_virtual": 1,
+   "label": "Public IPv6",
+   "read_only": 1
+  },
+  {
    "fieldname": "column_break_network",
    "fieldtype": "Column Break"
   },
@@ -298,11 +326,6 @@
    "set_only_once": 1
   },
   {
-   "fieldname": "section_break_tags",
-   "fieldtype": "Section Break",
-   "label": "Tags"
-  },
-  {
    "description": "Your own key and value labels for this virtual machine, such as env and prod. Use them to find it again.",
    "fieldname": "tags",
    "fieldtype": "Table",
@@ -326,8 +349,8 @@
    "link_fieldname": "virtual_machine"
   }
  ],
- "modified": "2026-09-21 00:51:27.833768",
- "modified_by": "test@gmail.com",
+ "modified": "2026-09-23 03:47:39.410994",
+ "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine",
  "naming_rule": "By script",

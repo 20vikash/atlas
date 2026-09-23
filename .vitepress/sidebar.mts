@@ -71,7 +71,7 @@ export const sidebar: DefaultTheme.Sidebar = {
 	'/services/wg-mesh/': [
 		{
 			text: 'WG Mesh',
-			items: [link('Overview', '/services/wg-mesh/'), link('Design and packet flow', '/services/wg-mesh/docs/design'), link('Operations', '/services/wg-mesh/docs/operations'), link('Unicast discovery', '/services/wg-mesh/docs/unicast-network'), link('Debug in production', '/services/wg-mesh/docs/debug-in-production'), link('Benchmarks', '/services/wg-mesh/docs/benchmark')],
+			items: [link('Overview', '/services/wg-mesh/'), link('Design and packet flow', '/services/wg-mesh/docs/design'), link('Operations', '/services/wg-mesh/docs/operations'), link('Gateways', '/services/wg-mesh/docs/gateways'), link('Benchmarks', '/services/wg-mesh/docs/benchmark')],
 		},
 		{
 			text: 'Reference',

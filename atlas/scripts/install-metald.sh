@@ -104,7 +104,7 @@ install_binary() {
 	local download
 
 	download=$(mktemp "$destination.staged.XXXXXX")
-	trap 'rm -f "$download"' EXIT
+	trap "rm -f '$download'" EXIT
 	curl -fsSL -o "$download" "$source_url"
 
 	# The version command below runs this file, so check it before that.
@@ -146,7 +146,11 @@ is_empty_storage_pool_device() {
 	fi
 
 	[ -b "$STORAGE_POOL_DEVICE" ] || return 1
-	[ "$(lsblk --raw --noheadings --output TYPE "$STORAGE_POOL_DEVICE")" = disk ] || return 1
+	# Scaleway gives a software RAID array, such as /dev/md2.
+	case "$(lsblk --raw --noheadings --output TYPE "$STORAGE_POOL_DEVICE")" in
+	disk | raid*) ;;
+	*) return 1 ;;
+	esac
 	[ "$(lsblk --raw --noheadings --output NAME "$STORAGE_POOL_DEVICE" | wc -l)" -eq 1 ] || return 1
 	[ -z "$(lsblk --raw --noheadings --output FSTYPE,PTTYPE,MOUNTPOINT "$STORAGE_POOL_DEVICE" | tr -d '[:space:]')" ] || return 1
 	[ "$(lsblk --raw --noheadings --output RO "$STORAGE_POOL_DEVICE")" = 0 ] || return 1
@@ -173,7 +177,7 @@ zfs list "$storage_pool_name/warm" >/dev/null 2>&1 || zfs create -o mountpoint=n
 
 
 # mesh_sections appends the WireGuard and Atlas WG Mesh settings. Atlas owns the
-# uplink name, because only Atlas knows which interface carries discovery.
+# uplink name, because only Atlas knows which interface carries Atlas NDP.
 mesh_sections() {
 	cat >> "$config_file" <<EOF
 
@@ -304,10 +308,17 @@ TTYVHangup=yes
 Restart=no
 EOF
 
-
 step "enable IP forwarding"
-printf 'net.ipv4.ip_forward = 1\n' > /etc/sysctl.d/99-metald.conf
-sysctl -q -w net.ipv4.ip_forward=1
+# A forwarding host ignores router advertisements unless accept_ra is 2, and a
+# gateway VM needs its host to hold the IPv6 default route.
+public_interface=$(ip -4 route show default | awk 'NR == 1 { print $5 }')
+{
+	printf 'net.ipv4.ip_forward = 1\n'
+	if [ -n "$public_interface" ]; then
+		printf 'net.ipv6.conf.%s.accept_ra = 2\n' "$public_interface"
+	fi
+} > /etc/sysctl.d/99-metald.conf
+sysctl -q -p /etc/sysctl.d/99-metald.conf
 /usr/local/lib/metal/network-setup
 
 
@@ -322,6 +333,9 @@ if ! systemctl restart metal.service || ! service_is_stable; then
 	fi
 	if [ -x /usr/bin/metald.previous ]; then
 		mv -f /usr/bin/metald.previous /usr/bin/metald
+	fi
+	if [ -x "$mesh_binary_path.previous" ]; then
+		mv -f "$mesh_binary_path.previous" "$mesh_binary_path"
 	fi
 	systemctl restart metal.service || true
 	journalctl -u metal.service -n 20 --no-pager -o cat >&2 || true

@@ -1,6 +1,9 @@
 package vm
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestSleepingIsNotAVirtualMachineState(t *testing.T) {
 	if isObservedState(State("sleeping")) || IsDesiredState(State("sleeping")) {
@@ -89,5 +92,24 @@ func TestCloneSpecificationCopiesFirewallRules(t *testing.T) {
 	}
 	if original.Network.Firewall.Inbound[0].Ports != "22" {
 		t.Fatal("clone shares firewall rules with the source")
+	}
+}
+
+func TestHostReachedDestinations(t *testing.T) {
+	routes := []GatewayRoute{{Destination: "2000::/3", Gateway: "fdaa:1::1"}, {Destination: "fdac::/16", Gateway: "fdaa:1::2"}}
+	cases := map[string]struct {
+		network NetworkConfiguration
+		want    []string
+	}{
+		"plain VM":      {NetworkConfiguration{}, []string{}},
+		"gateway route": {NetworkConfiguration{GatewayRoutes: routes}, []string{"2000::/3", "fdac::/16"}},
+		"block owner":   {NetworkConfiguration{PublicIPv6: "2001:db8:1::/64"}, []string{"::/0"}},
+		"gateway":       {NetworkConfiguration{IsNetworkGateway: true, GatewayRoutes: routes}, []string{"::/0"}},
+	}
+
+	for name, test := range cases {
+		if got := HostReachedDestinations(test.network); !slices.Equal(got, test.want) {
+			t.Errorf("%s: got %v, want %v", name, got, test.want)
+		}
 	}
 }

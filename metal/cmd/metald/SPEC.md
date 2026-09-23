@@ -58,7 +58,7 @@ The source starts a one-shot mutual-TLS listener on `migration.transfer_port` fo
 
 `wg_mesh.enabled = false` does not disable managed WireGuard peers.
 
-`wg_mesh.uplink` has no default. The Atlas WG Mesh uplink hook consumes discovery traffic for every VLAN under the interface it attaches to, so a parent interface silently blackholes discovery for its own VLANs. Only the controller knows which interface carries discovery, so metald requires the name.
+`wg_mesh.uplink` has no default. The Atlas WG Mesh NDP hook and its proxy NDP entries attach to this interface, so it must name the shared VLAN itself and never its parent. Only the controller knows which interface carries Atlas NDP, so metald requires the name.
 
 ## Config keys
 
@@ -78,7 +78,7 @@ The source starts a one-shot mutual-TLS listener on `migration.transfer_port` fo
 | `wireguard.interface` | `wg0` | Underlay interface for managed peers and Atlas WG Mesh. |
 | `wg_mesh.enabled` | `true` | Enables Atlas WG Mesh host setup and VM mesh registration. |
 | `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
-| `wg_mesh.uplink` | none | Discovery uplink. Required. |
+| `wg_mesh.uplink` | none | Private network interface that carries Atlas NDP. Required. |
 | `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
 | `migration.final_delta_mib` | `512` | Incremental size at or below which the destination stops the source and takes the final snapshot. |
 | `migration.transfer_port` | `9002` | Mutual-TLS snapshot stream port. Use the same value on every host in the region. |

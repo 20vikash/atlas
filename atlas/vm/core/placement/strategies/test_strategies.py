@@ -400,3 +400,8 @@ class TestPlacementRetry(TestCase):
 
 		self.assertEqual(context.call_count, 2)
 		self.assertEqual([c.args[0] for c in wait.call_args_list], [0])
+
+	def test_reserve_reports_a_target_without_capacity(self) -> None:
+		with self._patched([self._placement_result()]):
+			with self.assertRaisesRegex(OutOfCapacity, "Metal Server a is not ready"):
+				PlacementStrategy.reserve_server(self._requirements(), "a")

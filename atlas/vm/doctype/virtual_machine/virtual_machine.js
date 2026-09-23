@@ -43,15 +43,27 @@ frappe.ui.form.on("Virtual Machine", {
 			[__("Edit Network Throughput"), () => showEditThroughputDialog(frm), true, ACTIONS],
 			[__("Edit Firewall"), () => showEditFirewallDialog(frm), true, ACTIONS],
 			[
-				__("Attach IP Address"),
-				() => showAttachIPAddressDialog(frm),
+				__("Attach IPv4 Address"),
+				() => showAttachIPv4AddressDialog(frm),
 				!frm.doc.public_ipv4,
 				ACTIONS,
 			],
 			[
-				__("Detach IP Address"),
-				() => detachIPAddress(frm),
+				__("Detach IPv4 Address"),
+				() => detachIPv4Address(frm),
 				Boolean(frm.doc.public_ipv4),
+				ACTIONS,
+			],
+			[
+				__("Attach IPv6 Block"),
+				() => showAttachIPv6BlockDialog(frm),
+				!frm.doc.public_ipv6 && frappe.user.has_role("System Manager"),
+				ACTIONS,
+			],
+			[
+				__("Detach IPv6 Block"),
+				() => detachIPv6Block(frm),
+				Boolean(frm.doc.public_ipv6) && frappe.user.has_role("System Manager"),
 				ACTIONS,
 			],
 			[__("Change Egress Mode"), () => showEgressDialog(frm), true, ACTIONS],
@@ -79,6 +91,15 @@ frappe.ui.form.on("Virtual Machine", {
 				frm.doc.is_privileged ? __("Revoke Privilege") : __("Grant Privilege"),
 				() => showPrivilegeDialog(frm),
 				frm.doc.tenant_id === 0,
+				DANGEROUS,
+			],
+			[__("Edit Gateway Routes"), () => showGatewayRoutesDialog(frm), true, DANGEROUS],
+			[
+				frm.doc.is_network_gateway
+					? __("Stop Network Gateway")
+					: __("Make Network Gateway"),
+				() => showNetworkGatewayDialog(frm),
+				Boolean(frm.doc.is_privileged),
 				DANGEROUS,
 			],
 			[
@@ -633,32 +654,32 @@ function showEgressDialog(frm) {
 	);
 }
 
-function showAttachIPAddressDialog(frm) {
+function showAttachIPv4AddressDialog(frm) {
 	frappe.prompt(
 		{
 			fieldname: "server_ip_address",
 			fieldtype: "Link",
-			label: __("Metal Server IP Address"),
+			label: __("IPv4 Address"),
 			options: "Metal Server IP Address",
 			reqd: 1,
-			filters: { status: "Allocated" },
+			filters: { status: "Allocated", version: "4" },
 		},
 		({ server_ip_address }) =>
 			frm
 				.call({
-					method: "attach_ip_address",
+					method: "attach_public_ipv4",
 					doc: frm.doc,
 					args: { server_ip_address },
 					freeze: true,
-					freeze_message: __("Attaching IP address..."),
+					freeze_message: __("Attaching IPv4 address..."),
 				})
 				.then(() => frm.reload_doc()),
-		__("Attach IP Address"),
+		__("Attach IPv4 Address"),
 		__("Attach")
 	);
 }
 
-function detachIPAddress(frm) {
+function detachIPv4Address(frm) {
 	frappe.confirm(
 		__("Detach {0} from this Virtual Machine? Active connections can stop.", [
 			frm.doc.public_ipv4,
@@ -666,10 +687,53 @@ function detachIPAddress(frm) {
 		() =>
 			frm
 				.call({
-					method: "detach_ip_address",
+					method: "detach_public_ipv4",
 					doc: frm.doc,
 					freeze: true,
-					freeze_message: __("Detaching IP address..."),
+					freeze_message: __("Detaching IPv4 address..."),
+				})
+				.then(() => frm.reload_doc())
+	);
+}
+
+function showAttachIPv6BlockDialog(frm) {
+	frappe.prompt(
+		{
+			fieldname: "server_ip_address",
+			fieldtype: "Link",
+			label: __("IPv6 Block"),
+			options: "Metal Server IP Address",
+			reqd: 1,
+			filters: { status: "Allocated", version: "6" },
+			description: __("The host of this VM routes the block to the VM."),
+		},
+		({ server_ip_address }) =>
+			frm
+				.call({
+					method: "attach_public_ipv6",
+					doc: frm.doc,
+					args: { server_ip_address },
+					freeze: true,
+					freeze_message: __("Attaching IPv6 block..."),
+				})
+				.then(() => frm.reload_doc()),
+		__("Attach IPv6 Block"),
+		__("Attach")
+	);
+}
+
+function detachIPv6Block(frm) {
+	frappe.confirm(
+		__("Detach {0} from this Virtual Machine? Active connections can stop.", [
+			frm.doc.public_ipv6,
+		]),
+		() =>
+			frm
+				.call({
+					method: "detach_public_ipv6",
+					doc: frm.doc,
+					freeze: true,
+					freeze_message: __("Detaching IPv6 block..."),
 				})
 				.then(() => frm.reload_doc())
 	);
@@ -705,5 +769,79 @@ function showEditDiskLimitsDialog(frm) {
 				.then(() => frm.reload_doc()),
 		__("Edit Disk Limits"),
 		__("Save")
+	);
+}
+
+function showGatewayRoutesDialog(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Gateway Routes"),
+		size: "large",
+		fields: [
+			{
+				fieldname: "routes",
+				fieldtype: "Table",
+				label: __("Routes"),
+				cannot_add_rows: false,
+				in_place_edit: true,
+				data: JSON.parse(frm.doc.gateway_routes || "[]"),
+				fields: [
+					{
+						fieldname: "destination",
+						fieldtype: "Data",
+						label: __("Destination"),
+						in_list_view: 1,
+						reqd: 1,
+						description: __("::/0 for the internet, or a range such as fdac::/16."),
+					},
+					{
+						fieldname: "gateway",
+						fieldtype: "Link",
+						options: "Virtual Machine",
+						label: __("Gateway"),
+						in_list_view: 1,
+						reqd: 1,
+						get_query: () => ({ filters: { is_network_gateway: 1 } }),
+						description: __("The network gateway VM that carries the range."),
+					},
+				],
+			},
+		],
+		primary_action_label: __("Save"),
+		primary_action(values) {
+			const routes = (values.routes || []).map((route) => ({
+				destination: route.destination,
+				gateway: route.gateway,
+			}));
+			frm.call({
+				method: "set_gateway_routes",
+				doc: frm.doc,
+				args: { routes },
+				freeze: true,
+			}).then(() => {
+				dialog.hide();
+				frm.reload_doc();
+			});
+		},
+	});
+	dialog.show();
+}
+
+function showNetworkGatewayDialog(frm) {
+	const message = frm.doc.is_network_gateway
+		? __("Stop {0} from carrying traffic for other virtual machines?", [frm.doc.name.bold()])
+		: __(
+				"Let {0} carry traffic for other virtual machines? It may then send any source address.",
+				[frm.doc.name.bold()]
+		  );
+
+	frappe.confirm(message, () =>
+		frm
+			.call({
+				method: "set_network_gateway",
+				doc: frm.doc,
+				args: { is_network_gateway: !frm.doc.is_network_gateway },
+				freeze: true,
+			})
+			.then(() => frm.reload_doc())
 	);
 }

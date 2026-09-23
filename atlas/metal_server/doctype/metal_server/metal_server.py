@@ -53,6 +53,7 @@ class MetalServer(Document):
 		port: DF.Int
 		private_ipv4_address: DF.Data | None
 		private_network_interface: DF.Data | None
+		private_network_mac_address: DF.Data | None
 		provider_metadata: DF.Code | None
 		provider_server_id: DF.Data | None
 		public_ipv4_address: DF.Data | None

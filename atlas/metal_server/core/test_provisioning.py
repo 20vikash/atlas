@@ -39,6 +39,8 @@ class TestServerProvisioner(UnitTestCase):
 		self.assertEqual(server.status, "Running")
 		self.assertEqual(server.is_provisioning_completed, 1)
 		server.enqueue_disk_sync.assert_called_once_with()
+		# The provider sets the mesh MAC in memory, and progress saves it with the other setup fields.
+		self.assertEqual(server.db_set.call_args.args[0]["private_network_mac_address"], "aa:bb:cc:dd:ee:01")
 
 	def test_run_keeps_progress_and_reports_the_failed_phase(self) -> None:
 		server = self.server()
@@ -106,6 +108,7 @@ class TestServerProvisioner(UnitTestCase):
 			private_ipv4_address="10.1.0.2",
 			public_network_interface="eno1",
 			private_network_interface="eno1.123",
+			private_network_mac_address="aa:bb:cc:dd:ee:01",
 			wireguard_ip_address="fdab:1::1",
 			wireguard_public_key="public-key",
 			db_set=Mock(),

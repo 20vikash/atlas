@@ -22,9 +22,6 @@ class AwsConfiguration:
 	subnet_id: str | None
 	security_group_id: str | None
 	key_pair_name: str | None
-	transit_gateway_id: str | None
-	transit_gateway_attachment_id: str | None
-	multicast_domain_id: str | None
 
 	@classmethod
 	def from_settings(cls, settings: "AtlasSettings") -> "AwsConfiguration":
@@ -37,7 +34,4 @@ class AwsConfiguration:
 			subnet_id=settings.aws_subnet_id,
 			security_group_id=settings.aws_security_group_id,
 			key_pair_name=settings.aws_key_pair_name,
-			transit_gateway_id=settings.aws_transit_gateway_id,
-			transit_gateway_attachment_id=settings.aws_transit_gateway_attachment_id,
-			multicast_domain_id=settings.aws_multicast_domain_id,
 		)

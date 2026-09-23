@@ -266,12 +266,14 @@ class MetalClient:
 		wireguard_peers: list[dict[str, Any]],
 		images: list[dict[str, Any]],
 		privileged_vm_addresses: list[str],
+		unicast: bool,
 	) -> dict[str, Any]:
 		"""Exchange controller and host state."""
 		request = {
 			"wireguard_peers": wireguard_peers,
 			"images": images,
 			"privileged_vm_addresses": privileged_vm_addresses,
+			"unicast": unicast,
 		}
 		return self._request("POST", "/v1/sync", json=request, uncertain_on_failure=True)
 

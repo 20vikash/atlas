@@ -13,6 +13,9 @@ type request struct {
 	Egress                        vm.Egress
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
+	GatewayRoutes                 []vm.GatewayRoute
+	IsNetworkGateway              bool
+	PublicIPv6                    string
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
 	Firewall                      vm.FirewallConfiguration

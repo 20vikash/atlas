@@ -26,14 +26,16 @@ def enqueue_server_syncs() -> None:
 	)
 	peers = get_wireguard_peers()
 	privileged_addresses = get_privileged_vm_addresses()
+	unicast = is_unicast_network_enabled()
 	for server_name in servers:
-		enqueue_server_sync(server_name, peers, privileged_addresses)
+		enqueue_server_sync(server_name, peers, privileged_addresses, unicast)
 
 
 def enqueue_server_sync(
 	server_name: str,
 	wireguard_peers: list[dict[str, Any]] | None = None,
 	privileged_vm_addresses: list[str] | None = None,
+	unicast: bool | None = None,
 ) -> None:
 	"""Queue one state exchange. A caller that queues many syncs reads the shared
 	sets once and supplies them."""
@@ -41,6 +43,8 @@ def enqueue_server_sync(
 		wireguard_peers = get_wireguard_peers()
 	if privileged_vm_addresses is None:
 		privileged_vm_addresses = get_privileged_vm_addresses()
+	if unicast is None:
+		unicast = is_unicast_network_enabled()
 
 	frappe.enqueue(
 		sync_server,
@@ -49,6 +53,7 @@ def enqueue_server_sync(
 		server_name=server_name,
 		wireguard_peers=wireguard_peers,
 		privileged_vm_addresses=privileged_vm_addresses,
+		unicast=unicast,
 		job_id=f"atlas||server-sync||{server_name}",
 		deduplicate=True,
 	)
@@ -58,14 +63,16 @@ def sync_server(
 	server_name: str,
 	wireguard_peers: list[dict[str, Any]],
 	privileged_vm_addresses: list[str],
+	unicast: bool,
 ) -> None:
-	"""Exchange state with one host, then store its capacity and VM states."""
+	"""Exchange state with one host, then store its capacity, VM states, and private network MAC."""
 	server = cast("MetalServer", frappe.get_doc("Metal Server", server_name))
 	try:
 		response = MetalClient(server).sync(
 			wireguard_peers,
 			get_desired_images(),
 			privileged_vm_addresses,
+			unicast,
 		)
 		values = get_usage_values(response.get("capacity"))
 		store_reported_states(server_name, response.get("virtual_machines"))
@@ -85,6 +92,10 @@ def sync_server(
 	frappe.get_doc({"doctype": "Metal Server Usage", "server": server.name, **values}).insert(
 		ignore_permissions=True
 	)
+
+	mac_address = response.get("private_network_mac_address")
+	if mac_address and mac_address != server.private_network_mac_address:
+		frappe.db.set_value("Metal Server", server.name, "private_network_mac_address", mac_address)
 
 
 def get_desired_images() -> list[dict[str, Any]]:
@@ -128,15 +139,24 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 			"name",
 			"wireguard_public_key",
 			"wireguard_ip_address",
+			"public_ipv4_address",
 			"private_ipv4_address",
 			"port",
+			"private_network_mac_address",
 		],
 	)
 	peers = []
 	for server in servers:
-		if not server.wireguard_public_key or not server.private_ipv4_address:
-			continue
-		if not server.wireguard_ip_address:
+		# The mesh needs the public address and the MAC to reach and identify a peer.
+		if not all(
+			(
+				server.wireguard_public_key,
+				server.wireguard_ip_address,
+				server.private_ipv4_address,
+				server.public_ipv4_address,
+				server.private_network_mac_address,
+			)
+		):
 			continue
 
 		peers.append(
@@ -145,9 +165,17 @@ def get_wireguard_peers() -> list[dict[str, Any]]:
 				"mesh_address": server.wireguard_ip_address,
 				"public_key": server.wireguard_public_key,
 				"address": f"{server.private_ipv4_address}:{server.port}",
+				"public_address": server.public_ipv4_address,
+				"private_address": server.private_ipv4_address,
+				"private_network_mac_address": server.private_network_mac_address,
 			}
 		)
 	return peers
+
+
+def is_unicast_network_enabled() -> bool:
+	"""Report whether the region uses the unicast NDP transport."""
+	return bool(frappe.get_single("Atlas Settings").is_unicast_network_enabled)
 
 
 def get_usage_values(usage: object) -> dict[str, int]:

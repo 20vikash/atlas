@@ -150,9 +150,10 @@ func makeDirs(options options) error {
 // connectMesh prepares Atlas WG Mesh and configures the host on every start.
 func connectMesh(options options) (*network.Mesh, error) {
 	mesh, err := network.NewMesh(network.MeshConfig{
-		CommandPath:   options.mesh.binaryPath,
-		UplinkName:    options.mesh.uplinkName,
-		WireGuardName: options.wireGuardName,
+		CommandPath:        options.mesh.binaryPath,
+		UplinkName:         options.mesh.uplinkName,
+		WireGuardName:      options.wireGuardName,
+		WireGuardStatePath: wireGuardStatePath(options),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure Atlas WG Mesh: %w", err)
@@ -163,6 +164,11 @@ func connectMesh(options options) (*network.Mesh, error) {
 		return nil, fmt.Errorf("configure Atlas WG Mesh host: %w", err)
 	}
 	return mesh, nil
+}
+
+// wireGuardStatePath holds the managed WireGuard peer state under base_dir.
+func wireGuardStatePath(options options) string {
+	return filepath.Join(options.baseDir, "wireguard-peers.json")
 }
 
 // adoptConsoles restores consoles after a metald restart.
@@ -253,9 +259,10 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 	}
 
 	// Create virtual machine and API services.
+	wireGuardState := wireGuardStatePath(options)
 	wireGuardManager, err := network.NewWireGuardManager(network.WireGuardConfig{
 		InterfaceName: options.wireGuardName,
-		StatePath:     filepath.Join(options.baseDir, "wireguard-peers.json"),
+		StatePath:     wireGuardState,
 	})
 	if err != nil {
 		return fmt.Errorf("configure WireGuard manager: %w", err)
@@ -330,11 +337,19 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		}
 		return migrationManager.DestinationReservations(ctx)
 	}
-	hostService, err := host.NewService(host.Dependencies{
-		Mesh: mesh, WireGuard: wireGuardManager, Images: stores.Images,
-		VirtualMachines: virtualMachineManager, Storage: stores.Pool,
-		MigrationReservations: migrationReservations, Wake: notifyReconcilers,
-	})
+	hostDependencies := host.Dependencies{
+		WireGuard:             wireGuardManager,
+		Images:                stores.Images,
+		VirtualMachines:       virtualMachineManager,
+		Storage:               stores.Pool,
+		MigrationReservations: migrationReservations,
+		Wake:                  notifyReconcilers,
+	}
+	// A nil *network.Mesh in the interface would not compare equal to nil.
+	if mesh != nil {
+		hostDependencies.Mesh = mesh
+	}
+	hostService, err := host.NewService(hostDependencies)
 	if err != nil {
 		return fmt.Errorf("configure host service: %w", err)
 	}
@@ -352,10 +367,11 @@ func serve(options options, logger *slog.Logger) (serveError error) {
 		vm.NewMigrationHost(virtualMachineManager),
 		migration.NewSourceClient(0, tlsConfigurations.client),
 		storage.NewMigrationTransfer(stores.Pool, storage.MigrationTLSConfig{
-			CAFile: options.tls.caFile, CertificateFile: options.tls.certificateFile,
-			PrivateKeyFile: options.tls.privateKeyFile,
-			ListenAddress:  transferAddress,
-			TransferPort:   options.migration.transferPort,
+			CAFile:          options.tls.caFile,
+			CertificateFile: options.tls.certificateFile,
+			PrivateKeyFile:  options.tls.privateKeyFile,
+			ListenAddress:   transferAddress,
+			TransferPort:    options.migration.transferPort,
 		}),
 		migrationCapacity,
 		options.migration.finalDeltaMiB,
