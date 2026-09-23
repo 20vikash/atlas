@@ -258,11 +258,11 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 | Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
 | Change Egress Mode | Sends `uplink`, `mesh`, or `none`. |
 | Edit Gateway Routes | Sends each destination range with the mesh address of its gateway VM. The gateway must be an active network gateway VM. |
-| Make Network Gateway | Sets `is_network_gateway`. It needs the privileged flag, and a server runs one gateway. |
+| Make Network Gateway | Sets `is_network_gateway`. It needs the privileged flag. |
 | Attach IPv6 Block | Sends `public_ipv6`, then sets the provider attach intent. A VM holds one block. System Manager only. |
 | Detach IPv6 Block | Sends an empty `public_ipv6`, then sets a detach intent. System Manager only. |
 
-Metal owns the gateway routes. Atlas shows them as a read-only virtual field. A gateway or a VM with a block has no gateway routes, because it reaches every destination through its host. Migration moves each attached public address to the destination server at cutover, and places a gateway VM only on a server without a gateway.
+Metal owns the gateway routes. Atlas shows them as a read-only virtual field. A gateway or a VM with a block has no gateway routes, because it reaches every destination through its host. Migration moves each attached public address to the destination server at cutover.
 
 Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, throughput limits, and firewall rules can also be set during creation.
 

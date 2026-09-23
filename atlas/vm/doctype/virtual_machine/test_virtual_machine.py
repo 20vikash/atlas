@@ -690,16 +690,6 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		with self.assertRaisesRegex(AtlasUserError, "privileged flag"):
 			virtual_machine.validate_network_gateway()
 
-	def test_a_server_runs_one_network_gateway(self) -> None:
-		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
-		virtual_machine.is_privileged = 1
-
-		with (
-			patch.object(virtual_machine_module.frappe.db, "get_value", return_value="VM-00049"),
-			self.assertRaisesRegex(AtlasUserError, "already runs gateway VM-00049"),
-		):
-			virtual_machine.validate_network_gateway()
-
 	def test_attaching_a_block_sends_it_to_metal(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 		virtual_machine.tenant_id = 7

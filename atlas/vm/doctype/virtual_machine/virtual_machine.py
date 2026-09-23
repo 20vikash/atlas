@@ -93,19 +93,9 @@ class VirtualMachine(Document):
 			self.validate_network_gateway()
 
 	def validate_network_gateway(self) -> None:
-		"""A gateway is privileged, and a server runs one, because a reply names only its VM and client."""
+		"""A gateway carries traffic for other tenants, so it must be privileged."""
 		if not self.is_privileged:
 			frappe.throw(_("A network gateway needs the privileged flag."), exc=AtlasUserError)
-
-		other_gateway = frappe.db.get_value(
-			"Virtual Machine",
-			{"server": self.server, "is_network_gateway": 1, "is_terminating": 0, "name": ["!=", self.name]},
-		)
-		if other_gateway:
-			frappe.throw(
-				_("Metal Server {0} already runs gateway {1}.").format(self.server, other_gateway),
-				exc=AtlasUserError,
-			)
 
 	def on_trash(self) -> None:
 		"""Delete only after Metal confirms that the VM is absent."""

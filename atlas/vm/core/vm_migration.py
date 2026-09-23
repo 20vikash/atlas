@@ -175,13 +175,6 @@ class MigrationService:
 		)
 		requested_destination = self.migration.destination_metal_server
 		exclude_servers = {self.migration.source_metal_server}
-		if virtual_machine.is_network_gateway:
-			# A server runs one gateway, because a reply names only its VM and client.
-			exclude_servers |= set(
-				frappe.get_all(
-					"Virtual Machine", filters={"is_network_gateway": 1, "is_terminating": 0}, pluck="server"
-				)
-			)
 
 		try:
 			if requested_destination:
