@@ -79,6 +79,8 @@ uplink hook -> remote_vms
 
 The uplink hook maps the peer MAC address to its WireGuard address.
 
+`configure` sets `proxy_delay` to `0` on the uplink. Linux otherwise delays a proxied answer by up to 0.8 seconds. The mesh drops packets until the answer arrives.
+
 The virtual machine retries its packet after NDP completes.
 
 In unicast mode, the egress hook puts each NDP packet in IPv4 protocol 41.

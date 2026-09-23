@@ -139,9 +139,15 @@ func prepareHost(uplinkName string) error {
 		return err
 	}
 
-	// A VLAN name holds a dot, which sysctl reads as a separator, so write proxy_ndp directly.
-	if err := os.WriteFile("/proc/sys/net/ipv6/conf/"+uplinkName+"/proxy_ndp", []byte("1\n"), 0644); err != nil {
-		return err
+	// Write procfs directly because sysctl treats a dot in a VLAN name as a separator.
+	// A zero proxy delay prevents the mesh from dropping packets while Linux waits to answer.
+	for path, value := range map[string]string{
+		"/proc/sys/net/ipv6/conf/" + uplinkName + "/proxy_ndp":    "1\n",
+		"/proc/sys/net/ipv6/neigh/" + uplinkName + "/proxy_delay": "0\n",
+	} {
+		if err := os.WriteFile(path, []byte(value), 0644); err != nil {
+			return err
+		}
 	}
 
 	for _, arguments := range [][]string{
