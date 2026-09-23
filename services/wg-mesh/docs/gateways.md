@@ -40,9 +40,9 @@ Use Atlas Desk for all gateway and route settings:
 1. Open the tenant-0 gateway VM.
 2. Select **Dangerous Actions > Grant Privilege**.
 3. Select **Actions > Make Network Gateway**.
-4. Open the public IPv6 prefix in **Metal Server IP Address**.
-5. Select **Actions > Attach to Virtual Machine**.
-6. Select the gateway VM and click **Attach**.
+4. Open the public IPv6 prefix in **Public IP Pool**.
+5. Create an **IPv6 Router Server** for this pool.
+6. Wait until the router is Active.
 
 Atlas now assigns the public prefix to the gateway VM.
 
