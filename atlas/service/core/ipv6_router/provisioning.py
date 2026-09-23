@@ -92,9 +92,12 @@ class IPv6RouterServerProvisioner:
 		return frappe.get_doc("Virtual Machine", self.router.virtual_machine)
 
 	def configure_network(self) -> None:
-		"""Give the VM the gateway role, then attach the public block to it."""
+		"""Give the VM the gateway role and the complete public pool."""
+		from atlas.vm.core.vm_service import VirtualMachineService
+
 		virtual_machine = self.virtual_machine
-		attached_prefix = virtual_machine.public_ipv6
+		information = virtual_machine.get_metal_vm_info()
+		attached_prefix = information.desired.network.public_ipv6 if information else ""
 		if attached_prefix and attached_prefix != self.router.prefix:
 			frappe.throw(
 				_("Router VM {0} holds IPv6 block {1}, not {2}.").format(
@@ -105,7 +108,12 @@ class IPv6RouterServerProvisioner:
 		if not virtual_machine.is_network_gateway:
 			virtual_machine.set_network_gateway(True)
 		if not attached_prefix:
-			virtual_machine.attach_public_ipv6(self.router.ipv6_block)
+			pool = self.router.pool
+			if not pool:
+				frappe.throw(_("The router has no Public IP Pool."))
+			pool.begin_provider_attach(virtual_machine.server)
+			pool.reconcile()
+			VirtualMachineService(virtual_machine).update_network({"public_ipv6": pool.prefix})
 
 	def wait_for_ssh(self) -> None:
 		"""Wait for root SSH on the public IPv4 address."""

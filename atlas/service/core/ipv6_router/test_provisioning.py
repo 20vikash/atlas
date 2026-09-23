@@ -22,8 +22,8 @@ def router(**values) -> SimpleNamespace:
 		"name": "IPv6 Router Server",
 		"status": "Provisioning",
 		"virtual_machine": "vm-00001",
-		"ipv6_block": "block-1",
 		"prefix": "2001:db8::/64",
+		"pool": SimpleNamespace(prefix="2001:db8::/64", begin_provider_attach=Mock(), reconcile=Mock()),
 		"installation_task": None,
 		"save": Mock(),
 	}
@@ -31,11 +31,15 @@ def router(**values) -> SimpleNamespace:
 
 
 def virtual_machine(**values) -> Mock:
-	return Mock(**({"name": "vm-00001", "is_network_gateway": 0, "public_ipv6": ""} | values))
+	machine = Mock(**({"name": "vm-00001", "server": "metal-1", "is_network_gateway": 0} | values))
+	machine.get_metal_vm_info.return_value = metal_information("151.115.112.94", "")
+	return machine
 
 
-def metal_information(public_ipv4: str) -> SimpleNamespace:
-	return SimpleNamespace(desired=SimpleNamespace(network=SimpleNamespace(public_ipv4=public_ipv4)))
+def metal_information(public_ipv4: str, public_ipv6: str = "") -> SimpleNamespace:
+	return SimpleNamespace(
+		desired=SimpleNamespace(network=SimpleNamespace(public_ipv4=public_ipv4, public_ipv6=public_ipv6))
+	)
 
 
 class TestRouterReadiness(UnitTestCase):
@@ -56,7 +60,11 @@ class TestRouterReadiness(UnitTestCase):
 class TestRouterNetwork(UnitTestCase):
 	def configure(self, machine: Mock) -> None:
 		provisioner = IPv6RouterServerProvisioner(router())
-		with patch.object(provisioning.frappe, "get_doc", return_value=machine):
+		with (
+			patch.object(provisioning.frappe, "get_doc", return_value=machine),
+			patch("atlas.vm.core.vm_service.VirtualMachineService") as service,
+		):
+			self.network_service = service
 			provisioner.configure_network()
 
 	def test_the_vm_becomes_a_gateway_and_holds_the_block(self) -> None:
@@ -65,24 +73,28 @@ class TestRouterNetwork(UnitTestCase):
 		self.configure(machine)
 
 		machine.set_network_gateway.assert_called_once_with(True)
-		machine.attach_public_ipv6.assert_called_once_with("block-1")
+		self.network_service.return_value.update_network.assert_called_once_with(
+			{"public_ipv6": "2001:db8::/64"}
+		)
 
 	# A retry after a later failure must not attach the block twice.
 	def test_a_configured_vm_is_not_changed_again(self) -> None:
-		machine = virtual_machine(is_network_gateway=1, public_ipv6="2001:db8::/64")
+		machine = virtual_machine(is_network_gateway=1)
+		machine.get_metal_vm_info.return_value = metal_information("151.115.112.94", "2001:db8::/64")
 
 		self.configure(machine)
 
 		machine.set_network_gateway.assert_not_called()
-		machine.attach_public_ipv6.assert_not_called()
+		self.network_service.return_value.update_network.assert_not_called()
 
 	def test_a_vm_with_another_block_is_refused(self) -> None:
-		machine = virtual_machine(is_network_gateway=1, public_ipv6="2001:db8:1::/64")
+		machine = virtual_machine(is_network_gateway=1)
+		machine.get_metal_vm_info.return_value = metal_information("151.115.112.94", "2001:db8:1::/64")
 
 		with self.assertRaisesRegex(frappe.ValidationError, "holds IPv6 block"):
 			self.configure(machine)
 
-		machine.attach_public_ipv6.assert_not_called()
+		self.network_service.return_value.update_network.assert_not_called()
 
 
 class TestRouterInstallation(UnitTestCase):

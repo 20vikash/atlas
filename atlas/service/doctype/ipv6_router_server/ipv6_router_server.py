@@ -14,10 +14,7 @@ from frappe.utils.synchronization import filelock
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
-from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID
 from atlas.service.core.ipv6_router.address import (
-	ROUTED_DESTINATION,
-	get_routed_ipv6,
 	parse_ipv6_network,
 	validate_router_network,
 )
@@ -29,7 +26,7 @@ if TYPE_CHECKING:
 
 
 class IPv6RouterServer(Document):
-	"""Own one IPv6 router, its virtual machine, and its public IPv6 block."""
+	"""Own one IPv6 router and its virtual machine."""
 
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
@@ -41,7 +38,6 @@ class IPv6RouterServer(Document):
 
 		failure_message: DF.SmallText | None
 		installation_task: DF.Link | None
-		ipv6_block: DF.Link
 		server: DF.Link | None
 		status: DF.Literal["Pending", "Provisioning", "Active", "Failed", "Archived"]
 		virtual_machine: DF.Link | None
@@ -51,7 +47,13 @@ class IPv6RouterServer(Document):
 	@property
 	def prefix(self) -> str:
 		"""Return the public IPv6 block that the router translates."""
-		return frappe.get_doc("Metal Server IP Address", self.ipv6_block).prefix
+		return frappe.db.get_value("Public IP Pool", {"gateway": self.name}, "prefix") or ""
+
+	@property
+	def pool(self):
+		"""Return the public IP pool that this router serves."""
+		name = frappe.db.get_value("Public IP Pool", {"gateway": self.name})
+		return frappe.get_doc("Public IP Pool", name) if name else None
 
 	def before_insert(self) -> None:
 		"""Reject records created outside the IPv6 Router Server API."""
@@ -72,10 +74,13 @@ class IPv6RouterServer(Document):
 			frappe.throw(_("IPv6 Router Server creation data must be an object."))
 		_validate_create_request(values)
 
+		pool = frappe.get_doc("Public IP Pool", values["public_ip_pool"], for_update=True)
 		router = frappe.new_doc("IPv6 Router Server")
-		router.ipv6_block = values["ipv6_block"]
 		router.flags.created_by_ipv6_router_api = True
 		router.insert(ignore_permissions=True)
+		pool.allocation_prefix_length = 128
+		pool.gateway = router.name
+		pool.save(ignore_permissions=True)
 		frappe.db.commit()  # nosemgrep
 
 		is_draft = router._create_virtual_machine(values)
@@ -93,7 +98,17 @@ class IPv6RouterServer(Document):
 			if router.status == "Archived":
 				return
 
+			pool = router.pool
+			if pool and frappe.db.exists(
+				"Public IP Allocation",
+				{"pool": pool.name, "status": ["in", ["Attaching", "Attached", "Detaching"]]},
+			):
+				frappe.throw(_("Detach all routed IPv6 allocations before you archive this router."))
+
 			try:
+				if pool:
+					pool.begin_provider_detach()
+					pool.reconcile()
 				if router.virtual_machine and frappe.db.exists("Virtual Machine", router.virtual_machine):
 					virtual_machine = frappe.get_doc("Virtual Machine", router.virtual_machine)
 					virtual_machine.set_termination_protection(False)
@@ -110,29 +125,11 @@ class IPv6RouterServer(Document):
 			router.virtual_machine = None
 			router.installation_task = None
 			router.save(ignore_permissions=True)
+			if pool:
+				pool.gateway = None
+				pool.save(ignore_permissions=True)
 
 		frappe.msgprint(_("IPv6 Router Server {0} is archived.").format(self.name))
-
-	def attach_virtual_machine(self, virtual_machine: VirtualMachine) -> str:
-		"""Send the Internet range of a VM through this router and return its public address."""
-		from atlas.vm.core.vm_service import VirtualMachineService
-
-		if self.status != "Active":
-			frappe.throw(_("IPv6 Router Server {0} is not Active.").format(self.name), exc=AtlasUserError)
-
-		address = self.get_public_address(virtual_machine)
-		service = VirtualMachineService(virtual_machine)
-		routes = [
-			route for route in service.get_gateway_routes() if route["destination"] != ROUTED_DESTINATION
-		]
-		service.set_gateway_routes(
-			[*routes, {"destination": ROUTED_DESTINATION, "gateway": self.wireguard_mesh_ipv6}]
-		)
-		return address
-
-	def get_public_address(self, virtual_machine: VirtualMachine) -> str:
-		"""Return the address in this router's block that maps to the VM."""
-		return get_routed_ipv6(self.prefix, get_virtual_machine_mesh_address(virtual_machine))
 
 	def enqueue_provisioning(self, enqueue_after_commit: bool = True) -> None:
 		"""Queue router setup for the attached virtual machine."""
@@ -166,7 +163,7 @@ class IPv6RouterServer(Document):
 			"hostname": self.name,
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",
-			"server_ip_address": values["server_ip_address"],
+			"public_ipv4": values["public_ipv4"],
 		}
 		try:
 			result = VirtualMachineService.create(request)
@@ -206,7 +203,7 @@ def _validate_create_request(values: dict[str, Any]) -> None:
 		"hostname": "ipv6-router",
 		"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 		"egress": "uplink",
-		"server_ip_address": values.get("server_ip_address"),
+		"public_ipv4": values.get("public_ipv4"),
 	}
 	try:
 		request = VirtualMachineCreateRequest.from_value(virtual_machine_request)
@@ -219,69 +216,27 @@ def _validate_create_request(values: dict[str, Any]) -> None:
 		frappe.throw(_("Select a System Virtual Machine Image."))
 	image.validate_compatibility(request.disk_mib)
 
-	_validate_ipv4_address(request.server_ip_address)
-	_validate_ipv6_block(values.get("ipv6_block"))
+	_validate_ipv4_allocation(request.public_ipv4)
+	_validate_ipv6_pool(values.get("public_ip_pool"))
 
 
-def _validate_ipv4_address(address_name: object) -> None:
-	"""Require a free tenant-0 or pool IPv4 address for the router VM."""
-	if not isinstance(address_name, str) or not frappe.db.exists("Metal Server IP Address", address_name):
-		frappe.throw(_("Select an allocated public IPv4 address."))
-
-	address = frappe.get_doc("Metal Server IP Address", address_name)
-	if (
-		address.is_ipv6
-		or address.status != "Allocated"
-		or address.virtual_machine
-		or address.tenant_id not in (UNOWNED_TENANT_ID, 0)
-	):
-		frappe.throw(_("Select an allocated public IPv4 address that no virtual machine holds."))
+def _validate_ipv4_allocation(allocation_name: object) -> None:
+	"""Require a free IPv4 allocation reserved by tenant 0."""
+	if not isinstance(allocation_name, str) or not frappe.db.exists("Public IP Allocation", allocation_name):
+		frappe.throw(_("Select a reserved public IPv4 allocation."))
+	allocation = frappe.get_doc("Public IP Allocation", allocation_name)
+	if allocation.version != "4" or allocation.status != "Reserved" or allocation.tenant_id != 0:
+		frappe.throw(_("Select a free public IPv4 allocation reserved by tenant 0."))
 
 
-def _validate_ipv6_block(block_name: object) -> None:
-	"""Require a free tenant-0 or pool IPv6 block with space for the tenant and VM fields."""
-	if not isinstance(block_name, str) or not frappe.db.exists("Metal Server IP Address", block_name):
-		frappe.throw(_("Select an allocated IPv6 block."))
-
-	block = frappe.get_doc("Metal Server IP Address", block_name)
-	if (
-		not block.is_ipv6
-		or block.status != "Allocated"
-		or block.virtual_machine
-		or block.tenant_id not in (UNOWNED_TENANT_ID, 0)
-	):
-		frappe.throw(_("Select an allocated IPv6 block that no virtual machine holds."))
-
-	validate_router_network(parse_ipv6_network(block.prefix))
-
-
-def find_router(routes: list[dict[str, str]]) -> IPv6RouterServer | None:
-	"""Return the router that carries the Internet range in these gateway routes."""
-	gateway = next((route["gateway"] for route in routes if route["destination"] == ROUTED_DESTINATION), None)
-	name = gateway and frappe.db.get_value(
-		"IPv6 Router Server", {"wireguard_mesh_ipv6": gateway, "status": ["!=", "Archived"]}
-	)
-	return frappe.get_doc("IPv6 Router Server", name) if name else None
-
-
-def get_routed_ipv6_address(virtual_machine: VirtualMachine) -> str:
-	"""Return the public address that a router maps to the VM, or an empty string."""
-	from atlas.vm.core.vm_service import VirtualMachineService
-
-	router = find_router(VirtualMachineService(virtual_machine).get_gateway_routes())
-	return router.get_public_address(virtual_machine) if router else ""
-
-
-def detach_virtual_machine(virtual_machine: VirtualMachine) -> None:
-	"""Remove the router route of a VM and keep its other gateway routes."""
-	from atlas.vm.core.vm_service import VirtualMachineService
-
-	service = VirtualMachineService(virtual_machine)
-	routes = service.get_gateway_routes()
-	if not find_router(routes):
-		frappe.throw(_("This Virtual Machine has no routed IPv6 address."), exc=AtlasUserError)
-
-	service.set_gateway_routes([route for route in routes if route["destination"] != ROUTED_DESTINATION])
+def _validate_ipv6_pool(pool_name: object) -> None:
+	"""Require a free IPv6 pool that can use the router address layout."""
+	if not isinstance(pool_name, str) or not frappe.db.exists("Public IP Pool", pool_name):
+		frappe.throw(_("Select a public IPv6 pool."))
+	pool = frappe.get_doc("Public IP Pool", pool_name)
+	if pool.version != "6" or pool.gateway or frappe.db.exists("Public IP Allocation", {"pool": pool.name}):
+		frappe.throw(_("Select an IPv6 pool that has no gateway or allocations."))
+	validate_router_network(parse_ipv6_network(pool.prefix))
 
 
 @contextmanager

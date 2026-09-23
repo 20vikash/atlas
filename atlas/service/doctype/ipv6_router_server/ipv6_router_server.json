@@ -5,17 +5,24 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "status_section",
   "status",
-  "virtual_machine",
-  "server",
-  "column_break_status",
-  "ipv6_block",
-  "wireguard_mesh_ipv6",
+  "status_column",
   "installation_task",
+  "router_section",
+  "virtual_machine",
+  "wireguard_mesh_ipv6",
+  "router_column",
+  "server",
   "failure_section",
   "failure_message"
  ],
  "fields": [
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
   {
    "default": "Pending",
    "fieldname": "status",
@@ -27,21 +34,28 @@
    "read_only": 1
   },
   {
+   "fieldname": "status_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "installation_task",
+   "fieldtype": "Link",
+   "label": "Installation Task",
+   "options": "SSH Task",
+   "read_only": 1
+  },
+  {
+   "fieldname": "router_section",
+   "fieldtype": "Section Break",
+   "label": "Router"
+  },
+  {
    "fieldname": "virtual_machine",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Virtual Machine",
    "options": "Virtual Machine",
-   "read_only": 1
-  },
-  {
-   "fetch_from": "virtual_machine.server",
-   "fieldname": "server",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "Metal Server",
-   "options": "Metal Server",
    "read_only": 1
   },
   {
@@ -54,33 +68,24 @@
    "unique": 1
   },
   {
-   "fieldname": "column_break_status",
+   "fieldname": "router_column",
    "fieldtype": "Column Break"
   },
   {
-   "description": "The public IPv6 block that the router maps to WG Mesh addresses.",
-   "fieldname": "ipv6_block",
+   "fetch_from": "virtual_machine.server",
+   "fieldname": "server",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "IPv6 Block",
-   "options": "Metal Server IP Address",
-   "read_only": 1,
-   "reqd": 1,
-   "set_only_once": 1,
-   "show_description_on_click": 1,
-   "unique": 1
-  },
-  {
-   "fieldname": "installation_task",
-   "fieldtype": "Link",
-   "label": "Installation Task",
-   "options": "SSH Task",
+   "in_standard_filter": 1,
+   "label": "Metal Server",
+   "options": "Metal Server",
    "read_only": 1
   },
   {
-   "depends_on": "eval: doc.failure_message",
+   "depends_on": "failure_message",
    "fieldname": "failure_section",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Failure"
   },
   {
    "fieldname": "failure_message",
@@ -90,8 +95,13 @@
   }
  ],
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-09-24 01:21:46.868215",
+ "links": [
+  {
+   "link_doctype": "Public IP Pool",
+   "link_fieldname": "gateway"
+  }
+ ],
+ "modified": "2026-09-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Service",
  "name": "IPv6 Router Server",
