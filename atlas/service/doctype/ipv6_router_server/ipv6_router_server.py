@@ -42,6 +42,7 @@ class IPv6RouterServer(Document):
 		failure_message: DF.SmallText | None
 		installation_task: DF.Link | None
 		ipv6_block: DF.Link
+		server: DF.Link | None
 		status: DF.Literal["Pending", "Provisioning", "Active", "Failed", "Archived"]
 		virtual_machine: DF.Link | None
 		wireguard_mesh_ipv6: DF.Data | None

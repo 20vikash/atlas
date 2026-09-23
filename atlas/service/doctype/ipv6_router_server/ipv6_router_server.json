@@ -7,9 +7,10 @@
  "field_order": [
   "status",
   "virtual_machine",
-  "wireguard_mesh_ipv6",
+  "server",
   "column_break_status",
   "ipv6_block",
+  "wireguard_mesh_ipv6",
   "installation_task",
   "failure_section",
   "failure_message"
@@ -35,12 +36,21 @@
    "read_only": 1
   },
   {
-   "description": "The gateway address that other VMs use to send traffic to this router.",
+   "fetch_from": "virtual_machine.server",
+   "fieldname": "server",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Metal Server",
+   "options": "Metal Server",
+   "read_only": 1
+  },
+  {
    "fieldname": "wireguard_mesh_ipv6",
    "fieldtype": "Data",
    "label": "WireGuard Mesh IPv6",
    "read_only": 1,
    "set_only_once": 1,
+   "show_description_on_click": 1,
    "unique": 1
   },
   {
@@ -81,7 +91,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-24 00:00:13.248518",
+ "modified": "2026-09-24 01:21:46.868215",
  "modified_by": "Administrator",
  "module": "Service",
  "name": "IPv6 Router Server",
