@@ -45,9 +45,9 @@ class CargoServer(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		auto_build_pilot_images: DF.Check
 		failure_message: DF.SmallText | None
 		installation_task: DF.Link | None
-		auto_build_pilot_images: DF.Check
 		pilot_release_tracker_pending: DF.Check
 		status: DF.Literal["Not Provisioned", "Pending", "Provisioning", "Active", "Failed", "Archived"]
 		virtual_machine: DF.Link | None
