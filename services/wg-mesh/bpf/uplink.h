@@ -4,11 +4,12 @@
  *
  * Multicast mode: hosts share a VLAN. Linux answers solicitations through proxy NDP, and the ingress hook learns each advertisement.
  * Unicast mode: the egress hook wraps each solicitation and advertisement in IPv4 to every peer, and the ingress hook unwraps it.
+ * The public ingress hook also answers for local blocks, and forwards traffic for a block that moved to another host.
  */
 #ifndef ATLAS_UPLINK_H
 #define ATLAS_UPLINK_H
 
-#include "maps.h"
+#include "vm.h"
 
 #define ETHERTYPE_OFFSET 12
 #define IPV4_FRAGMENT_BITS 0x3fff
@@ -19,23 +20,38 @@
 /* Answer a solicitation for a prefix that a local VM owns. The provider keeps the prefix on the public link and asks for each address. */
 static __always_inline int answer_public_prefix_solicitation(struct __sk_buff *packet, struct config *config, struct ethhdr *eth, struct ipv6hdr *ip6, const struct in6_addr *target)
 {
-	struct ethhdr reply_eth = {.h_proto = bpf_htons(ETH_P_IPV6)};
-	struct ipv6hdr reply = {.saddr = *target, .daddr = ip6->saddr};
-	struct ndp_with_mac advertisement = {
-		.icmp.icmp6_type = NDP_ADVERTISEMENT,
-		.icmp.icmp6_dataun.un_data32[0] = bpf_htonl(ADVERTISEMENT_FLAGS),
-		.target = *target,
-		.option_type = NDP_TARGET_MAC_OPTION,
-	};
+	__u8 destination_mac[ETH_ALEN];
+	struct in6_addr destination = ip6->saddr;
 
-	__builtin_memcpy(reply_eth.h_dest, eth->h_source, ETH_ALEN);
-	__builtin_memcpy(reply_eth.h_source, config->public_mac, ETH_ALEN);
-	__builtin_memcpy(advertisement.mac, config->public_mac, ETH_ALEN);
-
-	if (replace_with_ndp(packet, &reply_eth, &reply, &advertisement))
+	__builtin_memcpy(destination_mac, eth->h_source, ETH_ALEN);
+	if (replace_with_public_advertisement(packet, config, destination_mac, &destination, target, ADVERTISEMENT_FLAGS))
 		return TC_ACT_SHOT;
 
 	return bpf_redirect(packet->ifindex, 0);
+}
+
+/*
+ * The provider router keeps each block address on the MAC of the host that answered it, and does not ask again after a VM moves.
+ * Send such a packet to the VM through the mesh. Its new host then advertises the address.
+ */
+static __always_inline int forward_moved_prefix(struct __sk_buff *packet, struct config *config, struct ipv6hdr *ip6)
+{
+	struct in6_addr destination = ip6->daddr;
+	struct in6_addr virtual_machine, *owner, *host;
+	__u32 inner_length = bpf_ntohs(ip6->payload_len) + sizeof(*ip6);
+
+	owner = get_moved_prefix_owner(&destination);
+	if (!owner || get_prefix_owner(&destination))
+		return TC_ACT_OK;
+	if (inner_length > packet->len - ETH_HLEN || inner_length > 0xffff)
+		return TC_ACT_SHOT;
+
+	virtual_machine = *owner;
+	host = bpf_map_lookup_elem(&remote_vms, &virtual_machine);
+	if (!host)
+		return start_vm_discovery(packet, config, &virtual_machine);
+
+	return add_mesh_tunnel(packet, config, host, inner_length);
 }
 
 /* Unicast mode: accept a wrapped NDP packet only from a peer, learn from an advertisement, and unwrap it for Linux. */
@@ -101,7 +117,7 @@ int handle_uplink_ingress(struct __sk_buff *packet)
 
 	message = ip6 ? parse_ndp(ip6, end) : NULL;
 	if (!message)
-		return TC_ACT_OK;
+		return ip6 && packet->ifindex == config->public_ifindex ? forward_moved_prefix(packet, config, ip6) : TC_ACT_OK;
 
 	target = message->target;
 

@@ -5,6 +5,9 @@
 
 #include "maps.h"
 
+/* Override, without solicited: an unsolicited advertisement replaces the MAC that a router holds. */
+#define UNSOLICITED_ADVERTISEMENT_FLAGS 0x20000000u
+
 /*
  * Remove the outer header. Linux routes the inner packet to the VM.
  *
@@ -58,6 +61,23 @@ static __always_inline int handle_not_here(struct __sk_buff *packet, struct conf
 		return TC_ACT_SHOT;
 
 	return bpf_redirect(config->uplink_ifindex, 0);
+}
+
+/* The old host of a block forwards its traffic here. Advertise the address once, so the provider router sends the next packet to this host. */
+static __always_inline int receive_moved_prefix_packet(struct __sk_buff *packet, struct config *config, const struct in6_addr *address)
+{
+	__u8 all_nodes_mac[ETH_ALEN] = {0x33, 0x33, 0, 0, 0, 1};
+	struct in6_addr all_nodes = {.s6_addr = {0xff, 0x02, [15] = 1}};
+
+	if (!take_announcement_token(address))
+		return remove_mesh_tunnel(packet);
+
+	/* wg0 has no link layer, so add room for the Ethernet header. */
+	if (bpf_skb_change_head(packet, ETH_HLEN, 0) ||
+		replace_with_public_advertisement(packet, config, all_nodes_mac, &all_nodes, address, UNSOLICITED_ADVERTISEMENT_FLAGS))
+		return TC_ACT_SHOT;
+
+	return bpf_redirect(config->public_ifindex, 0);
 }
 
 /* A packet from a remote VM to a client outside the mesh goes to this host's gateway. */
@@ -118,7 +138,12 @@ int handle_wireguard_packet(struct __sk_buff *packet)
 	destination = inner->daddr;
 
 	if (!is_vm_address(&destination))
+	{
+		/* Only an old host sends a client packet for a local block. */
+		if (!is_vm_address(&source) && get_prefix_owner(&destination))
+			return receive_moved_prefix_packet(packet, config, &destination);
 		return deliver_to_gateway(packet, &source, &destination);
+	}
 
 	/* The sending host checked source ownership. A foreign source comes from its gateway. */
 	if (is_vm_address(&source) && !can_communicate(&source, &destination))

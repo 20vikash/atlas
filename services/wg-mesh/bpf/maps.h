@@ -12,6 +12,9 @@
 #define DISCOVERY_INTERVAL_NS (1000000000ULL / 10)
 #define DISCOVERY_BURST 50
 
+/* One unsolicited advertisement for each moved block address each second. */
+#define ANNOUNCEMENT_INTERVAL_NS 1000000000ULL
+
 struct config
 {
 	__u32 uplink_ifindex;
@@ -45,6 +48,13 @@ struct prefix_key
 	struct in6_addr address;
 };
 
+/* A block whose VM left this host. Until expires_ns, the public hook sends its traffic to that VM through the mesh. */
+struct moved_prefix
+{
+	struct in6_addr virtual_machine;
+	__u64 expires_ns;
+};
+
 /* The destination follows the full VM address, so each VM has its own longest-prefix table. */
 struct route_key
 {
@@ -75,6 +85,8 @@ MAP(privileged_vms, BPF_MAP_TYPE_HASH, struct in6_addr, __u8, 4096);
 MAP(remote_vms, BPF_MAP_TYPE_LRU_HASH, struct in6_addr, struct in6_addr, 262144);
 /* VM ifindex to the time its next discovery token is due. */
 MAP(discovery_limits, BPF_MAP_TYPE_LRU_HASH, __u32, __u64, 4096);
+/* Moved block address to the time its next unsolicited advertisement is due. */
+MAP(announcement_limits, BPF_MAP_TYPE_LRU_HASH, struct in6_addr, __u64, 4096);
 
 struct
 {
@@ -84,6 +96,15 @@ struct
 	__uint(max_entries, 256);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 } owned_prefixes SEC(".maps");
+
+struct
+{
+	__uint(type, BPF_MAP_TYPE_LPM_TRIE);
+	__type(key, struct prefix_key);
+	__type(value, struct moved_prefix);
+	__uint(max_entries, 256);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+} moved_prefixes SEC(".maps");
 
 struct
 {
@@ -129,6 +150,15 @@ static __always_inline __u32 *get_prefix_owner(const struct in6_addr *address)
 	struct prefix_key key = {.prefix_length = 128, .address = *address};
 
 	return bpf_map_lookup_elem(&owned_prefixes, &key);
+}
+
+/* The VM that took the block of this address, or NULL when the block did not move away from this host. */
+static __always_inline struct in6_addr *get_moved_prefix_owner(const struct in6_addr *address)
+{
+	struct prefix_key key = {.prefix_length = 128, .address = *address};
+	struct moved_prefix *moved = bpf_map_lookup_elem(&moved_prefixes, &key);
+
+	return moved && moved->expires_ns > bpf_ktime_get_ns() ? &moved->virtual_machine : NULL;
 }
 
 static __always_inline struct in6_addr *get_gateway_route(const struct in6_addr *source, const struct in6_addr *destination)
@@ -206,6 +236,39 @@ static __always_inline int take_discovery_token(__u32 ifindex)
 	bpf_map_update_elem(&discovery_limits, &ifindex, &next, BPF_ANY);
 
 	return 1;
+}
+
+static __always_inline int take_announcement_token(const struct in6_addr *address)
+{
+	__u64 now = bpf_ktime_get_ns();
+	__u64 *due = bpf_map_lookup_elem(&announcement_limits, address);
+	__u64 next = now + ANNOUNCEMENT_INTERVAL_NS;
+
+	if (due && *due > now)
+		return 0;
+
+	bpf_map_update_elem(&announcement_limits, address, &next, BPF_ANY);
+
+	return 1;
+}
+
+/* Replace the packet with a neighbor advertisement from the public interface, which names its MAC for the target. */
+static __always_inline int replace_with_public_advertisement(struct __sk_buff *packet, struct config *config, const __u8 *destination_mac, const struct in6_addr *destination, const struct in6_addr *target, __u32 flags)
+{
+	struct ethhdr eth = {.h_proto = bpf_htons(ETH_P_IPV6)};
+	struct ipv6hdr ip6 = {.saddr = *target, .daddr = *destination};
+	struct ndp_with_mac advertisement = {
+		.icmp.icmp6_type = NDP_ADVERTISEMENT,
+		.icmp.icmp6_dataun.un_data32[0] = bpf_htonl(flags),
+		.target = *target,
+		.option_type = NDP_TARGET_MAC_OPTION,
+	};
+
+	__builtin_memcpy(eth.h_dest, destination_mac, ETH_ALEN);
+	__builtin_memcpy(eth.h_source, config->public_mac, ETH_ALEN);
+	__builtin_memcpy(advertisement.mac, config->public_mac, ETH_ALEN);
+
+	return replace_with_ndp(packet, &eth, &ip6, &advertisement);
 }
 
 #endif /* ATLAS_MAPS_H */

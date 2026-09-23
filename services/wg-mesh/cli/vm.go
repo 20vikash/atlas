@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -9,9 +10,15 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
+
+// movedPrefixLifetime bounds forwarding through a VM's previous host.
+// The first forwarded packet makes the new host advertise the address.
+const movedPrefixLifetime = 5 * time.Minute
 
 var (
 	vmInterfaceName string
@@ -170,6 +177,9 @@ func syncVM(interfaceName, addressText string, mtu uint32, isGateway bool, prefi
 	if err := applyPrefixes(ifindex, state.prefixes); err != nil {
 		return err
 	}
+	if err := pruneMovedPrefixes(state.prefixes); err != nil {
+		return err
+	}
 	if err := applyRoutes(state.address, state.routes); err != nil {
 		return err
 	}
@@ -177,6 +187,9 @@ func syncVM(interfaceName, addressText string, mtu uint32, isGateway bool, prefi
 		return err
 	}
 	if err := runCommand("ip", "-6", "neigh", "replace", "proxy", address, "dev", deviceName(config.UplinkIfIndex)); err != nil {
+		return err
+	}
+	if err := announceVMLocation(config, state.address); err != nil {
 		return err
 	}
 
@@ -239,6 +252,87 @@ func applyPrefixes(ifindex uint32, wanted map[prefixKey]bool) error {
 	return nil
 }
 
+// rememberMovedPrefixes keeps the blocks of a VM that leaves, so the public hook can forward their traffic to its next host.
+func rememberMovedPrefixes(ifindex uint32, address [16]byte) error {
+	owners, err := readMapEntries[prefixKey, uint32]("owned_prefixes")
+	if err != nil {
+		return err
+	}
+	now, err := monotonicNanoseconds()
+	if err != nil {
+		return err
+	}
+	for prefix, owner := range owners {
+		if owner != ifindex {
+			continue
+		}
+		if err := writeMap("moved_prefixes", prefix, movedPrefix{address, now + uint64(movedPrefixLifetime)}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneMovedPrefixes removes blocks that returned to this host or expired.
+func pruneMovedPrefixes(owned map[prefixKey]bool) error {
+	moved, err := readMapEntries[prefixKey, movedPrefix]("moved_prefixes")
+	if err != nil {
+		return err
+	}
+	now, err := monotonicNanoseconds()
+	if err != nil {
+		return err
+	}
+	for prefix, entry := range moved {
+		if owned[prefix] || entry.ExpiresNS <= now {
+			if err := deleteMapKey("moved_prefixes", prefix); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func monotonicNanoseconds() (uint64, error) {
+	var now unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
+		return 0, err
+	}
+	return uint64(now.Nano()), nil
+}
+
+// announceVMLocation lets every peer learn the VM's host without a NOT_HERE round trip.
+func announceVMLocation(config hostConfig, address [16]byte) error {
+	socket, err := unix.Socket(unix.AF_INET6, unix.SOCK_RAW, unix.IPPROTO_ICMPV6)
+	if err != nil {
+		return fmt.Errorf("open the NDP socket: %w", err)
+	}
+	defer unix.Close(socket)
+
+	uplink := int(config.UplinkIfIndex)
+	if err := unix.SetsockoptInt(socket, unix.IPPROTO_IPV6, unix.IPV6_MULTICAST_HOPS, 255); err != nil {
+		return err
+	}
+	if err := unix.SetsockoptInt(socket, unix.IPPROTO_IPV6, unix.IPV6_MULTICAST_IF, uplink); err != nil {
+		return err
+	}
+
+	// Neighbor advertisement with the override flag, then the target MAC option. Linux fills the checksum.
+	message := []byte{136, 0, 0, 0, 0x20, 0, 0, 0}
+	message = append(message, address[:]...)
+	message = append(message, 2, 1)
+	message = append(message, config.UplinkMAC[:]...)
+	allNodes := &unix.SockaddrInet6{ZoneId: uint32(uplink), Addr: [16]byte{0: 0xff, 1: 0x02, 15: 1}}
+	if err := unix.Sendto(socket, message, 0, allNodes); err != nil {
+		// The unicast hook clones the packet to every peer, then drops the original.
+		if errors.Is(err, unix.ENOBUFS) && isHookAttached(deviceName(config.UplinkIfIndex), "egress") {
+			return nil
+		}
+		return fmt.Errorf("announce VM location %s: %w", netip.AddrFrom16(address), err)
+	}
+	return nil
+}
+
 func applyRoutes(address [16]byte, wanted map[routeKey][16]byte) error {
 	routes, err := readMapEntries[routeKey, [16]byte]("gateway_routes")
 	if err != nil {
@@ -296,6 +390,9 @@ func removeVM(interfaceName, addressText string) error {
 	}
 	if registered {
 		if err := applyGateway(ifindex, address, false); err != nil {
+			return err
+		}
+		if err := rememberMovedPrefixes(ifindex, address); err != nil {
 			return err
 		}
 		if err := applyPrefixes(ifindex, nil); err != nil {

@@ -46,12 +46,16 @@ All hooks use one BPF object and one set of pinned maps.
 | `discovery_limits` | NDP request limit for each virtual machine interface. |
 | `local_gateway` | The gateway virtual machine on this host. |
 | `owned_prefixes` | Public prefix to owner interface. |
+| `moved_prefixes` | Public prefix of a VM that left this host, to that VM address and an expiry time. |
+| `announcement_limits` | Next allowed advertisement for each moved prefix address. |
 | `gateway_routes` | Virtual machine and destination prefix to gateway address. |
 | `build_hash` | Hash of the active BPF object. |
 
 `remote_vms` uses least recently used eviction.
 
 A location stays until eviction or a valid `NOT_HERE` packet removes it.
+
+`vm sync` sends an unsolicited neighbor advertisement for the VM address on the uplink. Every peer learns the new host of a moved VM at once, and `NOT_HERE` repairs only a missed advertisement.
 
 ## Virtual machine traffic
 
@@ -100,6 +104,7 @@ The WireGuard hook handles packets only between addresses in `fdab::/16`.
 | Tunnel to a local virtual machine | Remove the outer IPv6 header. |
 | Tunnel to a missing virtual machine | Return `NOT_HERE` to the sender. |
 | Reply for an external client | Send the packet to the local gateway. |
+| Client packet for a local prefix | Advertise the address on the public interface once, then deliver later packets. |
 | Valid `NOT_HERE` | Remove the old location and start NDP. |
 
 `NOT_HERE` uses IPv6 next header `253` and contains one virtual machine address.
@@ -113,5 +118,12 @@ A route selects a gateway by the longest destination prefix.
 One host can have one gateway because a reply does not identify the original local gateway.
 
 The public interface hook answers NDP for an address in an owned prefix.
+
+The provider router keeps each prefix address on the MAC of the host that answered, and does not ask again after the VM moves. `vm remove` keeps the prefix in `moved_prefixes` for 5 minutes. During that time the old host sends client packets for the prefix through the mesh to the VM. The new host answers the first packet with an unsolicited advertisement from its public interface, so the router sends later packets to the new host.
+
+```text
+client -> router -> old host -> mesh -> new host -> VM
+                    router <- unsolicited advertisement <- new host
+```
 
 Read [Gateways](gateways.md) for the configuration model.

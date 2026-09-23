@@ -61,6 +61,12 @@ type prefixKey struct {
 	Address      [16]byte
 }
 
+// movedPrefix matches struct moved_prefix in bpf/maps.h. ExpiresNS uses the monotonic clock of bpf_ktime_get_ns.
+type movedPrefix struct {
+	VirtualMachine [16]byte
+	ExpiresNS      uint64
+}
+
 // routeKey matches struct route_key in bpf/maps.h. Its prefix length counts the VM address too.
 type routeKey struct {
 	PrefixLength   uint32
