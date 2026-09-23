@@ -51,7 +51,7 @@ static __always_inline int forward_moved_prefix(struct __sk_buff *packet, struct
 	if (!host)
 		return start_vm_discovery(packet, config, &virtual_machine);
 
-	return add_mesh_tunnel(packet, config, host, inner_length);
+	return add_mesh_tunnel(packet, config, host, inner_length, NULL);
 }
 
 /* Unicast mode: accept a wrapped NDP packet only from a peer, learn from an advertisement, and unwrap it for Linux. */

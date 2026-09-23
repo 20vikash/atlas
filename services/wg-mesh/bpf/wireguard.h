@@ -80,24 +80,38 @@ static __always_inline int receive_moved_prefix_packet(struct __sk_buff *packet,
 	return bpf_redirect(config->public_ifindex, 0);
 }
 
-/* A packet from a remote VM to a client outside the mesh goes to this host's gateway. */
-static __always_inline int deliver_to_gateway(struct __sk_buff *packet, const struct in6_addr *source, const struct in6_addr *destination)
+/* A client packet from a remote VM goes to the local gateway VM that the tunnel names. */
+static __always_inline int deliver_to_gateway(struct __sk_buff *packet, struct config *config, const struct in6_addr *sender, struct ipv6hdr *outer, void *end)
 {
+	struct in6_addr *named_gateway = (void *)(outer + 1);
+	struct ipv6hdr *inner = (void *)(named_gateway + 1);
 	struct ethhdr eth = {.h_proto = bpf_htons(ETH_P_IPV6)};
 	struct bpf_redir_neigh next_hop = {.nh_family = AF_INET6};
-	struct gateway *gateway = get_local_gateway();
+	struct in6_addr gateway, source, destination;
+	__u32 ifindex;
 
-	if (!gateway || !is_vm_address(source) || !is_gateway_carried_address(destination))
+	if ((void *)(inner + 1) > end ||
+		sizeof(gateway) + sizeof(*inner) + bpf_ntohs(inner->payload_len) > bpf_ntohs(outer->payload_len))
 		return TC_ACT_SHOT;
 
-	__builtin_memcpy(next_hop.ipv6_nh, &gateway->address, sizeof(next_hop.ipv6_nh));
+	gateway = *named_gateway;
+	source = inner->saddr;
+	destination = inner->daddr;
+	if (!is_local_vm(&gateway))
+		return reply_not_here(packet, config, &gateway, sender);
+
+	ifindex = get_gateway_interface(&gateway);
+	if (!ifindex || !is_vm_address(&source) || !is_gateway_carried_address(&destination))
+		return TC_ACT_SHOT;
+
+	__builtin_memcpy(next_hop.ipv6_nh, &gateway, sizeof(next_hop.ipv6_nh));
 
 	/* wg0 has no link layer. The neighbor redirect needs an Ethernet header to fill. */
-	if (remove_mesh_tunnel(packet) != TC_ACT_OK || bpf_skb_change_head(packet, sizeof(eth), 0) ||
-		bpf_skb_store_bytes(packet, 0, &eth, sizeof(eth), 0))
+	if (bpf_skb_adjust_room(packet, -(int)(sizeof(*outer) + sizeof(gateway)), BPF_ADJ_ROOM_MAC, BPF_F_ADJ_ROOM_NO_CSUM_RESET | BPF_F_ADJ_ROOM_FIXED_GSO) ||
+		bpf_skb_change_head(packet, sizeof(eth), 0) || bpf_skb_store_bytes(packet, 0, &eth, sizeof(eth), 0))
 		return TC_ACT_SHOT;
 
-	return bpf_redirect_neigh(gateway->ifindex, &next_hop, sizeof(next_hop), 0);
+	return bpf_redirect_neigh(ifindex, &next_hop, sizeof(next_hop), 0);
 }
 
 SEC("tc")
@@ -126,6 +140,9 @@ int handle_wireguard_packet(struct __sk_buff *packet)
 	if (outer->nexthdr == NOT_HERE_NEXT_HEADER)
 		return bpf_ntohs(outer->payload_len) == sizeof(struct in6_addr) ? handle_not_here(packet, config, &sender) : TC_ACT_SHOT;
 
+	if (outer->nexthdr == GATEWAY_NEXT_HEADER)
+		return deliver_to_gateway(packet, config, &sender, outer, end);
+
 	if (outer->nexthdr != IPPROTO_IPV6)
 		return TC_ACT_OK;
 
@@ -137,13 +154,9 @@ int handle_wireguard_packet(struct __sk_buff *packet)
 	source = inner->saddr;
 	destination = inner->daddr;
 
+	/* Only an old host sends a client packet for a local block. Gateway traffic uses its own tunnel. */
 	if (!is_vm_address(&destination))
-	{
-		/* Only an old host sends a client packet for a local block. */
-		if (!is_vm_address(&source) && get_prefix_owner(&destination))
-			return receive_moved_prefix_packet(packet, config, &destination);
-		return deliver_to_gateway(packet, &source, &destination);
-	}
+		return !is_vm_address(&source) && get_prefix_owner(&destination) ? receive_moved_prefix_packet(packet, config, &destination) : TC_ACT_SHOT;
 
 	/* The sending host checked source ownership. A foreign source comes from its gateway. */
 	if (is_vm_address(&source) && !can_communicate(&source, &destination))

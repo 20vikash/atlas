@@ -35,13 +35,6 @@ struct peer
 	struct in6_addr wireguard_ipv6;
 };
 
-/* The gateway VM of this host. A reply names only its VM and client, so a host runs one gateway. */
-struct gateway
-{
-	__u32 ifindex;
-	struct in6_addr address;
-};
-
 struct prefix_key
 {
 	__u32 prefix_length;
@@ -75,7 +68,8 @@ struct route_key
 MAP(config, BPF_MAP_TYPE_ARRAY, __u32, struct config, 1);
 MAP(build_hash, BPF_MAP_TYPE_ARRAY, __u32, __u8[32], 1);
 MAP(peer_list, BPF_MAP_TYPE_ARRAY, __u32, struct peer, PEER_LIMIT);
-MAP(local_gateway, BPF_MAP_TYPE_ARRAY, __u32, struct gateway, 1);
+/* Interfaces of the local gateway VMs. */
+MAP(gateways, BPF_MAP_TYPE_HASH, __u32, __u8, 4096);
 
 /* Local VM address to the ifindex of its interface. A VM may only send from its own address. */
 MAP(local_vms, BPF_MAP_TYPE_HASH, struct in6_addr, __u32, 4096);
@@ -172,20 +166,17 @@ static __always_inline struct in6_addr *get_gateway_route(const struct in6_addr 
 	return bpf_map_lookup_elem(&gateway_routes, &key);
 }
 
-/* The gateway VM of this host, or NULL when it runs none. */
-static __always_inline struct gateway *get_local_gateway(void)
-{
-	__u32 key = 0;
-	struct gateway *gateway = bpf_map_lookup_elem(&local_gateway, &key);
-
-	return gateway && gateway->ifindex ? gateway : NULL;
-}
-
 static __always_inline int is_gateway_interface(__u32 ifindex)
 {
-	struct gateway *gateway = get_local_gateway();
+	return bpf_map_lookup_elem(&gateways, &ifindex) != NULL;
+}
 
-	return gateway && gateway->ifindex == ifindex;
+/* The interface of a local gateway VM, or 0 when the address is not one. */
+static __always_inline __u32 get_gateway_interface(const struct in6_addr *address)
+{
+	__u32 *ifindex = bpf_map_lookup_elem(&local_vms, address);
+
+	return ifindex && is_gateway_interface(*ifindex) ? *ifindex : 0;
 }
 
 static __always_inline struct peer *find_peer_by_ipv4(__be32 ipv4)

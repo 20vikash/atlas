@@ -153,7 +153,7 @@ func syncVM(interfaceName, addressText string, mtu uint32, isGateway bool, prefi
 	if err != nil {
 		return err
 	}
-	if err := validateVMState(state, ifindex, isGateway); err != nil {
+	if err := validateVMState(state, ifindex); err != nil {
 		return err
 	}
 
@@ -183,7 +183,7 @@ func syncVM(interfaceName, addressText string, mtu uint32, isGateway bool, prefi
 	if err := applyRoutes(state.address, state.routes); err != nil {
 		return err
 	}
-	if err := applyGateway(ifindex, state.address, isGateway); err != nil {
+	if err := applyGateway(ifindex, isGateway); err != nil {
 		return err
 	}
 	if err := runCommand("ip", "-6", "neigh", "replace", "proxy", address, "dev", deviceName(config.UplinkIfIndex)); err != nil {
@@ -197,7 +197,7 @@ func syncVM(interfaceName, addressText string, mtu uint32, isGateway bool, prefi
 	return nil
 }
 
-func validateVMState(state vmState, ifindex uint32, isGateway bool) error {
+func validateVMState(state vmState, ifindex uint32) error {
 	owners, err := readMapEntries[prefixKey, uint32]("owned_prefixes")
 	if err != nil {
 		return err
@@ -207,29 +207,14 @@ func validateVMState(state vmState, ifindex uint32, isGateway bool) error {
 			return fmt.Errorf("%s already owns %s", deviceName(owner), prefixText(prefix))
 		}
 	}
-
-	current, err := readMap[gateway]("local_gateway", uint32(0))
-	if err != nil {
-		return err
-	}
-	if isGateway && current.IfIndex != 0 && current.IfIndex != ifindex {
-		return fmt.Errorf("gateway %s already runs on %s", netip.AddrFrom16(current.Address), deviceName(current.IfIndex))
-	}
 	return nil
 }
 
-func applyGateway(ifindex uint32, address [16]byte, enabled bool) error {
-	current, err := readMap[gateway]("local_gateway", uint32(0))
-	if err != nil {
-		return err
-	}
+func applyGateway(ifindex uint32, enabled bool) error {
 	if enabled {
-		return writeMap("local_gateway", uint32(0), gateway{ifindex, address})
+		return writeMap("gateways", ifindex, uint8(1))
 	}
-	if current.IfIndex == ifindex {
-		return writeMap("local_gateway", uint32(0), gateway{})
-	}
-	return nil
+	return deleteMapKey("gateways", ifindex)
 }
 
 func applyPrefixes(ifindex uint32, wanted map[prefixKey]bool) error {
@@ -389,7 +374,7 @@ func removeVM(interfaceName, addressText string) error {
 		return err
 	}
 	if registered {
-		if err := applyGateway(ifindex, address, false); err != nil {
+		if err := applyGateway(ifindex, false); err != nil {
 			return err
 		}
 		if err := rememberMovedPrefixes(ifindex, address); err != nil {

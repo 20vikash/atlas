@@ -88,11 +88,11 @@ func localVM(address [16]byte) (uint32, bool, error) {
 }
 
 func fillLocalVMState(state *inspectedVM, address [16]byte, ifindex uint32) error {
-	localGateway, err := readMap[gateway]("local_gateway", uint32(0))
+	gateways, err := readMapEntries[uint32, uint8]("gateways")
 	if err != nil {
 		return err
 	}
-	state.Gateway = localGateway.IfIndex == ifindex && localGateway.Address == address
+	_, state.Gateway = gateways[ifindex]
 
 	owners, err := readMapEntries[prefixKey, uint32]("owned_prefixes")
 	if err != nil {

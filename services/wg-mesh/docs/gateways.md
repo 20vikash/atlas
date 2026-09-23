@@ -29,7 +29,6 @@ Make sure that these items are ready:
 - The provider routes a public IPv6 prefix to the public network of the Metal host.
 - Neighbor Discovery Protocol requests for the prefix can reach the public interface.
 - The gateway VM uses tenant `0` and has the privileged flag.
-- The host has no other gateway VM.
 - The gateway image contains `ip`, `sysctl`, and `nft`.
 
 The examples use `2001:db8:100::/64`, which is a documentation prefix. Replace it with the prefix from your provider.
@@ -161,7 +160,6 @@ If inbound traffic fails, check the provider route, public neighbor entry, gatew
 
 | Limit | Reason |
 | --- | --- |
-| One gateway per host | A reply does not identify more than one local gateway. |
 | One owner per prefix | Public NDP must have one destination interface. |
 
 Read [Design](design.md#gateways) for the packet behavior.

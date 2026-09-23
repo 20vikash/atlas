@@ -49,12 +49,6 @@ type peer struct {
 	WireGuardIPv6 [16]byte
 }
 
-// gateway matches struct gateway in bpf/maps.h.
-type gateway struct {
-	IfIndex uint32
-	Address [16]byte
-}
-
 // prefixKey matches struct prefix_key in bpf/maps.h.
 type prefixKey struct {
 	PrefixLength uint32

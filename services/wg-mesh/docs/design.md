@@ -44,7 +44,7 @@ All hooks use one BPF object and one set of pinned maps.
 | `privileged_vms` | Privileged tenant-0 addresses. |
 | `peer_list` | Peer IPv4, MAC, and WireGuard addresses. |
 | `discovery_limits` | NDP request limit for each virtual machine interface. |
-| `local_gateway` | The gateway virtual machine on this host. |
+| `gateways` | Interfaces of the gateway virtual machines on this host. |
 | `owned_prefixes` | Public prefix to owner interface. |
 | `moved_prefixes` | Public prefix of a VM that left this host, to that VM address and an expiry time. |
 | `announcement_limits` | Next allowed advertisement for each moved prefix address. |
@@ -103,11 +103,13 @@ The WireGuard hook handles packets only between addresses in `fdab::/16`.
 | --- | --- |
 | Tunnel to a local virtual machine | Remove the outer IPv6 header. |
 | Tunnel to a missing virtual machine | Return `NOT_HERE` to the sender. |
-| Reply for an external client | Send the packet to the local gateway. |
+| Gateway tunnel for an external client | Send the packet to the local gateway that the tunnel names. |
 | Client packet for a local prefix | Advertise the address on the public interface once, then deliver later packets. |
 | Valid `NOT_HERE` | Remove the old location and start NDP. |
 
 `NOT_HERE` uses IPv6 next header `253` and contains one virtual machine address.
+
+A gateway tunnel uses IPv6 next header `254`. The gateway address comes first, then the client packet. A gateway that is not on the host also returns `NOT_HERE`.
 
 Only the host stored in `remote_vms` can remove that location.
 
@@ -115,7 +117,7 @@ Only the host stored in `remote_vms` can remove that location.
 
 A route selects a gateway by the longest destination prefix.
 
-One host can have one gateway because a reply does not identify the original local gateway.
+A host can run several gateways. The tunnel names the gateway, so the receiving host delivers to that VM. The 16-byte gateway address fits the MTU: 1380 + 40 + 16 is 1436, and WireGuard carries 1440.
 
 The public interface hook answers NDP for an address in an owned prefix.
 

@@ -28,6 +28,9 @@
 #define NOT_HERE_NEXT_HEADER 253
 #define NOT_HERE_PACKET_LENGTH (sizeof(struct ipv6hdr) + sizeof(struct in6_addr))
 
+/* A tunnel to a gateway carries the gateway address before the client packet, so a host can run several gateways. */
+#define GATEWAY_NEXT_HEADER 254
+
 #define HOP_LIMIT 64
 #define AF_INET6 10
 
