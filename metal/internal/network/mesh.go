@@ -119,11 +119,13 @@ func (mesh *Mesh) ApplyPrivilegedAddresses(ctx context.Context, desired []string
 // meshNamespaceSteps routes mesh traffic through the namespace. The guest
 // owns its mesh address, and the proxy NDP entry answers for it from
 // creation, before the guest applies its own copy. A permanent tap0 neighbour
-// reaches a stopped guest.
+// reaches a stopped guest. A zero proxy_delay answers the host at once, because
+// the mesh drops packets until the host learns the guest.
 func meshNamespaceSteps(guestVirtualEthernet, address string) [][]string {
 	return [][]string{
 		{"sysctl", "-q", "-w", "net.ipv6.conf.all.forwarding=1"},
 		{"sysctl", "-q", "-w", "net.ipv6.conf." + guestVirtualEthernet + ".proxy_ndp=1"},
+		{"sysctl", "-q", "-w", "net.ipv6.neigh." + guestVirtualEthernet + ".proxy_delay=0"},
 		{"ip", "link", "set", guestVirtualEthernet, "mtu", strconv.Itoa(meshMTU)},
 		{"ip", "-6", "addr", "replace", meshGatewayAddress + "/64", "dev", tapName, "nodad"},
 		{"ip", "-6", "route", "replace", address + "/128", "dev", tapName},

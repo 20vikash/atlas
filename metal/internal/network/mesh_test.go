@@ -49,6 +49,7 @@ func TestMeshNamespaceStepsRouteTheGuestAddress(t *testing.T) {
 	for _, wanted := range []string{
 		"sysctl -q -w net.ipv6.conf.all.forwarding=1",
 		"sysctl -q -w net.ipv6.conf.vg-100.proxy_ndp=1",
+		"sysctl -q -w net.ipv6.neigh.vg-100.proxy_delay=0",
 		"link set vg-100 mtu 1380",
 		"addr replace fe80::1/64 dev tap0 nodad",
 		"route replace fdaa:1:0:7::1/128 dev tap0",
