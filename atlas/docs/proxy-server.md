@@ -12,7 +12,7 @@ Atlas creates `*.<wildcard-domain>` as a CNAME to `proxy.<wildcard-domain>` with
 
 ## Provisioning
 
-Each node needs one Allocated Metal Server IP Address. Reserve it before you create the Proxy Server.
+Each node needs one reserved tenant-0 Public IP Allocation for IPv4. Reserve it before you create the Proxy Server.
 
 Atlas uses this order for a new node:
 
