@@ -60,9 +60,9 @@ class ProxyServer(Document):
 		values = frappe.parse_json(request) if isinstance(request, str) else request
 		if not isinstance(values, dict):
 			frappe.throw(_("Proxy Server creation data must be an object."))
-		server_ip_address = values.get("server_ip_address")
-		if not isinstance(server_ip_address, str) or not server_ip_address.strip():
-			frappe.throw(_("Select an allocated public IPv4 address."))
+		public_ipv4 = values.get("public_ipv4")
+		if not isinstance(public_ipv4, str) or not public_ipv4.strip():
+			frappe.throw(_("Select a reserved public IPv4 allocation."))
 
 		proxy_server = frappe.new_doc("Proxy Server")
 		proxy_server.flags.created_by_proxy_server_api = True
@@ -91,7 +91,7 @@ class ProxyServer(Document):
 			"hostname": proxy_server.name,
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",
-			"server_ip_address": values["server_ip_address"],
+			"public_ipv4": values["public_ipv4"],
 		}
 		try:
 			result = VirtualMachineService.create(virtual_machine_request)

@@ -205,9 +205,9 @@ class CargoServer(Document):
 		):
 			frappe.throw(_("Select a System Virtual Machine Image."))
 
-		address = values.get("server_ip_address")
+		address = values.get("public_ipv4")
 		if not isinstance(address, str) or not address.strip():
-			frappe.throw(_("Select an allocated public IPv4 address."))
+			frappe.throw(_("Select a reserved public IPv4 allocation."))
 
 	def _create_virtual_machine(self, values: dict[str, Any]) -> bool:
 		from atlas.vm.core.vm_service import VirtualMachineCreateError, VirtualMachineService
@@ -223,7 +223,7 @@ class CargoServer(Document):
 			"hostname": "cargo",
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
 			"egress": "uplink",
-			"server_ip_address": values["server_ip_address"],
+			"public_ipv4": values["public_ipv4"],
 		}
 		try:
 			result = VirtualMachineService.create(request)

@@ -20,7 +20,7 @@ flowchart LR
     DNS --> Active[Set Active]
 ```
 
-Creation needs one Allocated Metal Server IP Address. Atlas creates the Proxy Server before it sends the VM request to Metal. A draft VM keeps the record Pending until VM reconciliation completes. Atlas queues Pending records every minute. A failed setup changes the status to Failed and records the failed phase.
+Creation needs one reserved tenant-0 Public IP Allocation for IPv4. Atlas creates the Proxy Server before it sends the VM request to Metal. A draft VM keeps the record Pending until VM reconciliation completes. Atlas queues Pending records every minute. A failed setup changes the status to Failed and records the failed phase.
 
 Atlas gives every node a `proxy-NNN.<wildcard-domain>` A record with a 3600-second TTL. It creates a health-checked multivalue A record for each node at `proxy.<wildcard-domain>` with a 120-second TTL.
 
