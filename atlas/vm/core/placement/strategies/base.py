@@ -262,7 +262,7 @@ class PlacementStrategy(ABC):
 		exclude_servers: set[str] | None = None,
 	) -> str:
 		"""Reserve one named host when it still satisfies the requirements."""
-		_, overcommit_factor, dedicated_sleepy_hosts = cls._load_settings()
+		_strategy_name, overcommit_factor, dedicated_sleepy_hosts = cls._load_settings()
 		deadline = time.monotonic() + PLACEMENT_DEADLINE_SECONDS
 		for attempt in range(PLACEMENT_ATTEMPTS):
 			placement = PlacementContext(
