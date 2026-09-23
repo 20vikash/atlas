@@ -175,6 +175,13 @@ class VirtualMachine(Document):
 		return VirtualMachineService(self).get_public_ipv6()
 
 	@property
+	def routed_ipv6(self) -> str:
+		"""Return the public address that an IPv6 router maps to this VM, or an empty string."""
+		from atlas.service.doctype.ipv6_router_server.ipv6_router_server import get_routed_ipv6_address
+
+		return get_routed_ipv6_address(self)
+
+	@property
 	def gateway_routes(self) -> str:
 		"""Return the gateway routes that Metal holds, with each gateway as its VM name."""
 		return json.dumps(VirtualMachineService(self).get_gateway_routes(), indent=2)
@@ -272,6 +279,24 @@ class VirtualMachine(Document):
 		self.ensure_not_migrating()
 		self.validate_network_change()
 		VirtualMachineService(self).set_gateway_routes(frappe.parse_json(routes) or [])
+
+	@frappe.whitelist(methods=["POST"])
+	def attach_routed_ipv6(self, ipv6_router_server: str) -> str:
+		"""Route the Internet range of this VM through an IPv6 router and return its public address."""
+		self.check_permission("write")
+		self.ensure_not_migrating()
+		self.validate_network_change()
+		return frappe.get_doc("IPv6 Router Server", ipv6_router_server).attach_virtual_machine(self)
+
+	@frappe.whitelist(methods=["POST"])
+	def detach_routed_ipv6(self) -> None:
+		"""Remove the IPv6 router route of this VM."""
+		from atlas.service.doctype.ipv6_router_server.ipv6_router_server import detach_virtual_machine
+
+		self.check_permission("write")
+		self.ensure_not_migrating()
+		self.validate_network_change()
+		detach_virtual_machine(self)
 
 	@frappe.whitelist(methods=["POST"])
 	def set_network_gateway(self, is_network_gateway: bool | int | str) -> None:

@@ -66,6 +66,18 @@ frappe.ui.form.on("Virtual Machine", {
 				Boolean(frm.doc.public_ipv6) && frappe.user.has_role("System Manager"),
 				ACTIONS,
 			],
+			[
+				__("Attach Routed IPv6"),
+				() => attachRoutedIPv6(frm),
+				!frm.doc.routed_ipv6 && !frm.doc.public_ipv6 && !frm.doc.is_network_gateway,
+				ACTIONS,
+			],
+			[
+				__("Detach Routed IPv6"),
+				() => detachRoutedIPv6(frm),
+				Boolean(frm.doc.routed_ipv6),
+				ACTIONS,
+			],
 			[__("Change Egress Mode"), () => showEgressDialog(frm), true, ACTIONS],
 			[
 				frm.doc.is_termination_protected
@@ -734,6 +746,54 @@ function detachIPv6Block(frm) {
 					doc: frm.doc,
 					freeze: true,
 					freeze_message: __("Detaching IPv6 block..."),
+				})
+				.then(() => frm.reload_doc())
+	);
+}
+
+function attachRoutedIPv6(frm) {
+	frappe.prompt(
+		{
+			fieldname: "ipv6_router_server",
+			fieldtype: "Link",
+			label: __("IPv6 Router Server"),
+			options: "IPv6 Router Server",
+			reqd: 1,
+			filters: { status: "Active" },
+			description: __(
+				"The router maps an address from its block to this VM. The VM firewall controls inbound traffic."
+			),
+		},
+		({ ipv6_router_server }) =>
+			frm
+				.call({
+					method: "attach_routed_ipv6",
+					doc: frm.doc,
+					args: { ipv6_router_server },
+					freeze: true,
+					freeze_message: __("Attaching routed IPv6..."),
+				})
+				.then((response) => {
+					frappe.msgprint(__("Routed IPv6 address: {0}", [response.message]));
+					return frm.reload_doc();
+				}),
+		__("Attach Routed IPv6"),
+		__("Attach")
+	);
+}
+
+function detachRoutedIPv6(frm) {
+	frappe.confirm(
+		__("Remove {0} from this Virtual Machine? Active connections can stop.", [
+			frm.doc.routed_ipv6,
+		]),
+		() =>
+			frm
+				.call({
+					method: "detach_routed_ipv6",
+					doc: frm.doc,
+					freeze: true,
+					freeze_message: __("Detaching routed IPv6..."),
 				})
 				.then(() => frm.reload_doc())
 	);
