@@ -618,22 +618,17 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				{"public_network_throughput_mibps": 25}
 			)
 
-	def test_a_gateway_route_sends_the_mesh_address_of_its_gateway_vm(self) -> None:
+	def test_a_gateway_route_accepts_an_arbitrary_mesh_address(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 		virtual_machine.is_network_gateway = 0
-		gateway = frappe._dict(name="VM-00049", tenant_id=0)
 
 		with (
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
-			patch.object(virtual_machine_service_module.frappe.db, "get_value", return_value=gateway),
-			patch.object(
-				virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa:1::49"
-			),
 			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
 		):
 			VirtualMachineService(virtual_machine).set_gateway_routes(
-				[{"destination": "::/0", "gateway": "VM-00049"}]
+				[{"destination": "::/0", "gateway": "fdaa:0001:0000::49"}]
 			)
 
 		self.assertEqual(
@@ -641,21 +636,37 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			[{"destination": "::/0", "gateway": "fdaa:1::49"}],
 		)
 
-	def test_a_route_to_a_vm_that_is_not_a_gateway_is_refused(self) -> None:
+	def test_a_gateway_route_outside_the_mesh_is_refused(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 		virtual_machine.is_network_gateway = 0
 
 		with (
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
-			patch.object(virtual_machine_service_module.frappe.db, "get_value", return_value=None),
 			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
-			self.assertRaisesRegex(AtlasUserError, "not an active network gateway"),
+			self.assertRaisesRegex(AtlasUserError, "fdaa::/16"),
 		):
 			VirtualMachineService(virtual_machine).set_gateway_routes(
-				[{"destination": "::/0", "gateway": "VM-00007"}]
+				[{"destination": "::/0", "gateway": "2001:db8::7"}]
 			)
 
 		client.set_virtual_machine_network.assert_not_called()
+
+	def test_gateway_route_editor_identifies_a_known_gateway_vm(self) -> None:
+		service = VirtualMachineService(Mock())
+		gateway = frappe._dict(name="VM-00049", tenant_id=0)
+		routes = [{"destination": "::/0", "gateway": "fdaa:1::49"}]
+
+		with (
+			patch.object(service, "get_gateway_routes", return_value=routes),
+			patch.object(virtual_machine_service_module.frappe, "get_all", return_value=[gateway]),
+			patch.object(
+				virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa:1::49"
+			),
+		):
+			self.assertEqual(
+				service.get_gateway_route_editor_rows(),
+				[{**routes[0], "gateway_virtual_machine": "VM-00049"}],
+			)
 
 	def test_a_vm_with_a_block_has_no_gateway_routes(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})

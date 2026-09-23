@@ -183,7 +183,7 @@ class VirtualMachine(Document):
 
 	@property
 	def gateway_routes(self) -> str:
-		"""Return the gateway routes that Metal holds, with each gateway as its VM name."""
+		"""Return the gateway routes that Metal holds."""
 		return json.dumps(VirtualMachineService(self).get_gateway_routes(), indent=2)
 
 	@property
@@ -274,11 +274,17 @@ class VirtualMachine(Document):
 
 	@frappe.whitelist(methods=["POST"])
 	def set_gateway_routes(self, routes: list[dict[str, str]] | str | None = None) -> None:
-		"""Replace which gateway VM carries each destination range."""
+		"""Replace the gateway address that carries each destination range."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
 		VirtualMachineService(self).set_gateway_routes(frappe.parse_json(routes) or [])
+
+	@frappe.whitelist(methods=["GET"])
+	def read_gateway_routes(self) -> list[dict[str, str]]:
+		"""Return gateway routes with optional VM ownership hints for the editor."""
+		self.check_permission("read")
+		return VirtualMachineService(self).get_gateway_route_editor_rows()
 
 	@frappe.whitelist(methods=["POST"])
 	def attach_routed_ipv6(self, ipv6_router_server: str) -> str:

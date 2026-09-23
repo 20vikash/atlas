@@ -10,8 +10,8 @@ from frappe.tests import UnitTestCase
 import atlas.service.doctype.ipv6_router_server.ipv6_router_server as router_module
 from atlas.service.doctype.ipv6_router_server.ipv6_router_server import IPv6RouterServer
 
-ROUTER_ROUTE = {"destination": "2000::/3", "gateway": "vm-00001"}
-OTHER_ROUTE = {"destination": "2001:db8:ff::/48", "gateway": "vm-00002"}
+ROUTER_ROUTE = {"destination": "2000::/3", "gateway": "fdaa:1::1"}
+OTHER_ROUTE = {"destination": "2001:db8:ff::/48", "gateway": "fdaa:1::2"}
 
 
 def block(**values) -> SimpleNamespace:
@@ -36,7 +36,12 @@ def ipv4_address(**values) -> SimpleNamespace:
 
 
 def router(**values) -> SimpleNamespace:
-	defaults = {"name": "ipv6-router-001", "status": "Active", "virtual_machine": "vm-00001"}
+	defaults = {
+		"name": "ipv6-router-001",
+		"status": "Active",
+		"virtual_machine": "vm-00001",
+		"wireguard_mesh_ipv6": "fdaa:1::1",
+	}
 	result = SimpleNamespace(**(defaults | values))
 	result.get_public_address = lambda _virtual_machine: "2001:db8::20:5"
 	return result
@@ -87,6 +92,15 @@ class TestIPv4AddressValidation(UnitTestCase):
 
 
 class TestIPv6RouterCreation(UnitTestCase):
+	def test_router_stores_the_mesh_address_of_its_virtual_machine(self) -> None:
+		router_server = SimpleNamespace()
+
+		with patch.object(router_module, "get_virtual_machine_mesh_address", return_value="fdaa:1::1"):
+			IPv6RouterServer._set_virtual_machine(router_server, "vm-00001")
+
+		self.assertEqual(router_server.virtual_machine, "vm-00001")
+		self.assertEqual(router_server.wireguard_mesh_ipv6, "fdaa:1::1")
+
 	def test_the_router_is_committed_before_vm_placement(self) -> None:
 		router_server = MagicMock(name="router_server")
 		router_server.name = "ipv6-router-001"
@@ -166,7 +180,7 @@ class TestFindRouter(UnitTestCase):
 		):
 			self.assertEqual(router_module.find_router([OTHER_ROUTE, ROUTER_ROUTE]), "router-2")
 
-		self.assertEqual(get_value.call_args.args[1]["virtual_machine"], "vm-00001")
+		self.assertEqual(get_value.call_args.args[1]["wireguard_mesh_ipv6"], "fdaa:1::1")
 
 	def test_no_internet_route_means_no_router(self) -> None:
 		self.assertIsNone(router_module.find_router([OTHER_ROUTE]))

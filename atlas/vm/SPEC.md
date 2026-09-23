@@ -257,7 +257,7 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 | Edit Network Throughput | Sends private and public limits in MiB/s. `0` removes a limit. |
 | Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
 | Change Egress Mode | Sends `uplink`, `mesh`, or `none`. |
-| Edit Gateway Routes | Sends each destination range with the mesh address of its gateway VM. The gateway must be an active network gateway VM. |
+| Edit Gateway Routes | Sends each destination range with a gateway address in the Atlas WG Mesh. The editor identifies the gateway VM when Atlas knows the address. |
 | Make Network Gateway | Sets `is_network_gateway`. It needs the privileged flag. |
 | Attach IPv6 Block | Sends `public_ipv6`, then sets the provider attach intent. A VM holds one block. System Manager only. |
 | Detach IPv6 Block | Sends an empty `public_ipv6`, then sets a detach intent. System Manager only. |

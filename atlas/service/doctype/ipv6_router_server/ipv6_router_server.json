@@ -7,6 +7,7 @@
  "field_order": [
   "status",
   "virtual_machine",
+  "wireguard_mesh_ipv6",
   "column_break_status",
   "ipv6_block",
   "installation_task",
@@ -32,6 +33,15 @@
    "label": "Virtual Machine",
    "options": "Virtual Machine",
    "read_only": 1
+  },
+  {
+   "description": "The gateway address that other VMs use to send traffic to this router.",
+   "fieldname": "wireguard_mesh_ipv6",
+   "fieldtype": "Data",
+   "label": "WireGuard Mesh IPv6",
+   "read_only": 1,
+   "set_only_once": 1,
+   "unique": 1
   },
   {
    "fieldname": "column_break_status",

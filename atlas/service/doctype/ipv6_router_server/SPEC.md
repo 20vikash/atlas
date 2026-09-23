@@ -39,7 +39,7 @@ The installer fails when the eBPF program is not attached. A failure sets Failed
 
 The Virtual Machine form has **Attach Routed IPv6** and **Detach Routed IPv6** in Actions.
 
-Attach asks for an Active IPv6 Router Server. It sets the gateway route `2000::/3` to that router VM, replaces an earlier `2000::/3` route, and keeps the other gateway routes. It returns the public address from the block of that router. The Routed IPv6 field shows the address while the route exists. Atlas finds the router from the gateway of the `2000::/3` route.
+Attach asks for an Active IPv6 Router Server. It sets the gateway route `2000::/3` to the WireGuard mesh IPv6 address stored on that router, replaces an earlier `2000::/3` route, and keeps the other gateway routes. It returns the public address from the block of that router. The Routed IPv6 field shows the address while the route exists. Atlas finds the router from the gateway address of the `2000::/3` route.
 
 Attach fails in these conditions:
 

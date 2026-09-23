@@ -44,6 +44,7 @@ class IPv6RouterServer(Document):
 		ipv6_block: DF.Link
 		status: DF.Literal["Pending", "Provisioning", "Active", "Failed", "Archived"]
 		virtual_machine: DF.Link | None
+		wireguard_mesh_ipv6: DF.Data | None
 	# end: auto-generated types
 
 	@property
@@ -124,7 +125,7 @@ class IPv6RouterServer(Document):
 			route for route in service.get_gateway_routes() if route["destination"] != ROUTED_DESTINATION
 		]
 		service.set_gateway_routes(
-			[*routes, {"destination": ROUTED_DESTINATION, "gateway": self.virtual_machine}]
+			[*routes, {"destination": ROUTED_DESTINATION, "gateway": self.wireguard_mesh_ipv6}]
 		)
 		return address
 
@@ -168,13 +169,18 @@ class IPv6RouterServer(Document):
 		}
 		try:
 			result = VirtualMachineService.create(request)
-			self.virtual_machine = result["name"]
+			self._set_virtual_machine(result["name"])
 			return bool(result["is_draft"])
 		except VirtualMachineCreateError as error:
-			self.virtual_machine = error.virtual_machine_name
+			self._set_virtual_machine(error.virtual_machine_name)
 			self.status = "Failed"
 			self.failure_message = f"virtual-machine: {error}"
 			return True
+
+	def _set_virtual_machine(self, name: str) -> None:
+		"""Store the router VM and its stable mesh address."""
+		self.virtual_machine = name
+		self.wireguard_mesh_ipv6 = get_virtual_machine_mesh_address(frappe._dict(name=name, tenant_id=0))
 
 
 @frappe.whitelist(methods=["POST"])
@@ -252,7 +258,7 @@ def find_router(routes: list[dict[str, str]]) -> IPv6RouterServer | None:
 	"""Return the router that carries the Internet range in these gateway routes."""
 	gateway = next((route["gateway"] for route in routes if route["destination"] == ROUTED_DESTINATION), None)
 	name = gateway and frappe.db.get_value(
-		"IPv6 Router Server", {"virtual_machine": gateway, "status": ["!=", "Archived"]}
+		"IPv6 Router Server", {"wireguard_mesh_ipv6": gateway, "status": ["!=", "Archived"]}
 	)
 	return frappe.get_doc("IPv6 Router Server", name) if name else None
 

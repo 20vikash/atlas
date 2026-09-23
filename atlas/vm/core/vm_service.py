@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 
 from atlas.atlas.core.exceptions import AtlasUserError
-from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
+from atlas.atlas.core.mesh_address import MESH_NETWORK, get_virtual_machine_mesh_address
 from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
@@ -364,7 +364,7 @@ class VirtualMachineService:
 		return information
 
 	def set_gateway_routes(self, routes: list[dict[str, str]]) -> dict[str, Any]:
-		"""Send each destination range and the mesh address of its gateway VM to Metal. Metal owns the routes."""
+		"""Validate and send gateway routes to Metal. Metal owns the routes."""
 		if routes and (self.virtual_machine.is_network_gateway or self.get_public_ipv6()):
 			frappe.throw(
 				_("A gateway or a VM with its own IPv6 block reaches every destination through its host."),
@@ -374,25 +374,24 @@ class VirtualMachineService:
 		return self.update_network({"gateway_routes": [self.parse_gateway_route(route) for route in routes]})
 
 	def parse_gateway_route(self, route: dict[str, str]) -> dict[str, str]:
-		"""Return one route for Metal. The gateway must be an active network gateway VM."""
+		"""Return one canonical IPv6 route for Metal."""
 		try:
 			destination = str(ipaddress.IPv6Network(route.get("destination") or ""))
 		except ValueError:
 			frappe.throw(_("Destination must be an IPv6 prefix, such as ::/0."), exc=AtlasUserError)
 
-		gateway = frappe.db.get_value(
-			"Virtual Machine",
-			{"name": route.get("gateway"), "is_network_gateway": 1, "is_terminating": 0, "is_draft": 0},
-			["name", "tenant_id"],
-			as_dict=True,
-		)
-		if not gateway:
+		try:
+			gateway = ipaddress.IPv6Address(route.get("gateway") or "")
+		except ValueError:
 			frappe.throw(
-				_("Gateway {0} is not an active network gateway VM.").format(route.get("gateway")),
-				exc=AtlasUserError,
+				_("Gateway must be an IPv6 address in {0}.").format(MESH_NETWORK), exc=AtlasUserError
+			)
+		if gateway not in MESH_NETWORK:
+			frappe.throw(
+				_("Gateway must be an IPv6 address in {0}.").format(MESH_NETWORK), exc=AtlasUserError
 			)
 
-		return {"destination": destination, "gateway": get_virtual_machine_mesh_address(gateway)}
+		return {"destination": destination, "gateway": str(gateway)}
 
 	def has_gateway_routes(self) -> bool:
 		"""Report whether Metal holds gateway routes for this VM."""
@@ -400,11 +399,16 @@ class VirtualMachineService:
 		return bool(information and information.desired.network.gateway_routes)
 
 	def get_gateway_routes(self) -> list[dict[str, str]]:
-		"""Return the routes that Metal holds, with each gateway as its VM name."""
+		"""Return the gateway routes that Metal holds."""
 		information = self.virtual_machine.get_metal_vm_info()
 		if not information or not information.desired.network.gateway_routes:
 			return []
 
+		return [route.as_dict() for route in information.desired.network.gateway_routes]
+
+	def get_gateway_route_editor_rows(self) -> list[dict[str, str]]:
+		"""Add known gateway VM names for the route editor."""
+		routes = self.get_gateway_routes()
 		gateway_names = {
 			get_virtual_machine_mesh_address(gateway): gateway.name
 			for gateway in frappe.get_all(
@@ -412,8 +416,7 @@ class VirtualMachineService:
 			)
 		}
 		return [
-			{"destination": route.destination, "gateway": gateway_names.get(route.gateway, route.gateway)}
-			for route in information.desired.network.gateway_routes
+			route | {"gateway_virtual_machine": gateway_names.get(route["gateway"], "")} for route in routes
 		]
 
 	def attach_public_ipv6(self, block: MetalServerIPAddress) -> dict[str, Any]:

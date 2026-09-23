@@ -760,9 +760,6 @@ function attachRoutedIPv6(frm) {
 			options: "IPv6 Router Server",
 			reqd: 1,
 			filters: { status: "Active" },
-			description: __(
-				"The router maps an address from its block to this VM. The VM firewall controls inbound traffic."
-			),
 		},
 		({ ipv6_router_server }) =>
 			frm
@@ -833,57 +830,76 @@ function showEditDiskLimitsDialog(frm) {
 }
 
 function showGatewayRoutesDialog(frm) {
-	const dialog = new frappe.ui.Dialog({
-		title: __("Gateway Routes"),
-		size: "large",
-		fields: [
-			{
-				fieldname: "routes",
-				fieldtype: "Table",
-				label: __("Routes"),
-				cannot_add_rows: false,
-				in_place_edit: true,
-				data: JSON.parse(frm.doc.gateway_routes || "[]"),
-				fields: [
-					{
-						fieldname: "destination",
-						fieldtype: "Data",
-						label: __("Destination"),
-						in_list_view: 1,
-						reqd: 1,
-						description: __("::/0 for the internet, or a range such as fdac::/16."),
-					},
-					{
-						fieldname: "gateway",
-						fieldtype: "Link",
-						options: "Virtual Machine",
-						label: __("Gateway"),
-						in_list_view: 1,
-						reqd: 1,
-						get_query: () => ({ filters: { is_network_gateway: 1 } }),
-						description: __("The network gateway VM that carries the range."),
-					},
-				],
+	frm.call({
+		method: "read_gateway_routes",
+		doc: frm.doc,
+		type: "GET",
+		freeze: true,
+		freeze_message: __("Reading gateway routes..."),
+	}).then(({ message: routes }) => {
+		const dialog = new frappe.ui.Dialog({
+			title: __("Gateway Routes"),
+			size: "large",
+			fields: [
+				{
+					fieldname: "routes",
+					fieldtype: "Table",
+					label: __("Routes"),
+					cannot_add_rows: false,
+					in_place_edit: true,
+					data: routes || [],
+					fields: [
+						{
+							fieldname: "destination",
+							fieldtype: "Data",
+							label: __("Destination"),
+							in_list_view: 1,
+							reqd: 1,
+							description: __(
+								"::/0 for the internet, or a range such as fdac::/16."
+							),
+						},
+						{
+							fieldname: "gateway",
+							fieldtype: "Data",
+							label: __("Gateway"),
+							in_list_view: 1,
+							reqd: 1,
+							description: __(
+								"The WireGuard mesh IPv6 address that carries the range."
+							),
+						},
+						{
+							fieldname: "gateway_virtual_machine",
+							fieldtype: "Link",
+							options: "Virtual Machine",
+							label: __("Gateway VM"),
+							in_list_view: 1,
+							read_only: 1,
+							description: __("The known owner of this address, when available."),
+						},
+					],
+				},
+			],
+			primary_action_label: __("Save"),
+			primary_action(values) {
+				const routes = (values.routes || []).map((route) => ({
+					destination: route.destination,
+					gateway: route.gateway,
+				}));
+				frm.call({
+					method: "set_gateway_routes",
+					doc: frm.doc,
+					args: { routes },
+					freeze: true,
+				}).then(() => {
+					dialog.hide();
+					frm.reload_doc();
+				});
 			},
-		],
-		primary_action_label: __("Save"),
-		primary_action(values) {
-			const routes = (values.routes || []).map((route) => ({
-				destination: route.destination,
-				gateway: route.gateway,
-			}));
-			frm.call({
-				method: "set_gateway_routes",
-				doc: frm.doc,
-				args: { routes },
-				freeze: true,
-			}).then(() => {
-				dialog.hide();
-				frm.reload_doc();
-			});
-		},
+		});
+		dialog.show();
 	});
-	dialog.show();
 }
 
 function showNetworkGatewayDialog(frm) {
