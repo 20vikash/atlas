@@ -102,12 +102,12 @@ code_only_modules = {
 after_install = [
 	"atlas.atlas.core.install.complete_setup_wizard",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
-	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+	"atlas.service.core.service_package.publish_service_packages",
 ]
 after_migrate = [
 	"atlas.atlas.core.install.realign_scheduled_job_baselines",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
-	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+	"atlas.service.core.service_package.publish_service_packages",
 ]
 
 # Uninstallation

@@ -22,7 +22,7 @@ from atlas.atlas.core.host_binaries import (
 )
 from atlas.atlas.core.setup import AtlasSetup, AtlasSetupConfiguration
 from atlas.atlas.object_storage import ObjectStorageError
-from atlas.service.core import http_proxy_package
+from atlas.service.core.service_package import SERVICE_PACKAGES
 from atlas.vm.core.image_builder import build_ubuntu_image, publish_ubuntu_image
 
 
@@ -88,10 +88,10 @@ def build_and_publish(context: CliCtxObj, binary: HostBinary) -> None:
 			frappe.destroy()
 
 
-@click.command("build-http-proxy-package")
+@click.command("build-service-packages")
 @pass_context
-def build_http_proxy_package(context: CliCtxObj) -> None:
-	"""Package the HTTP proxy component and link it in Atlas Settings."""
+def build_service_packages(context: CliCtxObj) -> None:
+	"""Package each service component and link it in Atlas Settings."""
 	if not context.sites:
 		raise SiteNotSpecifiedError
 
@@ -100,16 +100,16 @@ def build_http_proxy_package(context: CliCtxObj) -> None:
 			frappe.init(site)
 			frappe.connect()
 
-			archive = http_proxy_package.build_archive()
-			digest = hashlib.sha256(archive).hexdigest()
-			if http_proxy_package.is_published(digest):
-				click.echo(f"{http_proxy_package.PACKAGE_LABEL} is current on {site}")
-				continue
+			for package in SERVICE_PACKAGES:
+				archive = package.build_archive()
+				digest = hashlib.sha256(archive).hexdigest()
+				if package.is_published(digest):
+					click.echo(f"{package.label} is current on {site}")
+					continue
 
-			click.echo(f"Packaging the HTTP proxy for {site}")
-			file_name = http_proxy_package.publish_package(archive, digest)
-			frappe.db.commit()  # nosemgrep
-			click.echo(f"Published {http_proxy_package.PACKAGE_LABEL} as File {file_name} on {site}")
+				file_name = package.publish_archive(archive, digest)
+				frappe.db.commit()  # nosemgrep
+				click.echo(f"Published {package.label} as File {file_name} on {site}")
 		finally:
 			frappe.destroy()
 
@@ -203,4 +203,4 @@ def is_image_available(site: str, title: str, architecture: str) -> bool:
 		frappe.destroy()
 
 
-commands = [configure_atlas, build_metald, build_wg_mesh, build_http_proxy_package, build_ubuntu_base_image]
+commands = [configure_atlas, build_metald, build_wg_mesh, build_service_packages, build_ubuntu_base_image]

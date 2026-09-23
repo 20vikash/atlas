@@ -6,14 +6,15 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
+import frappe
 from frappe.tests import UnitTestCase
 
-from atlas.service.core import http_proxy_package
+from atlas.service.core.service_package import HTTP_PROXY_PACKAGE, ServicePackage
 
 
-class TestHTTPProxyPackage(UnitTestCase):
+class TestServicePackage(UnitTestCase):
 	def build_component(self) -> Path:
 		"""Create a component tree in a repository, with ignored and tracked files."""
 		directory = tempfile.TemporaryDirectory()
@@ -37,7 +38,9 @@ class TestHTTPProxyPackage(UnitTestCase):
 		self.run_git(component, "init", "--quiet")
 		self.run_git(component, "add", ".gitignore", "nginx/setup.sh")
 
-		patched = patch.object(http_proxy_package, "component_path", return_value=component)
+		patched = patch.object(
+			ServicePackage, "component_path", new_callable=PropertyMock, return_value=component
+		)
 		self.addCleanup(patched.stop)
 		patched.start()
 		return component
@@ -46,7 +49,7 @@ class TestHTTPProxyPackage(UnitTestCase):
 		subprocess.run(["git", *arguments], cwd=component, check=True, capture_output=True)
 
 	def archive_members(self) -> list[tarfile.TarInfo]:
-		with tarfile.open(fileobj=io.BytesIO(http_proxy_package.build_archive())) as archive:
+		with tarfile.open(fileobj=io.BytesIO(HTTP_PROXY_PACKAGE.build_archive())) as archive:
 			return sorted(archive.getmembers(), key=lambda member: member.name)
 
 	def archived_names(self) -> list[str]:
@@ -80,6 +83,13 @@ class TestHTTPProxyPackage(UnitTestCase):
 		for member in self.archive_members():
 			self.assertTrue(member.isfile(), member.name)
 
+	def test_a_source_name_with_a_line_break_is_refused(self) -> None:
+		component = self.build_component()
+		(component / "unsafe\nname").write_text("content\n")
+
+		with self.assertRaisesRegex(frappe.ValidationError, "must not contain line breaks"):
+			HTTP_PROXY_PACKAGE.build_archive()
+
 	def test_every_name_stays_below_the_archive_root(self) -> None:
 		self.build_component()
 
@@ -107,20 +117,20 @@ class TestHTTPProxyPackage(UnitTestCase):
 	def test_an_unchanged_tree_gives_the_same_bytes(self) -> None:
 		self.build_component()
 
-		self.assertEqual(http_proxy_package.build_archive(), http_proxy_package.build_archive())
+		self.assertEqual(HTTP_PROXY_PACKAGE.build_archive(), HTTP_PROXY_PACKAGE.build_archive())
 
 	def test_the_digest_follows_a_changed_source_file(self) -> None:
 		component = self.build_component()
-		before = hashlib.sha256(http_proxy_package.build_archive()).hexdigest()
+		before = hashlib.sha256(HTTP_PROXY_PACKAGE.build_archive()).hexdigest()
 
 		(component / "nginx" / "setup.sh").write_text("#!/usr/bin/env bash\necho changed\n")
 
-		self.assertNotEqual(before, hashlib.sha256(http_proxy_package.build_archive()).hexdigest())
+		self.assertNotEqual(before, hashlib.sha256(HTTP_PROXY_PACKAGE.build_archive()).hexdigest())
 
 	def test_the_digest_ignores_an_ignored_file(self) -> None:
 		component = self.build_component()
-		before = hashlib.sha256(http_proxy_package.build_archive()).hexdigest()
+		before = hashlib.sha256(HTTP_PROXY_PACKAGE.build_archive()).hexdigest()
 
 		(component / "proxy.ext4").write_text("a different build output\n")
 
-		self.assertEqual(before, hashlib.sha256(http_proxy_package.build_archive()).hexdigest())
+		self.assertEqual(before, hashlib.sha256(HTTP_PROXY_PACKAGE.build_archive()).hexdigest())
