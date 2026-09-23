@@ -21,8 +21,8 @@ metal_server/                   Provider hosts and Metal Server catalog records
   core/                        Provisioning, host installation, disk inventory, and catalog sync
   doctype/                     Metal Server records and catalog DocTypes
 service/                       Atlas services that run on virtual machines
-  core/                        Cargo and HTTP proxy provisioning and configuration
-  doctype/                     Cargo Server and Proxy Server
+  core/                        Service packages, and Cargo, HTTP proxy, and IPv6 router provisioning
+  doctype/                     Cargo Server, Proxy Server, and IPv6 Router Server
 vm/                            Virtual machine records, images, and orchestration
   core/                        Placement, Metal transport, and image movement
   doctype/                     Virtual Machine and Virtual Machine Image

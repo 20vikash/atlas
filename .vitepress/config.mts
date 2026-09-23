@@ -73,6 +73,7 @@ export default defineConfig({
 				text: 'Services',
 				items: [
 					{ text: 'HTTP proxy', link: '/services/http-proxy/' },
+					{ text: 'IPv6 router', link: '/services/ipv6-router/' },
 					{ text: 'WG Mesh', link: '/services/wg-mesh/' },
 				],
 			},

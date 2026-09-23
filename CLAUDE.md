@@ -18,6 +18,7 @@ Re-read `CLAUDE.md` after context compaction or a resumed session before you con
 - [Atlas app](atlas/SPEC.md)
 - [Metal](metal/SPEC.md)
 - [HTTP proxy](services/http-proxy/SPEC.md)
+- [IPv6 router](services/ipv6-router/SPEC.md)
 - [WG Mesh](services/wg-mesh/SPEC.md)
 
 ## Core principles
