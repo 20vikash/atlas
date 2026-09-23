@@ -502,10 +502,11 @@
         "type": "object"
       },
       "IPAddressResponse": {
-        "description": "A tenant public IPv4 address.",
+        "description": "A tenant public IP address.",
         "examples": [
           {
             "address": "203.0.113.10",
+            "cidr": 32,
             "created_at": 1788834165,
             "id": "203.0.113.10",
             "reserved": true,
@@ -514,6 +515,7 @@
               "pool": "edge"
             },
             "tenant_id": 7,
+            "version": 4,
             "virtual_machine_id": null
           }
         ],
@@ -521,6 +523,10 @@
           "address": {
             "title": "Address",
             "type": "string"
+          },
+          "cidr": {
+            "title": "Cidr",
+            "type": "integer"
           },
           "created_at": {
             "title": "Created At",
@@ -549,6 +555,10 @@
             "title": "Tenant Id",
             "type": "integer"
           },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
           "virtual_machine_id": {
             "anyOf": [
               {
@@ -565,6 +575,8 @@
           "id",
           "tenant_id",
           "address",
+          "version",
+          "cidr",
           "state",
           "reserved",
           "virtual_machine_id",
