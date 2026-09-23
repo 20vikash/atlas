@@ -1,0 +1,181 @@
+{
+ "actions": [],
+ "autoname": "UUID",
+ "creation": "2026-09-24 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "address_section",
+  "status",
+  "prefix",
+  "pool",
+  "address_column",
+  "version",
+  "tenant_id",
+  "is_reserved",
+  "attachment_section",
+  "virtual_machine",
+  "attachment_column",
+  "server",
+  "failure_section",
+  "failure_message",
+  "intent_version",
+  "tags_section",
+  "tags"
+ ],
+ "fields": [
+  {
+   "fieldname": "address_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "prefix",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Prefix",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "pool",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Pool",
+   "options": "Public IP Pool",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "address_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Available",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Available\nReserved\nAttaching\nAttached\nDetaching",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "version",
+   "fieldtype": "Select",
+   "label": "Version",
+   "options": "4\n6",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "default": "-1",
+   "description": "-1 means no tenant owns the allocation.",
+   "fieldname": "tenant_id",
+   "fieldtype": "Int",
+   "label": "Tenant ID",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_reserved",
+   "fieldtype": "Check",
+   "label": "Reserved",
+   "read_only": 1
+  },
+  {
+   "depends_on": "virtual_machine",
+   "fieldname": "attachment_section",
+   "fieldtype": "Section Break",
+   "label": "Attachment"
+  },
+  {
+   "fieldname": "virtual_machine",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Virtual Machine",
+   "options": "Virtual Machine",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "attachment_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "server",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Metal Server",
+   "options": "Metal Server",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "depends_on": "failure_message",
+   "fieldname": "failure_section",
+   "fieldtype": "Section Break",
+   "label": "Failure"
+  },
+  {
+   "fieldname": "failure_message",
+   "fieldtype": "Small Text",
+   "label": "Failure",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "intent_version",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Intent Version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tags_section",
+   "fieldtype": "Section Break",
+   "label": "Tags"
+  },
+  {
+   "fieldname": "tags",
+   "fieldtype": "Table",
+   "label": "Tags",
+   "options": "Atlas Tag"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-24 04:29:46.015008",
+ "modified_by": "Administrator",
+ "module": "Metal Server",
+ "name": "Public IP Allocation",
+ "naming_rule": "UUID",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Atlas Admin",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "search_fields": "prefix",
+ "show_title_field_in_link": 1,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "prefix"
+}
