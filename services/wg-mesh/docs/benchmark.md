@@ -54,6 +54,4 @@ Network time only, in unicast and multicast mode. A test endpoint in a network n
 | VM moved to another host                 | 1.5 ms to 10.5 ms in 15 moves, within one ping    |
 | Public IPv6 block moved to another host  | Traffic returns when the provider attaches the block to the new host |
 
-A full Atlas operation also includes the disk clone, the guest boot, and the provider IP move. On the test hosts, a new VM answered 9.1 s after creation. A migrated VM was away for 5.8 s. A VM with a public IPv6 block was away for 16 s, and 12 s of that was the provider IP move.
-
 The destination host announces a moved VM on the uplink, so peers learn the new host without a NOT_HERE round trip. The old host forwards traffic for a moved block through the mesh until the provider router uses the new host. See the [gateway design](design.md#gateways).

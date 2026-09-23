@@ -423,17 +423,10 @@ class TestServerIPAddress(UnitTestCase):
 
 	def test_a_move_detaches_now_and_attaches_on_the_new_server(self) -> None:
 		provider = Mock()
-		address = SimpleNamespace(
-			provider_resource_id="fip-1",
-			host_address="10.0.0.9",
-			server="node-1",
-			status="Attached",
-			intent_version=4,
-			save=Mock(),
-			queue_reconcile=Mock(),
-		)
+		address = self.moving_address()
 
 		with (
+			patch("frappe.db.get_value", return_value=frappe._dict(status="Attached", server="node-1")),
 			patch("frappe.get_single", return_value=SimpleNamespace(server_provider_controller=provider)),
 			patch("frappe.get_doc", return_value="node-1-document"),
 		):
@@ -445,6 +438,37 @@ class TestServerIPAddress(UnitTestCase):
 			("Attaching", "node-2", None, 5),
 		)
 		address.queue_reconcile.assert_called_once()
+
+	def test_a_move_that_already_happened_does_nothing(self) -> None:
+		provider = Mock()
+		address = self.moving_address()
+
+		for current in (
+			frappe._dict(status="Attached", server="node-2"),
+			frappe._dict(status="Attaching", server="node-2"),
+		):
+			with (
+				patch("frappe.db.get_value", return_value=current),
+				patch("frappe.get_single", return_value=SimpleNamespace(server_provider_controller=provider)),
+			):
+				MetalServerIPAddress.move_to_server(address, "node-2")
+
+		provider.detach_public_ip_address.assert_not_called()
+		address.save.assert_not_called()
+
+	@staticmethod
+	def moving_address() -> SimpleNamespace:
+		return SimpleNamespace(
+			doctype="Metal Server IP Address",
+			name="203.0.113.9",
+			provider_resource_id="fip-1",
+			host_address="10.0.0.9",
+			server="node-1",
+			status="Attached",
+			intent_version=4,
+			save=Mock(),
+			queue_reconcile=Mock(),
+		)
 
 	def test_an_ipv4_block_is_refused(self) -> None:
 		for values in ({"address": "203.0.113.0/24"}, {"address": "203.0.113.0", "cidr": 24}):

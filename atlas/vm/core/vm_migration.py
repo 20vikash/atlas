@@ -371,7 +371,7 @@ class MigrationService:
 		frappe.db.commit()  # nosemgrep
 		self.migration = migration
 
-		# The VM already runs on the destination, so one failed move must not stop the others.
+		# The VM already runs on the destination. The scheduled reconcile retries a failed move.
 		for address in frappe.get_all(
 			"Metal Server IP Address",
 			filters={"virtual_machine": virtual_machine.name, "status": "Attached"},

@@ -166,6 +166,13 @@ class MetalServerIPAddress(Document):
 
 	def move_to_server(self, server: str) -> None:
 		"""Detach from the current server now, then attach to another server for the same VM."""
+		# The lock stops a migration and a retry from both moving it.
+		current = frappe.db.get_value(
+			self.doctype, self.name, ["status", "server"], as_dict=True, for_update=True
+		)
+		if current.status != "Attached" or current.server == server:
+			return
+
 		frappe.get_single("Atlas Settings").server_provider_controller.detach_public_ip_address(
 			self.provider_resource_id, self.host_address, frappe.get_doc("Metal Server", self.server)
 		)
@@ -344,13 +351,36 @@ class MetalServerIPAddress(Document):
 
 
 def enqueue_pending_ip_address_reconcilation() -> None:
-	"""Queue a reconcile job for each pending intent."""
+	"""Queue each pending intent, and retry each failed migration move."""
 	for name in frappe.get_all(
 		"Metal Server IP Address",
 		filters={"status": ["in", ["Attaching", "Detaching"]]},
 		pluck="name",
 	):
 		frappe.get_doc("Metal Server IP Address", name).queue_reconcile()
+
+	# A failed migration move leaves the address on the old server.
+	address = frappe.qb.DocType("Metal Server IP Address")
+	virtual_machine = frappe.qb.DocType("Virtual Machine")
+	stranded = (
+		frappe.qb.from_(address)
+		.join(virtual_machine)
+		.on(address.virtual_machine == virtual_machine.name)
+		.select(address.name, virtual_machine.server)
+		.where(address.status == "Attached")
+		.where(address.server != virtual_machine.server)
+		.run()
+	)
+	for name, server in stranded:
+		frappe.enqueue_doc(
+			"Metal Server IP Address",
+			name,
+			"move_to_server",
+			server=server,
+			queue="default",
+			job_id=f"atlas||ip-address-move||{name}",
+			deduplicate=True,
+		)
 
 
 @frappe.whitelist(methods=["POST"])
