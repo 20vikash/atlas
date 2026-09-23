@@ -146,7 +146,11 @@ is_empty_storage_pool_device() {
 	fi
 
 	[ -b "$STORAGE_POOL_DEVICE" ] || return 1
-	[ "$(lsblk --raw --noheadings --output TYPE "$STORAGE_POOL_DEVICE")" = disk ] || return 1
+	# Scaleway gives a software RAID array, such as /dev/md2.
+	case "$(lsblk --raw --noheadings --output TYPE "$STORAGE_POOL_DEVICE")" in
+	disk | raid*) ;;
+	*) return 1 ;;
+	esac
 	[ "$(lsblk --raw --noheadings --output NAME "$STORAGE_POOL_DEVICE" | wc -l)" -eq 1 ] || return 1
 	[ -z "$(lsblk --raw --noheadings --output FSTYPE,PTTYPE,MOUNTPOINT "$STORAGE_POOL_DEVICE" | tr -d '[:space:]')" ] || return 1
 	[ "$(lsblk --raw --noheadings --output RO "$STORAGE_POOL_DEVICE")" = 0 ] || return 1
