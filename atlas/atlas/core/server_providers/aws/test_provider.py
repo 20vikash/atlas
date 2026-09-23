@@ -988,10 +988,11 @@ class TestAwsIPAddresses(UnitTestCase):
 		}
 		prefixes = AwsIPv6Prefixes(client, SimpleNamespace(subnet_id="subnet-1"))
 
-		reserved = prefixes.reserve({"2600:1f18:0:1::/80"})
+		reserved = prefixes.reserve({"2600:1f18:0:1:1::/80"})
 
-		self.assertEqual(reserved.address, "2600:1f18:0:1:1::/80")
-		self.assertEqual(reserved.provider_resource_id, "2600:1f18:0:1:1::/80")
+		# The first /80 holds the addresses that AWS reserves in every subnet.
+		self.assertEqual(reserved.address, "2600:1f18:0:1:2::/80")
+		self.assertEqual(reserved.provider_resource_id, "2600:1f18:0:1:2::/80")
 
 	def test_an_ipv6_block_is_delegated_to_the_host_interface(self) -> None:
 		client = Mock()

@@ -159,7 +159,11 @@ class AwsIPv6Prefixes:
 
 	def reserve(self, used_prefixes: set[str]) -> ReservedIPAddress:
 		"""Return the first /80 of the subnet that no Atlas record uses."""
-		for prefix in self.subnet_block().subnets(new_prefix=self.PREFIX_LENGTH):
+		block = self.subnet_block()
+		for prefix in block.subnets(new_prefix=self.PREFIX_LENGTH):
+			# AWS reserves the first four and the last address of a subnet, so it refuses the blocks that hold them.
+			if block.network_address in prefix or block.broadcast_address in prefix:
+				continue
 			if str(prefix) not in used_prefixes:
 				return ReservedIPAddress(address=str(prefix), provider_resource_id=str(prefix))
 		raise AwsError("The Atlas subnet has no free IPv6 /80 block")
