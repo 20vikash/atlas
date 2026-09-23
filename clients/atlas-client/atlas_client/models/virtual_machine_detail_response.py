@@ -11,6 +11,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.public_ip_response import PublicIPResponse
   from ..models.virtual_machine_compute import VirtualMachineCompute
   from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags
   from ..models.virtual_machine_disk import VirtualMachineDisk
@@ -42,6 +43,8 @@ class VirtualMachineDetailResponse:
             image_id (str):
             is_privileged (bool):
             network (VirtualMachineNetwork): The addresses and network limits of one virtual machine.
+            public_ipv4 (None | PublicIPResponse):
+            public_ipv6 (None | PublicIPResponse):
             tags (VirtualMachineDetailResponseTags):
             tenant_id (int):
      """
@@ -58,6 +61,8 @@ class VirtualMachineDetailResponse:
     image_id: str
     is_privileged: bool
     network: VirtualMachineNetwork
+    public_ipv4: None | PublicIPResponse
+    public_ipv6: None | PublicIPResponse
     tags: VirtualMachineDetailResponseTags
     tenant_id: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -67,6 +72,7 @@ class VirtualMachineDetailResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         from ..models.virtual_machine_compute import VirtualMachineCompute # noqa: PLC0415
         from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags # noqa: PLC0415
         from ..models.virtual_machine_disk import VirtualMachineDisk # noqa: PLC0415
@@ -98,6 +104,18 @@ class VirtualMachineDetailResponse:
 
         network = self.network.to_dict()
 
+        public_ipv4: dict[str, Any] | None
+        if isinstance(self.public_ipv4, PublicIPResponse):
+            public_ipv4 = self.public_ipv4.to_dict()
+        else:
+            public_ipv4 = self.public_ipv4
+
+        public_ipv6: dict[str, Any] | None
+        if isinstance(self.public_ipv6, PublicIPResponse):
+            public_ipv6 = self.public_ipv6.to_dict()
+        else:
+            public_ipv6 = self.public_ipv6
+
         tags = self.tags.to_dict()
 
         tenant_id = self.tenant_id
@@ -118,6 +136,8 @@ class VirtualMachineDetailResponse:
             "image_id": image_id,
             "is_privileged": is_privileged,
             "network": network,
+            "public_ipv4": public_ipv4,
+            "public_ipv6": public_ipv6,
             "tags": tags,
             "tenant_id": tenant_id,
         })
@@ -128,6 +148,7 @@ class VirtualMachineDetailResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         from ..models.virtual_machine_compute import VirtualMachineCompute # noqa: PLC0415
         from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags # noqa: PLC0415
         from ..models.virtual_machine_disk import VirtualMachineDisk # noqa: PLC0415
@@ -182,6 +203,42 @@ class VirtualMachineDetailResponse:
 
 
 
+        def _parse_public_ipv4(data: object) -> None | PublicIPResponse:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                public_ipv4_type_0 = PublicIPResponse.from_dict(data)
+
+
+
+                return public_ipv4_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicIPResponse, data)
+
+        public_ipv4 = _parse_public_ipv4(d.pop("public_ipv4"))
+
+
+        def _parse_public_ipv6(data: object) -> None | PublicIPResponse:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                public_ipv6_type_0 = PublicIPResponse.from_dict(data)
+
+
+
+                return public_ipv6_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicIPResponse, data)
+
+        public_ipv6 = _parse_public_ipv6(d.pop("public_ipv6"))
+
+
         tags = VirtualMachineDetailResponseTags.from_dict(d.pop("tags"))
 
 
@@ -202,6 +259,8 @@ class VirtualMachineDetailResponse:
             image_id=image_id,
             is_privileged=is_privileged,
             network=network,
+            public_ipv4=public_ipv4,
+            public_ipv6=public_ipv6,
             tags=tags,
             tenant_id=tenant_id,
         )

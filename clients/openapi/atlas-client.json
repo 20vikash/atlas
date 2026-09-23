@@ -187,18 +187,6 @@
             "title": "Image Id",
             "type": "string"
           },
-          "ip_address_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Ip Address Id"
-          },
           "is_privileged": {
             "default": false,
             "title": "Is Privileged",
@@ -226,6 +214,30 @@
             "minimum": 0,
             "title": "Private Network Throughput Mibps",
             "type": "integer"
+          },
+          "public_ipv4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Public Ipv4"
+          },
+          "public_ipv6": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Public Ipv6"
           },
           "public_network_throughput_mibps": {
             "default": 0,
@@ -482,108 +494,6 @@
           }
         },
         "title": "FirewallUpdatePayload",
-        "type": "object"
-      },
-      "IPAddressAssignmentPayload": {
-        "additionalProperties": false,
-        "description": "The public IPv4 address to attach.",
-        "properties": {
-          "ip_address_id": {
-            "description": "A reserved address, or auto to borrow one from the shared pool.",
-            "minLength": 1,
-            "title": "Ip Address Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ip_address_id"
-        ],
-        "title": "IPAddressAssignmentPayload",
-        "type": "object"
-      },
-      "IPAddressResponse": {
-        "description": "A tenant public IP address.",
-        "examples": [
-          {
-            "address": "203.0.113.10",
-            "cidr": 32,
-            "created_at": 1788834165,
-            "id": "203.0.113.10",
-            "reserved": true,
-            "state": "reserved",
-            "tags": {
-              "pool": "edge"
-            },
-            "tenant_id": 7,
-            "version": 4,
-            "virtual_machine_id": null
-          }
-        ],
-        "properties": {
-          "address": {
-            "title": "Address",
-            "type": "string"
-          },
-          "cidr": {
-            "title": "Cidr",
-            "type": "integer"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "integer"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "reserved": {
-            "title": "Reserved",
-            "type": "boolean"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          },
-          "tags": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Tags",
-            "type": "object"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "integer"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          },
-          "virtual_machine_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Virtual Machine Id"
-          }
-        },
-        "required": [
-          "id",
-          "tenant_id",
-          "address",
-          "version",
-          "cidr",
-          "state",
-          "reserved",
-          "virtual_machine_id",
-          "tags",
-          "created_at"
-        ],
-        "title": "IPAddressResponse",
         "type": "object"
       },
       "ImageDownloadResponse": {
@@ -984,45 +894,6 @@
         "title": "OutOfCapacityError",
         "type": "object"
       },
-      "Page[IPAddressResponse]": {
-        "examples": [
-          {
-            "has_more": false,
-            "items": [],
-            "limit": 20,
-            "offset": 0
-          }
-        ],
-        "properties": {
-          "has_more": {
-            "title": "Has More",
-            "type": "boolean"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/IPAddressResponse"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "limit": {
-            "title": "Limit",
-            "type": "integer"
-          },
-          "offset": {
-            "title": "Offset",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "offset",
-          "limit",
-          "has_more"
-        ],
-        "title": "Page[IPAddressResponse]",
-        "type": "object"
-      },
       "Page[ImageResponse]": {
         "examples": [
           {
@@ -1060,6 +931,45 @@
           "has_more"
         ],
         "title": "Page[ImageResponse]",
+        "type": "object"
+      },
+      "Page[PublicIPResponse]": {
+        "examples": [
+          {
+            "has_more": false,
+            "items": [],
+            "limit": 20,
+            "offset": 0
+          }
+        ],
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicIPResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "offset",
+          "limit",
+          "has_more"
+        ],
+        "title": "Page[PublicIPResponse]",
         "type": "object"
       },
       "Page[VirtualMachineListResponse]": {
@@ -1129,11 +1039,86 @@
         "title": "PlacementBusyError",
         "type": "object"
       },
-      "ReserveIPAddressPayload": {
+      "PublicIPAssignmentPayload": {
         "additionalProperties": false,
-        "description": "Optionally reserve an address the tenant already holds.",
+        "description": "The public IP to attach.",
         "properties": {
-          "ip_address_id": {
+          "public_ip": {
+            "description": "A reserved direct public IP, or auto for automatic selection.",
+            "minLength": 1,
+            "title": "Public Ip",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_ip"
+        ],
+        "title": "PublicIPAssignmentPayload",
+        "type": "object"
+      },
+      "PublicIPResponse": {
+        "description": "One tenant public IP.",
+        "examples": [
+          {
+            "created_at": 1788834165,
+            "delivery": "direct",
+            "id": "32eb57bc-9548-4a89-8358-543e26883569",
+            "prefix": "203.0.113.10/32",
+            "reserved": true,
+            "status": "reserved",
+            "tags": {
+              "pool": "edge"
+            },
+            "tenant_id": 7,
+            "version": 4,
+            "virtual_machine_id": null
+          }
+        ],
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "integer"
+          },
+          "delivery": {
+            "enum": [
+              "direct",
+              "routed"
+            ],
+            "title": "Delivery",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "reserved": {
+            "title": "Reserved",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "virtual_machine_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -1142,11 +1127,41 @@
                 "type": "null"
               }
             ],
-            "default": null,
-            "title": "Ip Address Id"
+            "title": "Virtual Machine Id"
           }
         },
-        "title": "ReserveIPAddressPayload",
+        "required": [
+          "id",
+          "tenant_id",
+          "prefix",
+          "version",
+          "status",
+          "reserved",
+          "delivery",
+          "virtual_machine_id",
+          "tags",
+          "created_at"
+        ],
+        "title": "PublicIPResponse",
+        "type": "object"
+      },
+      "ReservePublicIPPayload": {
+        "additionalProperties": false,
+        "description": "Select the IP version of one direct reservation.",
+        "properties": {
+          "version": {
+            "enum": [
+              4,
+              6
+            ],
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ReservePublicIPPayload",
         "type": "object"
       },
       "ResizePayload": {
@@ -1429,6 +1444,26 @@
           "network": {
             "$ref": "#/components/schemas/VirtualMachineNetwork"
           },
+          "public_ipv4": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicIPResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "public_ipv6": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicIPResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tags": {
             "additionalProperties": {
               "type": "string"
@@ -1449,6 +1484,8 @@
           "tags",
           "created_at",
           "is_privileged",
+          "public_ipv4",
+          "public_ipv6",
           "desired_state",
           "current_state",
           "error",
@@ -1591,6 +1628,26 @@
             "title": "Memory Mib",
             "type": "integer"
           },
+          "public_ipv4": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicIPResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "public_ipv6": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicIPResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sleep_after_idle_seconds": {
             "title": "Sleep After Idle Seconds",
             "type": "integer"
@@ -1628,6 +1685,8 @@
           "disk_mib",
           "sleep_after_idle_seconds",
           "is_termination_protected",
+          "public_ipv4",
+          "public_ipv6",
           "tags",
           "created_at",
           "last_known_state",
@@ -1759,6 +1818,26 @@
             "title": "Memory Mib",
             "type": "integer"
           },
+          "public_ipv4": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicIPResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "public_ipv6": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicIPResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sleep_after_idle_seconds": {
             "title": "Sleep After Idle Seconds",
             "type": "integer"
@@ -1785,6 +1864,8 @@
           "disk_mib",
           "sleep_after_idle_seconds",
           "is_termination_protected",
+          "public_ipv4",
+          "public_ipv6",
           "tags",
           "created_at"
         ],
@@ -2152,10 +2233,32 @@
         ]
       }
     },
-    "/api/atlas/ip-addresses": {
+    "/api/atlas/jwks.json": {
       "get": {
-        "description": "Returns one page of IP addresses reserved by the tenant in newest-first order.",
-        "operationId": "list_ip_addresses",
+        "operationId": "get_jwks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JSONWebKeySetResponse"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "security": [],
+        "summary": "JSON Web Key Set (JWKS)",
+        "tags": [
+          "Atlas"
+        ]
+      }
+    },
+    "/api/atlas/public-ips": {
+      "get": {
+        "description": "Returns the tenant's reserved and attached public IPs in newest-first order.",
+        "operationId": "list_public_ips",
         "parameters": [
           {
             "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
@@ -2215,21 +2318,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page[IPAddressResponse]"
+                  "$ref": "#/components/schemas/Page[PublicIPResponse]"
                 }
               }
             },
             "description": "OK"
           }
         },
-        "summary": "List IP addresses",
+        "summary": "List public IPs",
         "tags": [
-          "IP Addresses"
+          "Public IP"
         ]
       },
       "post": {
-        "description": "Reserves a shared-pool address, or keeps an address the tenant already holds by naming its ip_address_id.",
-        "operationId": "reserve_ip_address",
+        "description": "Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.",
+        "operationId": "reserve_public_ip",
         "parameters": [
           {
             "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
@@ -2247,54 +2350,44 @@
           "content": {
             "application/json": {
               "example": {
-                "ip_address_id": "203.0.113.10"
+                "version": 6
               },
               "schema": {
-                "$ref": "#/components/schemas/ReserveIPAddressPayload"
+                "$ref": "#/components/schemas/ReservePublicIPPayload"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IPAddressResponse"
-                }
-              }
-            },
-            "description": "The held address stays with the tenant."
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IPAddressResponse"
+                  "$ref": "#/components/schemas/PublicIPResponse"
                 }
               }
             },
-            "description": "The address is reserved for the tenant."
+            "description": "A direct public IP is reserved."
           },
           "409": {
-            "description": "The pool is empty or the address is detaching."
+            "description": "No compatible direct pool has capacity."
           }
         },
-        "summary": "Reserve IP address",
+        "summary": "Reserve new public IP",
         "tags": [
-          "IP Addresses"
+          "Public IP"
         ]
       }
     },
-    "/api/atlas/ip-addresses/{ip_address_id}": {
+    "/api/atlas/public-ips/{public_ip_id}": {
       "delete": {
-        "description": "Returns an unattached address to the shared pool and keeps its provider reservation. An attached or detaching address cannot be released.",
-        "operationId": "release_ip_address",
+        "description": "Returns one detached direct public IP to its pool.",
+        "operationId": "release_public_ip",
         "parameters": [
           {
             "in": "path",
-            "name": "ip_address_id",
+            "name": "public_ip_id",
             "required": true,
             "schema": {
               "type": "string"
@@ -2314,24 +2407,24 @@
         ],
         "responses": {
           "204": {
-            "description": "The address is back in the shared pool."
+            "description": "The detached public IP reservation is released."
           },
           "409": {
-            "description": "The address is attached or detaching."
+            "description": "The public IP is attached or has an active intent."
           }
         },
-        "summary": "Release IP address",
+        "summary": "Release public IP",
         "tags": [
-          "IP Addresses"
+          "Public IP"
         ]
       },
       "get": {
-        "description": "Returns one tenant IP address with its attachment state and VM assignment.",
-        "operationId": "get_ip_address",
+        "description": "Returns one public IP that belongs to the request tenant.",
+        "operationId": "get_public_ip",
         "parameters": [
           {
             "in": "path",
-            "name": "ip_address_id",
+            "name": "public_ip_id",
             "required": true,
             "schema": {
               "type": "string"
@@ -2354,38 +2447,62 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IPAddressResponse"
+                  "$ref": "#/components/schemas/PublicIPResponse"
                 }
               }
             },
             "description": "OK"
           }
         },
-        "summary": "Get IP address",
+        "summary": "Get public IP",
         "tags": [
-          "IP Addresses"
+          "Public IP"
         ]
       }
     },
-    "/api/atlas/jwks.json": {
-      "get": {
-        "operationId": "get_jwks",
+    "/api/atlas/public-ips/{public_ip_id}/reserve": {
+      "put": {
+        "description": "Keeps a direct public IP after its next detach.",
+        "operationId": "reserve_attached_public_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_ip_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JSONWebKeySetResponse"
+                  "$ref": "#/components/schemas/PublicIPResponse"
                 }
               }
             },
-            "description": "OK"
+            "description": "The direct public IP stays with the tenant after detach."
+          },
+          "400": {
+            "description": "A routed IPv6 address cannot be reserved."
           }
         },
-        "security": [],
-        "summary": "JSON Web Key Set (JWKS)",
+        "summary": "Reserve attached public IP",
         "tags": [
-          "Atlas"
+          "Public IP"
         ]
       }
     },
@@ -2501,7 +2618,7 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -2509,7 +2626,7 @@
                 }
               }
             },
-            "description": "The virtual machine request is stored."
+            "description": "The virtual machine and its public IP intents are stored."
           },
           "503": {
             "content": {
@@ -3086,106 +3203,6 @@
         ]
       }
     },
-    "/api/atlas/virtual-machines/{virtual_machine_id}/ip-address": {
-      "delete": {
-        "description": "Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared pool.",
-        "operationId": "detach_virtual_machine_ip_address",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "virtual_machine_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
-            "in": "header",
-            "name": "X-Tenant-ID",
-            "required": true,
-            "schema": {
-              "maximum": 4294967295,
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VirtualMachineResponse"
-                }
-              }
-            },
-            "description": "The change is accepted. Poll the virtual machine route."
-          }
-        },
-        "summary": "Detach IP address",
-        "tags": [
-          "VM Configuration"
-        ]
-      },
-      "put": {
-        "description": "Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which returns it on detach. Detach the current address first.",
-        "operationId": "attach_virtual_machine_ip_address",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "virtual_machine_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
-            "in": "header",
-            "name": "X-Tenant-ID",
-            "required": true,
-            "schema": {
-              "maximum": 4294967295,
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "example": {
-                "ip_address_id": "203.0.113.10"
-              },
-              "schema": {
-                "$ref": "#/components/schemas/IPAddressAssignmentPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VirtualMachineResponse"
-                }
-              }
-            },
-            "description": "The change is accepted. Poll the virtual machine route."
-          },
-          "409": {
-            "description": "A different address is attached, or the shared pool is empty."
-          }
-        },
-        "summary": "Attach IP address",
-        "tags": [
-          "VM Configuration"
-        ]
-      }
-    },
     "/api/atlas/virtual-machines/{virtual_machine_id}/metadata": {
       "put": {
         "description": "Replaces the complete custom metadata map. Entries that are not in the request are removed.",
@@ -3306,6 +3323,203 @@
           }
         },
         "summary": "Update network",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/public-ipv4": {
+      "delete": {
+        "description": "Detaches the public IPv4 allocation. A reserved allocation stays with the tenant.",
+        "operationId": "detach_virtual_machine_public_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Detach public IPv4",
+        "tags": [
+          "VM Configuration"
+        ]
+      },
+      "put": {
+        "description": "Attaches an automatic allocation or one direct allocation that the tenant reserved.",
+        "operationId": "attach_virtual_machine_public_ipv4",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "public_ip": "auto"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/PublicIPAssignmentPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "409": {
+            "description": "A different address is attached, or the shared pool is empty."
+          }
+        },
+        "summary": "Attach public IPv4",
+        "tags": [
+          "VM Configuration"
+        ]
+      }
+    },
+    "/api/atlas/virtual-machines/{virtual_machine_id}/public-ipv6": {
+      "delete": {
+        "description": "Detaches direct or routed IPv6. A new routed attach can use a different address.",
+        "operationId": "detach_virtual_machine_public_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Detach public IPv6",
+        "tags": [
+          "VM Configuration"
+        ]
+      },
+      "put": {
+        "description": "Attaches automatic direct or routed IPv6, or one direct allocation that the tenant reserved.",
+        "operationId": "attach_virtual_machine_public_ipv6",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "virtual_machine_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant that owns the resource, from 0 through 4294967295. A regional token must send the tenant of its own claim, and a Central token (tenant=*) names the tenant it acts for.",
+            "in": "header",
+            "name": "X-Tenant-ID",
+            "required": true,
+            "schema": {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "public_ip": "auto"
+              },
+              "schema": {
+                "$ref": "#/components/schemas/PublicIPAssignmentPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VirtualMachineResponse"
+                }
+              }
+            },
+            "description": "The change is accepted. Poll the virtual machine route."
+          }
+        },
+        "summary": "Attach public IPv6",
         "tags": [
           "VM Configuration"
         ]
@@ -3504,8 +3718,8 @@
       "parent": "Virtual Machines"
     },
     {
-      "description": "Reserve and release public IPv4 addresses for one tenant.",
-      "name": "IP Addresses"
+      "description": "Reserve, inspect, and release public IPs for one tenant.",
+      "name": "Public IP"
     },
     {
       "description": "Read and delete tenant virtual machine images.",

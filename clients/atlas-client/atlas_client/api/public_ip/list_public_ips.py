@@ -8,7 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.page_ip_address_response import PageIPAddressResponse
+from ...models.page_public_ip_response import PagePublicIPResponse
 from ...types import UNSET, Unset
 from typing import cast
 
@@ -49,7 +49,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/atlas/ip-addresses",
+        "url": "/api/atlas/public-ips",
         "params": params,
     }
 
@@ -59,9 +59,9 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PageIPAddressResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PagePublicIPResponse | None:
     if response.status_code == 200:
-        response_200 = PageIPAddressResponse.from_dict(response.json())
+        response_200 = PagePublicIPResponse.from_dict(response.json())
 
 
 
@@ -73,7 +73,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PageIPAddressResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PagePublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -90,10 +90,10 @@ def sync_detailed(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PageIPAddressResponse]:
-    """ List IP addresses
+) -> Response[PagePublicIPResponse]:
+    """ List public IPs
 
-     Returns one page of IP addresses reserved by the tenant in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -107,7 +107,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageIPAddressResponse]
+        Response[PagePublicIPResponse]
      """
 
 
@@ -133,10 +133,10 @@ def sync(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PageIPAddressResponse | None:
-    """ List IP addresses
+) -> PagePublicIPResponse | None:
+    """ List public IPs
 
-     Returns one page of IP addresses reserved by the tenant in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -150,7 +150,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageIPAddressResponse
+        PagePublicIPResponse
      """
 
 
@@ -171,10 +171,10 @@ async def asyncio_detailed(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PageIPAddressResponse]:
-    """ List IP addresses
+) -> Response[PagePublicIPResponse]:
+    """ List public IPs
 
-     Returns one page of IP addresses reserved by the tenant in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -188,7 +188,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageIPAddressResponse]
+        Response[PagePublicIPResponse]
      """
 
 
@@ -214,10 +214,10 @@ async def asyncio(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PageIPAddressResponse | None:
-    """ List IP addresses
+) -> PagePublicIPResponse | None:
+    """ List public IPs
 
-     Returns one page of IP addresses reserved by the tenant in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
         offset (int | Unset):  Default: 0.
@@ -231,7 +231,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageIPAddressResponse
+        PagePublicIPResponse
      """
 
 

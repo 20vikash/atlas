@@ -8,13 +8,13 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.ip_address_response import IPAddressResponse
+from ...models.public_ip_response import PublicIPResponse
 from typing import cast
 
 
 
 def _get_kwargs(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     x_tenant_id: int,
 
@@ -31,7 +31,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/atlas/ip-addresses/{ip_address_id}".format(ip_address_id=quote(str(ip_address_id), safe=""),),
+        "url": "/api/atlas/public-ips/{public_ip_id}".format(public_ip_id=quote(str(public_ip_id), safe=""),),
     }
 
 
@@ -40,9 +40,9 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> IPAddressResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PublicIPResponse | None:
     if response.status_code == 200:
-        response_200 = IPAddressResponse.from_dict(response.json())
+        response_200 = PublicIPResponse.from_dict(response.json())
 
 
 
@@ -54,7 +54,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[IPAddressResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -64,18 +64,18 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Response[IPAddressResponse]:
-    """ Get IP address
+) -> Response[PublicIPResponse]:
+    """ Get public IP
 
-     Returns one tenant IP address with its attachment state and VM assignment.
+     Returns one public IP that belongs to the request tenant.
 
     Args:
-        ip_address_id (str):
+        public_ip_id (str):
         x_tenant_id (int):
 
     Raises:
@@ -83,12 +83,12 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[IPAddressResponse]
+        Response[PublicIPResponse]
      """
 
 
     kwargs = _get_kwargs(
-        ip_address_id=ip_address_id,
+        public_ip_id=public_ip_id,
 x_tenant_id=x_tenant_id,
 
     )
@@ -100,18 +100,18 @@ x_tenant_id=x_tenant_id,
     return _build_response(client=client, response=response)
 
 def sync(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> IPAddressResponse | None:
-    """ Get IP address
+) -> PublicIPResponse | None:
+    """ Get public IP
 
-     Returns one tenant IP address with its attachment state and VM assignment.
+     Returns one public IP that belongs to the request tenant.
 
     Args:
-        ip_address_id (str):
+        public_ip_id (str):
         x_tenant_id (int):
 
     Raises:
@@ -119,30 +119,30 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        IPAddressResponse
+        PublicIPResponse
      """
 
 
     return sync_detailed(
-        ip_address_id=ip_address_id,
+        public_ip_id=public_ip_id,
 client=client,
 x_tenant_id=x_tenant_id,
 
     ).parsed
 
 async def asyncio_detailed(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Response[IPAddressResponse]:
-    """ Get IP address
+) -> Response[PublicIPResponse]:
+    """ Get public IP
 
-     Returns one tenant IP address with its attachment state and VM assignment.
+     Returns one public IP that belongs to the request tenant.
 
     Args:
-        ip_address_id (str):
+        public_ip_id (str):
         x_tenant_id (int):
 
     Raises:
@@ -150,12 +150,12 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[IPAddressResponse]
+        Response[PublicIPResponse]
      """
 
 
     kwargs = _get_kwargs(
-        ip_address_id=ip_address_id,
+        public_ip_id=public_ip_id,
 x_tenant_id=x_tenant_id,
 
     )
@@ -167,18 +167,18 @@ x_tenant_id=x_tenant_id,
     return _build_response(client=client, response=response)
 
 async def asyncio(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> IPAddressResponse | None:
-    """ Get IP address
+) -> PublicIPResponse | None:
+    """ Get public IP
 
-     Returns one tenant IP address with its attachment state and VM assignment.
+     Returns one public IP that belongs to the request tenant.
 
     Args:
-        ip_address_id (str):
+        public_ip_id (str):
         x_tenant_id (int):
 
     Raises:
@@ -186,12 +186,12 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        IPAddressResponse
+        PublicIPResponse
      """
 
 
     return (await asyncio_detailed(
-        ip_address_id=ip_address_id,
+        public_ip_id=public_ip_id,
 client=client,
 x_tenant_id=x_tenant_id,
 

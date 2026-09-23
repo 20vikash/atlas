@@ -11,28 +11,28 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.ip_address_response import IPAddressResponse
+  from ..models.public_ip_response import PublicIPResponse
 
 
 
 
 
-T = TypeVar("T", bound="PageIPAddressResponse")
+T = TypeVar("T", bound="PagePublicIPResponse")
 
 
 
 @_attrs_define
-class PageIPAddressResponse:
+class PagePublicIPResponse:
     """ 
         Attributes:
             has_more (bool):
-            items (list[IPAddressResponse]):
+            items (list[PublicIPResponse]):
             limit (int):
             offset (int):
      """
 
     has_more: bool
-    items: list[IPAddressResponse]
+    items: list[PublicIPResponse]
     limit: int
     offset: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -42,7 +42,7 @@ class PageIPAddressResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.ip_address_response import IPAddressResponse # noqa: PLC0415
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         has_more = self.has_more
 
         items = []
@@ -72,14 +72,14 @@ class PageIPAddressResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.ip_address_response import IPAddressResponse # noqa: PLC0415
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         d = dict(src_dict)
         has_more = d.pop("has_more")
 
         items = []
         _items = d.pop("items")
         for items_item_data in (_items):
-            items_item = IPAddressResponse.from_dict(items_item_data)
+            items_item = PublicIPResponse.from_dict(items_item_data)
 
 
 
@@ -90,7 +90,7 @@ class PageIPAddressResponse:
 
         offset = d.pop("offset")
 
-        page_ip_address_response = cls(
+        page_public_ip_response = cls(
             has_more=has_more,
             items=items,
             limit=limit,
@@ -98,8 +98,8 @@ class PageIPAddressResponse:
         )
 
 
-        page_ip_address_response.additional_properties = d
-        return page_ip_address_response
+        page_public_ip_response.additional_properties = d
+        return page_public_ip_response
 
     @property
     def additional_keys(self) -> list[str]:

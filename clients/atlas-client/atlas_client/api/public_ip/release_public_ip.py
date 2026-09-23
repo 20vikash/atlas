@@ -12,7 +12,7 @@ from ... import errors
 
 
 def _get_kwargs(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     x_tenant_id: int,
 
@@ -29,7 +29,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "delete",
-        "url": "/api/atlas/ip-addresses/{ip_address_id}".format(ip_address_id=quote(str(ip_address_id), safe=""),),
+        "url": "/api/atlas/public-ips/{public_ip_id}".format(public_ip_id=quote(str(public_ip_id), safe=""),),
     }
 
 
@@ -61,19 +61,18 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
 ) -> Response[Any]:
-    """ Release IP address
+    """ Release public IP
 
-     Returns an unattached address to the shared pool and keeps its provider reservation. An attached or
-    detaching address cannot be released.
+     Returns one detached direct public IP to its pool.
 
     Args:
-        ip_address_id (str):
+        public_ip_id (str):
         x_tenant_id (int):
 
     Raises:
@@ -86,7 +85,7 @@ def sync_detailed(
 
 
     kwargs = _get_kwargs(
-        ip_address_id=ip_address_id,
+        public_ip_id=public_ip_id,
 x_tenant_id=x_tenant_id,
 
     )
@@ -99,19 +98,18 @@ x_tenant_id=x_tenant_id,
 
 
 async def asyncio_detailed(
-    ip_address_id: str,
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
 ) -> Response[Any]:
-    """ Release IP address
+    """ Release public IP
 
-     Returns an unattached address to the shared pool and keeps its provider reservation. An attached or
-    detaching address cannot be released.
+     Returns one detached direct public IP to its pool.
 
     Args:
-        ip_address_id (str):
+        public_ip_id (str):
         x_tenant_id (int):
 
     Raises:
@@ -124,7 +122,7 @@ async def asyncio_detailed(
 
 
     kwargs = _get_kwargs(
-        ip_address_id=ip_address_id,
+        public_ip_id=public_ip_id,
 x_tenant_id=x_tenant_id,
 
     )

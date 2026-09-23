@@ -46,12 +46,12 @@ def _get_kwargs(
 
 
 def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
-    if response.status_code == 201:
-        response_201 = VirtualMachineResponse.from_dict(response.json())
+    if response.status_code == 202:
+        response_202 = VirtualMachineResponse.from_dict(response.json())
 
 
 
-        return response_201
+        return response_202
 
     if response.status_code == 503:
         response_503 = CapacityUnavailableResponse.from_dict(response.json())

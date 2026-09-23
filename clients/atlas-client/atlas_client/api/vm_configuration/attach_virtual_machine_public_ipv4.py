@@ -8,7 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.ip_address_assignment_payload import IPAddressAssignmentPayload
+from ...models.public_ip_assignment_payload import PublicIPAssignmentPayload
 from ...models.virtual_machine_response import VirtualMachineResponse
 from typing import cast
 
@@ -17,7 +17,7 @@ from typing import cast
 def _get_kwargs(
     virtual_machine_id: str,
     *,
-    body: IPAddressAssignmentPayload,
+    body: PublicIPAssignmentPayload,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -33,7 +33,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "put",
-        "url": "/api/atlas/virtual-machines/{virtual_machine_id}/ip-address".format(virtual_machine_id=quote(str(virtual_machine_id), safe=""),),
+        "url": "/api/atlas/virtual-machines/{virtual_machine_id}/public-ipv4".format(virtual_machine_id=quote(str(virtual_machine_id), safe=""),),
     }
 
     _kwargs["json"] = body.to_dict()
@@ -76,19 +76,18 @@ def sync_detailed(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: IPAddressAssignmentPayload,
+    body: PublicIPAssignmentPayload,
     x_tenant_id: int,
 
 ) -> Response[Any | VirtualMachineResponse]:
-    """ Attach IP address
+    """ Attach public IPv4
 
-     Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which
-    returns it on detach. Detach the current address first.
+     Attaches an automatic allocation or one direct allocation that the tenant reserved.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (IPAddressAssignmentPayload): The public IPv4 address to attach.
+        body (PublicIPAssignmentPayload): The public IP to attach.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -116,19 +115,18 @@ def sync(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: IPAddressAssignmentPayload,
+    body: PublicIPAssignmentPayload,
     x_tenant_id: int,
 
 ) -> Any | VirtualMachineResponse | None:
-    """ Attach IP address
+    """ Attach public IPv4
 
-     Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which
-    returns it on detach. Detach the current address first.
+     Attaches an automatic allocation or one direct allocation that the tenant reserved.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (IPAddressAssignmentPayload): The public IPv4 address to attach.
+        body (PublicIPAssignmentPayload): The public IP to attach.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -151,19 +149,18 @@ async def asyncio_detailed(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: IPAddressAssignmentPayload,
+    body: PublicIPAssignmentPayload,
     x_tenant_id: int,
 
 ) -> Response[Any | VirtualMachineResponse]:
-    """ Attach IP address
+    """ Attach public IPv4
 
-     Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which
-    returns it on detach. Detach the current address first.
+     Attaches an automatic allocation or one direct allocation that the tenant reserved.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (IPAddressAssignmentPayload): The public IPv4 address to attach.
+        body (PublicIPAssignmentPayload): The public IP to attach.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -191,19 +188,18 @@ async def asyncio(
     virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: IPAddressAssignmentPayload,
+    body: PublicIPAssignmentPayload,
     x_tenant_id: int,
 
 ) -> Any | VirtualMachineResponse | None:
-    """ Attach IP address
+    """ Attach public IPv4
 
-     Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which
-    returns it on detach. Detach the current address first.
+     Attaches an automatic allocation or one direct allocation that the tenant reserved.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (IPAddressAssignmentPayload): The public IPv4 address to attach.
+        body (PublicIPAssignmentPayload): The public IP to attach.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

@@ -23,9 +23,6 @@ from .image_download_response import ImageDownloadResponse
 from .image_download_response_artifact import ImageDownloadResponseArtifact
 from .image_response import ImageResponse
 from .image_response_tags import ImageResponseTags
-from .ip_address_assignment_payload import IPAddressAssignmentPayload
-from .ip_address_response import IPAddressResponse
-from .ip_address_response_tags import IPAddressResponseTags
 from .json_web_key import JSONWebKey
 from .json_web_key_set_response import JSONWebKeySetResponse
 from .list_images_image_type_type_0 import ListImagesImageTypeType0
@@ -36,10 +33,15 @@ from .network_update_payload import NetworkUpdatePayload
 from .network_update_payload_egress_type_0 import NetworkUpdatePayloadEgressType0
 from .out_of_capacity_error import OutOfCapacityError
 from .page_image_response import PageImageResponse
-from .page_ip_address_response import PageIPAddressResponse
+from .page_public_ip_response import PagePublicIPResponse
 from .page_virtual_machine_list_response import PageVirtualMachineListResponse
 from .placement_busy_error import PlacementBusyError
-from .reserve_ip_address_payload import ReserveIPAddressPayload
+from .public_ip_assignment_payload import PublicIPAssignmentPayload
+from .public_ip_response import PublicIPResponse
+from .public_ip_response_delivery import PublicIPResponseDelivery
+from .public_ip_response_tags import PublicIPResponseTags
+from .reserve_public_ip_payload import ReservePublicIPPayload
+from .reserve_public_ip_payload_version import ReservePublicIPPayloadVersion
 from .resize_payload import ResizePayload
 from .snapshot_payload import SnapshotPayload
 from .snapshot_payload_image_type import SnapshotPayloadImageType
@@ -83,9 +85,6 @@ __all__ = (
     "ImageDownloadResponseArtifact",
     "ImageResponse",
     "ImageResponseTags",
-    "IPAddressAssignmentPayload",
-    "IPAddressResponse",
-    "IPAddressResponseTags",
     "JSONWebKey",
     "JSONWebKeySetResponse",
     "ListImagesImageTypeType0",
@@ -96,10 +95,15 @@ __all__ = (
     "NetworkUpdatePayloadEgressType0",
     "OutOfCapacityError",
     "PageImageResponse",
-    "PageIPAddressResponse",
+    "PagePublicIPResponse",
     "PageVirtualMachineListResponse",
     "PlacementBusyError",
-    "ReserveIPAddressPayload",
+    "PublicIPAssignmentPayload",
+    "PublicIPResponse",
+    "PublicIPResponseDelivery",
+    "PublicIPResponseTags",
+    "ReservePublicIPPayload",
+    "ReservePublicIPPayloadVersion",
     "ResizePayload",
     "SnapshotPayload",
     "SnapshotPayloadImageType",

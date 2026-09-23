@@ -8,14 +8,15 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.virtual_machine_response import VirtualMachineResponse
+from ...models.public_ip_response import PublicIPResponse
+from ...models.reserve_public_ip_payload import ReservePublicIPPayload
 from typing import cast
 
 
 
 def _get_kwargs(
-    virtual_machine_id: str,
     *,
+    body: ReservePublicIPPayload,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -30,23 +31,30 @@ def _get_kwargs(
     
 
     _kwargs: dict[str, Any] = {
-        "method": "delete",
-        "url": "/api/atlas/virtual-machines/{virtual_machine_id}/ip-address".format(virtual_machine_id=quote(str(virtual_machine_id), safe=""),),
+        "method": "post",
+        "url": "/api/atlas/public-ips",
     }
 
+    _kwargs["json"] = body.to_dict()
+
+    headers["Content-Type"] = "application/json"
 
     _kwargs["headers"] = headers
     return _kwargs
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> VirtualMachineResponse | None:
-    if response.status_code == 202:
-        response_202 = VirtualMachineResponse.from_dict(response.json())
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PublicIPResponse | None:
+    if response.status_code == 201:
+        response_201 = PublicIPResponse.from_dict(response.json())
 
 
 
-        return response_202
+        return response_201
+
+    if response.status_code == 409:
+        response_409 = cast(Any, None)
+        return response_409
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -54,7 +62,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -64,32 +72,31 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
-    virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> Response[VirtualMachineResponse]:
-    """ Detach IP address
+) -> Response[Any | PublicIPResponse]:
+    """ Reserve new public IP
 
-     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
-    pool.
+     Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
 
     Args:
-        virtual_machine_id (str):
         x_tenant_id (int):
+        body (ReservePublicIPPayload): Select the IP version of one direct reservation.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[VirtualMachineResponse]
+        Response[Any | PublicIPResponse]
      """
 
 
     kwargs = _get_kwargs(
-        virtual_machine_id=virtual_machine_id,
+        body=body,
 x_tenant_id=x_tenant_id,
 
     )
@@ -101,64 +108,62 @@ x_tenant_id=x_tenant_id,
     return _build_response(client=client, response=response)
 
 def sync(
-    virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> VirtualMachineResponse | None:
-    """ Detach IP address
+) -> Any | PublicIPResponse | None:
+    """ Reserve new public IP
 
-     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
-    pool.
+     Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
 
     Args:
-        virtual_machine_id (str):
         x_tenant_id (int):
+        body (ReservePublicIPPayload): Select the IP version of one direct reservation.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        VirtualMachineResponse
+        Any | PublicIPResponse
      """
 
 
     return sync_detailed(
-        virtual_machine_id=virtual_machine_id,
-client=client,
+        client=client,
+body=body,
 x_tenant_id=x_tenant_id,
 
     ).parsed
 
 async def asyncio_detailed(
-    virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> Response[VirtualMachineResponse]:
-    """ Detach IP address
+) -> Response[Any | PublicIPResponse]:
+    """ Reserve new public IP
 
-     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
-    pool.
+     Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
 
     Args:
-        virtual_machine_id (str):
         x_tenant_id (int):
+        body (ReservePublicIPPayload): Select the IP version of one direct reservation.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[VirtualMachineResponse]
+        Response[Any | PublicIPResponse]
      """
 
 
     kwargs = _get_kwargs(
-        virtual_machine_id=virtual_machine_id,
+        body=body,
 x_tenant_id=x_tenant_id,
 
     )
@@ -170,33 +175,32 @@ x_tenant_id=x_tenant_id,
     return _build_response(client=client, response=response)
 
 async def asyncio(
-    virtual_machine_id: str,
     *,
     client: AuthenticatedClient | Client,
+    body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> VirtualMachineResponse | None:
-    """ Detach IP address
+) -> Any | PublicIPResponse | None:
+    """ Reserve new public IP
 
-     Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared
-    pool.
+     Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
 
     Args:
-        virtual_machine_id (str):
         x_tenant_id (int):
+        body (ReservePublicIPPayload): Select the IP version of one direct reservation.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        VirtualMachineResponse
+        Any | PublicIPResponse
      """
 
 
     return (await asyncio_detailed(
-        virtual_machine_id=virtual_machine_id,
-client=client,
+        client=client,
+body=body,
 x_tenant_id=x_tenant_id,
 
     )).parsed

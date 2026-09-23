@@ -8,15 +8,14 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.ip_address_response import IPAddressResponse
-from ...models.reserve_ip_address_payload import ReserveIPAddressPayload
+from ...models.public_ip_response import PublicIPResponse
 from typing import cast
 
 
 
 def _get_kwargs(
+    public_ip_id: str,
     *,
-    body: ReserveIPAddressPayload,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -31,37 +30,27 @@ def _get_kwargs(
     
 
     _kwargs: dict[str, Any] = {
-        "method": "post",
-        "url": "/api/atlas/ip-addresses",
+        "method": "put",
+        "url": "/api/atlas/public-ips/{public_ip_id}/reserve".format(public_ip_id=quote(str(public_ip_id), safe=""),),
     }
 
-    _kwargs["json"] = body.to_dict()
-
-    headers["Content-Type"] = "application/json"
 
     _kwargs["headers"] = headers
     return _kwargs
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | IPAddressResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PublicIPResponse | None:
     if response.status_code == 200:
-        response_200 = IPAddressResponse.from_dict(response.json())
+        response_200 = PublicIPResponse.from_dict(response.json())
 
 
 
         return response_200
 
-    if response.status_code == 201:
-        response_201 = IPAddressResponse.from_dict(response.json())
-
-
-
-        return response_201
-
-    if response.status_code == 409:
-        response_409 = cast(Any, None)
-        return response_409
+    if response.status_code == 400:
+        response_400 = cast(Any, None)
+        return response_400
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -69,7 +58,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | IPAddressResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -79,32 +68,31 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ReserveIPAddressPayload,
     x_tenant_id: int,
 
-) -> Response[Any | IPAddressResponse]:
-    """ Reserve IP address
+) -> Response[Any | PublicIPResponse]:
+    """ Reserve attached public IP
 
-     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
-    ip_address_id.
+     Keeps a direct public IP after its next detach.
 
     Args:
+        public_ip_id (str):
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | IPAddressResponse]
+        Response[Any | PublicIPResponse]
      """
 
 
     kwargs = _get_kwargs(
-        body=body,
+        public_ip_id=public_ip_id,
 x_tenant_id=x_tenant_id,
 
     )
@@ -116,64 +104,62 @@ x_tenant_id=x_tenant_id,
     return _build_response(client=client, response=response)
 
 def sync(
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ReserveIPAddressPayload,
     x_tenant_id: int,
 
-) -> Any | IPAddressResponse | None:
-    """ Reserve IP address
+) -> Any | PublicIPResponse | None:
+    """ Reserve attached public IP
 
-     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
-    ip_address_id.
+     Keeps a direct public IP after its next detach.
 
     Args:
+        public_ip_id (str):
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | IPAddressResponse
+        Any | PublicIPResponse
      """
 
 
     return sync_detailed(
-        client=client,
-body=body,
+        public_ip_id=public_ip_id,
+client=client,
 x_tenant_id=x_tenant_id,
 
     ).parsed
 
 async def asyncio_detailed(
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ReserveIPAddressPayload,
     x_tenant_id: int,
 
-) -> Response[Any | IPAddressResponse]:
-    """ Reserve IP address
+) -> Response[Any | PublicIPResponse]:
+    """ Reserve attached public IP
 
-     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
-    ip_address_id.
+     Keeps a direct public IP after its next detach.
 
     Args:
+        public_ip_id (str):
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | IPAddressResponse]
+        Response[Any | PublicIPResponse]
      """
 
 
     kwargs = _get_kwargs(
-        body=body,
+        public_ip_id=public_ip_id,
 x_tenant_id=x_tenant_id,
 
     )
@@ -185,33 +171,32 @@ x_tenant_id=x_tenant_id,
     return _build_response(client=client, response=response)
 
 async def asyncio(
+    public_ip_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: ReserveIPAddressPayload,
     x_tenant_id: int,
 
-) -> Any | IPAddressResponse | None:
-    """ Reserve IP address
+) -> Any | PublicIPResponse | None:
+    """ Reserve attached public IP
 
-     Reserves a shared-pool address, or keeps an address the tenant already holds by naming its
-    ip_address_id.
+     Keeps a direct public IP after its next detach.
 
     Args:
+        public_ip_id (str):
         x_tenant_id (int):
-        body (ReserveIPAddressPayload): Optionally reserve an address the tenant already holds.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | IPAddressResponse
+        Any | PublicIPResponse
      """
 
 
     return (await asyncio_detailed(
-        client=client,
-body=body,
+        public_ip_id=public_ip_id,
+client=client,
 x_tenant_id=x_tenant_id,
 
     )).parsed

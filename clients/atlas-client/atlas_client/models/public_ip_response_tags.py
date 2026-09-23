@@ -14,12 +14,12 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="IPAddressResponseTags")
+T = TypeVar("T", bound="PublicIPResponseTags")
 
 
 
 @_attrs_define
-class IPAddressResponseTags:
+class PublicIPResponseTags:
     
 
     additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
@@ -40,12 +40,12 @@ class IPAddressResponseTags:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        ip_address_response_tags = cls(
+        public_ip_response_tags = cls(
         )
 
 
-        ip_address_response_tags.additional_properties = d
-        return ip_address_response_tags
+        public_ip_response_tags.additional_properties = d
+        return public_ip_response_tags
 
     @property
     def additional_keys(self) -> list[str]:

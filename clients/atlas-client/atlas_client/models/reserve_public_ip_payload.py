@@ -8,38 +8,39 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.reserve_public_ip_payload_version import ReservePublicIPPayloadVersion
 
 
 
 
 
 
-T = TypeVar("T", bound="IPAddressAssignmentPayload")
+T = TypeVar("T", bound="ReservePublicIPPayload")
 
 
 
 @_attrs_define
-class IPAddressAssignmentPayload:
-    """ The public IPv4 address to attach.
+class ReservePublicIPPayload:
+    """ Select the IP version of one direct reservation.
 
         Attributes:
-            ip_address_id (str): A reserved address, or auto to borrow one from the shared pool.
+            version (ReservePublicIPPayloadVersion):
      """
 
-    ip_address_id: str
+    version: ReservePublicIPPayloadVersion
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        ip_address_id = self.ip_address_id
+        version = self.version.value
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "ip_address_id": ip_address_id,
+            "version": version,
         })
 
         return field_dict
@@ -49,11 +50,14 @@ class IPAddressAssignmentPayload:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        ip_address_id = d.pop("ip_address_id")
+        version = ReservePublicIPPayloadVersion(d.pop("version"))
 
-        ip_address_assignment_payload = cls(
-            ip_address_id=ip_address_id,
+
+
+
+        reserve_public_ip_payload = cls(
+            version=version,
         )
 
-        return ip_address_assignment_payload
+        return reserve_public_ip_payload
 

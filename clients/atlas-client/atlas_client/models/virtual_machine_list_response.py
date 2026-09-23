@@ -11,6 +11,7 @@ from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.public_ip_response import PublicIPResponse
   from ..models.virtual_machine_list_response_tags import VirtualMachineListResponseTags
 
 
@@ -35,6 +36,8 @@ class VirtualMachineListResponse:
             is_termination_protected (bool):
             last_known_state (str):
             memory_mib (int):
+            public_ipv4 (None | PublicIPResponse):
+            public_ipv6 (None | PublicIPResponse):
             sleep_after_idle_seconds (int):
             state_synced_at (int | None):
             tags (VirtualMachineListResponseTags):
@@ -50,6 +53,8 @@ class VirtualMachineListResponse:
     is_termination_protected: bool
     last_known_state: str
     memory_mib: int
+    public_ipv4: None | PublicIPResponse
+    public_ipv6: None | PublicIPResponse
     sleep_after_idle_seconds: int
     state_synced_at: int | None
     tags: VirtualMachineListResponseTags
@@ -61,6 +66,7 @@ class VirtualMachineListResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         from ..models.virtual_machine_list_response_tags import VirtualMachineListResponseTags # noqa: PLC0415
         architecture = self.architecture
 
@@ -79,6 +85,18 @@ class VirtualMachineListResponse:
         last_known_state = self.last_known_state
 
         memory_mib = self.memory_mib
+
+        public_ipv4: dict[str, Any] | None
+        if isinstance(self.public_ipv4, PublicIPResponse):
+            public_ipv4 = self.public_ipv4.to_dict()
+        else:
+            public_ipv4 = self.public_ipv4
+
+        public_ipv6: dict[str, Any] | None
+        if isinstance(self.public_ipv6, PublicIPResponse):
+            public_ipv6 = self.public_ipv6.to_dict()
+        else:
+            public_ipv6 = self.public_ipv6
 
         sleep_after_idle_seconds = self.sleep_after_idle_seconds
 
@@ -102,6 +120,8 @@ class VirtualMachineListResponse:
             "is_termination_protected": is_termination_protected,
             "last_known_state": last_known_state,
             "memory_mib": memory_mib,
+            "public_ipv4": public_ipv4,
+            "public_ipv6": public_ipv6,
             "sleep_after_idle_seconds": sleep_after_idle_seconds,
             "state_synced_at": state_synced_at,
             "tags": tags,
@@ -114,6 +134,7 @@ class VirtualMachineListResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         from ..models.virtual_machine_list_response_tags import VirtualMachineListResponseTags # noqa: PLC0415
         d = dict(src_dict)
         architecture = d.pop("architecture")
@@ -133,6 +154,42 @@ class VirtualMachineListResponse:
         last_known_state = d.pop("last_known_state")
 
         memory_mib = d.pop("memory_mib")
+
+        def _parse_public_ipv4(data: object) -> None | PublicIPResponse:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                public_ipv4_type_0 = PublicIPResponse.from_dict(data)
+
+
+
+                return public_ipv4_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicIPResponse, data)
+
+        public_ipv4 = _parse_public_ipv4(d.pop("public_ipv4"))
+
+
+        def _parse_public_ipv6(data: object) -> None | PublicIPResponse:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                public_ipv6_type_0 = PublicIPResponse.from_dict(data)
+
+
+
+                return public_ipv6_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicIPResponse, data)
+
+        public_ipv6 = _parse_public_ipv6(d.pop("public_ipv6"))
+
 
         sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
 
@@ -161,6 +218,8 @@ class VirtualMachineListResponse:
             is_termination_protected=is_termination_protected,
             last_known_state=last_known_state,
             memory_mib=memory_mib,
+            public_ipv4=public_ipv4,
+            public_ipv6=public_ipv6,
             sleep_after_idle_seconds=sleep_after_idle_seconds,
             state_synced_at=state_synced_at,
             tags=tags,

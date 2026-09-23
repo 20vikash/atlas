@@ -8,43 +8,44 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.public_ip_response_delivery import PublicIPResponseDelivery
 from typing import cast
 
 if TYPE_CHECKING:
-  from ..models.ip_address_response_tags import IPAddressResponseTags
+  from ..models.public_ip_response_tags import PublicIPResponseTags
 
 
 
 
 
-T = TypeVar("T", bound="IPAddressResponse")
+T = TypeVar("T", bound="PublicIPResponse")
 
 
 
 @_attrs_define
-class IPAddressResponse:
-    """ A tenant public IP address.
+class PublicIPResponse:
+    """ One tenant public IP.
 
         Attributes:
-            address (str):
-            cidr (int):
             created_at (int):
+            delivery (PublicIPResponseDelivery):
             id (str):
+            prefix (str):
             reserved (bool):
-            state (str):
-            tags (IPAddressResponseTags):
+            status (str):
+            tags (PublicIPResponseTags):
             tenant_id (int):
             version (int):
             virtual_machine_id (None | str):
      """
 
-    address: str
-    cidr: int
     created_at: int
+    delivery: PublicIPResponseDelivery
     id: str
+    prefix: str
     reserved: bool
-    state: str
-    tags: IPAddressResponseTags
+    status: str
+    tags: PublicIPResponseTags
     tenant_id: int
     version: int
     virtual_machine_id: None | str
@@ -55,18 +56,18 @@ class IPAddressResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.ip_address_response_tags import IPAddressResponseTags # noqa: PLC0415
-        address = self.address
-
-        cidr = self.cidr
-
+        from ..models.public_ip_response_tags import PublicIPResponseTags # noqa: PLC0415
         created_at = self.created_at
+
+        delivery = self.delivery.value
 
         id = self.id
 
+        prefix = self.prefix
+
         reserved = self.reserved
 
-        state = self.state
+        status = self.status
 
         tags = self.tags.to_dict()
 
@@ -81,12 +82,12 @@ class IPAddressResponse:
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "address": address,
-            "cidr": cidr,
             "created_at": created_at,
+            "delivery": delivery,
             "id": id,
+            "prefix": prefix,
             "reserved": reserved,
-            "state": state,
+            "status": status,
             "tags": tags,
             "tenant_id": tenant_id,
             "version": version,
@@ -99,21 +100,24 @@ class IPAddressResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.ip_address_response_tags import IPAddressResponseTags # noqa: PLC0415
+        from ..models.public_ip_response_tags import PublicIPResponseTags # noqa: PLC0415
         d = dict(src_dict)
-        address = d.pop("address")
-
-        cidr = d.pop("cidr")
-
         created_at = d.pop("created_at")
+
+        delivery = PublicIPResponseDelivery(d.pop("delivery"))
+
+
+
 
         id = d.pop("id")
 
+        prefix = d.pop("prefix")
+
         reserved = d.pop("reserved")
 
-        state = d.pop("state")
+        status = d.pop("status")
 
-        tags = IPAddressResponseTags.from_dict(d.pop("tags"))
+        tags = PublicIPResponseTags.from_dict(d.pop("tags"))
 
 
 
@@ -130,13 +134,13 @@ class IPAddressResponse:
         virtual_machine_id = _parse_virtual_machine_id(d.pop("virtual_machine_id"))
 
 
-        ip_address_response = cls(
-            address=address,
-            cidr=cidr,
+        public_ip_response = cls(
             created_at=created_at,
+            delivery=delivery,
             id=id,
+            prefix=prefix,
             reserved=reserved,
-            state=state,
+            status=status,
             tags=tags,
             tenant_id=tenant_id,
             version=version,
@@ -144,8 +148,8 @@ class IPAddressResponse:
         )
 
 
-        ip_address_response.additional_properties = d
-        return ip_address_response
+        public_ip_response.additional_properties = d
+        return public_ip_response
 
     @property
     def additional_keys(self) -> list[str]:
