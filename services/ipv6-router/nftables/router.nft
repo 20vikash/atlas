@@ -1,0 +1,17 @@
+# setup.sh replaces @MESH_REGION@ and @PUBLIC_PREFIX@. The forward hook sees the address after eBPF translation.
+table ip6 atlas_ipv6_router {}
+delete table ip6 atlas_ipv6_router
+
+table ip6 atlas_ipv6_router {
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+		ip6 daddr @MESH_REGION@ counter accept
+		ip6 saddr @PUBLIC_PREFIX@ counter accept
+	}
+
+	# The router forwards out of the interface that received the packet. A redirect would send the host around it.
+	chain output {
+		type filter hook output priority filter; policy accept;
+		icmpv6 type nd-redirect drop
+	}
+}

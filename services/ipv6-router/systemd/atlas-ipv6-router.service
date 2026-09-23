@@ -1,0 +1,17 @@
+[Unit]
+Description=Atlas IPv6 router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip -6 route replace default via fe80::1 dev eth0
+ExecStart=/usr/sbin/nft -f /opt/atlas/ipv6-router/router.nft
+ExecStart=/usr/sbin/tc qdisc replace dev eth0 clsact
+ExecStart=/usr/sbin/tc filter replace dev eth0 ingress pref 1 handle 1 bpf direct-action object-file /opt/atlas/ipv6-router/router.bpf.o section tc
+ExecStop=/usr/sbin/tc filter delete dev eth0 ingress pref 1 handle 1 bpf
+ExecStop=/usr/sbin/nft delete table ip6 atlas_ipv6_router
+
+[Install]
+WantedBy=multi-user.target
