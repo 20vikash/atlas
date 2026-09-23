@@ -222,7 +222,7 @@ class ServerProvider(ABC):
 		raise ProviderOperationError(f"The provider cannot promote Secure Shell user {user}")
 
 	def wait_for_private_address(self, server: "MetalServer") -> None:
-		"""Wait for the private address, then store the interface MAC. Atlas WG Mesh identifies each host by it."""
+		"""Wait for the private address, then set the interface MAC. Atlas WG Mesh identifies each host by it."""
 		from atlas.atlas.core.ssh import SSHRunner
 
 		device = server.private_network_interface
@@ -254,8 +254,7 @@ class ServerProvider(ABC):
 		except ProviderOperationError as error:
 			raise self.error_class(str(error), is_retryable=True) from error
 
-		if mac_address != server.private_network_mac_address:
-			frappe.db.set_value("Metal Server", server.name, "private_network_mac_address", mac_address)
+		server.private_network_mac_address = mac_address
 
 	def run_setup_script(
 		self,

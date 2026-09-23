@@ -26,6 +26,7 @@ class ServerProvisioner:
 		"private_ipv4_address",
 		"public_network_interface",
 		"private_network_interface",
+		"private_network_mac_address",
 		"wireguard_ip_address",
 		"wireguard_public_key",
 	)

@@ -105,16 +105,11 @@ class TestScalewayProvider(UnitTestCase):
 			exit_code=0, output="4: eno1.123 inet 10.1.0.2/20 scope global\nAA:BB:CC:DD:EE:07\n"
 		)
 
-		with (
-			patch("atlas.atlas.core.ssh.SSHRunner", return_value=runner),
-			patch("frappe.db.set_value") as set_value,
-		):
+		with patch("atlas.atlas.core.ssh.SSHRunner", return_value=runner):
 			provider.wait_for_private_address(server)
 
 		self.assertIn("eno1.123", runner.run_command.call_args.args[0])
-		set_value.assert_called_once_with(
-			"Metal Server", "server-1", "private_network_mac_address", "aa:bb:cc:dd:ee:07"
-		)
+		self.assertEqual(server.private_network_mac_address, "aa:bb:cc:dd:ee:07")
 
 	def test_wait_for_private_address_marks_a_timeout_as_retryable(self) -> None:
 		provider = self.provider()
