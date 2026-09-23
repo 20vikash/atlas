@@ -180,9 +180,7 @@ class AwsProvider(ServerProvider):
 		"""Reserve one Elastic IP address, or choose one free IPv6 /80 block."""
 		if version == 6:
 			used = set(
-				frappe.get_all(
-					"Metal Server IP Address", filters={"version": "6"}, pluck="provider_resource_id"
-				)
+				frappe.get_all("Public IP Pool", filters={"version": "6"}, pluck="provider_resource_id")
 			)
 			return self.ipv6_prefixes.reserve(used)
 		return self.ip_addresses.reserve()

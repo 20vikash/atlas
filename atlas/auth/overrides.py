@@ -9,7 +9,7 @@ from atlas.auth.identity import current_identity, get_current_tenant_id
 from atlas.auth.roles import has_role
 
 TENANT_DOCUMENT_TYPES = {
-	"Metal Server IP Address",
+	"Public IP Allocation",
 	"Virtual Machine",
 	"Virtual Machine Image",
 }

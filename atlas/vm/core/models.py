@@ -189,7 +189,8 @@ class VirtualMachineCreateRequest:
 	disk_iops: int = 0
 	private_network_throughput_mibps: int = 0
 	public_network_throughput_mibps: int = 0
-	server_ip_address: str | None = None
+	public_ipv4: str | None = None
+	public_ipv6: str | None = None
 	metadata: dict[str, str] = field(default_factory=dict)
 	firewall: FirewallConfiguration = field(default_factory=FirewallConfiguration)
 
@@ -220,8 +221,9 @@ class VirtualMachineCreateRequest:
 			raise ValueError("Egress must be uplink, mesh, or none.")
 
 		public_network_throughput_mibps = cls.non_negative_integer(payload, "public_network_throughput_mibps")
-		server_ip_address = payload.get("server_ip_address") or None
-		if egress != "uplink" and server_ip_address:
+		public_ipv4 = payload.get("public_ipv4") or None
+		public_ipv6 = payload.get("public_ipv6") or None
+		if egress != "uplink" and public_ipv4:
 			raise ValueError("A public IPv4 address requires uplink egress.")
 
 		sleep_after_idle_seconds = cls.non_negative_integer(payload, "sleep_after_idle_seconds")
@@ -249,7 +251,8 @@ class VirtualMachineCreateRequest:
 				payload, "private_network_throughput_mibps"
 			),
 			public_network_throughput_mibps=public_network_throughput_mibps,
-			server_ip_address=server_ip_address,
+			public_ipv4=public_ipv4,
+			public_ipv6=public_ipv6,
 			metadata=cls.metadata_map(payload),
 			firewall=FirewallConfiguration.from_value(payload.get("firewall")),
 		)

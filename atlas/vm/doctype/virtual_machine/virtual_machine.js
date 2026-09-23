@@ -43,39 +43,27 @@ frappe.ui.form.on("Virtual Machine", {
 			[__("Edit Network Throughput"), () => showEditThroughputDialog(frm), true, ACTIONS],
 			[__("Edit Firewall"), () => showEditFirewallDialog(frm), true, ACTIONS],
 			[
-				__("Attach IPv4 Address"),
-				() => showAttachIPv4AddressDialog(frm),
+				__("Attach Public IPv4"),
+				() => showAttachPublicIPDialog(frm, 4),
 				!frm.doc.public_ipv4,
 				ACTIONS,
 			],
 			[
-				__("Detach IPv4 Address"),
-				() => detachIPv4Address(frm),
+				__("Detach Public IPv4"),
+				() => detachPublicIP(frm, 4),
 				Boolean(frm.doc.public_ipv4),
 				ACTIONS,
 			],
 			[
-				__("Attach IPv6 Block"),
-				() => showAttachIPv6BlockDialog(frm),
-				!frm.doc.public_ipv6 && frappe.user.has_role("System Manager"),
+				__("Attach Public IPv6"),
+				() => showAttachPublicIPDialog(frm, 6),
+				!frm.doc.public_ipv6 && !frm.doc.routed_ipv6,
 				ACTIONS,
 			],
 			[
-				__("Detach IPv6 Block"),
-				() => detachIPv6Block(frm),
-				Boolean(frm.doc.public_ipv6) && frappe.user.has_role("System Manager"),
-				ACTIONS,
-			],
-			[
-				__("Attach Routed IPv6"),
-				() => attachRoutedIPv6(frm),
-				!frm.doc.routed_ipv6 && !frm.doc.public_ipv6 && !frm.doc.is_network_gateway,
-				ACTIONS,
-			],
-			[
-				__("Detach Routed IPv6"),
-				() => detachRoutedIPv6(frm),
-				Boolean(frm.doc.routed_ipv6),
+				__("Detach Public IPv6"),
+				() => detachPublicIP(frm, 6),
+				Boolean(frm.doc.public_ipv6 || frm.doc.routed_ipv6),
 				ACTIONS,
 			],
 			[__("Change Egress Mode"), () => showEgressDialog(frm), true, ACTIONS],
@@ -666,131 +654,44 @@ function showEgressDialog(frm) {
 	);
 }
 
-function showAttachIPv4AddressDialog(frm) {
+function showAttachPublicIPDialog(frm, version) {
 	frappe.prompt(
 		{
-			fieldname: "server_ip_address",
-			fieldtype: "Link",
-			label: __("IPv4 Address"),
-			options: "Metal Server IP Address",
+			fieldname: "allocation",
+			fieldtype: "Data",
+			label: __("Allocation"),
 			reqd: 1,
-			filters: { status: "Allocated", version: "4" },
+			default: "auto",
+			description: __("Use auto or the UUID of a reserved direct allocation."),
 		},
-		({ server_ip_address }) =>
+		({ allocation }) =>
 			frm
 				.call({
-					method: "attach_public_ipv4",
+					method: "attach_public_ip",
 					doc: frm.doc,
-					args: { server_ip_address },
+					args: { version, allocation },
 					freeze: true,
-					freeze_message: __("Attaching IPv4 address..."),
+					freeze_message: __("Storing public IP intent..."),
 				})
 				.then(() => frm.reload_doc()),
-		__("Attach IPv4 Address"),
+		__("Attach Public IPv{0}", [version]),
 		__("Attach")
 	);
 }
 
-function detachIPv4Address(frm) {
+function detachPublicIP(frm, version) {
 	frappe.confirm(
-		__("Detach {0} from this Virtual Machine? Active connections can stop.", [
-			frm.doc.public_ipv4,
+		__("Detach public IPv{0} from this Virtual Machine? Active connections can stop.", [
+			version,
 		]),
 		() =>
 			frm
 				.call({
-					method: "detach_public_ipv4",
+					method: "detach_public_ip",
 					doc: frm.doc,
+					args: { version },
 					freeze: true,
-					freeze_message: __("Detaching IPv4 address..."),
-				})
-				.then(() => frm.reload_doc())
-	);
-}
-
-function showAttachIPv6BlockDialog(frm) {
-	frappe.prompt(
-		{
-			fieldname: "server_ip_address",
-			fieldtype: "Link",
-			label: __("IPv6 Block"),
-			options: "Metal Server IP Address",
-			reqd: 1,
-			filters: { status: "Allocated", version: "6" },
-			description: __("The host of this VM routes the block to the VM."),
-		},
-		({ server_ip_address }) =>
-			frm
-				.call({
-					method: "attach_public_ipv6",
-					doc: frm.doc,
-					args: { server_ip_address },
-					freeze: true,
-					freeze_message: __("Attaching IPv6 block..."),
-				})
-				.then(() => frm.reload_doc()),
-		__("Attach IPv6 Block"),
-		__("Attach")
-	);
-}
-
-function detachIPv6Block(frm) {
-	frappe.confirm(
-		__("Detach {0} from this Virtual Machine? Active connections can stop.", [
-			frm.doc.public_ipv6,
-		]),
-		() =>
-			frm
-				.call({
-					method: "detach_public_ipv6",
-					doc: frm.doc,
-					freeze: true,
-					freeze_message: __("Detaching IPv6 block..."),
-				})
-				.then(() => frm.reload_doc())
-	);
-}
-
-function attachRoutedIPv6(frm) {
-	frappe.prompt(
-		{
-			fieldname: "ipv6_router_server",
-			fieldtype: "Link",
-			label: __("IPv6 Router Server"),
-			options: "IPv6 Router Server",
-			reqd: 1,
-			filters: { status: "Active" },
-		},
-		({ ipv6_router_server }) =>
-			frm
-				.call({
-					method: "attach_routed_ipv6",
-					doc: frm.doc,
-					args: { ipv6_router_server },
-					freeze: true,
-					freeze_message: __("Attaching routed IPv6..."),
-				})
-				.then((response) => {
-					frappe.msgprint(__("Routed IPv6 address: {0}", [response.message]));
-					return frm.reload_doc();
-				}),
-		__("Attach Routed IPv6"),
-		__("Attach")
-	);
-}
-
-function detachRoutedIPv6(frm) {
-	frappe.confirm(
-		__("Remove {0} from this Virtual Machine? Active connections can stop.", [
-			frm.doc.routed_ipv6,
-		]),
-		() =>
-			frm
-				.call({
-					method: "detach_routed_ipv6",
-					doc: frm.doc,
-					freeze: true,
-					freeze_message: __("Detaching routed IPv6..."),
+					freeze_message: __("Storing public IP intent..."),
 				})
 				.then(() => frm.reload_doc())
 	);

@@ -354,9 +354,13 @@
   {
    "link_doctype": "Virtual Machine Migration",
    "link_fieldname": "virtual_machine"
+  },
+  {
+   "link_doctype": "Public IP Allocation",
+   "link_fieldname": "virtual_machine"
   }
  ],
- "modified": "2026-09-24 01:13:20.894200",
+ "modified": "2026-09-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine",

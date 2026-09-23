@@ -100,7 +100,7 @@ class MigrationService:
 				exc=AtlasUserError,
 			)
 		if frappe.db.exists(
-			"Metal Server IP Address",
+			"Public IP Allocation",
 			{"virtual_machine": virtual_machine.name, "status": ["in", ["Attaching", "Detaching"]]},
 		):
 			frappe.throw(
@@ -372,18 +372,18 @@ class MigrationService:
 		self.migration = migration
 
 		# The VM already runs on the destination. The scheduled reconcile retries a failed move.
-		for address in frappe.get_all(
-			"Metal Server IP Address",
+		for allocation in frappe.get_all(
+			"Public IP Allocation",
 			filters={"virtual_machine": virtual_machine.name, "status": "Attached"},
 			pluck="name",
 		):
 			try:
-				frappe.get_doc("Metal Server IP Address", address).move_to_server(
+				frappe.get_doc("Public IP Allocation", allocation).move_to_server(
 					migration.destination_metal_server
 				)
 			except Exception:
 				frappe.log_error(
-					title=f"Move public address {address} to {migration.destination_metal_server}"
+					title=f"Move public allocation {allocation} to {migration.destination_metal_server}"
 				)
 
 	def finish(self) -> None:

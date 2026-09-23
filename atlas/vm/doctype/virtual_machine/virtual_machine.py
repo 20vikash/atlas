@@ -165,9 +165,10 @@ class VirtualMachine(Document):
 	@property
 	def public_ipv4(self) -> str | None:
 		"""Return the public IPv4 address assigned in Atlas."""
-		return frappe.db.get_value(
-			"Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}, "address"
+		prefix = frappe.db.get_value(
+			"Public IP Allocation", {"virtual_machine": self.name, "version": "4"}, "prefix"
 		)
+		return prefix.partition("/")[0] if prefix else None
 
 	@property
 	def public_ipv6(self) -> str:
@@ -176,10 +177,16 @@ class VirtualMachine(Document):
 
 	@property
 	def routed_ipv6(self) -> str:
-		"""Return the public address that an IPv6 router maps to this VM, or an empty string."""
-		from atlas.service.doctype.ipv6_router_server.ipv6_router_server import get_routed_ipv6_address
-
-		return get_routed_ipv6_address(self)
+		"""Return the routed public address of this VM, or an empty string."""
+		row = frappe.db.get_value(
+			"Public IP Allocation",
+			{"virtual_machine": self.name, "version": "6"},
+			["prefix", "pool"],
+			as_dict=True,
+		)
+		if not row or not frappe.db.get_value("Public IP Pool", row.pool, "gateway"):
+			return ""
+		return row.prefix.partition("/")[0]
 
 	@property
 	def gateway_routes(self) -> str:
@@ -285,24 +292,6 @@ class VirtualMachine(Document):
 		"""Return gateway routes with optional VM ownership hints for the editor."""
 		self.check_permission("read")
 		return VirtualMachineService(self).get_gateway_route_editor_rows()
-
-	@frappe.whitelist(methods=["POST"])
-	def attach_routed_ipv6(self, ipv6_router_server: str) -> str:
-		"""Route the Internet range of this VM through an IPv6 router and return its public address."""
-		self.check_permission("write")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-		return frappe.get_doc("IPv6 Router Server", ipv6_router_server).attach_virtual_machine(self)
-
-	@frappe.whitelist(methods=["POST"])
-	def detach_routed_ipv6(self) -> None:
-		"""Remove the IPv6 router route of this VM."""
-		from atlas.service.doctype.ipv6_router_server.ipv6_router_server import detach_virtual_machine
-
-		self.check_permission("write")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-		detach_virtual_machine(self)
 
 	@frappe.whitelist(methods=["POST"])
 	def set_network_gateway(self, is_network_gateway: bool | int | str) -> None:
@@ -437,57 +426,24 @@ class VirtualMachine(Document):
 		return VirtualMachineService(self).replace_metadata(metadata)
 
 	@frappe.whitelist(methods=["POST"])
-	def attach_public_ipv4(self, server_ip_address: str) -> dict[str, Any]:
-		"""Attach one reserved public IPv4 address without a VM restart."""
+	def attach_public_ip(self, version: int, allocation: str) -> None:
+		"""Store one public IP attachment intent."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
-		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}):
-			frappe.throw(_("Detach the current public IPv4 address first."), exc=AtlasUserError)
+		from atlas.metal_server.core.public_ip_service import PublicIPService
 
-		return VirtualMachineService(self).attach_public_ipv4(server_ip_address)
+		PublicIPService().attach(self, int(version), allocation)
 
 	@frappe.whitelist(methods=["POST"])
-	def detach_public_ipv4(self) -> dict[str, Any]:
-		"""Remove the public IPv4 address without a VM restart."""
+	def detach_public_ip(self, version: int) -> None:
+		"""Store one public IP detach intent."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
-		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}):
-			frappe.throw(_("This Virtual Machine has no public IPv4 address."), exc=AtlasUserError)
+		from atlas.metal_server.core.public_ip_service import PublicIPService
 
-		return VirtualMachineService(self).detach_public_ipv4()
-
-	@frappe.whitelist(methods=["POST"])
-	def attach_public_ipv6(self, server_ip_address: str) -> dict[str, Any]:
-		"""Attach one IPv6 block. Only a System Manager assigns public blocks."""
-		frappe.only_for("System Manager")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-		block = frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True)
-		if not block.is_ipv6:
-			frappe.throw(_("Choose an IPv6 block."), exc=AtlasUserError)
-
-		return VirtualMachineService(self).attach_public_ipv6(block)
-
-	@frappe.whitelist(methods=["POST"])
-	def detach_public_ipv6(self) -> dict[str, Any]:
-		"""Remove the IPv6 block without a VM restart."""
-		frappe.only_for("System Manager")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-
-		# Detach also cancels an attach that the provider keeps refusing.
-		block_name = frappe.db.get_value(
-			"Metal Server IP Address",
-			{"virtual_machine": self.name, "version": "6", "status": ["in", ["Attaching", "Attached"]]},
-		)
-		if not block_name:
-			frappe.throw(_("This Virtual Machine has no IPv6 block."), exc=AtlasUserError)
-
-		return VirtualMachineService(self).detach_public_ipv6(
-			frappe.get_doc("Metal Server IP Address", block_name)
-		)
+		PublicIPService().detach(self, int(version))
 
 	@frappe.whitelist(methods=["POST"])
 	def update_egress(self, egress: str) -> dict[str, Any]:
