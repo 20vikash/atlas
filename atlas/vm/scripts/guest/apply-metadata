@@ -9,7 +9,6 @@ METADATA_ADDRESS = ("169.254.169.254", 80)
 METADATA_PATH_PREFIX = "/latest"
 DROP_IN_PATH = pathlib.Path("/run/systemd/network/10-atlas.network.d/mesh.conf")
 MESH_GATEWAY = "fe80::1"
-MESH_PREFIX = "fdaa::/16"
 TOKEN_TTL_SECONDS = "21600"
 POLL_SECONDS = 0.25
 TIMEOUT_SECONDS = 3
@@ -75,7 +74,8 @@ def read(path, token):
 def apply_hostname(hostname):
     if hostname == socket.gethostname():
         return
-    subprocess.run(["hostnamectl", "set-hostname", hostname], check=True)
+    # A failure before D-Bus starts is retried on the next poll.
+    subprocess.run(["hostnamectl", "set-hostname", hostname], check=False)
 
 
 def mesh_drop_in(address, routes):
@@ -85,7 +85,7 @@ def mesh_drop_in(address, routes):
         f"Address={address}/128\n"
         "IPv6AcceptRA=no\n"
     )
-    for destination in [MESH_PREFIX, *routes]:
+    for destination in routes:
         drop_in += "\n[Route]\n" f"Destination={destination}\n" f"Gateway={MESH_GATEWAY}\n"
 
     return drop_in
@@ -101,9 +101,17 @@ def apply_mesh_network(address, routes):
     if DROP_IN_PATH.exists() and DROP_IN_PATH.read_text() == drop_in:
         return
 
+    # Netlink works before D-Bus starts. The drop-in preserves the state through networkd.
+    subprocess.run(["ip", "-6", "address", "replace", f"{address}/128", "dev", "eth0", "nodad"], check=False)
+    for destination in routes:
+        subprocess.run(["ip", "-6", "route", "replace", destination, "via", MESH_GATEWAY, "dev", "eth0"], check=False)
+
     DROP_IN_PATH.parent.mkdir(parents=True, exist_ok=True)
     DROP_IN_PATH.write_text(drop_in)
-    subprocess.run(["networkctl", "reload"], check=True)
+    # Remove the file when networkd is not ready, so the next poll retries.
+    if subprocess.run(["networkctl", "reload"], check=False).returncode != 0:
+        DROP_IN_PATH.unlink()
+        return
     reset_network_services()
 
 

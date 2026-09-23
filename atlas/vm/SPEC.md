@@ -226,7 +226,7 @@ Use `Grant Privilege` and `Revoke Privilege` under `Dangerous Actions` to change
 
 ## Per-VM metadata
 
-The image is shared, so nothing per VM can be baked into it. `atlas-metadata.service` reads MMDS and applies the hostname and the mesh address. It writes a systemd-networkd drop-in with the address and the `fdaa::/16` route, then reloads networkd. Each step does nothing when the value already matches.
+The image is shared, so nothing per VM can be baked into it. The image holds the `fdaa::/16` route, which is the same for every VM. `atlas-metadata.service` reads MMDS and applies the hostname, the mesh address, and the host routes. It starts before `sysinit.target` and applies the address with `ip` at once, because networkd answers only after D-Bus starts. It then writes a systemd-networkd drop-in with the same values and reloads networkd. Each step does nothing when the value already matches.
 
 The service also reads `meta-data/host-routes`, a comma-separated list of destinations that the guest routes through the host. A missing key means no routes. A failed read keeps the current routes.
 
