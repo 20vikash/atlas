@@ -25,6 +25,11 @@ const meshGatewayAddress = "fe80::1"
 // meshPrefix is the Atlas mesh address block.
 const meshPrefix = "fdaa::/16"
 
+// gatewayTable holds the namespace route of a gateway VM. The host sends the
+// traffic a gateway carries into its namespace, and the main table would send
+// a destination outside the mesh straight back to the host.
+const gatewayTable = "100"
+
 // MeshConfig identifies the Atlas WG Mesh CLI and the host interfaces it uses.
 // UplinkName must name the shared VLAN interface that carries Atlas NDP, never
 // its parent, because the NDP hook and the proxy NDP entries attach to it.
@@ -147,6 +152,9 @@ func (mesh *Mesh) syncVM(ctx context.Context, request request) error {
 	if err := mesh.convergeOwnedPrefixRoutes(ctx, request); err != nil {
 		return err
 	}
+	if err := mesh.convergeGatewayRoute(ctx, request); err != nil {
+		return err
+	}
 
 	arguments := []string{
 		"vm", "sync", "--interface", hostVirtualEthernet,
@@ -219,6 +227,43 @@ func parseNamespaceRoutes(output string) []string {
 		}
 	}
 	return destinations
+}
+
+// convergeGatewayRoute sends host traffic in a gateway namespace to the guest.
+func (mesh *Mesh) convergeGatewayRoute(ctx context.Context, request request) error {
+	_, guestVirtualEthernet := virtualEthernetNames(request.UserID)
+	namespace := namespaceName(request.VirtualMachineID)
+	rules, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "rule", "show", "iif", guestVirtualEthernet)
+	if err != nil {
+		return fmt.Errorf("read the gateway rule of %s: %w", request.VirtualMachineID, err)
+	}
+
+	hasRule := strings.Contains(rules, "lookup "+gatewayTable)
+	for _, step := range gatewayRouteSteps(guestVirtualEthernet, request.WireGuardMeshIPv6, request.IsNetworkGateway, hasRule) {
+		if _, err := platform.RunInNetworkNamespace(ctx, namespace, step[0], step[1:]...); err != nil {
+			return fmt.Errorf("change the gateway route of %s: %w", request.VirtualMachineID, err)
+		}
+	}
+	return nil
+}
+
+// gatewayRouteSteps adds or removes the gateway rule and its route.
+func gatewayRouteSteps(guestVirtualEthernet, address string, isGateway, hasRule bool) [][]string {
+	switch {
+	case isGateway && hasRule:
+		return [][]string{{"ip", "-6", "route", "replace", "default", "via", address, "dev", tapName, "table", gatewayTable}}
+	case isGateway:
+		return [][]string{
+			{"ip", "-6", "route", "replace", "default", "via", address, "dev", tapName, "table", gatewayTable},
+			{"ip", "-6", "rule", "add", "iif", guestVirtualEthernet, "lookup", gatewayTable},
+		}
+	case hasRule:
+		return [][]string{
+			{"ip", "-6", "rule", "del", "iif", guestVirtualEthernet, "lookup", gatewayTable},
+			{"ip", "-6", "route", "flush", "table", gatewayTable},
+		}
+	}
+	return nil
 }
 
 // convergeOwnedPrefixRoutes sends each public prefix to its gateway VM.

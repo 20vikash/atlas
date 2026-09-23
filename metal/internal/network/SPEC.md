@@ -110,6 +110,8 @@ When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interf
 
 The proxy answers without the default kernel delay, because the mesh drops packets until the host learns the guest.
 
+A gateway namespace has one more rule: every packet that enters from the host goes to the guest, in table `100`. The main table would send a destination outside the mesh back to the host.
+
 `EnsureHost` applies the configured uplink and WireGuard interfaces. The CLI refuses an uplink change until an operator resets the mesh.
 
 `ApplyPrivilegedAddresses` and `WireGuardManager.Apply` each replace a complete set. `Apply` drops this host from the peer set it receives and records what it applied, so it never peers with itself and never disturbs peers added by other tools.

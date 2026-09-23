@@ -63,6 +63,29 @@ func TestMeshNamespaceStepsRouteTheGuestAddress(t *testing.T) {
 	}
 }
 
+func TestGatewayRouteStepsSendHostTrafficToTheGuest(t *testing.T) {
+	route := "ip -6 route replace default via fdaa:1::5 dev tap0 table 100"
+	rule := "ip -6 rule add iif vg-100 lookup 100"
+	for _, test := range []struct {
+		name               string
+		isGateway, hasRule bool
+		want               []string
+	}{
+		{"add", true, false, []string{route, rule}},
+		{"keep", true, true, []string{route}},
+		{"remove", false, true, []string{"ip -6 rule del iif vg-100 lookup 100", "ip -6 route flush table 100"}},
+		{"absent", false, false, nil},
+	} {
+		var got []string
+		for _, step := range gatewayRouteSteps("vg-100", "fdaa:1::5", test.isGateway, test.hasRule) {
+			got = append(got, strings.Join(step, " "))
+		}
+		if !slices.Equal(got, test.want) {
+			t.Errorf("%s: got %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
 func TestNewMeshNeedsTheCommandOnTheHost(t *testing.T) {
 	if _, err := NewMesh(MeshConfig{
 		CommandPath: "/nonexistent/atlas-wg-mesh", WireGuardName: "wg0", UplinkName: "eno1.1878",
