@@ -727,6 +727,24 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		)
 		self.assertEqual(calls.set_network.call_args.args[1]["public_ipv6"], "")
 
+	def test_detach_cancels_a_block_that_is_still_attaching(self) -> None:
+		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine.ensure_not_migrating = Mock()
+		virtual_machine.validate_network_change = Mock()
+
+		with (
+			patch.object(virtual_machine_module.frappe, "only_for"),
+			patch.object(
+				virtual_machine_module.frappe.db, "get_value", return_value="2001:db8:1:2::"
+			) as get_value,
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value="block"),
+			patch.object(VirtualMachineService, "detach_public_ipv6") as detach,
+		):
+			virtual_machine.detach_public_ipv6()
+
+		self.assertEqual(get_value.call_args.args[1]["status"], ["in", ["Attaching", "Attached"]])
+		detach.assert_called_once_with("block")
+
 	def test_a_second_block_is_refused(self) -> None:
 		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
 		virtual_machine.tenant_id = 7

@@ -445,11 +445,14 @@ class VirtualMachine(Document):
 		frappe.only_for("System Manager")
 		self.ensure_not_migrating()
 		self.validate_network_change()
+
+		# Detach also cancels an attach that the provider keeps refusing.
 		block_name = frappe.db.get_value(
-			"Metal Server IP Address", {"virtual_machine": self.name, "version": "6", "status": "Attached"}
+			"Metal Server IP Address",
+			{"virtual_machine": self.name, "version": "6", "status": ["in", ["Attaching", "Attached"]]},
 		)
 		if not block_name:
-			frappe.throw(_("This Virtual Machine has no attached IPv6 block."), exc=AtlasUserError)
+			frappe.throw(_("This Virtual Machine has no IPv6 block."), exc=AtlasUserError)
 
 		return VirtualMachineService(self).detach_public_ipv6(
 			frappe.get_doc("Metal Server IP Address", block_name)

@@ -54,7 +54,7 @@ frappe.ui.form.on("Metal Server IP Address", {
 			[
 				__("Detach from Virtual Machine"),
 				() => frm.call("detach_public_ipv6").then(() => frm.reload_doc()),
-				is_ipv6 && frm.doc.status === "Attached" && is_system_manager,
+				is_ipv6 && ["Attaching", "Attached"].includes(frm.doc.status) && is_system_manager,
 				__("Detach {0}/{1} from {2}?", [
 					frm.doc.address.bold(),
 					frm.doc.cidr,
