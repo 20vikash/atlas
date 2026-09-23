@@ -14,6 +14,7 @@ from atlas.atlas.core.tags import (
 	MAXIMUM_TAG_VALUE_LENGTH,
 	MAXIMUM_TAGS,
 	read_tags,
+	read_tags_for,
 )
 from atlas.vm.core.models import (
 	MAXIMUM_CPU_MILLICORES,
@@ -25,8 +26,8 @@ from atlas.vm.core.models import (
 )
 
 if TYPE_CHECKING:
-	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
-		MetalServerIPAddress,
+	from atlas.metal_server.doctype.public_ip_allocation.public_ip_allocation import (
+		PublicIPAllocation,
 	)
 	from atlas.vm.core.metal_models import MetalVirtualMachine
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
@@ -41,7 +42,7 @@ TagMap = Annotated[
 	Field(max_length=MAXIMUM_TAGS),
 ]
 FirewallProtocol = Literal["any", "tcp", "udp", "icmp"]
-AUTO_IP_ADDRESS = "auto"
+AUTO_IP_ALLOCATION = "auto"
 
 
 class ApiErrorField(BaseModel):
@@ -160,26 +161,26 @@ class WebhookConfigurationResponse(BaseModel):
 	webhooks: list[str]
 
 
-class ReserveIPAddressPayload(StrictModel):
-	"""Optionally reserve an address the tenant already holds."""
+class ReservePublicIPPayload(StrictModel):
+	"""Select the IP version of one direct reservation."""
 
-	ip_address_id: str | None = None
+	version: Literal[4, 6]
 
 
-class IPAddressResponse(BaseModel):
-	"""A tenant public IP address."""
+class PublicIPResponse(BaseModel):
+	"""One tenant public IP."""
 
 	model_config = ConfigDict(
 		json_schema_extra={
 			"examples": [
 				{
-					"id": "203.0.113.10",
+					"id": "32eb57bc-9548-4a89-8358-543e26883569",
 					"tenant_id": 7,
-					"address": "203.0.113.10",
+					"prefix": "203.0.113.10/32",
 					"version": 4,
-					"cidr": 32,
-					"state": "reserved",
+					"status": "reserved",
 					"reserved": True,
+					"delivery": "direct",
 					"virtual_machine_id": None,
 					"tags": {"pool": "edge"},
 					"created_at": 1788834165,
@@ -190,32 +191,34 @@ class IPAddressResponse(BaseModel):
 
 	id: str
 	tenant_id: int
-	address: str
+	prefix: str
 	version: int
-	cidr: int
-	state: str
+	status: str
 	reserved: bool
+	delivery: Literal["direct", "routed"]
 	virtual_machine_id: str | None
 	tags: dict[str, str]
 	created_at: int
 
 	@classmethod
 	def from_document(
-		cls, ip_address: MetalServerIPAddress, tags: dict[str, str] | None = None
-	) -> IPAddressResponse:
-		"""Build a response from an IP address document, or from a query row with its tags."""
-		state = "reserved" if ip_address.status == "Allocated" else ip_address.status.lower()
+		cls, allocation: PublicIPAllocation, tags: dict[str, str] | None = None
+	) -> PublicIPResponse:
+		"""Build a response from an allocation document or query row."""
+		gateway = getattr(allocation, "gateway", None)
+		if gateway is None:
+			gateway = frappe.db.get_value("Public IP Pool", allocation.pool, "gateway")
 		return cls(
-			id=ip_address.name,
-			tenant_id=ip_address.tenant_id,
-			address=ip_address.address,
-			version=int(ip_address.version),
-			cidr=ip_address.cidr,
-			state=state,
-			reserved=bool(ip_address.reserved),
-			virtual_machine_id=ip_address.virtual_machine or None,
-			tags=read_tags(ip_address) if tags is None else tags,
-			created_at=to_unix_timestamp(ip_address.creation),
+			id=allocation.name,
+			tenant_id=allocation.tenant_id,
+			prefix=allocation.prefix,
+			version=int(allocation.version),
+			status=allocation.status.lower(),
+			reserved=bool(allocation.is_reserved),
+			delivery="routed" if gateway else "direct",
+			virtual_machine_id=allocation.virtual_machine or None,
+			tags=read_tags(allocation) if tags is None else tags,
+			created_at=to_unix_timestamp(allocation.creation),
 		)
 
 
@@ -395,7 +398,8 @@ class CreateVirtualMachinePayload(StrictModel):
 	ssh_keys: list[str] = Field(default_factory=list)
 	user_data: str = ""
 	metadata: dict[str, str] = Field(default_factory=dict)
-	ip_address_id: str | None = None
+	public_ipv4: str | None = None
+	public_ipv6: str | None = None
 	egress: EgressMode = "uplink"
 	is_privileged: bool = False
 	is_termination_protected: bool = False
@@ -406,9 +410,7 @@ class CreateVirtualMachinePayload(StrictModel):
 	public_network_throughput_mibps: int = Field(default=0, ge=0)
 	firewall: FirewallPayload = Field(default_factory=FirewallPayload)
 
-	def to_domain_request(
-		self, tenant_id: int, image_name: str, ip_address_name: str | None
-	) -> VirtualMachineCreateRequest:
+	def to_domain_request(self, tenant_id: int, image_name: str) -> VirtualMachineCreateRequest:
 		"""Build the domain request for this API payload."""
 		return VirtualMachineCreateRequest(
 			virtual_machine_image=image_name,
@@ -429,7 +431,8 @@ class CreateVirtualMachinePayload(StrictModel):
 			private_network_throughput_mibps=self.private_network_throughput_mibps,
 			public_network_throughput_mibps=self.public_network_throughput_mibps,
 			firewall=FirewallConfiguration.from_value(self.firewall.model_dump()),
-			server_ip_address=ip_address_name,
+			public_ipv4=self.public_ipv4,
+			public_ipv6=self.public_ipv6,
 		)
 
 
@@ -478,12 +481,12 @@ class MetadataReplacementPayload(StrictModel):
 	metadata: dict[str, str]
 
 
-class IPAddressAssignmentPayload(StrictModel):
-	"""The public IPv4 address to attach."""
+class PublicIPAssignmentPayload(StrictModel):
+	"""The public IP to attach."""
 
-	ip_address_id: str = Field(
+	public_ip: str = Field(
 		min_length=1,
-		description=f"A reserved address, or {AUTO_IP_ADDRESS} to borrow one from the shared pool.",
+		description=f"A reserved direct public IP, or {AUTO_IP_ALLOCATION} for automatic selection.",
 	)
 
 
@@ -564,6 +567,8 @@ class VirtualMachineResponse(BaseModel):
 	disk_mib: int
 	sleep_after_idle_seconds: int
 	is_termination_protected: bool
+	public_ipv4: PublicIPResponse | None
+	public_ipv6: PublicIPResponse | None
 	tags: dict[str, str]
 	created_at: int
 
@@ -572,6 +577,7 @@ class VirtualMachineResponse(BaseModel):
 		cls, virtual_machine: VirtualMachine, tags: dict[str, str] | None = None
 	) -> VirtualMachineResponse:
 		"""Build a response from a VM document, or from a query row with its tags."""
+		allocations = public_ip_allocations_for(virtual_machine.name)
 		return cls(
 			id=virtual_machine.name,
 			tenant_id=virtual_machine.tenant_id,
@@ -582,6 +588,8 @@ class VirtualMachineResponse(BaseModel):
 			disk_mib=virtual_machine.disk_mib,
 			sleep_after_idle_seconds=virtual_machine.sleep_after_idle_seconds,
 			is_termination_protected=bool(virtual_machine.is_termination_protected),
+			public_ipv4=allocations.get(4),
+			public_ipv6=allocations.get(6),
 			tags=read_tags(virtual_machine) if tags is None else tags,
 			created_at=to_unix_timestamp(virtual_machine.creation),
 		)
@@ -714,6 +722,8 @@ class VirtualMachineDetailResponse(BaseModel):
 	tags: dict[str, str]
 	created_at: int
 	is_privileged: bool
+	public_ipv4: PublicIPResponse | None
+	public_ipv6: PublicIPResponse | None
 	desired_state: str | None
 	current_state: str
 	error: str | None
@@ -729,6 +739,7 @@ class VirtualMachineDetailResponse(BaseModel):
 		"""Build a detailed response from Atlas storage and the live Metal state."""
 		desired = information.desired if information else None
 		observed = information.observed if information else None
+		allocations = public_ip_allocations_for(virtual_machine.name)
 		return cls(
 			id=virtual_machine.name,
 			tenant_id=virtual_machine.tenant_id,
@@ -737,6 +748,8 @@ class VirtualMachineDetailResponse(BaseModel):
 			tags=read_tags(virtual_machine),
 			created_at=to_unix_timestamp(virtual_machine.creation),
 			is_privileged=bool(virtual_machine.is_privileged),
+			public_ipv4=allocations.get(4),
+			public_ipv6=allocations.get(6),
 			desired_state=desired.state if desired else None,
 			current_state=get_current_state(virtual_machine, observed.state if observed else None),
 			error=observed.error.message if observed and observed.error else None,
@@ -778,6 +791,27 @@ class VirtualMachineDetailResponse(BaseModel):
 				metadata=dict(desired.guest.metadata) if desired else {},
 			),
 		)
+
+
+def public_ip_allocations_for(virtual_machine: str) -> dict[int, PublicIPResponse]:
+	"""Return each public IP version that belongs to one virtual machine."""
+	rows = frappe.get_all(
+		"Public IP Allocation",
+		filters={"virtual_machine": virtual_machine},
+		fields=[
+			"name",
+			"tenant_id",
+			"prefix",
+			"pool",
+			"version",
+			"status",
+			"is_reserved",
+			"virtual_machine",
+			"creation",
+		],
+	)
+	tags = read_tags_for("Public IP Allocation", [row.name for row in rows])
+	return {int(row.version): PublicIPResponse.from_document(row, tags[row.name]) for row in rows}
 
 
 class ConsoleTokenResponse(BaseModel):

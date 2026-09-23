@@ -15,16 +15,15 @@ from atlas.api.core.base import (
 from atlas.api.core.docs import api_docs
 from atlas.api.core.errors import ResourceConflict
 from atlas.api.models import (
-	AUTO_IP_ADDRESS,
 	CapacityUnavailableResponse,
 	ConsoleTokenPayload,
 	ConsoleTokenResponse,
 	CreateVirtualMachinePayload,
 	DiskUpdatePayload,
 	ImageResponse,
-	IPAddressAssignmentPayload,
 	MetadataReplacementPayload,
 	NetworkUpdatePayload,
+	PublicIPAssignmentPayload,
 	ResizePayload,
 	SnapshotPayload,
 	SSHKeysReplacementPayload,
@@ -40,18 +39,13 @@ from atlas.api.router import (
 	virtual_machines,
 )
 from atlas.api.routes.images import get_owned_image
-from atlas.api.routes.ip_addresses import get_owned_ip_address
 from atlas.atlas.core.tags import read_tags_for
 from atlas.auth.identity import get_current_tenant_id
-from atlas.metal_server.core.ip_address_service import IPAddressService
 from atlas.vm.core.console_token import CONSOLE_TOKEN_TTL_SECONDS
 from atlas.vm.core.vm_state import get_reported_state_rows
 from atlas.vm.doctype.virtual_machine.virtual_machine import create as create_virtual_machine_request
 
 if TYPE_CHECKING:
-	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
-		MetalServerIPAddress,
-	)
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
@@ -73,23 +67,6 @@ def request_virtual_machine_power_state(
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
-def get_available_ip_address(ip_address_id: str) -> MetalServerIPAddress:
-	"""Return one reserved IP address that no virtual machine uses."""
-	ip_address = get_owned_ip_address(ip_address_id)
-	if ip_address.status != "Allocated" or ip_address.virtual_machine:
-		raise ResourceConflict("The IP address is not available.")
-
-	return ip_address
-
-
-def get_attachable_ip_address_name(ip_address_id: str) -> str:
-	"""Return the address to attach. The auto value borrows one from the shared pool."""
-	if ip_address_id == AUTO_IP_ADDRESS:
-		return IPAddressService().borrow_from_pool()
-
-	return get_available_ip_address(ip_address_id).name
-
-
 @virtual_machines.post("")
 @api_docs(
 	request_example={
@@ -101,7 +78,7 @@ def get_attachable_ip_address_name(ip_address_id: str) -> str:
 		"ssh_keys": ["ssh-ed25519 AAAA"],
 	},
 	responses={
-		201: {"description": "The virtual machine request is stored."},
+		202: {"description": "The virtual machine and its public IP intents are stored."},
 		503: {
 			"description": (
 				"The virtual machine was not placed. `error.code` is `out_of_capacity` when no host "
@@ -129,17 +106,14 @@ def create_virtual_machine(
 	Set `is_termination_protected` to refuse deletion of the new VM. The termination protection route changes it later.
 	"""
 	image = get_owned_image(payload.image_id)
-	ip_address = get_available_ip_address(payload.ip_address_id) if payload.ip_address_id else None
-	request = payload.to_domain_request(
-		get_current_tenant_id(), image.name, ip_address.name if ip_address else None
-	)
+	request = payload.to_domain_request(get_current_tenant_id(), image.name)
 	result = create_virtual_machine_request(request)
 
 	virtual_machine: VirtualMachine = frappe.get_doc("Virtual Machine", result["name"])
 
 	return ApiResult(
 		VirtualMachineResponse.from_document(virtual_machine),
-		status=201,
+		status=202,
 		headers={
 			"Location": get_resource_location("virtual-machines", virtual_machine.name),
 		},
@@ -469,45 +443,63 @@ def replace_virtual_machine_metadata(
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
-@virtual_machine_configuration.put("<virtual_machine_id>/ip-address")
+@virtual_machine_configuration.put("<virtual_machine_id>/public-ipv4")
 @api_docs(
-	request_example={"ip_address_id": "203.0.113.10"},
+	request_example={"public_ip": "auto"},
 	responses={
 		**ACCEPTED_RESPONSE,
 		409: {"description": "A different address is attached, or the shared pool is empty."},
 	},
 )
-def attach_virtual_machine_ip_address(
-	virtual_machine_id: str, payload: IPAddressAssignmentPayload
+def attach_virtual_machine_public_ipv4(
+	virtual_machine_id: str, payload: PublicIPAssignmentPayload
 ) -> ApiResult[VirtualMachineResponse]:
-	"""Attach IP address.
+	"""Attach public IPv4.
 
-	Attaches one address the tenant reserved. Send auto to borrow one from the shared pool, which returns it on detach. Detach the current address first.
+	Attaches an automatic allocation or one direct allocation that the tenant reserved.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	attached_ip_address_name = frappe.db.get_value(
-		"Metal Server IP Address", {"virtual_machine": virtual_machine.name, "version": "4"}
-	)
-	if attached_ip_address_name == payload.ip_address_id:
-		return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
-	if attached_ip_address_name:
-		raise ResourceConflict("Detach the current IP address before you attach a different one.")
-
-	virtual_machine.attach_public_ipv4(get_attachable_ip_address_name(payload.ip_address_id))
+	virtual_machine.attach_public_ip(4, payload.public_ip)
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
-@virtual_machine_configuration.delete("<virtual_machine_id>/ip-address")
+@virtual_machine_configuration.delete("<virtual_machine_id>/public-ipv4")
 @api_docs(responses=ACCEPTED_RESPONSE)
-def detach_virtual_machine_ip_address(
+def detach_virtual_machine_public_ipv4(
 	virtual_machine_id: str,
 ) -> ApiResult[VirtualMachineResponse]:
-	"""Detach IP address.
+	"""Detach public IPv4.
 
-	Detaches the public IP address. Reserved addresses stay with the tenant; others return to the shared pool.
+	Detaches the public IPv4 allocation. A reserved allocation stays with the tenant.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	if frappe.db.exists("Metal Server IP Address", {"virtual_machine": virtual_machine.name, "version": "4"}):
-		virtual_machine.detach_public_ipv4()
+	virtual_machine.detach_public_ip(4)
+	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
+
+@virtual_machine_configuration.put("<virtual_machine_id>/public-ipv6")
+@api_docs(request_example={"public_ip": "auto"}, responses=ACCEPTED_RESPONSE)
+def attach_virtual_machine_public_ipv6(
+	virtual_machine_id: str, payload: PublicIPAssignmentPayload
+) -> ApiResult[VirtualMachineResponse]:
+	"""Attach public IPv6.
+
+	Attaches automatic direct or routed IPv6, or one direct allocation that the tenant reserved.
+	"""
+	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
+	virtual_machine.attach_public_ip(6, payload.public_ip)
+	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
+
+
+@virtual_machine_configuration.delete("<virtual_machine_id>/public-ipv6")
+@api_docs(responses=ACCEPTED_RESPONSE)
+def detach_virtual_machine_public_ipv6(
+	virtual_machine_id: str,
+) -> ApiResult[VirtualMachineResponse]:
+	"""Detach public IPv6.
+
+	Detaches direct or routed IPv6. A new routed attach can use a different address.
+	"""
+	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
+	virtual_machine.detach_public_ip(6)
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)

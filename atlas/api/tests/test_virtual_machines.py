@@ -7,10 +7,12 @@ from frappe.tests import UnitTestCase
 
 from atlas.api.models import SnapshotPayload, VirtualMachineDetailResponse, VirtualMachineResponse
 from atlas.api.routes.virtual_machines import (
-	attach_virtual_machine_ip_address,
+	attach_virtual_machine_public_ipv4,
+	attach_virtual_machine_public_ipv6,
 	create_virtual_machine,
 	delete_virtual_machine,
-	detach_virtual_machine_ip_address,
+	detach_virtual_machine_public_ipv4,
+	detach_virtual_machine_public_ipv6,
 	get_virtual_machine,
 	list_virtual_machines,
 	resize_virtual_machine,
@@ -64,8 +66,8 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"terminate": Mock(),
 		"get_metal_vm_info": Mock(return_value=None),
 		"resize": Mock(),
-		"attach_public_ipv4": Mock(),
-		"detach_public_ipv4": Mock(),
+		"attach_public_ip": Mock(),
+		"detach_public_ip": Mock(),
 		"update_network": Mock(),
 		"set_termination_protection": Mock(),
 	}
@@ -204,7 +206,7 @@ class TestCreateVirtualMachine(UnitTestCase):
 	def test_create_returns_the_record_and_its_location(self) -> None:
 		status, body, create = self.create(CREATE_BODY)
 
-		self.assertEqual(status, 201)
+		self.assertEqual(status, 202)
 		self.assertEqual(body["id"], "vm-00001")
 		self.assertEqual(create.call_args.args[0].tenant_id, TENANT_ID)
 
@@ -235,7 +237,7 @@ class TestCreateVirtualMachine(UnitTestCase):
 	def test_create_passes_the_privileged_flag(self) -> None:
 		status, _, create = self.create({**CREATE_BODY, "is_privileged": True}, tenant_id=0)
 
-		self.assertEqual(status, 201)
+		self.assertEqual(status, 202)
 		self.assertTrue(create.call_args.args[0].is_privileged)
 
 	def test_create_passes_the_firewall(self) -> None:
@@ -249,10 +251,16 @@ class TestCreateVirtualMachine(UnitTestCase):
 			}
 		)
 
-		self.assertEqual(status, 201)
+		self.assertEqual(status, 202)
 		firewall = create.call_args.args[0].firewall
 		self.assertTrue(firewall.enabled)
 		self.assertEqual(firewall.inbound[0].cidrs, ("203.0.113.0/24",))
+
+	def test_create_passes_both_public_ip_selectors(self) -> None:
+		status, _, create = self.create({**CREATE_BODY, "public_ipv4": "auto", "public_ipv6": "auto"})
+		self.assertEqual(status, 202)
+		self.assertEqual(create.call_args.args[0].public_ipv4, "auto")
+		self.assertEqual(create.call_args.args[0].public_ipv6, "auto")
 
 	def test_create_rejects_a_field_the_caller_cannot_set(self) -> None:
 		for field in ("tenant_id", "server", "is_sleepy", "idle_timeout_seconds"):
@@ -288,8 +296,11 @@ class TestReadVirtualMachines(UnitTestCase):
 			status, body = call_route(list_virtual_machines)
 
 		self.assertEqual(status, 200)
-		self.assertEqual(get_list.call_args.kwargs["filters"], {"tenant_id": TENANT_ID})
-		self.assertEqual(get_list.call_args.kwargs["limit"], 3)
+		virtual_machine_call = next(
+			call for call in get_list.call_args_list if call.args[0] == "Virtual Machine"
+		)
+		self.assertEqual(virtual_machine_call.kwargs["filters"], {"tenant_id": TENANT_ID})
+		self.assertEqual(virtual_machine_call.kwargs["limit"], 3)
 		self.assertEqual(len(body["items"]), 2)
 		self.assertTrue(body["has_more"])
 
@@ -448,77 +459,64 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 			self.assertEqual(body["error"]["code"], "invalid_request")
 			virtual_machine.resize.assert_not_called()
 
-	def attach(self, attached: str | None, requested: str):
-		"""Run the attach route with one currently attached address."""
+	def attach(self, version: int, requested: str):
+		"""Run one public IP attach route."""
+		route = attach_virtual_machine_public_ipv4 if version == 4 else attach_virtual_machine_public_ipv6
 		with (
 			api_request(
 				"PUT",
-				"/api/atlas/virtual-machines/vm-00001/ip-address",
+				f"/api/atlas/virtual-machines/vm-00001/public-ipv{version}",
 				tenant_id=TENANT_ID,
-				json={"ip_address_id": requested},
+				json={"public_ip": requested},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
-			patch("atlas.api.routes.virtual_machines.frappe.db.get_value", return_value=attached),
-			patch(
-				"atlas.api.routes.virtual_machines.get_available_ip_address",
-				return_value=SimpleNamespace(name=requested),
-			),
 		):
-			status, body = call_route(attach_virtual_machine_ip_address, virtual_machine_id="vm-00001")
+			status, body = call_route(route, virtual_machine_id="vm-00001")
 
 		return status, body, virtual_machine
 
-	def test_auto_borrows_one_pool_address(self) -> None:
+	def test_auto_ipv4_reaches_the_domain_service(self) -> None:
+		status, _, virtual_machine = self.attach(4, "auto")
+		self.assertEqual(status, 202)
+		virtual_machine.attach_public_ip.assert_called_once_with(4, "auto")
+
+	def test_reserved_ipv6_reaches_the_domain_service(self) -> None:
+		allocation = "32eb57bc-9548-4a89-8358-543e26883569"
+		status, _, virtual_machine = self.attach(6, allocation)
+		self.assertEqual(status, 202)
+		virtual_machine.attach_public_ip.assert_called_once_with(6, allocation)
+
+	def test_detach_routes_are_idempotent_at_the_domain_boundary(self) -> None:
+		for version, route in (
+			(4, detach_virtual_machine_public_ipv4),
+			(6, detach_virtual_machine_public_ipv6),
+		):
+			virtual_machine = build_virtual_machine()
+			with (
+				api_request(
+					"DELETE",
+					f"/api/atlas/virtual-machines/vm-00001/public-ipv{version}",
+					tenant_id=TENANT_ID,
+				),
+				owned_document(virtual_machine),
+			):
+				status, _ = call_route(route, virtual_machine_id="vm-00001")
+			self.assertEqual(status, 202)
+			virtual_machine.detach_public_ip.assert_called_once_with(version)
+
+	def test_an_unknown_attach_field_is_rejected(self) -> None:
 		with (
 			api_request(
 				"PUT",
-				"/api/atlas/virtual-machines/vm-00001/ip-address",
+				"/api/atlas/virtual-machines/vm-00001/public-ipv4",
 				tenant_id=TENANT_ID,
-				json={"ip_address_id": "auto"},
+				json={"allocation": "auto"},
 			),
 			owned_document(virtual_machine := build_virtual_machine()),
-			patch("atlas.api.routes.virtual_machines.frappe.db.get_value", return_value=None),
-			patch(
-				"atlas.api.routes.virtual_machines.IPAddressService",
-				return_value=Mock(borrow_from_pool=Mock(return_value="203.0.113.10")),
-			),
-			patch("atlas.api.routes.virtual_machines.get_available_ip_address") as get_available,
 		):
-			status, _ = call_route(attach_virtual_machine_ip_address, virtual_machine_id="vm-00001")
-
-		self.assertEqual(status, 202)
-		virtual_machine.attach_public_ipv4.assert_called_once_with("203.0.113.10")
-		get_available.assert_not_called()
-
-	def test_attaching_the_same_address_again_is_safe(self) -> None:
-		status, _, service = self.attach("203.0.113.10", "203.0.113.10")
-
-		self.assertEqual(status, 202)
-		service.attach_public_ipv4.assert_not_called()
-
-	def test_attaching_a_different_address_is_rejected(self) -> None:
-		status, body, service = self.attach("203.0.113.10", "203.0.113.11")
-
-		self.assertEqual(status, 409)
-		self.assertEqual(body["error"]["code"], "conflict")
-		service.attach_public_ipv4.assert_not_called()
-
-	def test_attaching_the_first_address_reaches_the_service(self) -> None:
-		status, _, service = self.attach(None, "203.0.113.11")
-
-		self.assertEqual(status, 202)
-		service.attach_public_ipv4.assert_called_once_with("203.0.113.11")
-
-	def test_detaching_without_an_address_changes_nothing(self) -> None:
-		with (
-			api_request("DELETE", "/api/atlas/virtual-machines/vm-00001/ip-address", tenant_id=TENANT_ID),
-			owned_document(virtual_machine := build_virtual_machine()),
-			patch("atlas.api.routes.virtual_machines.frappe.db.exists", return_value=False),
-		):
-			status, _ = call_route(detach_virtual_machine_ip_address, virtual_machine_id="vm-00001")
-
-		self.assertEqual(status, 202)
-		virtual_machine.detach_public_ipv4.assert_not_called()
+			status, _ = call_route(attach_virtual_machine_public_ipv4, virtual_machine_id="vm-00001")
+		self.assertEqual(status, 400)
+		virtual_machine.attach_public_ip.assert_not_called()
 
 
 class TestSnapshotPayload(UnitTestCase):
