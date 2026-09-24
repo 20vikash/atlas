@@ -57,6 +57,11 @@ func (store *VirtualMachineStore) PrepareRootFileSystem(ctx context.Context, req
 	return store.provisionDisk(ctx, request)
 }
 
+// HasDisk reports whether the VM already has a disk.
+func (store *VirtualMachineStore) HasDisk(ctx context.Context, virtualMachineID string) (bool, error) {
+	return datasetExists(ctx, store.pool.virtualMachineDataset(virtualMachineID))
+}
+
 // provisionDisk clones the image, grows the disk, and exposes it in the chroot.
 // A disk this call created is released when a later step fails, so a failed boot
 // does not leave a half-prepared disk behind.

@@ -113,14 +113,14 @@ flowchart TD
     Network --> Console[Open serial console PTY]
     Console --> Unit[Start systemd unit]
     Unit --> Socket[Wait for Firecracker API socket]
-    Socket --> Boot{Warm artifact is valid?}
+    Socket --> Boot{First boot with a valid warm artifact?}
     Boot -->|Yes| Warm[Load memory and device state]
     Boot -->|No| Cold[Configure and boot VM]
     Warm --> Observe[Store observed state]
     Cold --> Observe
 ```
 
-Warm start is an optimization. Cold start remains the recovery path when a warm artifact is absent or invalid.
+Warm start is an optimization for the first boot only. Cold start is used for every later start, and when a warm artifact is absent or invalid.
 
 ## Failure and cleanup rules
 

@@ -23,6 +23,7 @@ const maxConcurrentSSHSessions = 32
 type virtualMachineStorage interface {
 	PrepareBoot(ctx context.Context, request storage.VirtualMachineStorageRequest) (storage.BootConfiguration, error)
 	PrepareRootFileSystem(ctx context.Context, request storage.VirtualMachineStorageRequest) error
+	HasDisk(ctx context.Context, virtualMachineID string) (bool, error)
 	Release(ctx context.Context, virtualMachineID string) error
 }
 

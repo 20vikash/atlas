@@ -236,6 +236,7 @@ func TestCrashedVMReportsFailed(t *testing.T) {
 }
 
 type fakeImages struct {
+	hasDisk      bool
 	releaseCalls int
 	releaseError error
 	staged       map[string]storage.StagedSnapshot
@@ -253,6 +254,10 @@ func (images *fakeImages) PrepareRootFileSystem(
 	storage.VirtualMachineStorageRequest,
 ) error {
 	return nil
+}
+
+func (images *fakeImages) HasDisk(context.Context, string) (bool, error) {
+	return images.hasDisk, nil
 }
 
 func (images *fakeImages) Release(context.Context, string) error {

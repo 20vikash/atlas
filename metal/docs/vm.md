@@ -34,7 +34,7 @@ A user power request supports `running`, `paused`, and `stopped`. A request for 
 
 ## Starts and saved state
 
-A normal start can use a shared warm image when the image and VM shape match. If no matching warm image exists, Metal uses a cold boot.
+The first start of a VM can use a shared warm image when the image and VM shape match. A later start always uses a cold boot, because the VM disk no longer matches the warm memory. See [Guest disk corruption after a restart](../../docs/incidents/2026-09-24-guest-disk-corruption.md).
 
 Automatic idle shutdown can preserve the memory of one VM. Metal keeps the public desired state as `running` and reports the observed state as `stopped` while Firecracker is not running.
 
