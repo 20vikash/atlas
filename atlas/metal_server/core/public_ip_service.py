@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 
 AUTO_ALLOCATION = "auto"
-STOCK_BATCH_SIZE = 1_000
+ALLOCATION_BATCH_SIZE = 1_000
+ALLOCATION_REPLENISH_THRESHOLD = ALLOCATION_BATCH_SIZE // 5
 
 
 class PublicIPError(AtlasUserError):
@@ -49,6 +50,10 @@ class PublicIPAllocationInUse(PublicIPError):
 
 class PublicIPIntentInProgress(PublicIPError):
 	code = "public_ip_intent_in_progress"
+
+
+class IPv4InternetAccessRequired(PublicIPError):
+	code = "ipv4_internet_access_required"
 
 
 class UnsupportedIPReservation(AtlasUserError):
@@ -85,6 +90,10 @@ class PublicIPService:
 		if not is_creation:
 			virtual_machine.ensure_not_migrating()
 			virtual_machine.validate_network_change()
+			if version == 4 and not self._has_ipv4_internet_access(virtual_machine):
+				raise IPv4InternetAccessRequired(
+					_("Turn on IPv4 internet access before you attach a public IPv4 address.")
+				)
 		if selector != AUTO_ALLOCATION:
 			try:
 				UUID(selector)
@@ -123,6 +132,14 @@ class PublicIPService:
 			return None
 		allocation.begin_detach()
 		return allocation
+
+	def _has_ipv4_internet_access(self, virtual_machine: VirtualMachine) -> bool:
+		from atlas.vm.core.vm_service import VirtualMachineService
+
+		return (
+			Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST)
+			in VirtualMachineService(virtual_machine).get_routes()
+		)
 
 	def allocation_for_vm(self, virtual_machine: str, version: int) -> PublicIPAllocation | None:
 		name = frappe.db.get_value(
@@ -277,6 +294,7 @@ class PublicIPService:
 		from atlas.vm.core.vm_service import VirtualMachineService
 
 		service = VirtualMachineService(virtual_machine)
+		service.lock_network()
 		if pool.is_routed:
 			router = frappe.get_doc("IPv6 Router Server", pool.gateway)
 			route = Route(IPV6_INTERNET_DESTINATION, router.wireguard_mesh_ipv6)
@@ -317,6 +335,7 @@ class PublicIPService:
 		if virtual_machine.is_terminating:
 			return
 		service = VirtualMachineService(virtual_machine)
+		service.lock_network()
 		if pool.is_routed:
 			service.update_network({"routes": service.get_routes_without(IPV6_INTERNET_DESTINATION)})
 		elif pool.version == "4":
@@ -366,23 +385,34 @@ class PublicIPService:
 		frappe.db.set_value("Public IP Allocation", name, values, update_modified=False)
 
 
-def stock_direct_allocations() -> None:
+def replenish_direct_allocations() -> None:
 	for name in frappe.get_all(
-		"Public IP Pool", filters={"enabled": 1, "gateway": ["is", "not set"]}, pluck="name"
+		"Public IP Pool",
+		filters={"enabled": 1, "gateway": ["is", "not set"], "source": "Static"},
+		pluck="name",
 	):
-		if frappe.db.exists("Public IP Allocation", {"pool": name, "status": "Available"}):
+		pool: PublicIPPool = frappe.get_doc("Public IP Pool", name, for_update=True)
+		if not pool.enabled or pool.is_routed or pool.source == "Provider":
 			continue
-		create_allocation_stock(name)
+		available = frappe.db.count("Public IP Allocation", {"pool": pool.name, "status": "Available"})
+		if available <= ALLOCATION_REPLENISH_THRESHOLD:
+			_generate_available_allocations(pool, ALLOCATION_BATCH_SIZE)
 
 
-def create_allocation_stock(pool_name: str, limit: int = STOCK_BATCH_SIZE) -> int:
+def generate_available_allocations(pool_name: str, limit: int = ALLOCATION_BATCH_SIZE) -> int:
 	"""Create the next direct allocation records and return the number created."""
 	pool: PublicIPPool = frappe.get_doc("Public IP Pool", pool_name, for_update=True)
 	if pool.is_routed:
 		raise ValueError("Routed pools create allocations when a VM requests IPv6")
+	if pool.source == "Provider":
+		raise ValueError("Provider pools create allocations when an address is requested")
+	return _generate_available_allocations(pool, limit)
+
+
+def _generate_available_allocations(pool: PublicIPPool, limit: int) -> int:
 	service = PublicIPService()
 	created = 0
-	for _allocation_index in range(min(max(int(limit), 0), STOCK_BATCH_SIZE)):
+	for _allocation_index in range(min(max(int(limit), 0), ALLOCATION_BATCH_SIZE)):
 		try:
 			service._create_next(pool)
 		except PublicIPPoolEmpty:

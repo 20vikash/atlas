@@ -1,7 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from atlas.metal_server.core.public_ip_service import PublicIPService, create_allocation_stock
+from atlas.metal_server.core.public_ip_service import PublicIPService, generate_available_allocations
 
 
 def insert_pool(prefix: str, allocation_prefix_length: int, **values):
@@ -54,9 +54,25 @@ class TestPublicIPPool(IntegrationTestCase):
 				}
 			).insert(ignore_permissions=True)
 
+	def test_provider_pool_generates_its_allocation_on_demand(self) -> None:
+		pool = frappe.get_doc(
+			{
+				"doctype": "Public IP Pool",
+				"prefix": "198.19.30.1/32",
+				"allocation_prefix_length": 32,
+				"source": "Provider",
+				"provider_resource_id": "resource-3",
+			}
+		).insert(ignore_permissions=True)
+
+		with self.assertRaisesRegex(ValueError, "when an address is requested"):
+			generate_available_allocations(pool.name)
+
+		self.assertFalse(frappe.db.exists("Public IP Allocation", {"pool": pool.name}))
+
 	def test_delete_removes_available_allocations(self) -> None:
 		pool = insert_pool("198.19.31.0/30", 32)
-		create_allocation_stock(pool.name)
+		generate_available_allocations(pool.name)
 
 		frappe.delete_doc("Public IP Pool", pool.name, ignore_permissions=True)
 
@@ -78,7 +94,7 @@ class TestPublicIPPool(IntegrationTestCase):
 
 	def test_delete_refuses_a_pool_assigned_to_an_ipv6_router(self) -> None:
 		pool = insert_pool("2001:db8:32::/64", 128)
-		pool.db_set("gateway", "ipv6-router-001", update_modified=False)
+		pool.db_set("gateway", f"ipv6-router-{pool.name}", update_modified=False)
 		pool.reload()
 
 		with self.assertRaisesRegex(frappe.ValidationError, "Archive.*IPv6 Router Server"):

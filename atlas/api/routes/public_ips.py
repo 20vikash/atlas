@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 import frappe
 
-from atlas.api.core.base import ApiResult, ListQuery, Page, add_tag_filter, build_page, get_owned_document
+from atlas.api.core.base import ApiResult, Page, add_tag_filter, build_page, get_owned_document
 from atlas.api.core.docs import api_docs
 from atlas.api.core.errors import ResourceNotFound
-from atlas.api.models import PublicIPResponse, ReservePublicIPPayload
+from atlas.api.models import PublicIPListQuery, PublicIPResponse, ReservePublicIPPayload
 from atlas.api.router import get_resource_location, public_ips
 from atlas.atlas.core.tags import read_tags_for
 from atlas.auth.identity import get_current_tenant_id
@@ -27,12 +27,14 @@ def get_owned_public_ip(public_ip_id: str) -> PublicIPAllocation:
 
 @public_ips.get("")
 @api_docs()
-def list_public_ips(query: ListQuery) -> Page[PublicIPResponse]:
+def list_public_ips(query: PublicIPListQuery) -> Page[PublicIPResponse]:
 	"""List public IPs.
 
-	Returns the tenant's reserved and attached public IPs in newest-first order.
+	Returns the tenant's reserved and attached public IPs in newest-first order. Pass `version` as `4` or `6` to return only that version.
 	"""
 	filters: dict[str, Any] = {"tenant_id": get_current_tenant_id()}
+	if query.version:
+		filters["version"] = query.version
 	if not add_tag_filter("Public IP Allocation", query, filters):
 		return build_page([], query)
 	rows: list[PublicIPAllocation] = frappe.get_list(

@@ -5,6 +5,7 @@ from frappe.tests import UnitTestCase
 
 from atlas.api.models import PublicIPResponse
 from atlas.api.routes.public_ips import (
+	list_public_ips,
 	release_public_ip,
 	reserve_attached_public_ip,
 	reserve_public_ip,
@@ -50,6 +51,16 @@ class TestPublicIPResponse(UnitTestCase):
 
 
 class TestPublicIPRoutes(UnitTestCase):
+	def test_list_filters_by_version(self) -> None:
+		with (
+			api_request("GET", "/api/atlas/public-ips", tenant_id=TENANT_ID, query_string={"version": "6"}),
+			patch("atlas.api.routes.public_ips.frappe.get_list", return_value=[]) as get_list,
+		):
+			status, _ = call_route(list_public_ips)
+
+		self.assertEqual(status, 200)
+		self.assertEqual(get_list.call_args.kwargs["filters"], {"tenant_id": TENANT_ID, "version": "6"})
+
 	def test_reserve_selects_the_requested_version(self) -> None:
 		reserved = allocation()
 		with (

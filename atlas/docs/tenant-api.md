@@ -117,11 +117,15 @@ Use `PUT /api/atlas/public-ips/{id}/reserve` to keep an attached direct public I
 
 Use `DELETE /api/atlas/public-ips/{id}` to release a detached reservation.
 
+Use `GET /api/atlas/public-ips?version=6` to list only one IP version.
+
 Tenants cannot select a pool and cannot reserve a routed IPv6 address.
 
 Use the VM `public-ipv4` and `public-ipv6` routes to attach or detach an allocation.
 
 An attach or detach returns `202` because Atlas applies provider and Metal changes asynchronously.
+
+A public IPv4 attach needs `ipv4_internet_access`. Without it, Atlas returns `409` with `ipv4_internet_access_required`.
 
 The VM and allocation responses contain structured `public_ipv4` and `public_ipv6` allocation objects.
 

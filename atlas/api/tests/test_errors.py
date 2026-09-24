@@ -11,7 +11,7 @@ from atlas.api.core.errors import (
 	ResourceNotFound,
 	describe_exception,
 )
-from atlas.api.models import CapacityUnavailableResponse
+from atlas.api.models import CapacityUnavailableResponse, CreateVirtualMachinePayload
 from atlas.api.routes.virtual_machines import create_virtual_machine
 from atlas.vm.core.placement import OutOfCapacity, PlacementBusy
 
@@ -50,6 +50,23 @@ class TestErrorBody(UnitTestCase):
 
 		self.assertEqual(status, 400)
 		self.assertEqual([field["name"] for field in body["error"]["fields"]], ["name"])
+
+	def test_request_level_validation_error_becomes_the_message(self) -> None:
+		try:
+			CreateVirtualMachinePayload(
+				image_id="image-1",
+				cpu_millicores=1000,
+				memory_mib=1024,
+				disk_mib=10240,
+				public_ipv4="32eb57bc-9548-4a89-8358-543e26883569",
+				ipv4_internet_access=False,
+			)
+		except PydanticValidationError as error:
+			status, body = describe_exception(error)
+
+		self.assertEqual(status, 400)
+		self.assertEqual(body["error"]["message"], "A public IPv4 address needs ipv4_internet_access.")
+		self.assertEqual(body["error"]["fields"], [])
 
 	def test_frappe_failures_map_to_api_codes(self) -> None:
 		cases = (

@@ -10,7 +10,7 @@ from frappe.model.document import Document
 from frappe.utils import add_to_date, now_datetime
 
 from atlas.atlas.core.artifacts import get_download_url
-from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.atlas.core.exceptions import AtlasConflictError, AtlasUserError
 from atlas.atlas.core.parsing import strict_bool
 from atlas.atlas.core.tags import validate_tags
 from atlas.vm.core.models import MAXIMUM_CPU_MILLICORES
@@ -179,7 +179,7 @@ class VirtualMachineImage(Document):
 		if self.is_stored_in_site_file:
 			frappe.throw(
 				_("Virtual Machine Image {0} is not in object storage.").format(self.title),
-				exc=AtlasUserError,
+				exc=AtlasConflictError,
 			)
 
 		return {

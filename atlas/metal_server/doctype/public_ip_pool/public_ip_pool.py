@@ -117,14 +117,16 @@ class PublicIPPool(Document):
 		)
 
 	@frappe.whitelist(methods=["POST"])
-	def create_allocation_stock(self) -> int:
+	def generate_available_allocations(self) -> int:
 		"""Create the next batch of direct allocations from this pool."""
 		frappe.only_for("System Manager")
 		if self.is_routed:
 			frappe.throw(_("A routed pool creates an address when a VM requests IPv6."))
-		from atlas.metal_server.core.public_ip_service import create_allocation_stock
+		if self.source == "Provider":
+			frappe.throw(_("A provider pool creates an allocation when an address is requested."))
+		from atlas.metal_server.core.public_ip_service import generate_available_allocations
 
-		return create_allocation_stock(self.name)
+		return generate_available_allocations(self.name)
 
 	@frappe.whitelist(methods=["POST"])
 	def retry_provider_operation(self) -> None:

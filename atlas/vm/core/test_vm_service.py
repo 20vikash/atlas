@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 import frappe
 from frappe.tests import UnitTestCase
 
+from atlas.atlas.core.exceptions import AtlasConflictError
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.models import Route
 from atlas.vm.core.placement import OutOfCapacity, PlacementStrategy
@@ -332,6 +333,18 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 					service.apply_network_changes({"routes": routes})
 
 				update_network.assert_not_called()
+
+	def test_ipv4_internet_access_stays_on_while_a_public_ipv4_is_attached(self) -> None:
+		service = self.build_service("203.0.113.10")
+
+		with (
+			patch.object(service, "get_routes", return_value=[Route("0.0.0.0/0", "host")]),
+			patch.object(service, "update_network") as update_network,
+			self.assertRaises(AtlasConflictError),
+		):
+			service.apply_network_changes({"ipv4_internet_access": False})
+
+		update_network.assert_not_called()
 
 	def test_a_limit_change_needs_no_address_check(self) -> None:
 		service = self.build_service("203.0.113.10")

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Never, TypedDict, cast
 import frappe
 from frappe import _
 
-from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.atlas.core.exceptions import AtlasConflictError, AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.metal_server.core.public_ip_service import PublicIPService
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
@@ -335,6 +335,7 @@ class VirtualMachineService:
 	def apply_network_changes(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Validate and apply selected network changes."""
 		self.virtual_machine.validate_network_change()
+		self.lock_network()
 		if "ipv4_internet_access" in changes:
 			changes = {**changes}
 			changes["routes"] = self._routes_for_ipv4_internet_access(
@@ -355,10 +356,20 @@ class VirtualMachineService:
 	def _routes_for_ipv4_internet_access(self, enabled: bool) -> list[dict[str, str]]:
 		if enabled:
 			return self.get_routes_with(Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST))
+		if self.get_ipv4_address_name():
+			frappe.throw(
+				_("Detach the public IPv4 address before you turn off IPv4 internet access."),
+				exc=AtlasConflictError,
+			)
 		return self.get_routes_without(IPV4_INTERNET_DESTINATION)
+
+	def lock_network(self) -> None:
+		"""Serialize network changes. Each one reads and replaces the complete Metal network."""
+		frappe.db.get_value("Virtual Machine", self.virtual_machine.name, "name", for_update=True)
 
 	def set_routes(self, value: Any) -> dict[str, Any]:
 		"""Replace the complete route list. Metal owns the routes."""
+		self.lock_network()
 		return self.update_network({"routes": [route.as_dict() for route in self.validate_routes(value)]})
 
 	def validate_routes(self, value: Any) -> tuple[Route, ...]:

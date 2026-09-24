@@ -10,7 +10,7 @@ from frappe.model.naming import make_autoname
 from frappe.utils import add_to_date, cint, now_datetime
 
 from atlas.atlas.core.background_jobs import run_as_admin
-from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.atlas.core.exceptions import AtlasConflictError, AtlasUserError
 from atlas.atlas.core.parsing import strict_bool
 from atlas.atlas.core.tags import validate_tags
 from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
@@ -298,6 +298,7 @@ class VirtualMachine(Document):
 		self.ensure_not_migrating()
 		self.validate_network_change()
 		service = VirtualMachineService(self)
+		service.lock_network()
 		self.is_network_gateway = strict_bool(is_network_gateway, "is_network_gateway")
 		changes: dict[str, Any] = {"is_network_gateway": bool(self.is_network_gateway)}
 		if self.is_network_gateway:
@@ -332,7 +333,7 @@ class VirtualMachine(Document):
 		"""Reject removal while termination protection holds this VM."""
 		if self.is_termination_protected:
 			frappe.throw(
-				_("Virtual Machine {0} is termination protected.").format(self.name), exc=AtlasUserError
+				_("Virtual Machine {0} is termination protected.").format(self.name), exc=AtlasConflictError
 			)
 
 	@frappe.whitelist(methods=["POST"])

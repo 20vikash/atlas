@@ -2,6 +2,8 @@
 
 Atlas uses `ServerProvider` as the server provider extension point. The registry maps one stable provider type to one provider class. Atlas has three providers: Generic, Scaleway, and AWS.
 
+See [Public IP allocation](public-ip-allocation.md) for direct and routed address behavior for each provider.
+
 ## Ownership
 
 Atlas owns provider selection, credentials, catalog records, and Metal Server documents. A provider owns remote resource operations.
@@ -22,7 +24,7 @@ The provider contract includes these operations:
 - Apply one explicit power action.
 - Delete one provider host safely.
 - Return the storage pool device.
-- Optionally reserve, attach, detach, and delete public IPv4 addresses.
+- Optionally reserve, attach, detach, and delete public IP resources.
 
 Optional address operations raise `UnsupportedProviderOperation` when the provider does not support them.
 

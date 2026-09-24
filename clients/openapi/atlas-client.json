@@ -2799,7 +2799,7 @@
     },
     "/api/atlas/public-ips": {
       "get": {
-        "description": "Returns the tenant's reserved and attached public IPs in newest-first order.",
+        "description": "Returns the tenant's reserved and attached public IPs in newest-first order. Pass `version` as `4` or `6` to return only that version.",
         "operationId": "list_public_ips",
         "parameters": [
           {
@@ -2857,6 +2857,29 @@
               "default": null,
               "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
               "title": "Tag"
+            }
+          },
+          {
+            "description": "Return only this IP protocol version.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "4",
+                    "6"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Return only this IP protocol version.",
+              "title": "Version"
             }
           }
         ],

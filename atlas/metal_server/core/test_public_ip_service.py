@@ -13,6 +13,57 @@ def pool(name: str, gateway: str):
 	return SimpleNamespace(name=name, gateway=gateway, prefix="2001:db8::/64", is_routed=True)
 
 
+class TestAllocationReplenishment(UnitTestCase):
+	def test_only_static_direct_pools_are_replenished(self) -> None:
+		public_pool = SimpleNamespace(name="pool-1", enabled=1, is_routed=False, source="Static")
+		with (
+			patch.object(service_module.frappe, "get_all", return_value=["pool-1"]) as get_all,
+			patch.object(service_module.frappe, "get_doc", return_value=public_pool),
+			patch.object(service_module.frappe.db, "count", return_value=0),
+			patch.object(service_module, "_generate_available_allocations") as generate,
+		):
+			service_module.replenish_direct_allocations()
+
+		get_all.assert_called_once_with(
+			"Public IP Pool",
+			filters={"enabled": 1, "gateway": ["is", "not set"], "source": "Static"},
+			pluck="name",
+		)
+		generate.assert_called_once_with(public_pool, service_module.ALLOCATION_BATCH_SIZE)
+
+	def test_pool_is_replenished_after_eighty_percent_is_consumed(self) -> None:
+		public_pool = SimpleNamespace(name="pool-1", enabled=1, is_routed=False, source="Static")
+		with (
+			patch.object(service_module.frappe, "get_all", return_value=[public_pool.name]),
+			patch.object(service_module.frappe, "get_doc", return_value=public_pool),
+			patch.object(
+				service_module.frappe.db,
+				"count",
+				return_value=service_module.ALLOCATION_REPLENISH_THRESHOLD,
+			),
+			patch.object(service_module, "_generate_available_allocations", return_value=1) as generate,
+		):
+			service_module.replenish_direct_allocations()
+
+		generate.assert_called_once_with(public_pool, service_module.ALLOCATION_BATCH_SIZE)
+
+	def test_pool_is_not_replenished_above_the_threshold(self) -> None:
+		public_pool = SimpleNamespace(name="pool-1", enabled=1, is_routed=False, source="Static")
+		with (
+			patch.object(service_module.frappe, "get_all", return_value=[public_pool.name]),
+			patch.object(service_module.frappe, "get_doc", return_value=public_pool),
+			patch.object(
+				service_module.frappe.db,
+				"count",
+				return_value=service_module.ALLOCATION_REPLENISH_THRESHOLD + 1,
+			),
+			patch.object(service_module, "_generate_available_allocations") as generate,
+		):
+			service_module.replenish_direct_allocations()
+
+		generate.assert_not_called()
+
+
 class TestGatewayPoolSelection(UnitTestCase):
 	def test_a_gateway_on_the_vm_server_is_preferred(self) -> None:
 		pools = {
@@ -91,11 +142,23 @@ class TestAllocationAssignment(UnitTestCase):
 		with (
 			patch.object(service_module.frappe, "get_doc", side_effect=get_doc),
 			patch.object(service_module.frappe.db, "get_value", return_value=None),
+			patch.object(VirtualMachineService, "get_routes", return_value=[Route("0.0.0.0/0", "host")]),
 		):
 			result = PublicIPService().attach(virtual_machine, 4, allocation.name)
 
 		self.assertIs(result, allocation)
 		allocation.begin_attach.assert_called_once_with("vm-1", "metal-1", 7)
+
+	def test_ipv4_attach_needs_ipv4_internet_access(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="vm-1", is_draft=False, ensure_not_migrating=Mock(), validate_network_change=Mock()
+		)
+		with (
+			patch.object(service_module.frappe, "get_doc", return_value=virtual_machine),
+			patch.object(VirtualMachineService, "get_routes", return_value=[]),
+			self.assertRaises(service_module.IPv4InternetAccessRequired),
+		):
+			PublicIPService().attach(virtual_machine, 4, "auto")
 
 
 UNRELATED_ROUTE = Route("2001:db8:ffff::/48", "fdaa:1::2")
