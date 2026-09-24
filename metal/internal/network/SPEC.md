@@ -37,19 +37,15 @@ flowchart TD
     Namespace --> Base[Ensure loopback, TAP, and gateway]
     Base --> Firewall[Converge IPv4 and IPv6 firewall]
     Firewall --> Remove[Remove resources no longer wanted]
-    Remove --> Add[Add veth, internet, public IPv4, and mesh]
+    Remove --> Add[Add veth, routes, public addresses, and mesh]
     Add --> Traffic[Apply traffic control]
 ```
 
-Removal comes before addition, so a change of egress mode never leaves both shapes in place at once. Within `addWanted` the order is load bearing: the veth carries everything above it, and the mesh registration announces the VM, so it is last and the first packet it attracts finds a complete path.
+Removal comes before addition, so a route or address change never leaves both shapes in place at once. Within `addWanted` the order is load bearing: the veth carries everything above it, and the mesh registration announces the VM, so it is last and the first packet it attracts finds a complete path.
 
 A failed step leaves the partial host state. The next `Ensure` continues from it, so every step must accept a resource that already exists.
 
-| Egress | veth pair | Internet path | Public IPv4 |
-|---|---|---|---|
-| `uplink` | present | present | optional |
-| `mesh` | present | absent | rejected |
-| `none` | absent | absent | rejected |
+A VM with a mesh address always has the veth pair. `routes.go` converges the namespace routes of both families from `network.routes`: IPv4 routes use the host transit address, and IPv6 routes use `fe80::1`. It reads the present routes with `ip route show via` and removes the routes that the VM no longer lists. `ip` prints a default prefix as `default` and a host route without its length, so the parser restores both forms. IPv4 NAT exists while an IPv4 route uses `host`. Only a warm image capture VM has no mesh address, so it gets no veth pair.
 
 `Release` removes the mesh registration first, because deleting the namespace also deletes the veth pair the registration names.
 
@@ -67,7 +63,7 @@ Metal applies the firewall before it adds the veth, public address, or mesh regi
 
 ## Host rules
 
-Public IPv4 needs 5 rules across 2 network stacks: DNAT in, SNAT out, both conntrack directions, and a second DNAT inside the namespace. They are treated as one set. If any rule is missing, all are removed and rewritten, so a partial set from an interrupted run cannot survive.
+Public IPv4 needs 6 rules across 2 network stacks: DNAT in for forwarded and host-originated traffic, SNAT out, both conntrack directions, and a second DNAT inside the namespace. They are treated as one set. If any rule is missing, all are removed and rewritten, so a partial set from an interrupted run cannot survive.
 
 Every rule carries the comment `metal-public-ipv4-<vm-id>`. Cleanup finds rules by that comment, which is why no rule state is kept anywhere.
 

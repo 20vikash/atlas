@@ -218,7 +218,7 @@ func testSpecification() Specification {
 			KernelURL:    "https://example.com/kernel?token=first",
 			KernelSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		},
-		Network: NetworkConfiguration{Egress: EgressUplink, WireGuardMeshIPv6: "fdaa::2"},
+		Network: NetworkConfiguration{WireGuardMeshIPv6: "fdaa::2", Routes: []Route{{Destination: "0.0.0.0/0", Via: RouteViaHost}}},
 	}
 }
 

@@ -4,13 +4,12 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-
-	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 func TestTrafficControlStepsLimitPrivateAndPublicTraffic(t *testing.T) {
 	request := trafficControlRequest{
-		Egress:                        vm.EgressUplink,
+		HasNetworkAttachment:          true,
+		HasIPv4HostRoute:              true,
 		PrivateNetworkThroughputMiBps: 100,
 		PublicNetworkThroughputMiBps:  50,
 	}
@@ -38,7 +37,8 @@ func TestTrafficControlStepsLimitPrivateAndPublicTraffic(t *testing.T) {
 // the lower priority to classify RFC 1918 traffic first.
 func TestPrivateFiltersOutrankThePublicFilter(t *testing.T) {
 	steps := trafficControlSteps("metal-vm-1", "vg-1000", trafficControlRequest{
-		Egress:                        vm.EgressUplink,
+		HasNetworkAttachment:          true,
+		HasIPv4HostRoute:              true,
 		PrivateNetworkThroughputMiBps: 100,
 		PublicNetworkThroughputMiBps:  50,
 	})
@@ -79,42 +79,35 @@ func TestTrafficControlStepsSkipUnlimitedTraffic(t *testing.T) {
 	}
 }
 
-// Only EgressNone removes the veth pair, so mesh VMs still hold the policers.
+// A VM without a network attachment has no veth pair to hold the policers.
 func TestTrafficControlNeedsVirtualEthernet(t *testing.T) {
-	for _, testCase := range []struct {
-		egress vm.Egress
-		want   bool
-	}{
-		{vm.EgressUplink, true},
-		{vm.EgressMesh, true},
-		{vm.EgressNone, false},
-	} {
-		request := trafficControlRequest{Egress: testCase.egress}
-		if got := request.hasVirtualEthernet(); got != testCase.want {
-			t.Fatalf("egress %q has veth = %v, want %v", testCase.egress, got, testCase.want)
-		}
+	if !(trafficControlRequest{HasNetworkAttachment: true}).hasVirtualEthernet() {
+		t.Fatal("an attached VM must hold the policers")
+	}
+	if (trafficControlRequest{}).hasVirtualEthernet() {
+		t.Fatal("a VM without an attachment must not hold the policers")
 	}
 }
 
-// A mesh VM has no internet path, so a public policer could never match.
+// A VM without an IPv4 host route has no public path, so a public policer could never match.
 func TestTrafficControlSkipsThePublicLimitWithoutAnInternetPath(t *testing.T) {
 	request := trafficControlRequest{
-		Egress:                        vm.EgressMesh,
+		HasNetworkAttachment:          true,
 		PrivateNetworkThroughputMiBps: 100,
 		PublicNetworkThroughputMiBps:  50,
 	}
 
 	for _, step := range trafficControlSteps("metal-vm-1", "vg-1000", request) {
 		if slices.Contains(step, "50mibps") {
-			t.Fatalf("mesh egress installed a public policer: %v", step)
+			t.Fatalf("a VM without a host route installed a public policer: %v", step)
 		}
 	}
 
 	// A public limit alone leaves nothing to install, not even the qdisc.
 	if got := trafficControlSteps("metal-vm-1", "vg-1000", trafficControlRequest{
-		Egress:                       vm.EgressMesh,
+		HasNetworkAttachment:         true,
 		PublicNetworkThroughputMiBps: 50,
 	}); got != nil {
-		t.Fatalf("mesh egress with only a public limit = %#v, want none", got)
+		t.Fatalf("only a public limit without a host route = %#v, want none", got)
 	}
 }

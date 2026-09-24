@@ -10,35 +10,6 @@ import (
 	platform "github.com/frappe/atlas/metal/internal/platform"
 )
 
-// defaultRouteSteps builds the namespace route and forwarding.
-func defaultRouteSteps(hostIPAddress string) [][]string {
-	return [][]string{
-		{"ip", "route", "replace", "default", "via", hostIPAddress},
-		{"sysctl", "-q", "-w", "net.ipv4.ip_forward=1"},
-	}
-}
-
-// addInternetPath adds the namespace route and NAT rule.
-func addInternetPath(ctx context.Context, virtualMachineID string, userID uint32) error {
-	namespace := namespaceName(virtualMachineID)
-	_, guestVirtualEthernet := virtualEthernetNames(userID)
-	hostIPAddress, _ := transitAddresses(userID)
-	if err := runNetworkNamespaceSteps(ctx, namespace, defaultRouteSteps(hostIPAddress)); err != nil {
-		return err
-	}
-	return setMasquerade(ctx, namespace, guestVirtualEthernet, true)
-}
-
-// removeInternetPath removes the NAT rule before the route.
-func removeInternetPath(ctx context.Context, virtualMachineID string, userID uint32) error {
-	namespace := namespaceName(virtualMachineID)
-	_, guestVirtualEthernet := virtualEthernetNames(userID)
-	if err := setMasquerade(ctx, namespace, guestVirtualEthernet, false); err != nil {
-		return err
-	}
-	return removeDefaultRoute(ctx, namespace)
-}
-
 // setMasquerade adds or removes the namespace NAT rule. iptables fails on a
 // duplicate add and on a delete for an absent rule, so it checks first.
 func setMasquerade(ctx context.Context, namespace, guestVirtualEthernet string, present bool) error {
@@ -99,40 +70,27 @@ func ruleExists(ctx context.Context, check []string) (bool, error) {
 	return false, err
 }
 
-// removeDefaultRoute removes the namespace default route when it is present.
-func removeDefaultRoute(ctx context.Context, namespace string) error {
-	output, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "route", "show", "default")
-	if err != nil {
-		return fmt.Errorf("show default route: %w", err)
-	}
-	if strings.TrimSpace(output) == "" {
-		return nil
-	}
-	_, err = platform.RunInNetworkNamespace(ctx, namespace, "ip", "route", "del", "default")
-	return err
-}
-
-// ensurePublicIPv4 makes the public address rules present. The rules are one
-// set: if any is missing, all are removed and rewritten, so a partial set from
-// an interrupted run cannot survive.
 func ensurePublicIPv4(ctx context.Context, virtualMachineID string, userID uint32, publicIPv4 string) error {
 	namespace := namespaceName(virtualMachineID)
 	_, guestVirtualEthernet := virtualEthernetNames(userID)
 	_, namespaceIPAddress := transitAddresses(userID)
 	steps := publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespaceIPAddress, publicIPv4)
+	return ensureRuleSet(ctx, steps, func() error {
+		return errors.Join(removePublicIPv4Rules(ctx, virtualMachineID), removePublicIPv4NamespaceRules(ctx, virtualMachineID))
+	})
+}
 
+// ensureRuleSet replaces the full set when any rule is missing.
+func ensureRuleSet(ctx context.Context, steps [][]string, remove func() error) error {
 	for _, step := range steps {
-		exists, err := ruleExists(ctx, publicIPv4RuleCheck(step))
+		exists, err := ruleExists(ctx, ruleCheck(step))
 		if err != nil {
 			return err
 		}
 		if exists {
 			continue
 		}
-		if err := removePublicIPv4Rules(ctx, virtualMachineID); err != nil {
-			return err
-		}
-		if err := removePublicIPv4NamespaceRules(ctx, virtualMachineID); err != nil {
+		if err := remove(); err != nil {
 			return err
 		}
 		return runSteps(ctx, steps)
@@ -140,9 +98,8 @@ func ensurePublicIPv4(ctx context.Context, virtualMachineID string, userID uint3
 	return nil
 }
 
-// publicIPv4RuleCheck turns an append rule into the -C form that tests for it.
-// An insert also carries a position, which -C does not accept.
-func publicIPv4RuleCheck(step []string) []string {
+// ruleCheck removes an insert position because iptables -C does not accept it.
+func ruleCheck(step []string) []string {
 	check := append([]string(nil), step...)
 	for index, argument := range check {
 		switch argument {
@@ -171,8 +128,7 @@ func publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespac
 		// public address. Such a packet skips PREROUTING, so OUTPUT repeats the map.
 		{"iptables", "-t", "nat", "-A", "OUTPUT", "-d", publicIPv4, "-m", "comment", "--comment", comment, "-j", "DNAT", "--to-destination", namespaceIPAddress},
 
-		// Outbound: the VM leaves as its public address. Inserted at position 1,
-		// so it wins over the wider masquerade rule that egress adds.
+		// Insert SNAT first so it wins over namespace masquerading.
 		{"iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", namespaceIPAddress, "-m", "comment", "--comment", comment, "-j", "SNAT", "--to-source", publicIPv4},
 
 		// Allow new inbound connections and the traffic they establish.
@@ -186,28 +142,25 @@ func publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespac
 	}
 }
 
-// removePublicIPv4Rules removes the host rules of one virtual machine.
 func removePublicIPv4Rules(ctx context.Context, virtualMachineID string) error {
-	return removePublicIPv4RulesFrom(ctx, nil, virtualMachineID)
+	return removeTaggedRules(ctx, nil, "iptables", publicIPv4Comment(virtualMachineID))
 }
 
-// removePublicIPv4NamespaceRules removes the namespace rules of one VM.
 func removePublicIPv4NamespaceRules(ctx context.Context, virtualMachineID string) error {
-	return removePublicIPv4RulesFrom(ctx, namespaceCommandPrefix(namespaceName(virtualMachineID)), virtualMachineID)
+	return removeTaggedRules(ctx, namespaceCommandPrefix(namespaceName(virtualMachineID)), "iptables", publicIPv4Comment(virtualMachineID))
 }
 
-// namespaceCommandPrefix runs a host command inside one VM network namespace.
 func namespaceCommandPrefix(namespace string) []string {
 	return []string{"ip", "netns", "exec", namespace}
 }
 
-// removePublicIPv4RulesFrom deletes every rule carrying this VM's comment. It
-// continues past a failure and joins the errors, so one bad table does not leave
-// the other tables untouched.
-func removePublicIPv4RulesFrom(ctx context.Context, prefix []string, virtualMachineID string) error {
+// removeTaggedRules deletes every rule carrying this comment. It continues past
+// a failure and joins the errors, so one bad table does not leave the other
+// tables untouched.
+func removeTaggedRules(ctx context.Context, prefix []string, command, comment string) error {
 	var cleanupErrors []error
 	for _, table := range []string{"nat", "filter"} {
-		arguments := commandWithPrefix(prefix, "iptables", "-t", table, "-S")
+		arguments := commandWithPrefix(prefix, command, "-t", table, "-S")
 		output, err := platform.Output(ctx, arguments[0], arguments[1:]...)
 		if err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("list %s rules: %w", table, err))
@@ -215,7 +168,7 @@ func removePublicIPv4RulesFrom(ctx context.Context, prefix []string, virtualMach
 		}
 		for _, line := range strings.Split(output, "\n") {
 			ruleArguments := strings.Fields(line)
-			if !hasRuleComment(ruleArguments, publicIPv4Comment(virtualMachineID)) {
+			if !hasRuleComment(ruleArguments, comment) {
 				continue
 			}
 			if len(ruleArguments) < 2 || ruleArguments[0] != "-A" {
@@ -225,7 +178,7 @@ func removePublicIPv4RulesFrom(ctx context.Context, prefix []string, virtualMach
 			for index, argument := range ruleArguments {
 				ruleArguments[index] = strings.Trim(argument, "\"")
 			}
-			arguments = commandWithPrefix(prefix, "iptables", "-t", table)
+			arguments = commandWithPrefix(prefix, command, "-t", table)
 			arguments = append(arguments, ruleArguments...)
 			if err := platform.Run(ctx, arguments[0], arguments[1:]...); err != nil {
 				cleanupErrors = append(cleanupErrors, fmt.Errorf("remove %s rule: %w", table, err))
@@ -235,14 +188,12 @@ func removePublicIPv4RulesFrom(ctx context.Context, prefix []string, virtualMach
 	return errors.Join(cleanupErrors...)
 }
 
-// commandWithPrefix builds a command, optionally inside a namespace.
 func commandWithPrefix(prefix []string, command string, arguments ...string) []string {
 	result := append([]string(nil), prefix...)
 	result = append(result, command)
 	return append(result, arguments...)
 }
 
-// hasRuleComment reports whether an `iptables -S` line carries this comment.
 func hasRuleComment(arguments []string, expected string) bool {
 	for index, argument := range arguments {
 		if argument == "--comment" && index+1 < len(arguments) {
@@ -252,8 +203,6 @@ func hasRuleComment(arguments []string, expected string) bool {
 	return false
 }
 
-// publicIPv4Comment tags every rule of one VM, so cleanup can find them all
-// without keeping any rule state of its own.
 func publicIPv4Comment(virtualMachineID string) string {
 	return "metal-public-ipv4-" + virtualMachineID
 }

@@ -50,7 +50,7 @@ func (manager *fakeVirtualMachineManager) Create(_ context.Context, id string, s
 		SSHKeys:                       append([]string(nil), specification.SSHKeys...),
 		MAC:                           "06:00:00:00:00:01",
 		PublicIPv4:                    specification.Network.PublicIPv4,
-		Egress:                        specification.Network.Egress,
+		Routes:                        specification.Network.Routes,
 		WireGuardMeshIPv6:             specification.Network.WireGuardMeshIPv6,
 		PrivateNetworkThroughputMiBps: specification.Network.PrivateNetworkThroughputMiBps,
 		PublicNetworkThroughputMiBps:  specification.Network.PublicNetworkThroughputMiBps,
@@ -129,7 +129,7 @@ func (manager *fakeVirtualMachineManager) SetNetwork(_ context.Context, id strin
 	if !found {
 		return vm.ErrNotFound
 	}
-	virtualMachine.info.Egress = configuration.Egress
+	virtualMachine.info.Routes = configuration.Routes
 	virtualMachine.info.PublicIPv4 = configuration.PublicIPv4
 	virtualMachine.info.WireGuardMeshIPv6 = configuration.WireGuardMeshIPv6
 	virtualMachine.info.PrivateNetworkThroughputMiBps = configuration.PrivateNetworkThroughputMiBps
@@ -389,7 +389,7 @@ func (stubSerialBroker) Attach(context.Context, string, io.ReadWriter, <-chan co
 }
 
 const (
-	validCreateRequest = `{"compute":{"cpu_millicores":1000,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","egress":"uplink","firewall":{"enabled":false,"inbound":[],"outbound":[]}},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
+	validCreateRequest = `{"compute":{"cpu_millicores":1000,"memory_mib":512},"disk":{"size_mib":1024,"throughput_mibps":0,"iops":0},"image":{"ref":"ubuntu","architecture":"amd64","rootfs":{"url":"https://atlas.example/ubuntu.ext4?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"kernel":{"url":"https://atlas.example/vmlinux?signature=secret","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"network":{"wireguard_mesh_ipv6":"fdaa:1:0:7::1","routes":[{"destination":"0.0.0.0/0","via":"host"}],"firewall":{"enabled":false,"inbound":[],"outbound":[]}},"guest":{"hostname":"vm1","ssh_keys":[],"metadata":{},"user_data":""}}`
 	validSSHKey        = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA user@example"
 )
 
@@ -579,19 +579,21 @@ func TestInternalErrorDoesNotLeakDetails(t *testing.T) {
 
 func TestCreateRejectsInvalidNetwork(t *testing.T) {
 	srv := newTestServer(t)
+	hostRoute := `"routes":[{"destination":"0.0.0.0/0","via":"host"}]`
 	invalidAddress := strings.Replace(validCreateRequest, "fdaa:1:0:7::1", "2001:db8::1", 1)
-	invalidEgress := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"egress":"server"`, 1)
-	negativePrivateThroughput := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"private_network_throughput_mibps":-1,"egress":"host"`, 1)
-	negativePublicThroughput := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"public_network_throughput_mibps":-1,"egress":"host"`, 1)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", invalidAddress, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", invalidEgress, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", negativePrivateThroughput, http.StatusBadRequest)
-	do(t, srv, http.MethodPut, "/v1/vms/vm1", negativePublicThroughput, http.StatusBadRequest)
+	invalidVia := strings.Replace(validCreateRequest, hostRoute, `"routes":[{"destination":"0.0.0.0/0","via":"server"}]`, 1)
+	ipv4ThroughGateway := strings.Replace(validCreateRequest, hostRoute, `"routes":[{"destination":"0.0.0.0/0","via":"fdaa:1::56"}]`, 1)
+	duplicateRoute := strings.Replace(validCreateRequest, hostRoute, `"routes":[{"destination":"2000::/3","via":"host"},{"destination":"2000::/3","via":"fdaa:1::56"}]`, 1)
+	negativePrivateThroughput := strings.Replace(validCreateRequest, hostRoute, `"private_network_throughput_mibps":-1,`+hostRoute, 1)
+	negativePublicThroughput := strings.Replace(validCreateRequest, hostRoute, `"public_network_throughput_mibps":-1,`+hostRoute, 1)
+	for _, body := range []string{invalidAddress, invalidVia, ipv4ThroughGateway, duplicateRoute, negativePrivateThroughput, negativePublicThroughput} {
+		do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusBadRequest)
+	}
 }
 
 func TestCreateReturnsNetworkThroughput(t *testing.T) {
 	srv := newTestServer(t)
-	body := strings.Replace(validCreateRequest, `"egress":"uplink"`, `"private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"egress":"uplink"`, 1)
+	body := strings.Replace(validCreateRequest, `"routes":[{"destination":"0.0.0.0/0","via":"host"}]`, `"private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"routes":[{"destination":"0.0.0.0/0","via":"host"}]`, 1)
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
@@ -603,21 +605,29 @@ func TestCreateReturnsNetworkThroughput(t *testing.T) {
 	}
 }
 
-// A public IPv4 address requires internet egress.
-func TestCreateRejectsPublicIPv4WithoutUplink(t *testing.T) {
+// A public address needs a host route, because its replies leave through the host uplink.
+func TestCreateRejectsPublicAddressesWithoutAHostRoute(t *testing.T) {
 	srv := newTestServer(t)
-	for _, egress := range []string{"mesh", "none"} {
-		body := strings.Replace(validCreateRequest, `"egress":"uplink"`,
-			`"public_ipv4":"203.0.113.10","egress":"`+egress+`"`, 1)
+	hostRoute := `"routes":[{"destination":"0.0.0.0/0","via":"host"}]`
+	for _, network := range []string{
+		`"public_ipv4":"203.0.113.10","routes":[]`,
+		`"public_ipv6":"2001:db8::7/128",` + hostRoute,
+		`"public_ipv6":"2001:db8::7/128","routes":[{"destination":"2000::/3","via":"fdaa:1::56"}]`,
+	} {
+		body := strings.Replace(validCreateRequest, hostRoute, network, 1)
 		do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusBadRequest)
 	}
+
+	body := strings.Replace(validCreateRequest, hostRoute,
+		`"public_ipv6":"2001:db8::7/128","routes":[{"destination":"2000::/3","via":"host"}]`, 1)
+	do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 }
 
-// A mode without internet egress keeps, but does not apply, public limits.
-func TestCreateKeepsThePublicThroughputWithoutUplink(t *testing.T) {
+// A VM without host routes keeps, but does not apply, public limits.
+func TestCreateKeepsThePublicThroughputWithoutAHostRoute(t *testing.T) {
 	srv := newTestServer(t)
-	body := strings.Replace(validCreateRequest, `"egress":"uplink"`,
-		`"public_network_throughput_mibps":50,"egress":"mesh"`, 1)
+	body := strings.Replace(validCreateRequest, `"routes":[{"destination":"0.0.0.0/0","via":"host"}]`,
+		`"public_network_throughput_mibps":50,"routes":[]`, 1)
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
@@ -712,14 +722,14 @@ func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
-	body := `{"egress":"uplink","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"firewall":{"enabled":true,"inbound":[{"protocol":"tcp","ports":"22","cidrs":["203.0.113.0/24"]}],"outbound":[]}}`
+	body := `{"routes":[{"destination":"0.0.0.0/0","via":"host"}],"public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"firewall":{"enabled":true,"inbound":[{"protocol":"tcp","ports":"22","cidrs":["203.0.113.0/24"]}],"outbound":[]}}`
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/network", body, http.StatusAccepted)
 
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Desired.Network.Egress != string(vm.EgressUplink) || response.Desired.Network.PublicIPv4 != "203.0.113.10" {
+	if len(response.Desired.Network.Routes) != 1 || response.Desired.Network.PublicIPv4 != "203.0.113.10" {
 		t.Fatalf("network = %+v", response.Desired.Network)
 	}
 	if response.Desired.Network.PrivateNetworkThroughputMiBps != 100 || response.Desired.Network.PublicNetworkThroughputMiBps != 50 {
@@ -730,26 +740,22 @@ func TestSetNetworkStoresTheCompleteSpecification(t *testing.T) {
 	}
 }
 
-func TestSetNetworkAcceptsMeshAndRejectsPublicIPv4(t *testing.T) {
+func TestSetNetworkAcceptsNoRoutesAndRejectsPublicIPv4(t *testing.T) {
 	srv := newTestServer(t)
 	do(t, srv, http.MethodPut, "/v1/vms/vm1", validCreateRequest, http.StatusAccepted)
 
 	recorder := do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
-		`{"egress":"mesh","wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusAccepted)
+		`{"routes":[],"wireguard_mesh_ipv6":"fdaa:1:0:7::1","private_network_throughput_mibps":100,"public_network_throughput_mibps":50,"firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusAccepted)
 	var response virtualMachineResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Desired.Network.Egress != string(vm.EgressMesh) {
-		t.Fatalf("egress = %q, want %q", response.Desired.Network.Egress, vm.EgressMesh)
+	if len(response.Desired.Network.Routes) != 0 {
+		t.Fatalf("routes = %v, want none", response.Desired.Network.Routes)
 	}
 
 	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
-		`{"egress":"mesh","public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusBadRequest)
-
-	// Stored public limits must not block an egress mode change.
-	do(t, srv, http.MethodPut, "/v1/vms/vm1/network",
-		`{"egress":"none","wireguard_mesh_ipv6":"fdaa:1:0:7::1","public_network_throughput_mibps":50,"firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusAccepted)
+		`{"routes":[],"public_ipv4":"203.0.113.10","wireguard_mesh_ipv6":"fdaa:1:0:7::1","firewall":{"enabled":false,"inbound":[],"outbound":[]}}`, http.StatusBadRequest)
 }
 
 func TestSetDiskAppliesCompleteSpecificationAndRejectsInvalidLimits(t *testing.T) {

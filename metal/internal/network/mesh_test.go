@@ -160,13 +160,3 @@ func TestMeshSelectsMulticastWithoutTheFlag(t *testing.T) {
 		t.Fatalf("call = %q", got)
 	}
 }
-
-func TestParseNamespaceRoutesReadsDefaultAsTheIPv6DefaultRoute(t *testing.T) {
-	output := "default via fe80::1 dev vg-1 metric 1024 pref medium\n" +
-		"fdaa::/16 via fe80::1 dev vg-1 metric 1024 pref medium\n" +
-		"2000::/3 via fe80::1 dev vg-1 metric 1024 pref medium\n"
-
-	if got, want := parseNamespaceRoutes(output), []string{"::/0", "2000::/3"}; !slices.Equal(got, want) {
-		t.Fatalf("routes = %v, want %v", got, want)
-	}
-}

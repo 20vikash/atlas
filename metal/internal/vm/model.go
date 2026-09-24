@@ -55,42 +55,82 @@ type Disk struct {
 	IOPS            int `json:"iops"`
 }
 
-// GatewayRoute names the gateway that carries one destination range.
-type GatewayRoute struct {
+// RouteViaHost sends a destination through the Metal host uplink.
+const RouteViaHost = "host"
+
+// Route sends one destination range through the host or through a gateway VM.
+// Via is RouteViaHost or the WG Mesh address of a gateway VM.
+type Route struct {
 	Destination string `json:"destination"`
-	Gateway     string `json:"gateway"`
+	Via         string `json:"via"`
 }
 
-// defaultIPv6Destination reaches every IPv6 address.
-const defaultIPv6Destination = "::/0"
+// IsViaHost reports whether the host uplink carries the route.
+func (route Route) IsViaHost() bool {
+	return route.Via == RouteViaHost
+}
+
+// IsIPv4 reports whether the route destination is an IPv4 prefix.
+func (route Route) IsIPv4() bool {
+	return !strings.Contains(route.Destination, ":")
+}
 
 // NetworkConfiguration contains the requested VM network configuration.
 type NetworkConfiguration struct {
 	PublicIPv4        string `json:"public_ipv4"`
 	WireGuardMeshIPv6 string `json:"wireguard_mesh_ipv6"`
-	// GatewayRoutes name the gateway of each destination range this VM reaches.
-	GatewayRoutes []GatewayRoute `json:"gateway_routes,omitempty"`
+	// Routes send each destination range through the host or a gateway VM. A VM without routes reaches only the mesh.
+	Routes []Route `json:"routes,omitempty"`
 	// IsNetworkGateway lets this VM send a source address it does not own, so it can carry traffic for other VMs.
 	IsNetworkGateway bool `json:"is_network_gateway,omitempty"`
-	// PublicIPv6 is the address block the host routes into this VM, and whose addresses it may use.
+	// PublicIPv6 is a public address or block. The host maps a /128 to the mesh address and routes a larger block into the VM.
 	PublicIPv6                    string                `json:"public_ipv6,omitempty"`
 	PrivateNetworkThroughputMiBps int                   `json:"private_network_throughput_mibps"`
 	PublicNetworkThroughputMiBps  int                   `json:"public_network_throughput_mibps"`
-	Egress                        Egress                `json:"egress"`
 	Firewall                      FirewallConfiguration `json:"firewall"`
 }
 
 // Equal reports whether two network configurations contain the same desired values.
 func (configuration NetworkConfiguration) Equal(other NetworkConfiguration) bool {
 	return configuration.PublicIPv4 == other.PublicIPv4 &&
-		slices.Equal(configuration.GatewayRoutes, other.GatewayRoutes) &&
+		slices.Equal(configuration.Routes, other.Routes) &&
 		configuration.IsNetworkGateway == other.IsNetworkGateway &&
 		configuration.PublicIPv6 == other.PublicIPv6 &&
 		configuration.WireGuardMeshIPv6 == other.WireGuardMeshIPv6 &&
 		configuration.PrivateNetworkThroughputMiBps == other.PrivateNetworkThroughputMiBps &&
 		configuration.PublicNetworkThroughputMiBps == other.PublicNetworkThroughputMiBps &&
-		configuration.Egress == other.Egress &&
 		configuration.Firewall.Equal(other.Firewall)
+}
+
+// HasNetworkAttachment reports whether the VM has a mesh network attachment.
+func (configuration NetworkConfiguration) HasNetworkAttachment() bool {
+	return configuration.WireGuardMeshIPv6 != ""
+}
+
+// HasIPv4HostRoute reports whether the host carries an IPv4 route.
+func (configuration NetworkConfiguration) HasIPv4HostRoute() bool {
+	return slices.ContainsFunc(configuration.Routes, func(route Route) bool { return route.IsIPv4() && route.IsViaHost() })
+}
+
+// HasIPv6HostRoute reports whether the host carries an IPv6 route.
+func (configuration NetworkConfiguration) HasIPv6HostRoute() bool {
+	return slices.ContainsFunc(configuration.Routes, func(route Route) bool { return !route.IsIPv4() && route.IsViaHost() })
+}
+
+// HasPublicIPv6Address reports whether PublicIPv6 is one mapped address.
+func (configuration NetworkConfiguration) HasPublicIPv6Address() bool {
+	return strings.HasSuffix(configuration.PublicIPv6, "/128")
+}
+
+// RoutesViaGateway returns routes that a gateway VM carries.
+func (configuration NetworkConfiguration) RoutesViaGateway() []Route {
+	var routes []Route
+	for _, route := range configuration.Routes {
+		if !route.IsViaHost() {
+			routes = append(routes, route)
+		}
+	}
+	return routes
 }
 
 // SameReservation reports whether two specifications reserve the same VM. It
@@ -130,38 +170,6 @@ func (specification Specification) RefreshImageSource(other Specification) Speci
 	specification.Image.MemorySnapshot = other.Image.MemorySnapshot
 	specification.Image.MemorySnapshotConfiguration = other.Image.MemorySnapshotConfiguration
 	return specification
-}
-
-// Egress controls internet reachability without changing mesh access.
-type Egress string
-
-const (
-	// EgressUplink routes VM traffic to the internet through the host uplink.
-	EgressUplink Egress = "uplink"
-	// EgressMesh keeps the private network attachment and gives no internet path.
-	EgressMesh Egress = "mesh"
-	// EgressNone removes the private network attachment and isolates the VM.
-	EgressNone Egress = "none"
-)
-
-// IsValid reports whether the value names one egress mode.
-func (egress Egress) IsValid() bool {
-	switch egress {
-	case EgressUplink, EgressMesh, EgressNone:
-		return true
-	default:
-		return false
-	}
-}
-
-// HasVirtualEthernet reports whether the mode keeps the private network attachment.
-func (egress Egress) HasVirtualEthernet() bool {
-	return egress == EgressUplink || egress == EgressMesh
-}
-
-// HasInternetPath reports whether the mode gives the VM a route to the internet.
-func (egress Egress) HasInternetPath() bool {
-	return egress == EgressUplink
 }
 
 // State is a virtual machine condition.
@@ -224,12 +232,11 @@ type Information struct {
 	MAC                           string
 	PublicIPv4                    string
 	WireGuardMeshIPv6             string
-	GatewayRoutes                 []GatewayRoute
+	Routes                        []Route
 	IsNetworkGateway              bool
 	PublicIPv6                    string
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
-	Egress                        Egress
 	Firewall                      FirewallConfiguration
 	DesiredGeneration             uint64
 	DesiredRestartGeneration      uint64
@@ -248,18 +255,14 @@ type PublicOperationError struct {
 	UpdatedAt time.Time
 }
 
-// HostReachedDestinations lists what a guest and its namespace route through
-// the host. A gateway or a VM with its own block reaches every destination
-// through the host. Another VM reaches only its gateway route destinations.
+// HostReachedDestinations lists the IPv6 destinations that a guest and its
+// namespace send to the host. The host uplink or a gateway VM then carries them.
 func HostReachedDestinations(network NetworkConfiguration) []string {
-	if network.IsNetworkGateway || network.PublicIPv6 != "" {
-		return []string{defaultIPv6Destination}
+	var destinations []string
+	for _, route := range network.Routes {
+		if !route.IsIPv4() {
+			destinations = append(destinations, route.Destination)
+		}
 	}
-
-	destinations := make([]string, 0, len(network.GatewayRoutes))
-	for _, route := range network.GatewayRoutes {
-		destinations = append(destinations, route.Destination)
-	}
-
 	return destinations
 }

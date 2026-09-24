@@ -42,8 +42,10 @@ func TestSourceLockBlocksMutationsButAllowsReads(t *testing.T) {
 	for name, mutate := range map[string]func() error{
 		"power":   func() error { return manager.SetPowerState(ctx, "vm-1", StateStopped) },
 		"restart": func() error { return manager.RequestRestart(ctx, "vm-1") },
-		"network": func() error { return manager.SetNetwork(ctx, "vm-1", NetworkConfiguration{Egress: EgressMesh}) },
-		"delete":  func() error { return manager.Delete(ctx, "vm-1") },
+		"network": func() error {
+			return manager.SetNetwork(ctx, "vm-1", NetworkConfiguration{WireGuardMeshIPv6: "fdaa::2"})
+		},
+		"delete": func() error { return manager.Delete(ctx, "vm-1") },
 	} {
 		if err := mutate(); !errors.Is(err, ErrConflict) {
 			t.Fatalf("%s mutation during migration = %v, want ErrConflict", name, err)

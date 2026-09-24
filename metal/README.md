@@ -41,7 +41,7 @@ Metal rebuilds its view from durable records, systemd, and ZFS after a restart. 
 | VM manager | Desired state, lifecycle, locks, and cleanup | [VM functionality](docs/vm.md) |
 | Firecracker runtime | Process launch, jail, warm start, and saved state | [Firecracker specification](internal/firecracker/SPEC.md) |
 | Storage | Images, ZFS disks, snapshots, and transfer staging | [Storage](docs/storage.md) |
-| Network | Namespaces, egress, traffic limits, and WG Mesh | [Networking](docs/networking.md) |
+| Network | Namespaces, routes, traffic limits, and WG Mesh | [Networking](docs/networking.md) |
 | Reconciler | Bounded passes that move state forward | [Reconciler specification](internal/reconciler/SPEC.md) |
 | Host service | Controller sync, image policy, and capacity | [Host specification](internal/host/SPEC.md) |
 | API | Atlas routes and node coordination routes | [HTTP API](docs/api.md) |

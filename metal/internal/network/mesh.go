@@ -7,12 +7,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
-	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // meshMTU is the VM interface MTU required by Atlas WG Mesh. It leaves room for
@@ -146,9 +144,6 @@ func (mesh *Mesh) syncVM(ctx context.Context, request request) error {
 		return nil
 	}
 	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
-	if err := mesh.convergeNamespaceRoutes(ctx, request); err != nil {
-		return err
-	}
 	if err := mesh.convergeOwnedPrefixRoutes(ctx, request); err != nil {
 		return err
 	}
@@ -166,67 +161,10 @@ func (mesh *Mesh) syncVM(ctx context.Context, request request) error {
 	if request.PublicIPv6 != "" {
 		arguments = append(arguments, "--prefix", request.PublicIPv6)
 	}
-	for _, route := range request.GatewayRoutes {
-		arguments = append(arguments, "--route", route.Destination+"="+route.Gateway)
+	for _, route := range request.RoutesViaGateway() {
+		arguments = append(arguments, "--route", route.Destination+"="+route.Via)
 	}
 	return platform.Run(ctx, mesh.commandPath, arguments...)
-}
-
-// convergeNamespaceRoutes sends each configured destination through the host.
-func (mesh *Mesh) convergeNamespaceRoutes(ctx context.Context, request request) error {
-	_, guestVirtualEthernet := virtualEthernetNames(request.UserID)
-	wanted := vm.HostReachedDestinations(vm.NetworkConfiguration{
-		GatewayRoutes: request.GatewayRoutes, PublicIPv6: request.PublicIPv6, IsNetworkGateway: request.IsNetworkGateway,
-	})
-	present, err := mesh.namespaceRoutes(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	namespace := namespaceName(request.VirtualMachineID)
-	for _, destination := range present {
-		if slices.Contains(wanted, destination) {
-			continue
-		}
-		if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "del", destination,
-			"via", meshGatewayAddress, "dev", guestVirtualEthernet); err != nil {
-			return fmt.Errorf("remove the namespace route of %s: %w", destination, err)
-		}
-	}
-	for _, destination := range wanted {
-		if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "replace", destination,
-			"via", meshGatewayAddress, "dev", guestVirtualEthernet); err != nil {
-			return fmt.Errorf("add the namespace route of %s: %w", destination, err)
-		}
-	}
-	return nil
-}
-
-func (mesh *Mesh) namespaceRoutes(ctx context.Context, request request) ([]string, error) {
-	_, guestVirtualEthernet := virtualEthernetNames(request.UserID)
-	output, err := platform.RunInNetworkNamespace(ctx, namespaceName(request.VirtualMachineID),
-		"ip", "-6", "route", "show", "via", meshGatewayAddress, "dev", guestVirtualEthernet)
-	if err != nil {
-		return nil, fmt.Errorf("read the namespace routes of %s: %w", request.VirtualMachineID, err)
-	}
-
-	return parseNamespaceRoutes(output), nil
-}
-
-// parseNamespaceRoutes returns the destinations of ip route output, except the mesh route. ip prints ::/0 as default.
-func parseNamespaceRoutes(output string) []string {
-	var destinations []string
-	for line := range strings.SplitSeq(output, "\n") {
-		fields := strings.Fields(line)
-		switch {
-		case len(fields) == 0 || fields[0] == meshPrefix:
-		case fields[0] == "default":
-			destinations = append(destinations, "::/0")
-		default:
-			destinations = append(destinations, fields[0])
-		}
-	}
-	return destinations
 }
 
 // convergeGatewayRoute sends host traffic in a gateway namespace to the guest.
