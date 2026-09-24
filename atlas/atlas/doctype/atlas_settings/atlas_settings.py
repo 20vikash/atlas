@@ -134,6 +134,8 @@ class AtlasSettings(Document):
 		wildcard_tls_certificate: DF.Password | None
 		wildcard_tls_expires_on: DF.Datetime | None
 		wildcard_tls_private_key: DF.Password | None
+		wireguard_gateway_package_file: DF.Link | None
+		wireguard_gateway_package_hash: DF.Data | None
 	# end: auto-generated types
 
 	@property
