@@ -50,7 +50,10 @@ A public address needs a route via `host`, because its replies leave through the
 | Field | Needs | Delivery |
 |---|---|---|
 | `public_ipv4` | an IPv4 route via `host` | The host maps the address to the guest with DNAT and SNAT. |
+| `public_ipv6` as a `/128` | an IPv6 route via `host` | The host maps the address to the guest mesh address with ip6tables DNAT and SNAT. The guest needs no configuration. The namespace has no route for the address, so the guest reaches its own public address through the host. |
 | `public_ipv6` as a larger block | an IPv6 route via `host` | The host routes the block into the VM. The guest configures its addresses. |
+
+A VM reaches the public address of another VM, on the same host or another host, in the same way as any Internet address. The SNAT rule tests the original destination of the connection, so the target sees the public address of the source, and the reply returns through conntrack on the host. WG Mesh drops mesh traffic between tenants, so a reply that bypassed the host would not arrive.
 
 A warm image capture VM has no mesh address, so it gets no veth pair.
 

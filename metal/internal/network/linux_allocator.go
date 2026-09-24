@@ -105,7 +105,7 @@ func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseReq
 		trafficError = allocator.trafficMonitor.Detach(virtualMachineID)
 	}
 	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
-	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
+	rulesError := errors.Join(removePublicIPv4Rules(ctx, virtualMachineID), removePublicIPv6Rules(ctx, virtualMachineID))
 
 	exists, err := networkNamespaceExists(ctx, virtualMachineID)
 	if err != nil {
@@ -265,6 +265,11 @@ func (allocator *LinuxAllocator) removeUnwanted(ctx context.Context, request req
 			return err
 		}
 	}
+	if !request.HasPublicIPv6Address() {
+		if err := removePublicIPv6Rules(ctx, request.VirtualMachineID); err != nil {
+			return err
+		}
+	}
 	if !request.HasNetworkAttachment() {
 		return allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
 	}
@@ -289,6 +294,11 @@ func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request)
 	}
 	if request.PublicIPv4 != "" {
 		if err := ensurePublicIPv4(ctx, request.VirtualMachineID, request.UserID, request.PublicIPv4); err != nil {
+			return err
+		}
+	}
+	if request.HasPublicIPv6Address() {
+		if err := ensurePublicIPv6(ctx, request.VirtualMachineID, request.PublicIPv6, request.WireGuardMeshIPv6); err != nil {
 			return err
 		}
 	}

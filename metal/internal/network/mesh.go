@@ -204,7 +204,6 @@ func gatewayRouteSteps(guestVirtualEthernet, address string, isGateway, hasRule 
 	return nil
 }
 
-// convergeOwnedPrefixRoutes sends each public prefix to its gateway VM.
 func (mesh *Mesh) convergeOwnedPrefixRoutes(ctx context.Context, request request) error {
 	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
 	present, err := platform.Output(ctx, "ip", "-6", "route", "show", "dev", hostVirtualEthernet)
@@ -217,26 +216,59 @@ func (mesh *Mesh) convergeOwnedPrefixRoutes(ctx context.Context, request request
 		if len(fields) == 0 || fieldAfter(fields, "via") != request.WireGuardMeshIPv6 || fields[0] == request.PublicIPv6 {
 			continue
 		}
-		if err := mesh.changeOwnedPrefixRoute(ctx, request, "del", fields[0]); err != nil {
+		if err := changeHostPrefixRoute(ctx, request, "del", fields[0]); err != nil {
 			return err
 		}
 	}
 	if request.PublicIPv6 != "" {
-		return mesh.changeOwnedPrefixRoute(ctx, request, "replace", request.PublicIPv6)
+		if err := changeHostPrefixRoute(ctx, request, "replace", request.PublicIPv6); err != nil {
+			return err
+		}
 	}
-	return nil
+	return convergeGuestPrefixRoute(ctx, request)
 }
 
-// changeOwnedPrefixRoute uses onlink because vm sync adds the VM address route later.
-func (mesh *Mesh) changeOwnedPrefixRoute(ctx context.Context, request request, action, prefix string) error {
+// changeHostPrefixRoute uses onlink because vm sync adds the VM address route later.
+func changeHostPrefixRoute(ctx context.Context, request request, action, prefix string) error {
 	hostVirtualEthernet, _ := virtualEthernetNames(request.UserID)
 	if err := platform.Run(ctx, "ip", "-6", "route", action, prefix,
 		"via", request.WireGuardMeshIPv6, "dev", hostVirtualEthernet, "onlink"); err != nil {
 		return fmt.Errorf("%s the route of %s: %w", action, prefix, err)
 	}
-	if _, err := platform.RunInNetworkNamespace(ctx, namespaceName(request.VirtualMachineID),
-		"ip", "-6", "route", action, prefix, "via", request.WireGuardMeshIPv6, "dev", tapName); err != nil {
-		return fmt.Errorf("%s the guest route of %s: %w", action, prefix, err)
+	return nil
+}
+
+// convergeGuestPrefixRoute sends a routed block from the namespace to the guest,
+// which owns its addresses. A /128 has no guest route: the host maps it to the
+// mesh address, and a namespace route would return the guest's traffic to its
+// own public address back to the guest before it reaches the host.
+func convergeGuestPrefixRoute(ctx context.Context, request request) error {
+	namespace := namespaceName(request.VirtualMachineID)
+	wanted := ""
+	if request.PublicIPv6 != "" && !request.HasPublicIPv6Address() {
+		wanted = request.PublicIPv6
+	}
+
+	output, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "show",
+		"via", request.WireGuardMeshIPv6, "dev", tapName)
+	if err != nil {
+		return fmt.Errorf("read the guest prefix routes of %s: %w", request.VirtualMachineID, err)
+	}
+	for _, prefix := range parseNamespaceRoutes(output, routeFamilies(request.UserID)[1]) {
+		if prefix == wanted {
+			continue
+		}
+		if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "del", prefix,
+			"via", request.WireGuardMeshIPv6, "dev", tapName); err != nil {
+			return fmt.Errorf("remove the guest route of %s: %w", prefix, err)
+		}
+	}
+	if wanted == "" {
+		return nil
+	}
+	if _, err := platform.RunInNetworkNamespace(ctx, namespace, "ip", "-6", "route", "replace", wanted,
+		"via", request.WireGuardMeshIPv6, "dev", tapName); err != nil {
+		return fmt.Errorf("add the guest route of %s: %w", wanted, err)
 	}
 	return nil
 }

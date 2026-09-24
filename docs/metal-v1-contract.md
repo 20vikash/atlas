@@ -208,7 +208,7 @@ Network replaces the complete network object:
 }
 ```
 
-`routes` sends each destination range through the host uplink (`via` is `host`) or through the mesh address of a gateway VM. Only the host carries IPv4. The longest prefix wins, and a VM without routes reaches only the mesh. A public address needs a route via `host`. `is_network_gateway` lets the VM send a source address it does not own. `public_ipv6` is the IPv6 block that the host routes into the VM. These fields are empty when omitted.
+`routes` sends each destination range through the host uplink (`via` is `host`) or through the mesh address of a gateway VM. Only the host carries IPv4. The longest prefix wins, and a VM without routes reaches only the mesh. A public address needs a route via `host`. `is_network_gateway` lets the VM send a source address it does not own. `public_ipv6` is one `/128` that the host maps to the mesh address, or a larger block that the host routes into the VM. These fields are empty when omitted.
 
 The firewall supports `any`, `tcp`, `udp`, and `icmp`. An empty `ports` value selects all ports. Other port values select one port or one inclusive range from 1 through 65535.
 

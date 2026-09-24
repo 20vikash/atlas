@@ -80,6 +80,12 @@ func ensurePublicIPv4(ctx context.Context, virtualMachineID string, userID uint3
 	})
 }
 
+func ensurePublicIPv6(ctx context.Context, virtualMachineID, publicIPv6, meshIPv6 string) error {
+	address := strings.TrimSuffix(publicIPv6, "/128")
+	steps := publicIPv6Steps(virtualMachineID, address, meshIPv6)
+	return ensureRuleSet(ctx, steps, func() error { return removePublicIPv6Rules(ctx, virtualMachineID) })
+}
+
 // ensureRuleSet replaces the full set when any rule is missing.
 func ensureRuleSet(ctx context.Context, steps [][]string, remove func() error) error {
 	for _, step := range steps {
@@ -140,6 +146,31 @@ func publicIPv4Steps(virtualMachineID, namespace, guestVirtualEthernet, namespac
 		// Inside the namespace: the transit address becomes the guest address.
 		{"ip", "netns", "exec", namespace, "iptables", "-t", "nat", "-A", "PREROUTING", "-i", guestVirtualEthernet, "-d", namespaceIPAddress, "-m", "comment", "--comment", comment, "-j", "DNAT", "--to-destination", guestIPAddress},
 	}
+}
+
+// publicIPv6Steps maps a public /128 to the guest mesh address: DNAT in for
+// forwarded and host-originated traffic, SNAT out for connections to a public
+// address, and forwarding both ways. The mesh address reaches the guest directly,
+// so no namespace rule is necessary.
+func publicIPv6Steps(virtualMachineID, publicIPv6, meshIPv6 string) [][]string {
+	comment := publicIPv6Comment(virtualMachineID)
+	return [][]string{
+		{"ip6tables", "-t", "nat", "-A", "PREROUTING", "-d", publicIPv6, "-m", "comment", "--comment", comment, "-j", "DNAT", "--to-destination", meshIPv6},
+		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-d", publicIPv6, "-m", "comment", "--comment", comment, "-j", "DNAT", "--to-destination", meshIPv6},
+
+		// Mesh traffic keeps the mesh address. The rule tests the original destination, so a
+		// connection to the public address of another VM changes source too. DNAT has
+		// already made its destination a mesh address, and the reply must return through
+		// this host, because the mesh drops traffic between tenants.
+		{"ip6tables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", meshIPv6, "-m", "conntrack", "!", "--ctorigdst", meshPrefix, "-m", "comment", "--comment", comment, "-j", "SNAT", "--to-source", publicIPv6},
+
+		{"ip6tables", "-A", "FORWARD", "-d", meshIPv6, "-m", "conntrack", "--ctstate", "NEW,ESTABLISHED,RELATED", "-m", "comment", "--comment", comment, "-j", "ACCEPT"},
+		{"ip6tables", "-A", "FORWARD", "-s", meshIPv6, "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-m", "comment", "--comment", comment, "-j", "ACCEPT"},
+	}
+}
+
+func removePublicIPv6Rules(ctx context.Context, virtualMachineID string) error {
+	return removeTaggedRules(ctx, nil, "ip6tables", publicIPv6Comment(virtualMachineID))
 }
 
 func removePublicIPv4Rules(ctx context.Context, virtualMachineID string) error {
@@ -205,4 +236,8 @@ func hasRuleComment(arguments []string, expected string) bool {
 
 func publicIPv4Comment(virtualMachineID string) string {
 	return "metal-public-ipv4-" + virtualMachineID
+}
+
+func publicIPv6Comment(virtualMachineID string) string {
+	return "metal-public-ipv6-" + virtualMachineID
 }

@@ -63,11 +63,11 @@ Metal applies the firewall before it adds the veth, public address, or mesh regi
 
 ## Host rules
 
-Public IPv4 needs 6 rules across 2 network stacks: DNAT in for forwarded and host-originated traffic, SNAT out, both conntrack directions, and a second DNAT inside the namespace. They are treated as one set. If any rule is missing, all are removed and rewritten, so a partial set from an interrupted run cannot survive.
+Public IPv4 needs 6 rules across 2 network stacks: DNAT in for forwarded and host-originated traffic, SNAT out, both conntrack directions, and a second DNAT inside the namespace. A public IPv6 `/128` needs 5 host rules: the same DNAT pair to the guest mesh address, SNAT out for a connection whose original destination is outside `fdaa::/16`, and both conntrack directions. The original destination makes hairpin work: a connection to the public address of another VM has a mesh destination after DNAT, but it still leaves with the public source. A routed IPv6 block also gets a namespace route to the guest. A `/128` does not, because that route would return the guest's traffic to its own public address to the guest. Each set is treated as one set. If any rule is missing, all are removed and rewritten, so a partial set from an interrupted run cannot survive.
 
-Every rule carries the comment `metal-public-ipv4-<vm-id>`. Cleanup finds rules by that comment, which is why no rule state is kept anywhere.
+Every rule carries the comment `metal-public-ipv4-<vm-id>` or `metal-public-ipv6-<vm-id>`. Cleanup finds rules by that comment, which is why no rule state is kept anywhere.
 
-`iptables` fails on a duplicate add and on a delete of an absent rule, so each change tests with `-C` first. Exit code 1 means absent; any other failure is an error, so a broken check never reads as absent.
+`iptables` and `ip6tables` fail on a duplicate add and on a delete of an absent rule, so each change tests with `-C` first. Exit code 1 means absent; any other failure is an error, so a broken check never reads as absent.
 
 ## Maximum segment size
 

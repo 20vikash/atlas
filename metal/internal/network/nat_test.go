@@ -25,6 +25,22 @@ func TestPublicIPv4RuleCheckRemovesInsertPosition(t *testing.T) {
 	}
 }
 
+// The SNAT rule tests the original destination. A connection to the public
+// address of another VM has a mesh destination after DNAT, and it must still
+// leave with the public source, so its reply returns through the host.
+func TestPublicIPv6StepsTranslateConnectionsToPublicAddresses(t *testing.T) {
+	steps := publicIPv6Steps("vm-10", "2001:db8:5::7", "fdaa:1:0:2::a")
+
+	want := []string{
+		"ip6tables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", "fdaa:1:0:2::a",
+		"-m", "conntrack", "!", "--ctorigdst", "fdaa::/16",
+		"-m", "comment", "--comment", "metal-public-ipv6-vm-10", "-j", "SNAT", "--to-source", "2001:db8:5::7",
+	}
+	if !slices.ContainsFunc(steps, func(step []string) bool { return slices.Equal(step, want) }) {
+		t.Fatalf("steps = %v, want one matching %v", steps, want)
+	}
+}
+
 func TestPublicIPv4StepsMapHostOriginatedTraffic(t *testing.T) {
 	steps := publicIPv4Steps("vm-10", "metal-vm-10", "vpeer0", "10.6.26.130", "203.0.113.7")
 
