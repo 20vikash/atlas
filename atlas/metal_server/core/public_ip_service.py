@@ -277,6 +277,7 @@ class PublicIPService:
 		from atlas.vm.core.vm_service import VirtualMachineService
 
 		service = VirtualMachineService(virtual_machine)
+		service.lock_network()
 		if pool.is_routed:
 			router = frappe.get_doc("IPv6 Router Server", pool.gateway)
 			route = Route(IPV6_INTERNET_DESTINATION, router.wireguard_mesh_ipv6)
@@ -317,6 +318,7 @@ class PublicIPService:
 		if virtual_machine.is_terminating:
 			return
 		service = VirtualMachineService(virtual_machine)
+		service.lock_network()
 		if pool.is_routed:
 			service.update_network({"routes": service.get_routes_without(IPV6_INTERNET_DESTINATION)})
 		elif pool.version == "4":

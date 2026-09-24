@@ -298,6 +298,7 @@ class VirtualMachine(Document):
 		self.ensure_not_migrating()
 		self.validate_network_change()
 		service = VirtualMachineService(self)
+		service.lock_network()
 		self.is_network_gateway = strict_bool(is_network_gateway, "is_network_gateway")
 		changes: dict[str, Any] = {"is_network_gateway": bool(self.is_network_gateway)}
 		if self.is_network_gateway:
