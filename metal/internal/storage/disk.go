@@ -71,6 +71,16 @@ func (store *VirtualMachineStore) provisionDisk(ctx context.Context, request Vir
 		return err
 	}
 
+	if exists && request.SourceSnapshot != "" {
+		isUnchanged, err := isUnchangedClone(ctx, store.pool.virtualMachineDataset(request.VirtualMachineID), request.SourceSnapshot)
+		if err != nil {
+			return err
+		}
+		if !isUnchanged {
+			return fmt.Errorf("prepare VM %s from %s: %w", request.VirtualMachineID, request.SourceSnapshot, ErrDiskNotFresh)
+		}
+	}
+
 	created := false
 	if !exists {
 		if err := store.images.ensureImage(ctx, request.ImageReference, request.Image); err != nil {
@@ -222,6 +232,21 @@ func datasetExists(ctx context.Context, name string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("check ZFS dataset %s: %w", name, err)
+}
+
+// isUnchangedClone reports whether a dataset is a clone of the snapshot with no
+// writes since the clone.
+func isUnchangedClone(ctx context.Context, dataset string, snapshot string) (bool, error) {
+	output, err := platform.Output(ctx, "zfs", "get", "-Hp", "-o", "value", "origin,written", dataset)
+	if err != nil {
+		return false, err
+	}
+
+	values := strings.Fields(output)
+	if len(values) != 2 {
+		return false, fmt.Errorf("read ZFS clone state of %s: unexpected output %q", dataset, output)
+	}
+	return values[0] == snapshot && values[1] == "0", nil
 }
 
 // volumeSizeBytes reads the provisioned size of one volume.

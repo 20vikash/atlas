@@ -35,6 +35,10 @@ var (
 	// ErrShuttingDown indicates that the store no longer accepts new work. The
 	// caller should try again against the restarted daemon.
 	ErrShuttingDown = errors.New("storage: shutting down")
+
+	// ErrDiskNotFresh reports an existing VM disk that is not an unchanged clone of
+	// the requested source snapshot. Warm memory must not resume over it.
+	ErrDiskNotFresh = errors.New("storage: disk is not an unchanged clone")
 )
 
 // ZFSPool manages datasets in one ZFS pool.

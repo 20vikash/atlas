@@ -10,6 +10,7 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
 	platform "github.com/frappe/atlas/metal/internal/platform"
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -93,6 +94,10 @@ func (m *machine) Start(ctx context.Context) error {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if errors.Is(err, storage.ErrDiskNotFresh) {
+			m.runtime.logger.Warn("VM disk changed, using cold boot", "virtual_machine_id", m.input.ID, "error", err)
+			return m.coldBoot(ctx)
 		}
 
 		m.runtime.logger.Warn("warm boot failed, using cold boot", "virtual_machine_id", m.input.ID, "error", err)
