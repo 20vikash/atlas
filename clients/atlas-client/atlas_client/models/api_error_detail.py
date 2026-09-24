@@ -9,7 +9,6 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from typing import cast
-from typing import Literal, cast
 
 if TYPE_CHECKING:
   from ..models.api_error_field import ApiErrorField
@@ -18,21 +17,21 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="OutOfCapacityError")
+T = TypeVar("T", bound="ApiErrorDetail")
 
 
 
 @_attrs_define
-class OutOfCapacityError:
-    """ No host can accept the VM. The fleet needs more capacity.
+class ApiErrorDetail:
+    """ The stable error details returned by Atlas.
 
         Attributes:
-            code (Literal['out_of_capacity']): Stable machine-readable error code.
+            code (str): Stable machine-readable error code.
             fields (list[ApiErrorField]): Invalid request fields, or an empty list.
             message (str): Safe description of the failure.
      """
 
-    code: Literal['out_of_capacity']
+    code: str
     fields: list[ApiErrorField]
     message: str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -71,9 +70,7 @@ class OutOfCapacityError:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.api_error_field import ApiErrorField # noqa: PLC0415
         d = dict(src_dict)
-        code = cast(Literal['out_of_capacity'] , d.pop("code"))
-        if code != 'out_of_capacity':
-            raise ValueError(f"code must match const 'out_of_capacity', got '{code}'")
+        code = d.pop("code")
 
         fields = []
         _fields = d.pop("fields")
@@ -87,15 +84,15 @@ class OutOfCapacityError:
 
         message = d.pop("message")
 
-        out_of_capacity_error = cls(
+        api_error_detail = cls(
             code=code,
             fields=fields,
             message=message,
         )
 
 
-        out_of_capacity_error.additional_properties = d
-        return out_of_capacity_error
+        api_error_detail.additional_properties = d
+        return api_error_detail
 
     @property
     def additional_keys(self) -> list[str]:

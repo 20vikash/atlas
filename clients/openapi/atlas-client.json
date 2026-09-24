@@ -1,14 +1,46 @@
 {
   "components": {
     "schemas": {
+      "ApiErrorDetail": {
+        "description": "The stable error details returned by Atlas.",
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable error code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "fields": {
+            "description": "Invalid request fields, or an empty list.",
+            "items": {
+              "$ref": "#/components/schemas/ApiErrorField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "message": {
+            "description": "Safe description of the failure.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "fields"
+        ],
+        "title": "ApiErrorDetail",
+        "type": "object"
+      },
       "ApiErrorField": {
-        "description": "One field named in an Atlas API error.",
+        "description": "One invalid field named in an Atlas API error.",
         "properties": {
           "message": {
+            "description": "Reason that the field is not valid.",
             "title": "Message",
             "type": "string"
           },
           "name": {
+            "description": "Request field path.",
             "title": "Name",
             "type": "string"
           }
@@ -20,10 +52,25 @@
         "title": "ApiErrorField",
         "type": "object"
       },
+      "ApiErrorResponse": {
+        "description": "The JSON body of an Atlas API error.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiErrorDetail",
+            "description": "Error details."
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ApiErrorResponse",
+        "type": "object"
+      },
       "CapacityUnavailableResponse": {
         "description": "The JSON body of a 503 from virtual machine creation.\n\n`error.code` separates a fleet that is full from one that is only busy, so a\ncaller can retry a busy placement at once and escalate a full one.",
         "properties": {
           "error": {
+            "description": "Capacity failure details.",
             "discriminator": {
               "mapping": {
                 "out_of_capacity": "#/components/schemas/OutOfCapacityError",
@@ -61,6 +108,7 @@
           },
           "enabled": {
             "default": true,
+            "description": "Whether Atlas sends webhook events.",
             "title": "Enabled",
             "type": "boolean"
           },
@@ -91,6 +139,7 @@
         "properties": {
           "mode": {
             "default": "tty",
+            "description": "Console protocol opened by the token.",
             "enum": [
               "tty",
               "ssh"
@@ -113,10 +162,13 @@
         ],
         "properties": {
           "expires_in": {
+            "description": "Seconds until the token expires.",
+            "minimum": 0,
             "title": "Expires In",
             "type": "integer"
           },
           "mode": {
+            "description": "Console protocol opened by the token.",
             "enum": [
               "tty",
               "ssh"
@@ -125,6 +177,7 @@
             "type": "string"
           },
           "token": {
+            "description": "Single-use console token.",
             "title": "Token",
             "type": "string"
           }
@@ -142,6 +195,7 @@
         "description": "Values that create one virtual machine.",
         "properties": {
           "cpu_millicores": {
+            "description": "CPU capacity in millicores. 1000 millicores equals one virtual CPU.",
             "maximum": 32000,
             "minimum": 100,
             "title": "Cpu Millicores",
@@ -149,30 +203,36 @@
           },
           "disk_iops": {
             "default": 0,
+            "description": "Disk IOPS limit. Zero removes the limit.",
             "minimum": 0,
             "title": "Disk Iops",
             "type": "integer"
           },
           "disk_mib": {
+            "description": "Root disk capacity in MiB.",
             "exclusiveMinimum": 0,
             "title": "Disk Mib",
             "type": "integer"
           },
           "disk_throughput_mibps": {
             "default": 0,
+            "description": "Disk throughput limit in MiB/s. Zero removes the limit.",
             "minimum": 0,
             "title": "Disk Throughput Mibps",
             "type": "integer"
           },
           "firewall": {
-            "$ref": "#/components/schemas/FirewallPayload"
+            "$ref": "#/components/schemas/FirewallPayload",
+            "description": "Desired firewall configuration."
           },
           "hostname": {
             "default": "",
+            "description": "Guest hostname.",
             "title": "Hostname",
             "type": "string"
           },
           "image_id": {
+            "description": "Image used to create the virtual machine.",
             "minLength": 1,
             "title": "Image Id",
             "type": "string"
@@ -185,15 +245,18 @@
           },
           "is_privileged": {
             "default": false,
+            "description": "Whether the guest can reach every tenant through the mesh.",
             "title": "Is Privileged",
             "type": "boolean"
           },
           "is_termination_protected": {
             "default": false,
+            "description": "Whether deletion is blocked.",
             "title": "Is Termination Protected",
             "type": "boolean"
           },
           "memory_mib": {
+            "description": "Memory capacity in MiB.",
             "exclusiveMinimum": 0,
             "title": "Memory Mib",
             "type": "integer"
@@ -202,11 +265,13 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Custom guest metadata.",
             "title": "Metadata",
             "type": "object"
           },
           "private_network_throughput_mibps": {
             "default": 0,
+            "description": "Private network throughput limit in MiB/s. Zero removes the limit.",
             "minimum": 0,
             "title": "Private Network Throughput Mibps",
             "type": "integer"
@@ -221,6 +286,7 @@
               }
             ],
             "default": null,
+            "description": "Reserved public IPv4 allocation ID, or null.",
             "title": "Public Ipv4"
           },
           "public_ipv6": {
@@ -233,22 +299,26 @@
               }
             ],
             "default": null,
+            "description": "Reserved public IPv6 allocation ID, or null.",
             "title": "Public Ipv6"
           },
           "public_network_throughput_mibps": {
             "default": 0,
+            "description": "Public network throughput limit in MiB/s. Zero removes the limit.",
             "minimum": 0,
             "title": "Public Network Throughput Mibps",
             "type": "integer"
           },
           "sleep_after_idle_seconds": {
             "default": 0,
+            "description": "Idle time before automatic stop. Zero disables it.",
             "maximum": 9223372036,
             "minimum": 0,
             "title": "Sleep After Idle Seconds",
             "type": "integer"
           },
           "ssh_keys": {
+            "description": "Authorized SSH public keys.",
             "items": {
               "type": "string"
             },
@@ -257,6 +327,7 @@
           },
           "user_data": {
             "default": "",
+            "description": "Cloud-init user data supplied to the guest.",
             "title": "User Data",
             "type": "string"
           }
@@ -285,6 +356,7 @@
               }
             ],
             "default": null,
+            "description": "New disk IOPS limit. Zero removes the limit.",
             "title": "Disk Iops"
           },
           "disk_mib": {
@@ -298,6 +370,7 @@
               }
             ],
             "default": null,
+            "description": "New root disk capacity in MiB.",
             "title": "Disk Mib"
           },
           "disk_throughput_mibps": {
@@ -311,6 +384,7 @@
               }
             ],
             "default": null,
+            "description": "New disk throughput limit in MiB/s. Zero removes the limit.",
             "title": "Disk Throughput Mibps"
           }
         },
@@ -323,10 +397,12 @@
         "properties": {
           "enabled": {
             "default": false,
+            "description": "Whether the firewall enforces these rules.",
             "title": "Enabled",
             "type": "boolean"
           },
           "inbound": {
+            "description": "Inbound allow rules.",
             "items": {
               "$ref": "#/components/schemas/FirewallRulePayload"
             },
@@ -334,6 +410,7 @@
             "type": "array"
           },
           "outbound": {
+            "description": "Outbound allow rules.",
             "items": {
               "$ref": "#/components/schemas/FirewallRulePayload"
             },
@@ -348,10 +425,12 @@
         "description": "The complete desired firewall configuration.",
         "properties": {
           "enabled": {
+            "description": "Whether the firewall enforces these rules.",
             "title": "Enabled",
             "type": "boolean"
           },
           "inbound": {
+            "description": "Inbound allow rules.",
             "items": {
               "$ref": "#/components/schemas/FirewallRuleResponse"
             },
@@ -359,6 +438,7 @@
             "type": "array"
           },
           "outbound": {
+            "description": "Outbound allow rules.",
             "items": {
               "$ref": "#/components/schemas/FirewallRuleResponse"
             },
@@ -379,6 +459,7 @@
         "description": "One firewall allow rule.",
         "properties": {
           "cidrs": {
+            "description": "Source or destination networks in CIDR notation.",
             "items": {
               "type": "string"
             },
@@ -388,10 +469,12 @@
           },
           "ports": {
             "default": "",
+            "description": "Allowed ports or ranges. Leave empty for all ports.",
             "title": "Ports",
             "type": "string"
           },
           "protocol": {
+            "description": "Allowed IP protocol.",
             "enum": [
               "any",
               "tcp",
@@ -413,6 +496,7 @@
         "description": "One desired firewall allow rule.",
         "properties": {
           "cidrs": {
+            "description": "Source or destination networks in CIDR notation.",
             "items": {
               "type": "string"
             },
@@ -420,10 +504,12 @@
             "type": "array"
           },
           "ports": {
+            "description": "Allowed ports or ranges. Empty means all ports.",
             "title": "Ports",
             "type": "string"
           },
           "protocol": {
+            "description": "Allowed IP protocol.",
             "enum": [
               "any",
               "tcp",
@@ -456,6 +542,7 @@
               }
             ],
             "default": null,
+            "description": "New firewall enforcement state.",
             "title": "Enabled"
           },
           "inbound": {
@@ -471,6 +558,7 @@
               }
             ],
             "default": null,
+            "description": "Complete inbound allow rule list.",
             "title": "Inbound"
           },
           "outbound": {
@@ -486,6 +574,7 @@
               }
             ],
             "default": null,
+            "description": "Complete outbound allow rule list.",
             "title": "Outbound"
           }
         },
@@ -506,6 +595,7 @@
         ],
         "properties": {
           "artifact": {
+            "description": "Image artifact represented by this URL.",
             "enum": [
               "rootfs",
               "kernel"
@@ -514,22 +604,33 @@
             "type": "string"
           },
           "expires_at": {
+            "description": "URL expiry time as Unix seconds.",
+            "minimum": 0,
             "title": "Expires At",
             "type": "integer"
           },
           "expires_in": {
+            "description": "Seconds until the URL expires.",
+            "minimum": 0,
             "title": "Expires In",
             "type": "integer"
           },
           "sha256": {
+            "description": "Lowercase SHA-256 digest.",
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Sha256",
             "type": "string"
           },
           "size_mib": {
+            "description": "Artifact size in MiB.",
+            "minimum": 0,
             "title": "Size Mib",
             "type": "integer"
           },
           "url": {
+            "description": "Temporary signed download URL.",
+            "format": "uri",
+            "minLength": 1,
             "title": "Url",
             "type": "string"
           }
@@ -572,46 +673,79 @@
         ],
         "properties": {
           "architecture": {
+            "description": "CPU architecture.",
+            "enum": [
+              "amd64",
+              "arm64"
+            ],
             "title": "Architecture",
             "type": "string"
           },
           "cache_image": {
+            "description": "Whether hosts may keep this image cached.",
             "title": "Cache Image",
             "type": "boolean"
           },
           "created_at": {
+            "description": "Creation time as Unix seconds.",
+            "minimum": 0,
             "title": "Created At",
             "type": "integer"
           },
           "enabled": {
+            "description": "Whether the image can create a virtual machine.",
             "title": "Enabled",
             "type": "boolean"
           },
           "id": {
+            "description": "Virtual machine image ID.",
             "title": "Id",
             "type": "string"
           },
           "image_type": {
+            "description": "System image or tenant machine snapshot.",
+            "enum": [
+              "system",
+              "machine"
+            ],
             "title": "Image Type",
             "type": "string"
           },
           "is_termination_protected": {
+            "description": "Whether deletion is blocked.",
             "title": "Is Termination Protected",
             "type": "boolean"
           },
           "kernel_size_mib": {
+            "description": "Kernel artifact size in MiB.",
+            "minimum": 0,
             "title": "Kernel Size Mib",
             "type": "integer"
           },
           "memory_snapshot": {
+            "description": "Whether the image includes guest memory.",
             "title": "Memory Snapshot",
             "type": "boolean"
           },
           "rootfs_size_mib": {
+            "description": "Root filesystem size in MiB.",
+            "minimum": 0,
             "title": "Rootfs Size Mib",
             "type": "integer"
           },
           "status": {
+            "description": "Current image lifecycle state.",
+            "enum": [
+              "pending",
+              "snapshotting",
+              "uploading",
+              "completing",
+              "cleaning",
+              "available",
+              "failed",
+              "deleting",
+              "archived"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -619,14 +753,17 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Resource tags as key-value pairs.",
             "title": "Tags",
             "type": "object"
           },
           "tenant_id": {
+            "description": "Tenant that owns the image.",
             "title": "Tenant Id",
             "type": "integer"
           },
           "title": {
+            "description": "Display title.",
             "title": "Title",
             "type": "string"
           },
@@ -639,9 +776,13 @@
                 "type": "null"
               }
             ],
+            "description": "Last transfer error, or null.",
             "title": "Transfer Error"
           },
           "transfer_progress": {
+            "description": "Transfer completion percentage.",
+            "maximum": 100,
+            "minimum": 0,
             "title": "Transfer Progress",
             "type": "integer"
           }
@@ -672,15 +813,18 @@
         "properties": {
           "alg": {
             "const": "EdDSA",
+            "description": "Signing algorithm.",
             "title": "Alg",
             "type": "string"
           },
           "crv": {
             "const": "Ed25519",
+            "description": "Edwards curve name.",
             "title": "Crv",
             "type": "string"
           },
           "key_ops": {
+            "description": "Operations allowed for this public key.",
             "items": {
               "const": "verify",
               "type": "string"
@@ -689,20 +833,24 @@
             "type": "array"
           },
           "kid": {
+            "description": "Key ID used to select this key.",
             "title": "Kid",
             "type": "string"
           },
           "kty": {
             "const": "OKP",
+            "description": "JSON Web Key type.",
             "title": "Kty",
             "type": "string"
           },
           "use": {
             "const": "sig",
+            "description": "Intended key use.",
             "title": "Use",
             "type": "string"
           },
           "x": {
+            "description": "Base64url-encoded public key.",
             "title": "X",
             "type": "string"
           }
@@ -722,6 +870,7 @@
         "description": "The public keys that this Atlas region trusts.",
         "properties": {
           "keys": {
+            "description": "Active public signature keys.",
             "items": {
               "$ref": "#/components/schemas/JSONWebKey"
             },
@@ -750,6 +899,7 @@
               }
             ],
             "default": null,
+            "description": "Disk capacity served by the warm artifact in MiB.",
             "title": "Disk Mib"
           },
           "memory_mib": {
@@ -763,6 +913,7 @@
               }
             ],
             "default": null,
+            "description": "Memory capacity served by the warm artifact in MiB.",
             "title": "Memory Mib"
           },
           "virtual_cpu_count": {
@@ -776,6 +927,7 @@
               }
             ],
             "default": null,
+            "description": "Virtual CPU count served by the warm artifact.",
             "title": "Virtual Cpu Count"
           }
         },
@@ -790,6 +942,7 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Complete custom guest metadata map.",
             "title": "Metadata",
             "type": "object"
           }
@@ -813,7 +966,8 @@
                 "type": "null"
               }
             ],
-            "default": null
+            "default": null,
+            "description": "Firewall fields to replace."
           },
           "ipv4_internet_access": {
             "description": "Reach the IPv4 internet through host NAT. A public IPv4 address needs it.",
@@ -831,6 +985,7 @@
               }
             ],
             "default": null,
+            "description": "New private network throughput limit in MiB/s. Zero removes the limit.",
             "title": "Private Network Throughput Mibps"
           },
           "public_network_throughput_mibps": {
@@ -844,6 +999,7 @@
               }
             ],
             "default": null,
+            "description": "New public network throughput limit in MiB/s. Zero removes the limit.",
             "title": "Public Network Throughput Mibps"
           }
         },
@@ -855,10 +1011,12 @@
         "properties": {
           "code": {
             "const": "out_of_capacity",
+            "description": "Stable machine-readable error code.",
             "title": "Code",
             "type": "string"
           },
           "fields": {
+            "description": "Invalid request fields, or an empty list.",
             "items": {
               "$ref": "#/components/schemas/ApiErrorField"
             },
@@ -866,6 +1024,7 @@
             "type": "array"
           },
           "message": {
+            "description": "Safe description of the failure.",
             "title": "Message",
             "type": "string"
           }
@@ -889,10 +1048,12 @@
         ],
         "properties": {
           "has_more": {
+            "description": "Whether another page follows this page.",
             "title": "Has More",
             "type": "boolean"
           },
           "items": {
+            "description": "Resources in this page.",
             "items": {
               "$ref": "#/components/schemas/ImageResponse"
             },
@@ -900,10 +1061,12 @@
             "type": "array"
           },
           "limit": {
+            "description": "Requested maximum page size.",
             "title": "Limit",
             "type": "integer"
           },
           "offset": {
+            "description": "Number of matching resources skipped before this page.",
             "title": "Offset",
             "type": "integer"
           }
@@ -928,10 +1091,12 @@
         ],
         "properties": {
           "has_more": {
+            "description": "Whether another page follows this page.",
             "title": "Has More",
             "type": "boolean"
           },
           "items": {
+            "description": "Resources in this page.",
             "items": {
               "$ref": "#/components/schemas/PublicIPResponse"
             },
@@ -939,10 +1104,12 @@
             "type": "array"
           },
           "limit": {
+            "description": "Requested maximum page size.",
             "title": "Limit",
             "type": "integer"
           },
           "offset": {
+            "description": "Number of matching resources skipped before this page.",
             "title": "Offset",
             "type": "integer"
           }
@@ -967,10 +1134,12 @@
         ],
         "properties": {
           "has_more": {
+            "description": "Whether another page follows this page.",
             "title": "Has More",
             "type": "boolean"
           },
           "items": {
+            "description": "Resources in this page.",
             "items": {
               "$ref": "#/components/schemas/VirtualMachineListResponse"
             },
@@ -978,10 +1147,12 @@
             "type": "array"
           },
           "limit": {
+            "description": "Requested maximum page size.",
             "title": "Limit",
             "type": "integer"
           },
           "offset": {
+            "description": "Number of matching resources skipped before this page.",
             "title": "Offset",
             "type": "integer"
           }
@@ -1000,10 +1171,12 @@
         "properties": {
           "code": {
             "const": "placement_busy",
+            "description": "Stable machine-readable error code.",
             "title": "Code",
             "type": "string"
           },
           "fields": {
+            "description": "Invalid request fields, or an empty list.",
             "items": {
               "$ref": "#/components/schemas/ApiErrorField"
             },
@@ -1011,6 +1184,7 @@
             "type": "array"
           },
           "message": {
+            "description": "Safe description of the failure.",
             "title": "Message",
             "type": "string"
           }
@@ -1060,10 +1234,13 @@
         ],
         "properties": {
           "created_at": {
+            "description": "Creation time as Unix seconds.",
+            "minimum": 0,
             "title": "Created At",
             "type": "integer"
           },
           "delivery": {
+            "description": "How traffic reaches the virtual machine.",
             "enum": [
               "direct",
               "routed"
@@ -1072,18 +1249,29 @@
             "type": "string"
           },
           "id": {
+            "description": "Public IP allocation ID.",
             "title": "Id",
             "type": "string"
           },
           "prefix": {
+            "description": "Allocated address or network in CIDR notation.",
             "title": "Prefix",
             "type": "string"
           },
           "reserved": {
+            "description": "Whether the tenant keeps this allocation after detach.",
             "title": "Reserved",
             "type": "boolean"
           },
           "status": {
+            "description": "Current allocation lifecycle state.",
+            "enum": [
+              "available",
+              "reserved",
+              "attaching",
+              "attached",
+              "detaching"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -1091,14 +1279,21 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Resource tags as key-value pairs.",
             "title": "Tags",
             "type": "object"
           },
           "tenant_id": {
+            "description": "Tenant that owns the allocation.",
             "title": "Tenant Id",
             "type": "integer"
           },
           "version": {
+            "description": "IP protocol version.",
+            "enum": [
+              4,
+              6
+            ],
             "title": "Version",
             "type": "integer"
           },
@@ -1111,6 +1306,7 @@
                 "type": "null"
               }
             ],
+            "description": "Attached virtual machine ID, or null when detached.",
             "title": "Virtual Machine Id"
           }
         },
@@ -1134,6 +1330,7 @@
         "description": "Select the IP version of one direct reservation.",
         "properties": {
           "version": {
+            "description": "IP protocol version to reserve.",
             "enum": [
               4,
               6
@@ -1164,6 +1361,7 @@
               }
             ],
             "default": null,
+            "description": "New CPU capacity in millicores.",
             "title": "Cpu Millicores"
           },
           "disk_mib": {
@@ -1177,6 +1375,7 @@
               }
             ],
             "default": null,
+            "description": "New root disk capacity in MiB.",
             "title": "Disk Mib"
           },
           "memory_mib": {
@@ -1190,6 +1389,7 @@
               }
             ],
             "default": null,
+            "description": "New memory capacity in MiB.",
             "title": "Memory Mib"
           },
           "sleep_after_idle_seconds": {
@@ -1204,6 +1404,7 @@
               }
             ],
             "default": null,
+            "description": "New idle time before automatic stop. Zero disables it.",
             "title": "Sleep After Idle Seconds"
           }
         },
@@ -1215,6 +1416,7 @@
         "description": "The complete authorized key list.",
         "properties": {
           "ssh_keys": {
+            "description": "Complete authorized SSH public key list.",
             "items": {
               "type": "string"
             },
@@ -1234,36 +1436,42 @@
         "properties": {
           "cache_image": {
             "default": false,
+            "description": "Whether hosts may keep this image cached.",
             "title": "Cache Image",
             "type": "boolean"
           },
           "image_type": {
             "default": "machine",
+            "description": "Image visibility and intended use.",
             "enum": [
-              "machine",
-              "system"
+              "system",
+              "machine"
             ],
             "title": "Image Type",
             "type": "string"
           },
           "is_termination_protected": {
             "default": false,
+            "description": "Whether deletion of the new image is blocked.",
             "title": "Is Termination Protected",
             "type": "boolean"
           },
           "memory_snapshot": {
             "default": false,
+            "description": "Whether to include guest memory.",
             "title": "Memory Snapshot",
             "type": "boolean"
           },
           "memory_snapshot_configuration": {
-            "$ref": "#/components/schemas/MemorySnapshotConfigurationPayload"
+            "$ref": "#/components/schemas/MemorySnapshotConfigurationPayload",
+            "description": "Shape served by the warm artifact."
           },
           "tags": {
             "additionalProperties": {
               "maxLength": 1000,
               "type": "string"
             },
+            "description": "Resource tags as key-value pairs.",
             "maxProperties": 32,
             "propertyNames": {
               "maxLength": 128
@@ -1272,6 +1480,7 @@
             "type": "object"
           },
           "title": {
+            "description": "Display title for the new image.",
             "minLength": 1,
             "title": "Title",
             "type": "string"
@@ -1288,6 +1497,7 @@
         "description": "The termination protection state to store.",
         "properties": {
           "enabled": {
+            "description": "New termination protection state.",
             "title": "Enabled",
             "type": "boolean"
           }
@@ -1302,14 +1512,17 @@
         "description": "The compute shape of one virtual machine.",
         "properties": {
           "cpu_millicores": {
+            "description": "CPU capacity in millicores.",
             "title": "Cpu Millicores",
             "type": "integer"
           },
           "memory_mib": {
+            "description": "Memory capacity in MiB.",
             "title": "Memory Mib",
             "type": "integer"
           },
           "sleep_after_idle_seconds": {
+            "description": "Idle time before automatic stop. Zero disables it.",
             "title": "Sleep After Idle Seconds",
             "type": "integer"
           }
@@ -1326,6 +1539,7 @@
         "description": "One virtual machine with its state, addresses, and guest configuration.",
         "examples": [
           {
+            "architecture": "amd64",
             "compute": {
               "cpu_millicores": 2000,
               "memory_mib": 2048,
@@ -1367,22 +1581,36 @@
               "public_ipv6": "2001:db8:5::7/128",
               "public_network_throughput_mibps": 0
             },
+            "public_ipv4": null,
+            "public_ipv6": null,
+            "tags": {
+              "env": "prod"
+            },
             "tenant_id": 7
           }
         ],
         "properties": {
           "architecture": {
+            "description": "CPU architecture.",
+            "enum": [
+              "amd64",
+              "arm64"
+            ],
             "title": "Architecture",
             "type": "string"
           },
           "compute": {
-            "$ref": "#/components/schemas/VirtualMachineCompute"
+            "$ref": "#/components/schemas/VirtualMachineCompute",
+            "description": "Compute configuration."
           },
           "created_at": {
+            "description": "Creation time as Unix seconds.",
+            "minimum": 0,
             "title": "Created At",
             "type": "integer"
           },
           "current_state": {
+            "description": "Current state reported by the host or managed by Atlas.",
             "title": "Current State",
             "type": "string"
           },
@@ -1395,10 +1623,12 @@
                 "type": "null"
               }
             ],
+            "description": "State requested from the host, or null when unavailable.",
             "title": "Desired State"
           },
           "disk": {
-            "$ref": "#/components/schemas/VirtualMachineDisk"
+            "$ref": "#/components/schemas/VirtualMachineDisk",
+            "description": "Disk configuration and usage."
           },
           "error": {
             "anyOf": [
@@ -1409,25 +1639,31 @@
                 "type": "null"
               }
             ],
+            "description": "Current host-reported error, or null.",
             "title": "Error"
           },
           "guest": {
-            "$ref": "#/components/schemas/VirtualMachineGuest"
+            "$ref": "#/components/schemas/VirtualMachineGuest",
+            "description": "Guest configuration."
           },
           "id": {
+            "description": "Virtual machine ID.",
             "title": "Id",
             "type": "string"
           },
           "image_id": {
+            "description": "Image used to create the virtual machine.",
             "title": "Image Id",
             "type": "string"
           },
           "is_privileged": {
+            "description": "Whether the guest can reach every tenant through the mesh.",
             "title": "Is Privileged",
             "type": "boolean"
           },
           "network": {
-            "$ref": "#/components/schemas/VirtualMachineNetwork"
+            "$ref": "#/components/schemas/VirtualMachineNetwork",
+            "description": "Network configuration and addresses."
           },
           "public_ipv4": {
             "anyOf": [
@@ -1437,7 +1673,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Attached public IPv4 allocation, or null."
           },
           "public_ipv6": {
             "anyOf": [
@@ -1447,16 +1684,19 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Attached public IPv6 allocation, or null."
           },
           "tags": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Resource tags as key-value pairs.",
             "title": "Tags",
             "type": "object"
           },
           "tenant_id": {
+            "description": "Tenant that owns the virtual machine.",
             "title": "Tenant Id",
             "type": "integer"
           }
@@ -1486,14 +1726,17 @@
         "description": "The disk size and its rate limits.",
         "properties": {
           "iops": {
+            "description": "Disk IOPS limit. Zero means unlimited.",
             "title": "Iops",
             "type": "integer"
           },
           "size_mib": {
+            "description": "Root disk capacity in MiB.",
             "title": "Size Mib",
             "type": "integer"
           },
           "throughput_mibps": {
+            "description": "Disk throughput limit in MiB/s. Zero means unlimited.",
             "title": "Throughput Mibps",
             "type": "integer"
           },
@@ -1506,6 +1749,7 @@
                 "type": "null"
               }
             ],
+            "description": "Observed used disk space in MiB, or null when unavailable.",
             "title": "Used Mib"
           }
         },
@@ -1530,16 +1774,19 @@
                 "type": "null"
               }
             ],
+            "description": "Guest hostname, or null.",
             "title": "Hostname"
           },
           "metadata": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Custom guest metadata.",
             "title": "Metadata",
             "type": "object"
           },
           "ssh_keys": {
+            "description": "Authorized SSH public keys.",
             "items": {
               "type": "string"
             },
@@ -1568,6 +1815,8 @@
             "is_termination_protected": false,
             "last_known_state": "running",
             "memory_mib": 2048,
+            "public_ipv4": null,
+            "public_ipv6": null,
             "sleep_after_idle_seconds": 0,
             "state_synced_at": 1788834165,
             "tags": {
@@ -1578,38 +1827,52 @@
         ],
         "properties": {
           "architecture": {
+            "description": "CPU architecture.",
+            "enum": [
+              "amd64",
+              "arm64"
+            ],
             "title": "Architecture",
             "type": "string"
           },
           "cpu_millicores": {
+            "description": "CPU capacity in millicores.",
             "title": "Cpu Millicores",
             "type": "integer"
           },
           "created_at": {
+            "description": "Creation time as Unix seconds.",
+            "minimum": 0,
             "title": "Created At",
             "type": "integer"
           },
           "disk_mib": {
+            "description": "Root disk capacity in MiB.",
             "title": "Disk Mib",
             "type": "integer"
           },
           "id": {
+            "description": "Virtual machine ID.",
             "title": "Id",
             "type": "string"
           },
           "image_id": {
+            "description": "Image used to create the virtual machine.",
             "title": "Image Id",
             "type": "string"
           },
           "is_termination_protected": {
+            "description": "Whether deletion is blocked.",
             "title": "Is Termination Protected",
             "type": "boolean"
           },
           "last_known_state": {
+            "description": "Last state reported by the host, including Atlas transition states.",
             "title": "Last Known State",
             "type": "string"
           },
           "memory_mib": {
+            "description": "Memory capacity in MiB.",
             "title": "Memory Mib",
             "type": "integer"
           },
@@ -1621,7 +1884,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Attached public IPv4 allocation, or null."
           },
           "public_ipv6": {
             "anyOf": [
@@ -1631,9 +1895,11 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Attached public IPv6 allocation, or null."
           },
           "sleep_after_idle_seconds": {
+            "description": "Idle time before automatic stop. Zero disables it.",
             "title": "Sleep After Idle Seconds",
             "type": "integer"
           },
@@ -1646,16 +1912,19 @@
                 "type": "null"
               }
             ],
+            "description": "Host state synchronization time as Unix seconds, or null.",
             "title": "State Synced At"
           },
           "tags": {
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Resource tags as key-value pairs.",
             "title": "Tags",
             "type": "object"
           },
           "tenant_id": {
+            "description": "Tenant that owns the virtual machine.",
             "title": "Tenant Id",
             "type": "integer"
           }
@@ -1684,9 +1953,11 @@
         "description": "The addresses, internet access, and network limits of one virtual machine.",
         "properties": {
           "firewall": {
-            "$ref": "#/components/schemas/FirewallResponse"
+            "$ref": "#/components/schemas/FirewallResponse",
+            "description": "Desired firewall configuration."
           },
           "ipv4_internet_access": {
+            "description": "Whether the guest reaches the IPv4 internet through host NAT.",
             "title": "Ipv4 Internet Access",
             "type": "boolean"
           },
@@ -1699,6 +1970,7 @@
                 "type": "null"
               }
             ],
+            "description": "Observed network interface MAC address, or null.",
             "title": "Mac"
           },
           "mesh_ipv6": {
@@ -1710,9 +1982,11 @@
                 "type": "null"
               }
             ],
+            "description": "Private WireGuard mesh IPv6 address, or null.",
             "title": "Mesh Ipv6"
           },
           "private_network_throughput_mibps": {
+            "description": "Private network throughput limit in MiB/s.",
             "title": "Private Network Throughput Mibps",
             "type": "integer"
           },
@@ -1725,6 +1999,7 @@
                 "type": "null"
               }
             ],
+            "description": "IPv4 address configured on the guest, or null.",
             "title": "Public Ipv4"
           },
           "public_ipv6": {
@@ -1736,9 +2011,11 @@
                 "type": "null"
               }
             ],
+            "description": "IPv6 prefix assigned to the guest, or null.",
             "title": "Public Ipv6"
           },
           "public_network_throughput_mibps": {
+            "description": "Public network throughput limit in MiB/s.",
             "title": "Public Network Throughput Mibps",
             "type": "integer"
           }
@@ -1768,6 +2045,8 @@
             "image_id": "8f1c2d3e4b5a6978",
             "is_termination_protected": false,
             "memory_mib": 2048,
+            "public_ipv4": null,
+            "public_ipv6": null,
             "sleep_after_idle_seconds": 0,
             "tags": {
               "env": "prod"
@@ -1777,34 +2056,47 @@
         ],
         "properties": {
           "architecture": {
+            "description": "CPU architecture.",
+            "enum": [
+              "amd64",
+              "arm64"
+            ],
             "title": "Architecture",
             "type": "string"
           },
           "cpu_millicores": {
+            "description": "CPU capacity in millicores.",
             "title": "Cpu Millicores",
             "type": "integer"
           },
           "created_at": {
+            "description": "Creation time as Unix seconds.",
+            "minimum": 0,
             "title": "Created At",
             "type": "integer"
           },
           "disk_mib": {
+            "description": "Root disk capacity in MiB.",
             "title": "Disk Mib",
             "type": "integer"
           },
           "id": {
+            "description": "Virtual machine ID.",
             "title": "Id",
             "type": "string"
           },
           "image_id": {
+            "description": "Image used to create the virtual machine.",
             "title": "Image Id",
             "type": "string"
           },
           "is_termination_protected": {
+            "description": "Whether deletion is blocked.",
             "title": "Is Termination Protected",
             "type": "boolean"
           },
           "memory_mib": {
+            "description": "Memory capacity in MiB.",
             "title": "Memory Mib",
             "type": "integer"
           },
@@ -1816,7 +2108,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Attached public IPv4 allocation, or null."
           },
           "public_ipv6": {
             "anyOf": [
@@ -1826,9 +2119,11 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Attached public IPv6 allocation, or null."
           },
           "sleep_after_idle_seconds": {
+            "description": "Idle time before automatic stop. Zero disables it.",
             "title": "Sleep After Idle Seconds",
             "type": "integer"
           },
@@ -1836,10 +2131,12 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Resource tags as key-value pairs.",
             "title": "Tags",
             "type": "object"
           },
           "tenant_id": {
+            "description": "Tenant that owns the virtual machine.",
             "title": "Tenant Id",
             "type": "integer"
           }
@@ -1876,14 +2173,17 @@
         ],
         "properties": {
           "central_id": {
+            "description": "Receiving Central.",
             "title": "Central Id",
             "type": "integer"
           },
           "enabled": {
+            "description": "Whether Atlas sends webhook events.",
             "title": "Enabled",
             "type": "boolean"
           },
           "webhooks": {
+            "description": "Frappe webhook records managed for this Central.",
             "items": {
               "type": "string"
             },
@@ -1922,6 +2222,7 @@
     }
   },
   "info": {
+    "description": "Manage tenant virtual machines, public IP addresses, images, and webhooks in one Atlas region.",
     "title": "Atlas API",
     "version": "1.0.0"
   },
@@ -1939,27 +2240,31 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           },
           {
+            "description": "Number of matching resources to skip.",
             "in": "query",
             "name": "offset",
             "required": false,
             "schema": {
               "default": 0,
+              "description": "Number of matching resources to skip.",
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum number of resources to return.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum number of resources to return.",
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",
@@ -1967,6 +2272,7 @@
             }
           },
           {
+            "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
             "in": "query",
             "name": "tag",
             "required": false,
@@ -1985,6 +2291,7 @@
             }
           },
           {
+            "description": "Return only this image type.",
             "in": "query",
             "name": "image_type",
             "required": false,
@@ -2002,6 +2309,7 @@
                 }
               ],
               "default": null,
+              "description": "Return only this image type.",
               "title": "Image Type"
             }
           }
@@ -2016,6 +2324,46 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "List images",
@@ -2030,6 +2378,7 @@
         "operationId": "delete_image",
         "parameters": [
           {
+            "description": "Virtual machine image ID.",
             "in": "path",
             "name": "image_id",
             "required": true,
@@ -2044,7 +2393,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2060,8 +2409,55 @@
             },
             "description": "The image is retired. Poll the image route while it is Deleting."
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
           "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
             "description": "Another tenant owns this System image."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Delete image",
@@ -2074,6 +2470,7 @@
         "operationId": "get_image",
         "parameters": [
           {
+            "description": "Virtual machine image ID.",
             "in": "path",
             "name": "image_id",
             "required": true,
@@ -2088,7 +2485,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2103,6 +2500,46 @@
               }
             },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Get image",
@@ -2117,6 +2554,7 @@
         "operationId": "download_image",
         "parameters": [
           {
+            "description": "Virtual machine image ID.",
             "in": "path",
             "name": "image_id",
             "required": true,
@@ -2131,15 +2569,17 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           },
           {
+            "description": "Image artifact to download.",
             "in": "query",
             "name": "artifact",
             "required": true,
             "schema": {
+              "description": "Image artifact to download.",
               "enum": [
                 "rootfs",
                 "kernel"
@@ -2159,6 +2599,56 @@
               }
             },
             "description": "A signed artifact URL that expires after 24 hours."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Download image",
@@ -2173,6 +2663,7 @@
         "operationId": "update_image_termination_protection",
         "parameters": [
           {
+            "description": "Virtual machine image ID.",
             "in": "path",
             "name": "image_id",
             "required": true,
@@ -2187,7 +2678,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2215,6 +2706,56 @@
               }
             },
             "description": "The termination protection state is stored."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Update termination protection",
@@ -2225,6 +2766,7 @@
     },
     "/api/atlas/jwks.json": {
       "get": {
+        "description": "Returns the public keys that verify Atlas service tokens issued by this region.",
         "operationId": "get_jwks",
         "responses": {
           "200": {
@@ -2236,6 +2778,16 @@
               }
             },
             "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "security": [],
@@ -2257,27 +2809,31 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           },
           {
+            "description": "Number of matching resources to skip.",
             "in": "query",
             "name": "offset",
             "required": false,
             "schema": {
               "default": 0,
+              "description": "Number of matching resources to skip.",
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum number of resources to return.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum number of resources to return.",
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",
@@ -2285,6 +2841,7 @@
             }
           },
           {
+            "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
             "in": "query",
             "name": "tag",
             "required": false,
@@ -2313,6 +2870,46 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "List public IPs",
@@ -2331,7 +2928,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2360,8 +2957,55 @@
             },
             "description": "A direct public IP is reserved."
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
           "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
             "description": "No compatible direct pool has capacity."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Reserve new public IP",
@@ -2376,6 +3020,7 @@
         "operationId": "release_public_ip",
         "parameters": [
           {
+            "description": "Public IP allocation ID.",
             "in": "path",
             "name": "public_ip_id",
             "required": true,
@@ -2390,7 +3035,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2399,8 +3044,55 @@
           "204": {
             "description": "The detached public IP reservation is released."
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
           "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
             "description": "The public IP is attached or has an active intent."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Release public IP",
@@ -2413,6 +3105,7 @@
         "operationId": "get_public_ip",
         "parameters": [
           {
+            "description": "Public IP allocation ID.",
             "in": "path",
             "name": "public_ip_id",
             "required": true,
@@ -2427,7 +3120,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2442,6 +3135,46 @@
               }
             },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Get public IP",
@@ -2456,6 +3189,7 @@
         "operationId": "reserve_attached_public_ip",
         "parameters": [
           {
+            "description": "Public IP allocation ID.",
             "in": "path",
             "name": "public_ip_id",
             "required": true,
@@ -2470,7 +3204,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2487,7 +3221,54 @@
             "description": "The direct public IP stays with the tenant after detach."
           },
           "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
             "description": "A routed IPv6 address cannot be reserved."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Reserve attached public IP",
@@ -2508,27 +3289,31 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           },
           {
+            "description": "Number of matching resources to skip.",
             "in": "query",
             "name": "offset",
             "required": false,
             "schema": {
               "default": 0,
+              "description": "Number of matching resources to skip.",
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum number of resources to return.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum number of resources to return.",
               "maximum": 100,
               "minimum": 1,
               "title": "Limit",
@@ -2536,6 +3321,7 @@
             }
           },
           {
+            "description": "Comma separated key:value tags. A resource must carry every pair, such as tag=os:Ubuntu,channel:lts.",
             "in": "query",
             "name": "tag",
             "required": false,
@@ -2564,6 +3350,46 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "List VMs",
@@ -2582,7 +3408,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2618,6 +3444,46 @@
             },
             "description": "The virtual machine and its public IP intents are stored."
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          },
           "503": {
             "content": {
               "application/json": {
@@ -2649,6 +3515,7 @@
         "operationId": "delete_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2663,7 +3530,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2678,6 +3545,46 @@
               }
             },
             "description": "Termination started. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Delete VM",
@@ -2690,6 +3597,7 @@
         "operationId": "get_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2704,7 +3612,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2719,6 +3627,46 @@
               }
             },
             "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Get VM",
@@ -2733,6 +3681,7 @@
         "operationId": "create_virtual_machine_console_token",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2747,7 +3696,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2775,6 +3724,56 @@
               }
             },
             "description": "A single-use console token."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Create console token",
@@ -2789,6 +3788,7 @@
         "operationId": "pause_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2803,7 +3803,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2818,6 +3818,46 @@
               }
             },
             "description": "The request is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Pause VM",
@@ -2832,6 +3872,7 @@
         "operationId": "resize_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2846,7 +3887,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2877,6 +3918,56 @@
             },
             "description": "The change is accepted. Poll the virtual machine route."
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
+          },
           "503": {
             "content": {
               "application/json": {
@@ -2900,6 +3991,7 @@
         "operationId": "restart_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2914,7 +4006,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2929,6 +4021,46 @@
               }
             },
             "description": "The request is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Restart VM",
@@ -2943,6 +4075,7 @@
         "operationId": "resume_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -2957,7 +4090,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -2972,6 +4105,46 @@
               }
             },
             "description": "The request is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Resume VM",
@@ -2986,6 +4159,7 @@
         "operationId": "create_virtual_machine_snapshot",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3000,7 +4174,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3039,6 +4213,56 @@
               }
             },
             "description": "The Machine image record is created."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Create snapshot",
@@ -3053,6 +4277,7 @@
         "operationId": "start_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3067,7 +4292,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3082,6 +4307,46 @@
               }
             },
             "description": "The request is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Start VM",
@@ -3096,6 +4361,7 @@
         "operationId": "stop_virtual_machine",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3110,7 +4376,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3125,6 +4391,46 @@
               }
             },
             "description": "The request is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Stop VM",
@@ -3139,6 +4445,7 @@
         "operationId": "update_virtual_machine_disk",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3153,7 +4460,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3183,8 +4490,65 @@
             },
             "description": "The change is accepted. Poll the virtual machine route."
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
           "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
             "description": "The host has no room. `error.code` is `insufficient_capacity`."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Update disk in-place",
@@ -3199,6 +4563,7 @@
         "operationId": "replace_virtual_machine_metadata",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3213,7 +4578,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3243,6 +4608,56 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Replace metadata",
@@ -3257,6 +4672,7 @@
         "operationId": "update_virtual_machine_network",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3271,7 +4687,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3310,6 +4726,56 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Update network",
@@ -3324,6 +4790,7 @@
         "operationId": "detach_virtual_machine_public_ipv4",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3338,7 +4805,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3353,6 +4820,46 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Detach public IPv4",
@@ -3365,6 +4872,7 @@
         "operationId": "attach_virtual_machine_public_ipv4",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3379,7 +4887,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3408,8 +4916,65 @@
             },
             "description": "The change is accepted. Poll the virtual machine route."
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
           "409": {
-            "description": "A different address is attached, or the shared pool is empty."
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "A different address is attached, or no compatible shared allocation is available."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Attach public IPv4",
@@ -3424,6 +4989,7 @@
         "operationId": "detach_virtual_machine_public_ipv6",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3438,7 +5004,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3453,6 +5019,46 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Detach public IPv6",
@@ -3465,6 +5071,7 @@
         "operationId": "attach_virtual_machine_public_ipv6",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3479,7 +5086,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3507,6 +5114,66 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "A different address is attached, or no compatible shared allocation is available."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Attach public IPv6",
@@ -3521,6 +5188,7 @@
         "operationId": "replace_virtual_machine_ssh_keys",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3535,7 +5203,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3565,6 +5233,56 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Replace SSH keys",
@@ -3579,6 +5297,7 @@
         "operationId": "update_virtual_machine_termination_protection",
         "parameters": [
           {
+            "description": "Virtual machine ID.",
             "in": "path",
             "name": "virtual_machine_id",
             "required": true,
@@ -3593,7 +5312,7 @@
             "required": true,
             "schema": {
               "maximum": 4294967295,
-              "minimum": 1,
+              "minimum": 0,
               "type": "integer"
             }
           }
@@ -3621,6 +5340,56 @@
               }
             },
             "description": "The change is accepted. Poll the virtual machine route."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The caller cannot use this resource."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The resource does not exist."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Update termination protection",
@@ -3660,8 +5429,45 @@
             },
             "description": "The deliveries point at the receiver."
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request is not valid."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required."
+          },
           "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
             "description": "The token does not act for every tenant."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "The request could not be completed."
           }
         },
         "summary": "Configure webhooks",

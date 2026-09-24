@@ -8,29 +8,28 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
+
+if TYPE_CHECKING:
+  from ..models.api_error_detail import ApiErrorDetail
 
 
 
 
 
-
-T = TypeVar("T", bound="VirtualMachineCompute")
+T = TypeVar("T", bound="ApiErrorResponse")
 
 
 
 @_attrs_define
-class VirtualMachineCompute:
-    """ The compute shape of one virtual machine.
+class ApiErrorResponse:
+    """ The JSON body of an Atlas API error.
 
         Attributes:
-            cpu_millicores (int): CPU capacity in millicores.
-            memory_mib (int): Memory capacity in MiB.
-            sleep_after_idle_seconds (int): Idle time before automatic stop. Zero disables it.
+            error (ApiErrorDetail): The stable error details returned by Atlas.
      """
 
-    cpu_millicores: int
-    memory_mib: int
-    sleep_after_idle_seconds: int
+    error: ApiErrorDetail
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -38,19 +37,14 @@ class VirtualMachineCompute:
 
 
     def to_dict(self) -> dict[str, Any]:
-        cpu_millicores = self.cpu_millicores
-
-        memory_mib = self.memory_mib
-
-        sleep_after_idle_seconds = self.sleep_after_idle_seconds
+        from ..models.api_error_detail import ApiErrorDetail # noqa: PLC0415
+        error = self.error.to_dict()
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "cpu_millicores": cpu_millicores,
-            "memory_mib": memory_mib,
-            "sleep_after_idle_seconds": sleep_after_idle_seconds,
+            "error": error,
         })
 
         return field_dict
@@ -59,22 +53,20 @@ class VirtualMachineCompute:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.api_error_detail import ApiErrorDetail # noqa: PLC0415
         d = dict(src_dict)
-        cpu_millicores = d.pop("cpu_millicores")
+        error = ApiErrorDetail.from_dict(d.pop("error"))
 
-        memory_mib = d.pop("memory_mib")
 
-        sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds")
 
-        virtual_machine_compute = cls(
-            cpu_millicores=cpu_millicores,
-            memory_mib=memory_mib,
-            sleep_after_idle_seconds=sleep_after_idle_seconds,
+
+        api_error_response = cls(
+            error=error,
         )
 
 
-        virtual_machine_compute.additional_properties = d
-        return virtual_machine_compute
+        api_error_response.additional_properties = d
+        return api_error_response
 
     @property
     def additional_keys(self) -> list[str]:

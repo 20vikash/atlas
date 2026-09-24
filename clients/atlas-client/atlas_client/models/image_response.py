@@ -8,6 +8,9 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.image_response_architecture import ImageResponseArchitecture
+from ..models.image_response_image_type import ImageResponseImageType
+from ..models.image_response_status import ImageResponseStatus
 from typing import cast
 
 if TYPE_CHECKING:
@@ -26,35 +29,35 @@ class ImageResponse:
     """ A tenant virtual machine image.
 
         Attributes:
-            architecture (str):
-            cache_image (bool):
-            created_at (int):
-            enabled (bool):
-            id (str):
-            image_type (str):
-            is_termination_protected (bool):
-            kernel_size_mib (int):
-            memory_snapshot (bool):
-            rootfs_size_mib (int):
-            status (str):
-            tags (ImageResponseTags):
-            tenant_id (int):
-            title (str):
-            transfer_error (None | str):
-            transfer_progress (int):
+            architecture (ImageResponseArchitecture): CPU architecture.
+            cache_image (bool): Whether hosts may keep this image cached.
+            created_at (int): Creation time as Unix seconds.
+            enabled (bool): Whether the image can create a virtual machine.
+            id (str): Virtual machine image ID.
+            image_type (ImageResponseImageType): System image or tenant machine snapshot.
+            is_termination_protected (bool): Whether deletion is blocked.
+            kernel_size_mib (int): Kernel artifact size in MiB.
+            memory_snapshot (bool): Whether the image includes guest memory.
+            rootfs_size_mib (int): Root filesystem size in MiB.
+            status (ImageResponseStatus): Current image lifecycle state.
+            tags (ImageResponseTags): Resource tags as key-value pairs.
+            tenant_id (int): Tenant that owns the image.
+            title (str): Display title.
+            transfer_error (None | str): Last transfer error, or null.
+            transfer_progress (int): Transfer completion percentage.
      """
 
-    architecture: str
+    architecture: ImageResponseArchitecture
     cache_image: bool
     created_at: int
     enabled: bool
     id: str
-    image_type: str
+    image_type: ImageResponseImageType
     is_termination_protected: bool
     kernel_size_mib: int
     memory_snapshot: bool
     rootfs_size_mib: int
-    status: str
+    status: ImageResponseStatus
     tags: ImageResponseTags
     tenant_id: int
     title: str
@@ -68,7 +71,7 @@ class ImageResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.image_response_tags import ImageResponseTags # noqa: PLC0415
-        architecture = self.architecture
+        architecture = self.architecture.value
 
         cache_image = self.cache_image
 
@@ -78,7 +81,7 @@ class ImageResponse:
 
         id = self.id
 
-        image_type = self.image_type
+        image_type = self.image_type.value
 
         is_termination_protected = self.is_termination_protected
 
@@ -88,7 +91,7 @@ class ImageResponse:
 
         rootfs_size_mib = self.rootfs_size_mib
 
-        status = self.status
+        status = self.status.value
 
         tags = self.tags.to_dict()
 
@@ -131,7 +134,10 @@ class ImageResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.image_response_tags import ImageResponseTags # noqa: PLC0415
         d = dict(src_dict)
-        architecture = d.pop("architecture")
+        architecture = ImageResponseArchitecture(d.pop("architecture"))
+
+
+
 
         cache_image = d.pop("cache_image")
 
@@ -141,7 +147,10 @@ class ImageResponse:
 
         id = d.pop("id")
 
-        image_type = d.pop("image_type")
+        image_type = ImageResponseImageType(d.pop("image_type"))
+
+
+
 
         is_termination_protected = d.pop("is_termination_protected")
 
@@ -151,7 +160,10 @@ class ImageResponse:
 
         rootfs_size_mib = d.pop("rootfs_size_mib")
 
-        status = d.pop("status")
+        status = ImageResponseStatus(d.pop("status"))
+
+
+
 
         tags = ImageResponseTags.from_dict(d.pop("tags"))
 

@@ -1,6 +1,8 @@
 """ Contains all the data models used in inputs/outputs """
 
+from .api_error_detail import ApiErrorDetail
 from .api_error_field import ApiErrorField
+from .api_error_response import ApiErrorResponse
 from .capacity_unavailable_response import CapacityUnavailableResponse
 from .configure_webhooks_payload import ConfigureWebhooksPayload
 from .console_token_payload import ConsoleTokenPayload
@@ -21,6 +23,9 @@ from .firewall_update_payload import FirewallUpdatePayload
 from .image_download_response import ImageDownloadResponse
 from .image_download_response_artifact import ImageDownloadResponseArtifact
 from .image_response import ImageResponse
+from .image_response_architecture import ImageResponseArchitecture
+from .image_response_image_type import ImageResponseImageType
+from .image_response_status import ImageResponseStatus
 from .image_response_tags import ImageResponseTags
 from .json_web_key import JSONWebKey
 from .json_web_key_set_response import JSONWebKeySetResponse
@@ -37,7 +42,9 @@ from .placement_busy_error import PlacementBusyError
 from .public_ip_assignment_payload import PublicIPAssignmentPayload
 from .public_ip_response import PublicIPResponse
 from .public_ip_response_delivery import PublicIPResponseDelivery
+from .public_ip_response_status import PublicIPResponseStatus
 from .public_ip_response_tags import PublicIPResponseTags
+from .public_ip_response_version import PublicIPResponseVersion
 from .reserve_public_ip_payload import ReservePublicIPPayload
 from .reserve_public_ip_payload_version import ReservePublicIPPayloadVersion
 from .resize_payload import ResizePayload
@@ -48,19 +55,24 @@ from .ssh_keys_replacement_payload import SSHKeysReplacementPayload
 from .termination_protection_payload import TerminationProtectionPayload
 from .virtual_machine_compute import VirtualMachineCompute
 from .virtual_machine_detail_response import VirtualMachineDetailResponse
+from .virtual_machine_detail_response_architecture import VirtualMachineDetailResponseArchitecture
 from .virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags
 from .virtual_machine_disk import VirtualMachineDisk
 from .virtual_machine_guest import VirtualMachineGuest
 from .virtual_machine_guest_metadata import VirtualMachineGuestMetadata
 from .virtual_machine_list_response import VirtualMachineListResponse
+from .virtual_machine_list_response_architecture import VirtualMachineListResponseArchitecture
 from .virtual_machine_list_response_tags import VirtualMachineListResponseTags
 from .virtual_machine_network import VirtualMachineNetwork
 from .virtual_machine_response import VirtualMachineResponse
+from .virtual_machine_response_architecture import VirtualMachineResponseArchitecture
 from .virtual_machine_response_tags import VirtualMachineResponseTags
 from .webhook_configuration_response import WebhookConfigurationResponse
 
 __all__ = (
+    "ApiErrorDetail",
     "ApiErrorField",
+    "ApiErrorResponse",
     "CapacityUnavailableResponse",
     "ConfigureWebhooksPayload",
     "ConsoleTokenPayload",
@@ -81,6 +93,9 @@ __all__ = (
     "ImageDownloadResponse",
     "ImageDownloadResponseArtifact",
     "ImageResponse",
+    "ImageResponseArchitecture",
+    "ImageResponseImageType",
+    "ImageResponseStatus",
     "ImageResponseTags",
     "JSONWebKey",
     "JSONWebKeySetResponse",
@@ -97,7 +112,9 @@ __all__ = (
     "PublicIPAssignmentPayload",
     "PublicIPResponse",
     "PublicIPResponseDelivery",
+    "PublicIPResponseStatus",
     "PublicIPResponseTags",
+    "PublicIPResponseVersion",
     "ReservePublicIPPayload",
     "ReservePublicIPPayloadVersion",
     "ResizePayload",
@@ -108,14 +125,17 @@ __all__ = (
     "TerminationProtectionPayload",
     "VirtualMachineCompute",
     "VirtualMachineDetailResponse",
+    "VirtualMachineDetailResponseArchitecture",
     "VirtualMachineDetailResponseTags",
     "VirtualMachineDisk",
     "VirtualMachineGuest",
     "VirtualMachineGuestMetadata",
     "VirtualMachineListResponse",
+    "VirtualMachineListResponseArchitecture",
     "VirtualMachineListResponseTags",
     "VirtualMachineNetwork",
     "VirtualMachineResponse",
+    "VirtualMachineResponseArchitecture",
     "VirtualMachineResponseTags",
     "WebhookConfigurationResponse",
 )

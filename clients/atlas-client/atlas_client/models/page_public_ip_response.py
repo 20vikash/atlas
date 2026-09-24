@@ -25,10 +25,10 @@ T = TypeVar("T", bound="PagePublicIPResponse")
 class PagePublicIPResponse:
     """ 
         Attributes:
-            has_more (bool):
-            items (list[PublicIPResponse]):
-            limit (int):
-            offset (int):
+            has_more (bool): Whether another page follows this page.
+            items (list[PublicIPResponse]): Resources in this page.
+            limit (int): Requested maximum page size.
+            offset (int): Number of matching resources skipped before this page.
      """
 
     has_more: bool

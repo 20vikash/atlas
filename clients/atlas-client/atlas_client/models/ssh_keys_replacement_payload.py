@@ -24,7 +24,7 @@ class SSHKeysReplacementPayload:
     """ The complete authorized key list.
 
         Attributes:
-            ssh_keys (list[str]):
+            ssh_keys (list[str]): Complete authorized SSH public key list.
      """
 
     ssh_keys: list[str]

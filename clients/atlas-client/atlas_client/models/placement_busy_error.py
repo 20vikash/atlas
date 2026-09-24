@@ -29,9 +29,9 @@ class PlacementBusyError:
     The fleet has room. Retry at once, guided by the `Retry-After` header.
 
         Attributes:
-            code (Literal['placement_busy']):
-            fields (list[ApiErrorField]):
-            message (str):
+            code (Literal['placement_busy']): Stable machine-readable error code.
+            fields (list[ApiErrorField]): Invalid request fields, or an empty list.
+            message (str): Safe description of the failure.
      """
 
     code: Literal['placement_busy']

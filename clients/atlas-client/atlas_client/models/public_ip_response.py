@@ -9,6 +9,8 @@ from attrs import field as _attrs_field
 from ..types import UNSET, Unset
 
 from ..models.public_ip_response_delivery import PublicIPResponseDelivery
+from ..models.public_ip_response_status import PublicIPResponseStatus
+from ..models.public_ip_response_version import PublicIPResponseVersion
 from typing import cast
 
 if TYPE_CHECKING:
@@ -27,16 +29,16 @@ class PublicIPResponse:
     """ One tenant public IP.
 
         Attributes:
-            created_at (int):
-            delivery (PublicIPResponseDelivery):
-            id (str):
-            prefix (str):
-            reserved (bool):
-            status (str):
-            tags (PublicIPResponseTags):
-            tenant_id (int):
-            version (int):
-            virtual_machine_id (None | str):
+            created_at (int): Creation time as Unix seconds.
+            delivery (PublicIPResponseDelivery): How traffic reaches the virtual machine.
+            id (str): Public IP allocation ID.
+            prefix (str): Allocated address or network in CIDR notation.
+            reserved (bool): Whether the tenant keeps this allocation after detach.
+            status (PublicIPResponseStatus): Current allocation lifecycle state.
+            tags (PublicIPResponseTags): Resource tags as key-value pairs.
+            tenant_id (int): Tenant that owns the allocation.
+            version (PublicIPResponseVersion): IP protocol version.
+            virtual_machine_id (None | str): Attached virtual machine ID, or null when detached.
      """
 
     created_at: int
@@ -44,10 +46,10 @@ class PublicIPResponse:
     id: str
     prefix: str
     reserved: bool
-    status: str
+    status: PublicIPResponseStatus
     tags: PublicIPResponseTags
     tenant_id: int
-    version: int
+    version: PublicIPResponseVersion
     virtual_machine_id: None | str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -67,13 +69,13 @@ class PublicIPResponse:
 
         reserved = self.reserved
 
-        status = self.status
+        status = self.status.value
 
         tags = self.tags.to_dict()
 
         tenant_id = self.tenant_id
 
-        version = self.version
+        version = self.version.value
 
         virtual_machine_id: None | str
         virtual_machine_id = self.virtual_machine_id
@@ -115,7 +117,10 @@ class PublicIPResponse:
 
         reserved = d.pop("reserved")
 
-        status = d.pop("status")
+        status = PublicIPResponseStatus(d.pop("status"))
+
+
+
 
         tags = PublicIPResponseTags.from_dict(d.pop("tags"))
 
@@ -124,7 +129,10 @@ class PublicIPResponse:
 
         tenant_id = d.pop("tenant_id")
 
-        version = d.pop("version")
+        version = PublicIPResponseVersion(d.pop("version"))
+
+
+
 
         def _parse_virtual_machine_id(data: object) -> None | str:
             if data is None:

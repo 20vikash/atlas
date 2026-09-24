@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.public_ip_response import PublicIPResponse
 from typing import cast
 
@@ -40,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PublicIPResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | PublicIPResponse | None:
     if response.status_code == 200:
         response_200 = PublicIPResponse.from_dict(response.json())
 
@@ -49,8 +50,39 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return response_200
 
     if response.status_code == 400:
-        response_400 = cast(Any, None)
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -58,7 +90,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PublicIPResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | PublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,7 +105,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Response[Any | PublicIPResponse]:
+) -> Response[ApiErrorResponse | PublicIPResponse]:
     """ Reserve attached public IP
 
      Keeps a direct public IP after its next detach.
@@ -87,7 +119,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PublicIPResponse]
+        Response[ApiErrorResponse | PublicIPResponse]
      """
 
 
@@ -109,7 +141,7 @@ def sync(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Any | PublicIPResponse | None:
+) -> ApiErrorResponse | PublicIPResponse | None:
     """ Reserve attached public IP
 
      Keeps a direct public IP after its next detach.
@@ -123,7 +155,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PublicIPResponse
+        ApiErrorResponse | PublicIPResponse
      """
 
 
@@ -140,7 +172,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Response[Any | PublicIPResponse]:
+) -> Response[ApiErrorResponse | PublicIPResponse]:
     """ Reserve attached public IP
 
      Keeps a direct public IP after its next detach.
@@ -154,7 +186,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PublicIPResponse]
+        Response[ApiErrorResponse | PublicIPResponse]
      """
 
 
@@ -176,7 +208,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Any | PublicIPResponse | None:
+) -> ApiErrorResponse | PublicIPResponse | None:
     """ Reserve attached public IP
 
      Keeps a direct public IP after its next detach.
@@ -190,7 +222,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PublicIPResponse
+        ApiErrorResponse | PublicIPResponse
      """
 
 

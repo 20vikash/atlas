@@ -26,9 +26,9 @@ class FirewallRulePayload:
     """ One firewall allow rule.
 
         Attributes:
-            cidrs (list[str]):
-            protocol (FirewallRulePayloadProtocol):
-            ports (str | Unset):  Default: ''.
+            cidrs (list[str]): Source or destination networks in CIDR notation.
+            protocol (FirewallRulePayloadProtocol): Allowed IP protocol.
+            ports (str | Unset): Allowed ports or ranges. Leave empty for all ports. Default: ''.
      """
 
     cidrs: list[str]

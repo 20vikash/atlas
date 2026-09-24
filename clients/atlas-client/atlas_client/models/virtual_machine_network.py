@@ -27,13 +27,13 @@ class VirtualMachineNetwork:
 
         Attributes:
             firewall (FirewallResponse): The complete desired firewall configuration.
-            ipv4_internet_access (bool):
-            mac (None | str):
-            mesh_ipv6 (None | str):
-            private_network_throughput_mibps (int):
-            public_ipv4 (None | str):
-            public_ipv6 (None | str):
-            public_network_throughput_mibps (int):
+            ipv4_internet_access (bool): Whether the guest reaches the IPv4 internet through host NAT.
+            mac (None | str): Observed network interface MAC address, or null.
+            mesh_ipv6 (None | str): Private WireGuard mesh IPv6 address, or null.
+            private_network_throughput_mibps (int): Private network throughput limit in MiB/s.
+            public_ipv4 (None | str): IPv4 address configured on the guest, or null.
+            public_ipv6 (None | str): IPv6 prefix assigned to the guest, or null.
+            public_network_throughput_mibps (int): Public network throughput limit in MiB/s.
      """
 
     firewall: FirewallResponse

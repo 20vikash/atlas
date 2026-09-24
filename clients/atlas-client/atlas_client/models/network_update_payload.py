@@ -27,10 +27,12 @@ class NetworkUpdatePayload:
     """ New IPv4 internet access, network rate limits, or firewall fields.
 
         Attributes:
-            firewall (FirewallUpdatePayload | None | Unset):
+            firewall (FirewallUpdatePayload | None | Unset): Firewall fields to replace.
             ipv4_internet_access (bool | Unset): Reach the IPv4 internet through host NAT. A public IPv4 address needs it.
-            private_network_throughput_mibps (int | None | Unset):
-            public_network_throughput_mibps (int | None | Unset):
+            private_network_throughput_mibps (int | None | Unset): New private network throughput limit in MiB/s. Zero
+                removes the limit.
+            public_network_throughput_mibps (int | None | Unset): New public network throughput limit in MiB/s. Zero removes
+                the limit.
      """
 
     firewall: FirewallUpdatePayload | None | Unset = UNSET

@@ -25,10 +25,10 @@ T = TypeVar("T", bound="PageVirtualMachineListResponse")
 class PageVirtualMachineListResponse:
     """ 
         Attributes:
-            has_more (bool):
-            items (list[VirtualMachineListResponse]):
-            limit (int):
-            offset (int):
+            has_more (bool): Whether another page follows this page.
+            items (list[VirtualMachineListResponse]): Resources in this page.
+            limit (int): Requested maximum page size.
+            offset (int): Number of matching resources skipped before this page.
      """
 
     has_more: bool

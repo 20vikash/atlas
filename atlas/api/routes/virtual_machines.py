@@ -51,6 +51,10 @@ if TYPE_CHECKING:
 
 
 ACCEPTED_RESPONSE = {202: {"description": "The change is accepted. Poll the virtual machine route."}}
+PUBLIC_IP_ATTACH_RESPONSES = {
+	**ACCEPTED_RESPONSE,
+	409: {"description": "A different address is attached, or no compatible shared allocation is available."},
+}
 
 
 def get_owned_virtual_machine(virtual_machine_id: str) -> VirtualMachine:
@@ -405,7 +409,7 @@ def update_virtual_machine_network(
 	Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access` reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6 address brings its own internet path.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
-	virtual_machine.update_network(payload.model_dump(exclude_unset=True))
+	virtual_machine.update_network(payload.model_dump(exclude_unset=True, exclude_none=True))
 	return ApiResult(VirtualMachineResponse.from_document(virtual_machine), status=202)
 
 
@@ -446,10 +450,7 @@ def replace_virtual_machine_metadata(
 @virtual_machine_configuration.put("<virtual_machine_id>/public-ipv4")
 @api_docs(
 	request_example={"public_ip": "auto"},
-	responses={
-		**ACCEPTED_RESPONSE,
-		409: {"description": "A different address is attached, or the shared pool is empty."},
-	},
+	responses=PUBLIC_IP_ATTACH_RESPONSES,
 )
 def attach_virtual_machine_public_ipv4(
 	virtual_machine_id: str, payload: PublicIPAssignmentPayload
@@ -478,7 +479,7 @@ def detach_virtual_machine_public_ipv4(
 
 
 @virtual_machine_configuration.put("<virtual_machine_id>/public-ipv6")
-@api_docs(request_example={"public_ip": "auto"}, responses=ACCEPTED_RESPONSE)
+@api_docs(request_example={"public_ip": "auto"}, responses=PUBLIC_IP_ATTACH_RESPONSES)
 def attach_virtual_machine_public_ipv6(
 	virtual_machine_id: str, payload: PublicIPAssignmentPayload
 ) -> ApiResult[VirtualMachineResponse]:

@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.public_ip_response import PublicIPResponse
 from ...models.reserve_public_ip_payload import ReservePublicIPPayload
 from typing import cast
@@ -44,7 +45,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | PublicIPResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | PublicIPResponse | None:
     if response.status_code == 201:
         response_201 = PublicIPResponse.from_dict(response.json())
 
@@ -52,9 +53,40 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_201
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
     if response.status_code == 409:
-        response_409 = cast(Any, None)
+        response_409 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_409
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -62,7 +94,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | PublicIPResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | PublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -77,7 +109,7 @@ def sync_detailed(
     body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> Response[Any | PublicIPResponse]:
+) -> Response[ApiErrorResponse | PublicIPResponse]:
     """ Reserve new public IP
 
      Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
@@ -91,7 +123,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PublicIPResponse]
+        Response[ApiErrorResponse | PublicIPResponse]
      """
 
 
@@ -113,7 +145,7 @@ def sync(
     body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> Any | PublicIPResponse | None:
+) -> ApiErrorResponse | PublicIPResponse | None:
     """ Reserve new public IP
 
      Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
@@ -127,7 +159,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PublicIPResponse
+        ApiErrorResponse | PublicIPResponse
      """
 
 
@@ -144,7 +176,7 @@ async def asyncio_detailed(
     body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> Response[Any | PublicIPResponse]:
+) -> Response[ApiErrorResponse | PublicIPResponse]:
     """ Reserve new public IP
 
      Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
@@ -158,7 +190,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | PublicIPResponse]
+        Response[ApiErrorResponse | PublicIPResponse]
      """
 
 
@@ -180,7 +212,7 @@ async def asyncio(
     body: ReservePublicIPPayload,
     x_tenant_id: int,
 
-) -> Any | PublicIPResponse | None:
+) -> ApiErrorResponse | PublicIPResponse | None:
     """ Reserve new public IP
 
      Reserves one direct IPv4 or IPv6 prefix. Atlas selects the pool.
@@ -194,7 +226,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | PublicIPResponse
+        ApiErrorResponse | PublicIPResponse
      """
 
 

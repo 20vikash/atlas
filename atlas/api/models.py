@@ -9,6 +9,7 @@ from frappe.utils import get_datetime, get_system_timezone
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from atlas.api.core.base import ListQuery, PatchPayload, StrictModel
+from atlas.api.core.errors import ApiErrorField
 from atlas.atlas.core.tags import (
 	MAXIMUM_TAG_KEY_LENGTH,
 	MAXIMUM_TAG_VALUE_LENGTH,
@@ -40,25 +41,32 @@ TagMap = Annotated[
 		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_KEY_LENGTH)],
 		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_VALUE_LENGTH)],
 	],
-	Field(max_length=MAXIMUM_TAGS),
+	Field(max_length=MAXIMUM_TAGS, description="Resource tags as key-value pairs."),
 ]
 FirewallProtocol = Literal["any", "tcp", "udp", "icmp"]
+Architecture = Literal["amd64", "arm64"]
+ImageType = Literal["system", "machine"]
+PublicIPStatus = Literal["available", "reserved", "attaching", "attached", "detaching"]
+ImageStatus = Literal[
+	"pending",
+	"snapshotting",
+	"uploading",
+	"completing",
+	"cleaning",
+	"available",
+	"failed",
+	"deleting",
+	"archived",
+]
 AUTO_IP_ALLOCATION = "auto"
-
-
-class ApiErrorField(BaseModel):
-	"""One field named in an Atlas API error."""
-
-	name: str
-	message: str
 
 
 class OutOfCapacityError(BaseModel):
 	"""No host can accept the VM. The fleet needs more capacity."""
 
-	code: Literal["out_of_capacity"]
-	message: str
-	fields: list[ApiErrorField]
+	code: Literal["out_of_capacity"] = Field(description="Stable machine-readable error code.")
+	message: str = Field(description="Safe description of the failure.")
+	fields: list[ApiErrorField] = Field(description="Invalid request fields, or an empty list.")
 
 
 class PlacementBusyError(BaseModel):
@@ -67,9 +75,9 @@ class PlacementBusyError(BaseModel):
 	The fleet has room. Retry at once, guided by the `Retry-After` header.
 	"""
 
-	code: Literal["placement_busy"]
-	message: str
-	fields: list[ApiErrorField]
+	code: Literal["placement_busy"] = Field(description="Stable machine-readable error code.")
+	message: str = Field(description="Safe description of the failure.")
+	fields: list[ApiErrorField] = Field(description="Invalid request fields, or an empty list.")
 
 
 CapacityError = Annotated[
@@ -85,7 +93,7 @@ class CapacityUnavailableResponse(BaseModel):
 	caller can retry a busy placement at once and escalate a full one.
 	"""
 
-	error: CapacityError
+	error: CapacityError = Field(description="Capacity failure details.")
 
 
 def to_unix_timestamp(value: str | datetime) -> int:
@@ -101,19 +109,21 @@ def to_unix_timestamp(value: str | datetime) -> int:
 class JSONWebKey(BaseModel):
 	"""One public Ed25519 signature key."""
 
-	kty: Literal["OKP"]
-	crv: Literal["Ed25519"]
-	x: str
-	kid: str
-	alg: Literal["EdDSA"]
-	use: Literal["sig"]
-	key_ops: list[Literal["verify"]] = Field(default_factory=lambda: ["verify"])
+	kty: Literal["OKP"] = Field(description="JSON Web Key type.")
+	crv: Literal["Ed25519"] = Field(description="Edwards curve name.")
+	x: str = Field(description="Base64url-encoded public key.")
+	kid: str = Field(description="Key ID used to select this key.")
+	alg: Literal["EdDSA"] = Field(description="Signing algorithm.")
+	use: Literal["sig"] = Field(description="Intended key use.")
+	key_ops: list[Literal["verify"]] = Field(
+		default_factory=lambda: ["verify"], description="Operations allowed for this public key."
+	)
 
 
 class JSONWebKeySetResponse(BaseModel):
 	"""The public keys that this Atlas region trusts."""
 
-	keys: list[JSONWebKey]
+	keys: list[JSONWebKey] = Field(description="Active public signature keys.")
 
 
 class ConfigureWebhooksPayload(StrictModel):
@@ -122,7 +132,7 @@ class ConfigureWebhooksPayload(StrictModel):
 	request_url: AnyHttpUrl = Field(description="HTTP or HTTPS URL that receives every delivery.")
 	webhook_secret: str = Field(min_length=1, description="Shared secret that signs every delivery.")
 	central_id: int = Field(default=1, ge=1, description="Receiving Central.")
-	enabled: bool = True
+	enabled: bool = Field(default=True, description="Whether Atlas sends webhook events.")
 
 	@model_validator(mode="after")
 	def validate_central_id(self) -> ConfigureWebhooksPayload:
@@ -157,15 +167,15 @@ class WebhookConfigurationResponse(BaseModel):
 		}
 	)
 
-	central_id: int
-	enabled: bool
-	webhooks: list[str]
+	central_id: int = Field(description="Receiving Central.")
+	enabled: bool = Field(description="Whether Atlas sends webhook events.")
+	webhooks: list[str] = Field(description="Frappe webhook records managed for this Central.")
 
 
 class ReservePublicIPPayload(StrictModel):
 	"""Select the IP version of one direct reservation."""
 
-	version: Literal[4, 6]
+	version: Literal[4, 6] = Field(description="IP protocol version to reserve.")
 
 
 class PublicIPResponse(BaseModel):
@@ -190,16 +200,16 @@ class PublicIPResponse(BaseModel):
 		}
 	)
 
-	id: str
-	tenant_id: int
-	prefix: str
-	version: int
-	status: str
-	reserved: bool
-	delivery: Literal["direct", "routed"]
-	virtual_machine_id: str | None
-	tags: dict[str, str]
-	created_at: int
+	id: str = Field(description="Public IP allocation ID.")
+	tenant_id: int = Field(description="Tenant that owns the allocation.")
+	prefix: str = Field(description="Allocated address or network in CIDR notation.")
+	version: Literal[4, 6] = Field(description="IP protocol version.")
+	status: PublicIPStatus = Field(description="Current allocation lifecycle state.")
+	reserved: bool = Field(description="Whether the tenant keeps this allocation after detach.")
+	delivery: Literal["direct", "routed"] = Field(description="How traffic reaches the virtual machine.")
+	virtual_machine_id: str | None = Field(description="Attached virtual machine ID, or null when detached.")
+	tags: dict[str, str] = Field(description="Resource tags as key-value pairs.")
+	created_at: int = Field(ge=0, description="Creation time as Unix seconds.")
 
 	@classmethod
 	def from_document(
@@ -251,22 +261,22 @@ class ImageResponse(BaseModel):
 		}
 	)
 
-	id: str
-	tenant_id: int
-	title: str
-	image_type: str
-	architecture: str
-	status: str
-	enabled: bool
-	cache_image: bool
-	memory_snapshot: bool
-	is_termination_protected: bool
-	rootfs_size_mib: int
-	kernel_size_mib: int
-	transfer_progress: int
-	transfer_error: str | None
-	tags: dict[str, str]
-	created_at: int
+	id: str = Field(description="Virtual machine image ID.")
+	tenant_id: int = Field(description="Tenant that owns the image.")
+	title: str = Field(description="Display title.")
+	image_type: ImageType = Field(description="System image or tenant machine snapshot.")
+	architecture: Architecture = Field(description="CPU architecture.")
+	status: ImageStatus = Field(description="Current image lifecycle state.")
+	enabled: bool = Field(description="Whether the image can create a virtual machine.")
+	cache_image: bool = Field(description="Whether hosts may keep this image cached.")
+	memory_snapshot: bool = Field(description="Whether the image includes guest memory.")
+	is_termination_protected: bool = Field(description="Whether deletion is blocked.")
+	rootfs_size_mib: int = Field(ge=0, description="Root filesystem size in MiB.")
+	kernel_size_mib: int = Field(ge=0, description="Kernel artifact size in MiB.")
+	transfer_progress: int = Field(ge=0, le=100, description="Transfer completion percentage.")
+	transfer_error: str | None = Field(description="Last transfer error, or null.")
+	tags: dict[str, str] = Field(description="Resource tags as key-value pairs.")
+	created_at: int = Field(ge=0, description="Creation time as Unix seconds.")
 
 	@classmethod
 	def from_document(cls, image: VirtualMachineImage, tags: dict[str, str] | None = None) -> ImageResponse:
@@ -294,13 +304,13 @@ class ImageResponse(BaseModel):
 class ImageListQuery(ListQuery):
 	"""Page through images, and narrow them to one image type when asked."""
 
-	image_type: Literal["system", "machine"] | None = None
+	image_type: ImageType | None = Field(default=None, description="Return only this image type.")
 
 
 class ImageDownloadQuery(StrictModel):
 	"""Select one image artifact to download."""
 
-	artifact: Literal["rootfs", "kernel"]
+	artifact: Literal["rootfs", "kernel"] = Field(description="Image artifact to download.")
 
 
 class ImageDownloadResponse(BaseModel):
@@ -321,12 +331,12 @@ class ImageDownloadResponse(BaseModel):
 		}
 	)
 
-	artifact: Literal["rootfs", "kernel"]
-	url: str
-	size_mib: int
-	sha256: str
-	expires_in: int
-	expires_at: int
+	artifact: Literal["rootfs", "kernel"] = Field(description="Image artifact represented by this URL.")
+	url: AnyHttpUrl = Field(description="Temporary signed download URL.")
+	size_mib: int = Field(ge=0, description="Artifact size in MiB.")
+	sha256: str = Field(pattern=r"^[0-9a-f]{64}$", description="Lowercase SHA-256 digest.")
+	expires_in: int = Field(ge=0, description="Seconds until the URL expires.")
+	expires_at: int = Field(ge=0, description="URL expiry time as Unix seconds.")
 
 	@classmethod
 	def from_download(cls, download: dict[str, Any]) -> ImageDownloadResponse:
@@ -344,9 +354,9 @@ class ImageDownloadResponse(BaseModel):
 class FirewallRulePayload(StrictModel):
 	"""One firewall allow rule."""
 
-	protocol: FirewallProtocol
-	ports: str = ""
-	cidrs: list[str] = Field(min_length=1)
+	protocol: FirewallProtocol = Field(description="Allowed IP protocol.")
+	ports: str = Field(default="", description="Allowed ports or ranges. Leave empty for all ports.")
+	cidrs: list[str] = Field(min_length=1, description="Source or destination networks in CIDR notation.")
 
 	@model_validator(mode="after")
 	def validate_rule(self) -> FirewallRulePayload:
@@ -358,9 +368,9 @@ class FirewallRulePayload(StrictModel):
 class FirewallPayload(StrictModel):
 	"""The complete desired firewall configuration."""
 
-	enabled: bool = False
-	inbound: list[FirewallRulePayload] = Field(default_factory=list)
-	outbound: list[FirewallRulePayload] = Field(default_factory=list)
+	enabled: bool = Field(default=False, description="Whether the firewall enforces these rules.")
+	inbound: list[FirewallRulePayload] = Field(default_factory=list, description="Inbound allow rules.")
+	outbound: list[FirewallRulePayload] = Field(default_factory=list, description="Outbound allow rules.")
 
 	@model_validator(mode="after")
 	def validate_effective_rule_count(self) -> FirewallPayload:
@@ -374,9 +384,13 @@ class FirewallPayload(StrictModel):
 class FirewallUpdatePayload(PatchPayload):
 	"""Selected firewall fields to replace."""
 
-	enabled: bool | None = None
-	inbound: list[FirewallRulePayload] | None = None
-	outbound: list[FirewallRulePayload] | None = None
+	enabled: bool | None = Field(default=None, description="New firewall enforcement state.")
+	inbound: list[FirewallRulePayload] | None = Field(
+		default=None, description="Complete inbound allow rule list."
+	)
+	outbound: list[FirewallRulePayload] | None = Field(
+		default=None, description="Complete outbound allow rule list."
+	)
 
 	@model_validator(mode="after")
 	def validate_effective_rule_count(self) -> FirewallUpdatePayload:
@@ -391,28 +405,44 @@ class FirewallUpdatePayload(PatchPayload):
 class CreateVirtualMachinePayload(StrictModel):
 	"""Values that create one virtual machine."""
 
-	image_id: str = Field(min_length=1)
-	cpu_millicores: int = Field(ge=MINIMUM_CPU_MILLICORES, le=MAXIMUM_CPU_MILLICORES)
-	memory_mib: int = Field(gt=0)
-	disk_mib: int = Field(gt=0)
-	hostname: str = ""
-	ssh_keys: list[str] = Field(default_factory=list)
-	user_data: str = ""
-	metadata: dict[str, str] = Field(default_factory=dict)
-	public_ipv4: str | None = None
-	public_ipv6: str | None = None
+	image_id: str = Field(min_length=1, description="Image used to create the virtual machine.")
+	cpu_millicores: int = Field(
+		ge=MINIMUM_CPU_MILLICORES,
+		le=MAXIMUM_CPU_MILLICORES,
+		description="CPU capacity in millicores. 1000 millicores equals one virtual CPU.",
+	)
+	memory_mib: int = Field(gt=0, description="Memory capacity in MiB.")
+	disk_mib: int = Field(gt=0, description="Root disk capacity in MiB.")
+	hostname: str = Field(default="", description="Guest hostname.")
+	ssh_keys: list[str] = Field(default_factory=list, description="Authorized SSH public keys.")
+	user_data: str = Field(default="", description="Cloud-init user data supplied to the guest.")
+	metadata: dict[str, str] = Field(default_factory=dict, description="Custom guest metadata.")
+	public_ipv4: str | None = Field(default=None, description="Reserved public IPv4 allocation ID, or null.")
+	public_ipv6: str | None = Field(default=None, description="Reserved public IPv6 allocation ID, or null.")
 	ipv4_internet_access: bool = Field(
 		default=True,
 		description="Reach the IPv4 internet through host NAT. A public IPv4 address needs it. Without it and without a public IPv6 address, the VM reaches only the mesh.",
 	)
-	is_privileged: bool = False
-	is_termination_protected: bool = False
-	sleep_after_idle_seconds: int = Field(default=0, ge=0, le=9_223_372_036)
-	disk_throughput_mibps: int = Field(default=0, ge=0)
-	disk_iops: int = Field(default=0, ge=0)
-	private_network_throughput_mibps: int = Field(default=0, ge=0)
-	public_network_throughput_mibps: int = Field(default=0, ge=0)
-	firewall: FirewallPayload = Field(default_factory=FirewallPayload)
+	is_privileged: bool = Field(
+		default=False, description="Whether the guest can reach every tenant through the mesh."
+	)
+	is_termination_protected: bool = Field(default=False, description="Whether deletion is blocked.")
+	sleep_after_idle_seconds: int = Field(
+		default=0, ge=0, le=9_223_372_036, description="Idle time before automatic stop. Zero disables it."
+	)
+	disk_throughput_mibps: int = Field(
+		default=0, ge=0, description="Disk throughput limit in MiB/s. Zero removes the limit."
+	)
+	disk_iops: int = Field(default=0, ge=0, description="Disk IOPS limit. Zero removes the limit.")
+	private_network_throughput_mibps: int = Field(
+		default=0, ge=0, description="Private network throughput limit in MiB/s. Zero removes the limit."
+	)
+	public_network_throughput_mibps: int = Field(
+		default=0, ge=0, description="Public network throughput limit in MiB/s. Zero removes the limit."
+	)
+	firewall: FirewallPayload = Field(
+		default_factory=FirewallPayload, description="Desired firewall configuration."
+	)
 
 	@model_validator(mode="after")
 	def validate_ipv4_internet_access(self) -> CreateVirtualMachinePayload:
@@ -449,18 +479,32 @@ class CreateVirtualMachinePayload(StrictModel):
 class ResizePayload(PatchPayload):
 	"""VM resource and idle shutdown changes."""
 
-	cpu_millicores: int | None = Field(default=None, ge=MINIMUM_CPU_MILLICORES, le=MAXIMUM_CPU_MILLICORES)
-	memory_mib: int | None = Field(default=None, gt=0)
-	disk_mib: int | None = Field(default=None, gt=0)
-	sleep_after_idle_seconds: int | None = Field(default=None, ge=0, le=9_223_372_036)
+	cpu_millicores: int | None = Field(
+		default=None,
+		ge=MINIMUM_CPU_MILLICORES,
+		le=MAXIMUM_CPU_MILLICORES,
+		description="New CPU capacity in millicores.",
+	)
+	memory_mib: int | None = Field(default=None, gt=0, description="New memory capacity in MiB.")
+	disk_mib: int | None = Field(default=None, gt=0, description="New root disk capacity in MiB.")
+	sleep_after_idle_seconds: int | None = Field(
+		default=None,
+		ge=0,
+		le=9_223_372_036,
+		description="New idle time before automatic stop. Zero disables it.",
+	)
 
 
 class DiskUpdatePayload(PatchPayload):
 	"""New disk size and disk rate limits."""
 
-	disk_mib: int | None = Field(default=None, gt=0)
-	disk_throughput_mibps: int | None = Field(default=None, ge=0)
-	disk_iops: int | None = Field(default=None, ge=0)
+	disk_mib: int | None = Field(default=None, gt=0, description="New root disk capacity in MiB.")
+	disk_throughput_mibps: int | None = Field(
+		default=None, ge=0, description="New disk throughput limit in MiB/s. Zero removes the limit."
+	)
+	disk_iops: int | None = Field(
+		default=None, ge=0, description="New disk IOPS limit. Zero removes the limit."
+	)
 
 	def to_domain_changes(self) -> dict[str, int]:
 		"""Return the field names that the VM service accepts."""
@@ -477,21 +521,29 @@ class NetworkUpdatePayload(PatchPayload):
 		default_factory=lambda: True,
 		description="Reach the IPv4 internet through host NAT. A public IPv4 address needs it.",
 	)
-	private_network_throughput_mibps: int | None = Field(default=None, ge=0)
-	public_network_throughput_mibps: int | None = Field(default=None, ge=0)
-	firewall: FirewallUpdatePayload | None = None
+	private_network_throughput_mibps: int | None = Field(
+		default=None,
+		ge=0,
+		description="New private network throughput limit in MiB/s. Zero removes the limit.",
+	)
+	public_network_throughput_mibps: int | None = Field(
+		default=None,
+		ge=0,
+		description="New public network throughput limit in MiB/s. Zero removes the limit.",
+	)
+	firewall: FirewallUpdatePayload | None = Field(default=None, description="Firewall fields to replace.")
 
 
 class SSHKeysReplacementPayload(StrictModel):
 	"""The complete authorized key list."""
 
-	ssh_keys: list[str]
+	ssh_keys: list[str] = Field(description="Complete authorized SSH public key list.")
 
 
 class MetadataReplacementPayload(StrictModel):
 	"""The complete custom metadata map."""
 
-	metadata: dict[str, str]
+	metadata: dict[str, str] = Field(description="Complete custom guest metadata map.")
 
 
 class PublicIPAssignmentPayload(StrictModel):
@@ -506,35 +558,44 @@ class PublicIPAssignmentPayload(StrictModel):
 class MemorySnapshotConfigurationPayload(StrictModel):
 	"""The virtual machine shape that a warm artifact serves."""
 
-	virtual_cpu_count: int | None = Field(default=None, ge=1)
-	memory_mib: int | None = Field(default=None, ge=1)
-	disk_mib: int | None = Field(default=None, ge=1)
+	virtual_cpu_count: int | None = Field(
+		default=None, ge=1, description="Virtual CPU count served by the warm artifact."
+	)
+	memory_mib: int | None = Field(
+		default=None, ge=1, description="Memory capacity served by the warm artifact in MiB."
+	)
+	disk_mib: int | None = Field(
+		default=None, ge=1, description="Disk capacity served by the warm artifact in MiB."
+	)
 
 
 class SnapshotPayload(StrictModel):
 	"""Values that create one image from a virtual machine."""
 
-	title: str = Field(min_length=1)
-	image_type: Literal["machine", "system"] = "machine"
-	cache_image: bool = False
-	memory_snapshot: bool = False
+	title: str = Field(min_length=1, description="Display title for the new image.")
+	image_type: ImageType = Field(default="machine", description="Image visibility and intended use.")
+	cache_image: bool = Field(default=False, description="Whether hosts may keep this image cached.")
+	memory_snapshot: bool = Field(default=False, description="Whether to include guest memory.")
 	memory_snapshot_configuration: MemorySnapshotConfigurationPayload = Field(
-		default_factory=MemorySnapshotConfigurationPayload
+		default_factory=MemorySnapshotConfigurationPayload,
+		description="Shape served by the warm artifact.",
 	)
-	is_termination_protected: bool = False
+	is_termination_protected: bool = Field(
+		default=False, description="Whether deletion of the new image is blocked."
+	)
 	tags: TagMap = Field(default_factory=dict)
 
 
 class TerminationProtectionPayload(StrictModel):
 	"""The termination protection state to store."""
 
-	enabled: bool
+	enabled: bool = Field(description="New termination protection state.")
 
 
 class ConsoleTokenPayload(StrictModel):
 	"""The console mode that the token opens."""
 
-	mode: Literal["tty", "ssh"] = "tty"
+	mode: Literal["tty", "ssh"] = Field(default="tty", description="Console protocol opened by the token.")
 
 
 def get_current_state(virtual_machine: VirtualMachine, reported_state: str | None) -> str:
@@ -564,6 +625,8 @@ class VirtualMachineResponse(BaseModel):
 					"disk_mib": 20480,
 					"sleep_after_idle_seconds": 0,
 					"is_termination_protected": False,
+					"public_ipv4": None,
+					"public_ipv6": None,
 					"tags": {"env": "prod"},
 					"created_at": 1788834165,
 				}
@@ -571,19 +634,19 @@ class VirtualMachineResponse(BaseModel):
 		}
 	)
 
-	id: str
-	tenant_id: int
-	image_id: str
-	architecture: str
-	cpu_millicores: int
-	memory_mib: int
-	disk_mib: int
-	sleep_after_idle_seconds: int
-	is_termination_protected: bool
-	public_ipv4: PublicIPResponse | None
-	public_ipv6: PublicIPResponse | None
-	tags: dict[str, str]
-	created_at: int
+	id: str = Field(description="Virtual machine ID.")
+	tenant_id: int = Field(description="Tenant that owns the virtual machine.")
+	image_id: str = Field(description="Image used to create the virtual machine.")
+	architecture: Architecture = Field(description="CPU architecture.")
+	cpu_millicores: int = Field(description="CPU capacity in millicores.")
+	memory_mib: int = Field(description="Memory capacity in MiB.")
+	disk_mib: int = Field(description="Root disk capacity in MiB.")
+	sleep_after_idle_seconds: int = Field(description="Idle time before automatic stop. Zero disables it.")
+	is_termination_protected: bool = Field(description="Whether deletion is blocked.")
+	public_ipv4: PublicIPResponse | None = Field(description="Attached public IPv4 allocation, or null.")
+	public_ipv6: PublicIPResponse | None = Field(description="Attached public IPv6 allocation, or null.")
+	tags: dict[str, str] = Field(description="Resource tags as key-value pairs.")
+	created_at: int = Field(ge=0, description="Creation time as Unix seconds.")
 
 	@classmethod
 	def from_document(
@@ -623,8 +686,12 @@ class VirtualMachineListResponse(VirtualMachineResponse):
 		}
 	)
 
-	last_known_state: str
-	state_synced_at: int | None
+	last_known_state: str = Field(
+		description="Last state reported by the host, including Atlas transition states."
+	)
+	state_synced_at: int | None = Field(
+		description="Host state synchronization time as Unix seconds, or null."
+	)
 
 	@classmethod
 	def from_document_and_state(
@@ -642,55 +709,57 @@ class VirtualMachineListResponse(VirtualMachineResponse):
 class VirtualMachineCompute(BaseModel):
 	"""The compute shape of one virtual machine."""
 
-	cpu_millicores: int
-	memory_mib: int
-	sleep_after_idle_seconds: int
+	cpu_millicores: int = Field(description="CPU capacity in millicores.")
+	memory_mib: int = Field(description="Memory capacity in MiB.")
+	sleep_after_idle_seconds: int = Field(description="Idle time before automatic stop. Zero disables it.")
 
 
 class VirtualMachineDisk(BaseModel):
 	"""The disk size and its rate limits."""
 
-	size_mib: int
-	throughput_mibps: int
-	iops: int
-	used_mib: int | None
+	size_mib: int = Field(description="Root disk capacity in MiB.")
+	throughput_mibps: int = Field(description="Disk throughput limit in MiB/s. Zero means unlimited.")
+	iops: int = Field(description="Disk IOPS limit. Zero means unlimited.")
+	used_mib: int | None = Field(description="Observed used disk space in MiB, or null when unavailable.")
 
 
 class FirewallRuleResponse(BaseModel):
 	"""One desired firewall allow rule."""
 
-	protocol: FirewallProtocol
-	ports: str
-	cidrs: list[str]
+	protocol: FirewallProtocol = Field(description="Allowed IP protocol.")
+	ports: str = Field(description="Allowed ports or ranges. Empty means all ports.")
+	cidrs: list[str] = Field(description="Source or destination networks in CIDR notation.")
 
 
 class FirewallResponse(BaseModel):
 	"""The complete desired firewall configuration."""
 
-	enabled: bool
-	inbound: list[FirewallRuleResponse]
-	outbound: list[FirewallRuleResponse]
+	enabled: bool = Field(description="Whether the firewall enforces these rules.")
+	inbound: list[FirewallRuleResponse] = Field(description="Inbound allow rules.")
+	outbound: list[FirewallRuleResponse] = Field(description="Outbound allow rules.")
 
 
 class VirtualMachineNetwork(BaseModel):
 	"""The addresses, internet access, and network limits of one virtual machine."""
 
-	ipv4_internet_access: bool
-	public_ipv4: str | None
-	public_ipv6: str | None
-	mesh_ipv6: str | None
-	mac: str | None
-	private_network_throughput_mibps: int
-	public_network_throughput_mibps: int
-	firewall: FirewallResponse
+	ipv4_internet_access: bool = Field(
+		description="Whether the guest reaches the IPv4 internet through host NAT."
+	)
+	public_ipv4: str | None = Field(description="IPv4 address configured on the guest, or null.")
+	public_ipv6: str | None = Field(description="IPv6 prefix assigned to the guest, or null.")
+	mesh_ipv6: str | None = Field(description="Private WireGuard mesh IPv6 address, or null.")
+	mac: str | None = Field(description="Observed network interface MAC address, or null.")
+	private_network_throughput_mibps: int = Field(description="Private network throughput limit in MiB/s.")
+	public_network_throughput_mibps: int = Field(description="Public network throughput limit in MiB/s.")
+	firewall: FirewallResponse = Field(description="Desired firewall configuration.")
 
 
 class VirtualMachineGuest(BaseModel):
 	"""The guest configuration of one virtual machine."""
 
-	hostname: str | None
-	ssh_keys: list[str]
-	metadata: dict[str, str]
+	hostname: str | None = Field(description="Guest hostname, or null.")
+	ssh_keys: list[str] = Field(description="Authorized SSH public keys.")
+	metadata: dict[str, str] = Field(description="Custom guest metadata.")
 
 
 class VirtualMachineDetailResponse(BaseModel):
@@ -703,8 +772,12 @@ class VirtualMachineDetailResponse(BaseModel):
 					"id": "vm-00001",
 					"tenant_id": 7,
 					"image_id": "8f1c2d3e4b5a6978",
+					"architecture": "amd64",
+					"tags": {"env": "prod"},
 					"created_at": 1788834165,
 					"is_privileged": False,
+					"public_ipv4": None,
+					"public_ipv6": None,
 					"desired_state": "running",
 					"current_state": "running",
 					"error": None,
@@ -730,22 +803,22 @@ class VirtualMachineDetailResponse(BaseModel):
 		}
 	)
 
-	id: str
-	tenant_id: int
-	image_id: str
-	architecture: str
-	tags: dict[str, str]
-	created_at: int
-	is_privileged: bool
-	public_ipv4: PublicIPResponse | None
-	public_ipv6: PublicIPResponse | None
-	desired_state: str | None
-	current_state: str
-	error: str | None
-	compute: VirtualMachineCompute
-	disk: VirtualMachineDisk
-	network: VirtualMachineNetwork
-	guest: VirtualMachineGuest
+	id: str = Field(description="Virtual machine ID.")
+	tenant_id: int = Field(description="Tenant that owns the virtual machine.")
+	image_id: str = Field(description="Image used to create the virtual machine.")
+	architecture: Architecture = Field(description="CPU architecture.")
+	tags: dict[str, str] = Field(description="Resource tags as key-value pairs.")
+	created_at: int = Field(ge=0, description="Creation time as Unix seconds.")
+	is_privileged: bool = Field(description="Whether the guest can reach every tenant through the mesh.")
+	public_ipv4: PublicIPResponse | None = Field(description="Attached public IPv4 allocation, or null.")
+	public_ipv6: PublicIPResponse | None = Field(description="Attached public IPv6 allocation, or null.")
+	desired_state: str | None = Field(description="State requested from the host, or null when unavailable.")
+	current_state: str = Field(description="Current state reported by the host or managed by Atlas.")
+	error: str | None = Field(description="Current host-reported error, or null.")
+	compute: VirtualMachineCompute = Field(description="Compute configuration.")
+	disk: VirtualMachineDisk = Field(description="Disk configuration and usage.")
+	network: VirtualMachineNetwork = Field(description="Network configuration and addresses.")
+	guest: VirtualMachineGuest = Field(description="Guest configuration.")
 
 	@classmethod
 	def from_document_and_metal(
@@ -841,6 +914,6 @@ class ConsoleTokenResponse(BaseModel):
 		json_schema_extra={"examples": [{"token": "console-token", "mode": "tty", "expires_in": 60}]}
 	)
 
-	token: str
-	mode: Literal["tty", "ssh"]
-	expires_in: int
+	token: str = Field(description="Single-use console token.")
+	mode: Literal["tty", "ssh"] = Field(description="Console protocol opened by the token.")
+	expires_in: int = Field(ge=0, description="Seconds until the token expires.")

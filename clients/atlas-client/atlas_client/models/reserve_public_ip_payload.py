@@ -24,7 +24,7 @@ class ReservePublicIPPayload:
     """ Select the IP version of one direct reservation.
 
         Attributes:
-            version (ReservePublicIPPayloadVersion):
+            version (ReservePublicIPPayloadVersion): IP protocol version to reserve.
      """
 
     version: ReservePublicIPPayloadVersion

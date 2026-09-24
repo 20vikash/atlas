@@ -474,6 +474,21 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 		self.assertEqual(status, 400)
 		virtual_machine.update_network.assert_not_called()
 
+	def test_network_change_ignores_nullable_rate_limits(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/network",
+				tenant_id=TENANT_ID,
+				json={"private_network_throughput_mibps": None, "firewall": None},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _ = call_route(update_virtual_machine_network, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 202)
+		virtual_machine.update_network.assert_called_once_with({})
+
 	def test_network_change_rejects_an_invalid_firewall_rule(self) -> None:
 		with (
 			api_request(

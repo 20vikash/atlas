@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.list_images_image_type_type_0 import ListImagesImageTypeType0
 from ...models.page_image_response import PageImageResponse
 from ...types import UNSET, Unset
@@ -70,7 +71,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PageImageResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | PageImageResponse | None:
     if response.status_code == 200:
         response_200 = PageImageResponse.from_dict(response.json())
 
@@ -78,13 +79,41 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PageImageResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | PageImageResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -102,7 +131,7 @@ def sync_detailed(
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PageImageResponse]:
+) -> Response[ApiErrorResponse | PageImageResponse]:
     """ List images
 
      Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
@@ -110,11 +139,11 @@ def sync_detailed(
     `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
-        image_type (ListImagesImageTypeType0 | None | Unset):
+        image_type (ListImagesImageTypeType0 | None | Unset): Return only this image type.
         x_tenant_id (int):
 
     Raises:
@@ -122,7 +151,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageImageResponse]
+        Response[ApiErrorResponse | PageImageResponse]
      """
 
 
@@ -150,7 +179,7 @@ def sync(
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PageImageResponse | None:
+) -> ApiErrorResponse | PageImageResponse | None:
     """ List images
 
      Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
@@ -158,11 +187,11 @@ def sync(
     `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
-        image_type (ListImagesImageTypeType0 | None | Unset):
+        image_type (ListImagesImageTypeType0 | None | Unset): Return only this image type.
         x_tenant_id (int):
 
     Raises:
@@ -170,7 +199,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageImageResponse
+        ApiErrorResponse | PageImageResponse
      """
 
 
@@ -193,7 +222,7 @@ async def asyncio_detailed(
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PageImageResponse]:
+) -> Response[ApiErrorResponse | PageImageResponse]:
     """ List images
 
      Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
@@ -201,11 +230,11 @@ async def asyncio_detailed(
     `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
-        image_type (ListImagesImageTypeType0 | None | Unset):
+        image_type (ListImagesImageTypeType0 | None | Unset): Return only this image type.
         x_tenant_id (int):
 
     Raises:
@@ -213,7 +242,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageImageResponse]
+        Response[ApiErrorResponse | PageImageResponse]
      """
 
 
@@ -241,7 +270,7 @@ async def asyncio(
     image_type: ListImagesImageTypeType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PageImageResponse | None:
+) -> ApiErrorResponse | PageImageResponse | None:
     """ List images
 
      Returns one page of enabled System and Machine images owned by the tenant in newest-first order. A
@@ -249,11 +278,11 @@ async def asyncio(
     `system` or `machine` to return only that type. Omit it to return both.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
-        image_type (ListImagesImageTypeType0 | None | Unset):
+        image_type (ListImagesImageTypeType0 | None | Unset): Return only this image type.
         x_tenant_id (int):
 
     Raises:
@@ -261,7 +290,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageImageResponse
+        ApiErrorResponse | PageImageResponse
      """
 
 

@@ -23,7 +23,7 @@ class TerminationProtectionPayload:
     """ The termination protection state to store.
 
         Attributes:
-            enabled (bool):
+            enabled (bool): New termination protection state.
      """
 
     enabled: bool

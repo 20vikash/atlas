@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.page_public_ip_response import PagePublicIPResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -59,7 +60,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PagePublicIPResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | PagePublicIPResponse | None:
     if response.status_code == 200:
         response_200 = PagePublicIPResponse.from_dict(response.json())
 
@@ -67,13 +68,41 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PagePublicIPResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | PagePublicIPResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -90,14 +119,14 @@ def sync_detailed(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PagePublicIPResponse]:
+) -> Response[ApiErrorResponse | PagePublicIPResponse]:
     """ List public IPs
 
      Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -107,7 +136,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PagePublicIPResponse]
+        Response[ApiErrorResponse | PagePublicIPResponse]
      """
 
 
@@ -133,14 +162,14 @@ def sync(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PagePublicIPResponse | None:
+) -> ApiErrorResponse | PagePublicIPResponse | None:
     """ List public IPs
 
      Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -150,7 +179,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PagePublicIPResponse
+        ApiErrorResponse | PagePublicIPResponse
      """
 
 
@@ -171,14 +200,14 @@ async def asyncio_detailed(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PagePublicIPResponse]:
+) -> Response[ApiErrorResponse | PagePublicIPResponse]:
     """ List public IPs
 
      Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -188,7 +217,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PagePublicIPResponse]
+        Response[ApiErrorResponse | PagePublicIPResponse]
      """
 
 
@@ -214,14 +243,14 @@ async def asyncio(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PagePublicIPResponse | None:
+) -> ApiErrorResponse | PagePublicIPResponse | None:
     """ List public IPs
 
      Returns the tenant's reserved and attached public IPs in newest-first order.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -231,7 +260,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PagePublicIPResponse
+        ApiErrorResponse | PagePublicIPResponse
      """
 
 

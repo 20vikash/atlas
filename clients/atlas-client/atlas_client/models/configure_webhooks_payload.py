@@ -27,7 +27,7 @@ class ConfigureWebhooksPayload:
             request_url (str): HTTP or HTTPS URL that receives every delivery.
             webhook_secret (str): Shared secret that signs every delivery.
             central_id (int | Unset): Receiving Central. Default: 1.
-            enabled (bool | Unset):  Default: True.
+            enabled (bool | Unset): Whether Atlas sends webhook events. Default: True.
      """
 
     request_url: str

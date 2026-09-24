@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.download_image_artifact import DownloadImageArtifact
 from ...models.image_download_response import ImageDownloadResponse
 from typing import cast
@@ -50,7 +51,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ImageDownloadResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | ImageDownloadResponse | None:
     if response.status_code == 200:
         response_200 = ImageDownloadResponse.from_dict(response.json())
 
@@ -58,13 +59,48 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ImageDownloadResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | ImageDownloadResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -80,7 +116,7 @@ def sync_detailed(
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
 
-) -> Response[ImageDownloadResponse]:
+) -> Response[ApiErrorResponse | ImageDownloadResponse]:
     """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
@@ -88,7 +124,7 @@ def sync_detailed(
 
     Args:
         image_id (str):
-        artifact (DownloadImageArtifact):
+        artifact (DownloadImageArtifact): Image artifact to download.
         x_tenant_id (int):
 
     Raises:
@@ -96,7 +132,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ImageDownloadResponse]
+        Response[ApiErrorResponse | ImageDownloadResponse]
      """
 
 
@@ -120,7 +156,7 @@ def sync(
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
 
-) -> ImageDownloadResponse | None:
+) -> ApiErrorResponse | ImageDownloadResponse | None:
     """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
@@ -128,7 +164,7 @@ def sync(
 
     Args:
         image_id (str):
-        artifact (DownloadImageArtifact):
+        artifact (DownloadImageArtifact): Image artifact to download.
         x_tenant_id (int):
 
     Raises:
@@ -136,7 +172,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ImageDownloadResponse
+        ApiErrorResponse | ImageDownloadResponse
      """
 
 
@@ -155,7 +191,7 @@ async def asyncio_detailed(
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
 
-) -> Response[ImageDownloadResponse]:
+) -> Response[ApiErrorResponse | ImageDownloadResponse]:
     """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
@@ -163,7 +199,7 @@ async def asyncio_detailed(
 
     Args:
         image_id (str):
-        artifact (DownloadImageArtifact):
+        artifact (DownloadImageArtifact): Image artifact to download.
         x_tenant_id (int):
 
     Raises:
@@ -171,7 +207,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ImageDownloadResponse]
+        Response[ApiErrorResponse | ImageDownloadResponse]
      """
 
 
@@ -195,7 +231,7 @@ async def asyncio(
     artifact: DownloadImageArtifact,
     x_tenant_id: int,
 
-) -> ImageDownloadResponse | None:
+) -> ApiErrorResponse | ImageDownloadResponse | None:
     """ Download image
 
      Returns a signed download URL for the selected rootfs or kernel artifact. The response includes its
@@ -203,7 +239,7 @@ async def asyncio(
 
     Args:
         image_id (str):
-        artifact (DownloadImageArtifact):
+        artifact (DownloadImageArtifact): Image artifact to download.
         x_tenant_id (int):
 
     Raises:
@@ -211,7 +247,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ImageDownloadResponse
+        ApiErrorResponse | ImageDownloadResponse
      """
 
 

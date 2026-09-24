@@ -25,9 +25,9 @@ class MemorySnapshotConfigurationPayload:
     """ The virtual machine shape that a warm artifact serves.
 
         Attributes:
-            disk_mib (int | None | Unset):
-            memory_mib (int | None | Unset):
-            virtual_cpu_count (int | None | Unset):
+            disk_mib (int | None | Unset): Disk capacity served by the warm artifact in MiB.
+            memory_mib (int | None | Unset): Memory capacity served by the warm artifact in MiB.
+            virtual_cpu_count (int | None | Unset): Virtual CPU count served by the warm artifact.
      """
 
     disk_mib: int | None | Unset = UNSET

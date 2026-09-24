@@ -10,7 +10,11 @@ atlas_router = Router(
 	prefix=API_PREFIX,
 	name="Atlas",
 	description="Tenant control plane for virtual machines, IP addresses, and images.",
-	docs=DocsConfig(title="Atlas API", version=API_VERSION),
+	docs=DocsConfig(
+		title="Atlas API",
+		version=API_VERSION,
+		description="Manage tenant virtual machines, public IP addresses, images, and webhooks in one Atlas region.",
+	),
 )
 
 virtual_machine_group = atlas_router.subrouter(

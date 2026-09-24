@@ -28,26 +28,28 @@ class CreateVirtualMachinePayload:
     """ Values that create one virtual machine.
 
         Attributes:
-            cpu_millicores (int):
-            disk_mib (int):
-            image_id (str):
-            memory_mib (int):
-            disk_iops (int | Unset):  Default: 0.
-            disk_throughput_mibps (int | Unset):  Default: 0.
+            cpu_millicores (int): CPU capacity in millicores. 1000 millicores equals one virtual CPU.
+            disk_mib (int): Root disk capacity in MiB.
+            image_id (str): Image used to create the virtual machine.
+            memory_mib (int): Memory capacity in MiB.
+            disk_iops (int | Unset): Disk IOPS limit. Zero removes the limit. Default: 0.
+            disk_throughput_mibps (int | Unset): Disk throughput limit in MiB/s. Zero removes the limit. Default: 0.
             firewall (FirewallPayload | Unset): The complete desired firewall configuration.
-            hostname (str | Unset):  Default: ''.
+            hostname (str | Unset): Guest hostname. Default: ''.
             ipv4_internet_access (bool | Unset): Reach the IPv4 internet through host NAT. A public IPv4 address needs it.
                 Without it and without a public IPv6 address, the VM reaches only the mesh. Default: True.
-            is_privileged (bool | Unset):  Default: False.
-            is_termination_protected (bool | Unset):  Default: False.
-            metadata (CreateVirtualMachinePayloadMetadata | Unset):
-            private_network_throughput_mibps (int | Unset):  Default: 0.
-            public_ipv4 (None | str | Unset):
-            public_ipv6 (None | str | Unset):
-            public_network_throughput_mibps (int | Unset):  Default: 0.
-            sleep_after_idle_seconds (int | Unset):  Default: 0.
-            ssh_keys (list[str] | Unset):
-            user_data (str | Unset):  Default: ''.
+            is_privileged (bool | Unset): Whether the guest can reach every tenant through the mesh. Default: False.
+            is_termination_protected (bool | Unset): Whether deletion is blocked. Default: False.
+            metadata (CreateVirtualMachinePayloadMetadata | Unset): Custom guest metadata.
+            private_network_throughput_mibps (int | Unset): Private network throughput limit in MiB/s. Zero removes the
+                limit. Default: 0.
+            public_ipv4 (None | str | Unset): Reserved public IPv4 allocation ID, or null.
+            public_ipv6 (None | str | Unset): Reserved public IPv6 allocation ID, or null.
+            public_network_throughput_mibps (int | Unset): Public network throughput limit in MiB/s. Zero removes the limit.
+                Default: 0.
+            sleep_after_idle_seconds (int | Unset): Idle time before automatic stop. Zero disables it. Default: 0.
+            ssh_keys (list[str] | Unset): Authorized SSH public keys.
+            user_data (str | Unset): Cloud-init user data supplied to the guest. Default: ''.
      """
 
     cpu_millicores: int

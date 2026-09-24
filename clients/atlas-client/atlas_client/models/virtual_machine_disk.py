@@ -24,10 +24,10 @@ class VirtualMachineDisk:
     """ The disk size and its rate limits.
 
         Attributes:
-            iops (int):
-            size_mib (int):
-            throughput_mibps (int):
-            used_mib (int | None):
+            iops (int): Disk IOPS limit. Zero means unlimited.
+            size_mib (int): Root disk capacity in MiB.
+            throughput_mibps (int): Disk throughput limit in MiB/s. Zero means unlimited.
+            used_mib (int | None): Observed used disk space in MiB, or null when unavailable.
      """
 
     iops: int

@@ -27,9 +27,9 @@ class FirewallUpdatePayload:
     """ Selected firewall fields to replace.
 
         Attributes:
-            enabled (bool | None | Unset):
-            inbound (list[FirewallRulePayload] | None | Unset):
-            outbound (list[FirewallRulePayload] | None | Unset):
+            enabled (bool | None | Unset): New firewall enforcement state.
+            inbound (list[FirewallRulePayload] | None | Unset): Complete inbound allow rule list.
+            outbound (list[FirewallRulePayload] | None | Unset): Complete outbound allow rule list.
      """
 
     enabled: bool | None | Unset = UNSET

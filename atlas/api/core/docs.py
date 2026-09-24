@@ -11,11 +11,20 @@ from typing import TYPE_CHECKING, Any, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
+from atlas.api.core.errors import ApiErrorResponse
+
 if TYPE_CHECKING:
 	from atlas.api.core.base import RouteMeta, Router
 	from atlas.api.core.binding import ParameterBinding
 
 DEFAULT_RESPONSES: dict[int, str] = {}
+ERROR_RESPONSE_DESCRIPTIONS = {
+	400: "The request is not valid.",
+	401: "Authentication is required.",
+	403: "The caller cannot use this resource.",
+	404: "The resource does not exist.",
+	500: "The request could not be completed.",
+}
 OPENAPI_VERSION = "3.1.0"
 REFERENCE_TEMPLATE = "#/components/schemas/{model}"
 PATH_PARAMETER_PATTERN = re.compile(r"<(?:(\w+):)?(\w+)>")
@@ -44,6 +53,11 @@ SECURITY_SCHEMES: dict[str, dict[str, str]] = {
 		"bearerFormat": "JWT",
 		"description": "Use a Central or regional Atlas service token.",
 	},
+}
+PATH_PARAMETER_DESCRIPTIONS = {
+	"image_id": "Virtual machine image ID.",
+	"public_ip_id": "Public IP allocation ID.",
+	"virtual_machine_id": "Virtual machine ID.",
 }
 SCALAR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/@scalar/api-reference"
 API_REFERENCE_TEMPLATE = Template("""<!doctype html>
@@ -85,6 +99,7 @@ class DocsConfig:
 
 	title: str = "API Documentation"
 	version: str = "1.0.0"
+	description: str | None = None
 	show_authorization: bool = True
 	default_responses: dict[int, str] = field(default_factory=lambda: dict(DEFAULT_RESPONSES))
 
@@ -132,9 +147,13 @@ def generate_specification(router: Router) -> dict[str, Any]:
 	if config.show_authorization:
 		components["securitySchemes"] = SECURITY_SCHEMES
 
+	info = {"title": config.title, "version": config.version}
+	if config.description:
+		info["description"] = config.description
+
 	return {
 		"openapi": OPENAPI_VERSION,
-		"info": {"title": config.title, "version": config.version},
+		"info": info,
 		"tags": router.documentation_tags,
 		"paths": paths,
 		"components": components,
@@ -176,7 +195,16 @@ def build_operation(
 			content["example"] = docs.request_example
 		operation["requestBody"] = {"required": True, "content": {"application/json": content}}
 
-	operation["responses"] = build_responses(route.function, docs, default_responses, schemas)
+	responses = dict(default_responses)
+	responses[500] = ERROR_RESPONSE_DESCRIPTIONS[500]
+	if route.payload or route.query:
+		responses[400] = ERROR_RESPONSE_DESCRIPTIONS[400]
+	if not route.public:
+		responses[401] = ERROR_RESPONSE_DESCRIPTIONS[401]
+		responses[403] = ERROR_RESPONSE_DESCRIPTIONS[403]
+	if path_parameters:
+		responses[404] = ERROR_RESPONSE_DESCRIPTIONS[404]
+	operation["responses"] = build_responses(route.function, docs, responses, schemas)
 	return operation
 
 
@@ -198,10 +226,13 @@ def build_query_parameters(binding: ParameterBinding | None, schemas: dict[str, 
 	schema = binding.model.model_json_schema(ref_template=REFERENCE_TEMPLATE)
 	lift_definitions(schema, schemas)
 	required = set(schema.get("required", []))
-	return [
-		{"name": name, "in": "query", "required": name in required, "schema": field_schema}
-		for name, field_schema in schema.get("properties", {}).items()
-	]
+	parameters = []
+	for name, field_schema in schema.get("properties", {}).items():
+		parameter = {"name": name, "in": "query", "required": name in required, "schema": field_schema}
+		if description := field_schema.get("description"):
+			parameter["description"] = description
+		parameters.append(parameter)
+	return parameters
 
 
 def build_responses(
@@ -224,6 +255,11 @@ def build_responses(
 			]
 		if "headers" in declared:
 			response["headers"] = declared["headers"]
+
+	for status, response in responses.items():
+		if status >= 400 and "content" not in response:
+			reference = register_model(ApiErrorResponse, schemas)
+			response["content"] = {"application/json": {"schema": {"$ref": reference}}}
 
 	model = get_response_model(function)
 	if model:
@@ -280,6 +316,9 @@ def convert_path(path: str) -> tuple[str, list[dict[str, Any]]]:
 				"name": name,
 				"in": "path",
 				"required": True,
+				"description": PATH_PARAMETER_DESCRIPTIONS.get(
+					name, f"{name.replace('_', ' ').capitalize()}."
+				),
 				"schema": {"type": WERKZEUG_CONVERTER_TYPES.get(converter, "string")},
 			}
 		)

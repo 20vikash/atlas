@@ -26,7 +26,7 @@ class MetadataReplacementPayload:
     """ The complete custom metadata map.
 
         Attributes:
-            metadata (MetadataReplacementPayloadMetadata):
+            metadata (MetadataReplacementPayloadMetadata): Complete custom guest metadata map.
      """
 
     metadata: MetadataReplacementPayloadMetadata

@@ -44,7 +44,7 @@ TENANT_PARAMETERS = (
 			" send the tenant of its own claim, and a Central token (tenant=*) names the tenant"
 			" it acts for."
 		),
-		"schema": {"type": "integer", "minimum": 1, "maximum": MAXIMUM_TENANT_ID},
+		"schema": {"type": "integer", "minimum": 0, "maximum": MAXIMUM_TENANT_ID},
 	},
 )
 
@@ -69,8 +69,13 @@ class PatchPayload(StrictModel):
 class ListQuery(StrictModel):
 	"""Query values that every list route accepts."""
 
-	offset: int = Field(default=0, ge=0)
-	limit: int = Field(default=DEFAULT_LIST_LIMIT, ge=1, le=MAXIMUM_LIST_LIMIT)
+	offset: int = Field(default=0, ge=0, description="Number of matching resources to skip.")
+	limit: int = Field(
+		default=DEFAULT_LIST_LIMIT,
+		ge=1,
+		le=MAXIMUM_LIST_LIMIT,
+		description="Maximum number of resources to return.",
+	)
 	tag: str | None = Field(
 		default=None,
 		description=(
@@ -116,10 +121,10 @@ class Page[PageItem](PydanticBaseModel):
 		json_schema_extra={"examples": [{"items": [], "offset": 0, "limit": 20, "has_more": False}]}
 	)
 
-	items: list[PageItem]
-	offset: int
-	limit: int
-	has_more: bool
+	items: list[PageItem] = Field(description="Resources in this page.")
+	offset: int = Field(description="Number of matching resources skipped before this page.")
+	limit: int = Field(description="Requested maximum page size.")
+	has_more: bool = Field(description="Whether another page follows this page.")
 
 
 def get_owned_document(doctype: str, name: str, label: str | None = None):

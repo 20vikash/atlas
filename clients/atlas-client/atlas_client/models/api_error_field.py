@@ -20,11 +20,11 @@ T = TypeVar("T", bound="ApiErrorField")
 
 @_attrs_define
 class ApiErrorField:
-    """ One field named in an Atlas API error.
+    """ One invalid field named in an Atlas API error.
 
         Attributes:
-            message (str):
-            name (str):
+            message (str): Reason that the field is not valid.
+            name (str): Request field path.
      """
 
     message: str

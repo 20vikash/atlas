@@ -1,6 +1,7 @@
 from typing import Any
 
 import frappe
+from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
 
 from atlas.atlas.core.exceptions import AtlasUserError
@@ -12,6 +13,27 @@ MESSAGE_BY_STATUS = {
 	409: "The resource state does not allow this request.",
 	503: "No host capacity is available. Retry later.",
 }
+
+
+class ApiErrorField(BaseModel):
+	"""One invalid field named in an Atlas API error."""
+
+	name: str = Field(description="Request field path.")
+	message: str = Field(description="Reason that the field is not valid.")
+
+
+class ApiErrorDetail(BaseModel):
+	"""The stable error details returned by Atlas."""
+
+	code: str = Field(description="Stable machine-readable error code.")
+	message: str = Field(description="Safe description of the failure.")
+	fields: list[ApiErrorField] = Field(description="Invalid request fields, or an empty list.")
+
+
+class ApiErrorResponse(BaseModel):
+	"""The JSON body of an Atlas API error."""
+
+	error: ApiErrorDetail = Field(description="Error details.")
 
 
 class ApiError(Exception):
