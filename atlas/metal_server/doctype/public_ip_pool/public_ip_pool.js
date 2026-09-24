@@ -20,6 +20,13 @@ frappe.ui.form.on("Public IP Pool", {
 				__("Actions")
 			);
 		}
+		if (!frm.doc.gateway) {
+			frm.add_custom_button(
+				__("Reserve Allocation"),
+				() => reserveAllocation(frm),
+				__("Actions")
+			);
+		}
 		if (["Attaching", "Detaching"].includes(frm.doc.provider_status)) {
 			frm.add_custom_button(
 				__("Retry Provider Operation"),
@@ -36,6 +43,14 @@ frappe.ui.form.on("Public IP Pool", {
 		}
 	},
 });
+
+function reserveAllocation(frm) {
+	frappe.confirm(__("Reserve the next allocation of this pool for Atlas services?"), () =>
+		frm
+			.call({ method: "reserve_allocation", doc: frm.doc, freeze: true })
+			.then((response) => frappe.set_route("Form", "Public IP Allocation", response.message))
+	);
+}
 
 function generateAvailableAllocations(frm) {
 	return frm
