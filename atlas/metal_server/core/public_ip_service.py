@@ -51,6 +51,10 @@ class PublicIPIntentInProgress(PublicIPError):
 	code = "public_ip_intent_in_progress"
 
 
+class IPv4InternetAccessRequired(PublicIPError):
+	code = "ipv4_internet_access_required"
+
+
 class UnsupportedIPReservation(AtlasUserError):
 	code = "unsupported_ip_reservation"
 	http_status_code = 400
@@ -85,6 +89,10 @@ class PublicIPService:
 		if not is_creation:
 			virtual_machine.ensure_not_migrating()
 			virtual_machine.validate_network_change()
+			if version == 4 and not self._has_ipv4_internet_access(virtual_machine):
+				raise IPv4InternetAccessRequired(
+					_("Turn on IPv4 internet access before you attach a public IPv4 address.")
+				)
 		if selector != AUTO_ALLOCATION:
 			try:
 				UUID(selector)
@@ -123,6 +131,14 @@ class PublicIPService:
 			return None
 		allocation.begin_detach()
 		return allocation
+
+	def _has_ipv4_internet_access(self, virtual_machine: VirtualMachine) -> bool:
+		from atlas.vm.core.vm_service import VirtualMachineService
+
+		return (
+			Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST)
+			in VirtualMachineService(virtual_machine).get_routes()
+		)
 
 	def allocation_for_vm(self, virtual_machine: str, version: int) -> PublicIPAllocation | None:
 		name = frappe.db.get_value(

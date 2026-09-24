@@ -91,11 +91,23 @@ class TestAllocationAssignment(UnitTestCase):
 		with (
 			patch.object(service_module.frappe, "get_doc", side_effect=get_doc),
 			patch.object(service_module.frappe.db, "get_value", return_value=None),
+			patch.object(VirtualMachineService, "get_routes", return_value=[Route("0.0.0.0/0", "host")]),
 		):
 			result = PublicIPService().attach(virtual_machine, 4, allocation.name)
 
 		self.assertIs(result, allocation)
 		allocation.begin_attach.assert_called_once_with("vm-1", "metal-1", 7)
+
+	def test_ipv4_attach_needs_ipv4_internet_access(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="vm-1", is_draft=False, ensure_not_migrating=Mock(), validate_network_change=Mock()
+		)
+		with (
+			patch.object(service_module.frappe, "get_doc", return_value=virtual_machine),
+			patch.object(VirtualMachineService, "get_routes", return_value=[]),
+			self.assertRaises(service_module.IPv4InternetAccessRequired),
+		):
+			PublicIPService().attach(virtual_machine, 4, "auto")
 
 
 UNRELATED_ROUTE = Route("2001:db8:ffff::/48", "fdaa:1::2")

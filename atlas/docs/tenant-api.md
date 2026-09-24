@@ -123,6 +123,8 @@ Use the VM `public-ipv4` and `public-ipv6` routes to attach or detach an allocat
 
 An attach or detach returns `202` because Atlas applies provider and Metal changes asynchronously.
 
+A public IPv4 attach needs `ipv4_internet_access`. Without it, Atlas returns `409` with `ipv4_internet_access_required`.
+
 The VM and allocation responses contain structured `public_ipv4` and `public_ipv6` allocation objects.
 
 The **Use IPv6 Router For Auto Assignment** Atlas setting selects direct or routed delivery for automatic IPv6.
