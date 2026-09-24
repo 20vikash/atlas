@@ -166,6 +166,12 @@ static __always_inline struct in6_addr *get_gateway_route(const struct in6_addr 
 	return bpf_map_lookup_elem(&gateway_routes, &key);
 }
 
+/* A VM receives a foreign source only when its reply to that source goes through a gateway. */
+static __always_inline int has_gateway_return_route(const struct in6_addr *virtual_machine, const struct in6_addr *foreign_source)
+{
+	return get_gateway_route(virtual_machine, foreign_source) != NULL;
+}
+
 static __always_inline int is_gateway_interface(__u32 ifindex)
 {
 	return bpf_map_lookup_elem(&gateways, &ifindex) != NULL;
