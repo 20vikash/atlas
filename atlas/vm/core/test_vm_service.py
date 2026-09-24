@@ -5,6 +5,7 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
+from atlas.vm.core.models import Route
 from atlas.vm.core.placement import OutOfCapacity, PlacementStrategy
 from atlas.vm.core.vm_service import (
 	InsufficientHostCapacity,
@@ -257,9 +258,12 @@ class TestVirtualMachineDisk(UnitTestCase):
 class TestVirtualMachineNetworkChanges(UnitTestCase):
 	def build_service(self, attached: str | None) -> VirtualMachineService:
 		"""Return a service for a managed virtual machine."""
-		virtual_machine = SimpleNamespace(name="VM-00001", validate_network_change=Mock())
+		virtual_machine = SimpleNamespace(
+			name="VM-00001", validate_network_change=Mock(), is_network_gateway=0
+		)
 		service = VirtualMachineService(virtual_machine)
 		service.get_ipv4_address_name = Mock(return_value=attached)
+		service.get_public_ipv6 = Mock(return_value="")
 		return service
 
 	def test_termination_detaches_all_public_ip_allocations(self) -> None:
@@ -280,22 +284,22 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 		for allocation in allocations.values():
 			allocation.begin_detach.assert_called_once_with()
 
-	def test_an_unknown_egress_mode_is_rejected(self) -> None:
+	def test_an_invalid_route_is_rejected(self) -> None:
 		service = self.build_service(None)
 
 		with patch.object(service, "update_network") as update_network:
 			with self.assertRaises(frappe.ValidationError):
-				service.apply_network_changes({"egress": "server"})
+				service.apply_network_changes({"routes": [{"destination": "0.0.0.0/0", "via": "server"}]})
 
 			update_network.assert_not_called()
 
-	def test_an_attached_address_keeps_the_internet_path(self) -> None:
+	def test_an_attached_ipv4_address_keeps_its_host_route(self) -> None:
 		service = self.build_service("203.0.113.10")
 
-		for egress in ("mesh", "none"):
+		for routes in ([], [{"destination": "10.0.0.0/8", "via": "host"}]):
 			with patch.object(service, "update_network") as update_network:
-				with self.assertRaises(frappe.ValidationError):
-					service.apply_network_changes({"egress": egress})
+				with self.assertRaisesRegex(frappe.ValidationError, "Detach the public IPv4"):
+					service.apply_network_changes({"routes": routes})
 
 				update_network.assert_not_called()
 

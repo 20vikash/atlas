@@ -77,7 +77,7 @@ class TestCargoServerProvisionRequest(UnitTestCase):
 		self.assertEqual(request["tenant_id"], 0)
 		self.assertTrue(request["is_privileged"])
 		self.assertTrue(request["is_termination_protected"])
-		self.assertEqual(request["egress"], "uplink")
+		self.assertNotIn("routes", request)
 		self.assertEqual(request["hostname"], "cargo")
 		self.assertEqual(request["public_ipv4"], "32eb57bc-9548-4a89-8358-543e26883569")
 		self.assertEqual(request["cpu_millicores"], 2000)

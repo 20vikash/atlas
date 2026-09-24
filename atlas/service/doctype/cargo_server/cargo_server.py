@@ -222,7 +222,6 @@ class CargoServer(Document):
 			"is_termination_protected": True,
 			"hostname": "cargo",
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
-			"egress": "uplink",
 			"public_ipv4": values["public_ipv4"],
 		}
 		try:

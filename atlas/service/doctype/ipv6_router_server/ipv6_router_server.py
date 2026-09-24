@@ -162,7 +162,6 @@ class IPv6RouterServer(Document):
 			"is_termination_protected": True,
 			"hostname": self.name,
 			"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
-			"egress": "uplink",
 			"public_ipv4": values["public_ipv4"],
 		}
 		try:
@@ -202,7 +201,6 @@ def _validate_create_request(values: dict[str, Any]) -> None:
 		"is_termination_protected": True,
 		"hostname": "ipv6-router",
 		"ssh_keys": frappe.get_single("Atlas Settings").public_ssh_key,
-		"egress": "uplink",
 		"public_ipv4": values.get("public_ipv4"),
 	}
 	try:

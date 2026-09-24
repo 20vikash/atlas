@@ -309,7 +309,7 @@ def virtual_machine_response() -> dict:
 				"memory_snapshot": False,
 			},
 			"network": {
-				"egress": "uplink",
+				"routes": [{"destination": "0.0.0.0/0", "via": "host"}],
 				"wireguard_mesh_ipv6": "",
 				"private_network_throughput_mibps": 0,
 				"public_network_throughput_mibps": 0,
@@ -409,7 +409,7 @@ class TestMetalClientVirtualMachineRoutes(UnitTestCase):
 		client = build_client()
 		disk = {"size_mib": 2048, "throughput_mibps": 50, "iops": 2000}
 		network = {
-			"egress": "uplink",
+			"routes": [{"destination": "0.0.0.0/0", "via": "host"}],
 			"public_ipv4": "203.0.113.10",
 			"wireguard_mesh_ipv6": "fdaa:1::1",
 			"private_network_throughput_mibps": 100,

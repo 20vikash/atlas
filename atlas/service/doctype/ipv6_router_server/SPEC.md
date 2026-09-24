@@ -33,7 +33,7 @@ The IPv6 pool must have a prefix length of `/84` or shorter.
 
 Atlas sets its allocation size to `/128` and links it to the new router.
 
-Atlas creates the VM for tenant `0` with privileged mesh access, `uplink` egress, the record name as its hostname, and the Atlas public Secure Shell key.
+Atlas creates the VM for tenant `0` with privileged mesh access, the default `0.0.0.0/0` route via `host`, the record name as its hostname, and the Atlas public Secure Shell key. Provisioning adds the `2000::/3` route via `host`, because the router forwards Internet traffic.
 
 The router does not need a Proxy Server.
 

@@ -102,7 +102,7 @@ class LiveTrial:
 				"memory_mib": self.arguments.memory_mib,
 				"disk_mib": self.arguments.disk_mib,
 				"tenant_id": tenant_id,
-				"egress": "none",
+				"routes": [],
 				"sleep_after_idle_seconds": self.arguments.sleep_after_idle_seconds if is_sleepy else 0,
 			}
 		)

@@ -23,7 +23,7 @@ A VM with a tenant ID of 2^24 or more, or a VM number of 2^20 or more, has no pu
 
 ```text
 Internet -> Metal host -> router eth0 -> tc ingress: destination block -> mesh -> WG Mesh -> VM
-VM -> gateway route 2000::/3 -> router eth0 -> tc ingress: source mesh -> block -> Metal host -> Internet
+VM -> route 2000::/3 via gateway -> router eth0 -> tc ingress: source mesh -> block -> Metal host -> Internet
 ```
 
 The eBPF program on `eth0` ingress changes the address and corrects the L4 checksum. For an ICMPv6 error, it also changes the address in the quoted packet. The kernel forwards the packet out of `eth0`.
@@ -71,6 +71,6 @@ The nft counters show forwarded packets in each direction.
 
 | Limit | Reason |
 | --- | --- |
-| One router for each VM | A VM has one `2000::/3` gateway route. |
+| One router for each VM | A VM has one `2000::/3` route. |
 | One fragment header only | The program drops translated packets with another extension header because it cannot safely correct the L4 checksum. |
 | The router itself has no public address | The program runs on ingress only. |

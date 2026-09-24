@@ -232,7 +232,7 @@ The service also reads `meta-data/host-routes`, a comma-separated list of destin
 
 `atlas-metadata.service` reads MMDS every 250 ms. This lets a warm VM receive its own hostname and address after resume. cloud-init uses `preserve_hostname`, so the service owns the hostname.
 
-When the service writes a new mesh drop-in, it also resets the server features of systemd-resolved, flushes the resolver cache, and queues a restart of systemd-timesyncd. A warm snapshot is captured without egress, so the resolver and time sync resume in a backed-off state. Without this reset, DNS and time sync stay stalled for about 40 seconds after resume.
+When the service writes a new mesh drop-in, it also resets the server features of systemd-resolved, flushes the resolver cache, and queues a restart of systemd-timesyncd. A warm snapshot is captured without a network, so the resolver and time sync resume in a backed-off state. Without this reset, DNS and time sync stay stalled for about 40 seconds after resume.
 
 ## Custom metadata
 

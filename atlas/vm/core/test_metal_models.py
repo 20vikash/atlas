@@ -39,7 +39,7 @@ def complete_response() -> dict:
 				},
 			},
 			"network": {
-				"egress": "uplink",
+				"routes": [{"destination": "0.0.0.0/0", "via": "host"}],
 				"public_ipv4": "1.2.3.4",
 				"wireguard_mesh_ipv6": "fdaa::1",
 				"private_network_throughput_mibps": 10,
@@ -91,7 +91,7 @@ def new_virtual_machine_response() -> dict:
 				"memory_snapshot": False,
 			},
 			"network": {
-				"egress": "uplink",
+				"routes": [],
 				"wireguard_mesh_ipv6": "",
 				"private_network_throughput_mibps": 0,
 				"public_network_throughput_mibps": 0,

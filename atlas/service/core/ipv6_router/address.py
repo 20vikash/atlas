@@ -7,12 +7,12 @@ from frappe import _
 from frappe.utils.caching import redis_cache
 
 from atlas.atlas.core.exceptions import AtlasUserError
+from atlas.vm.core.models import IPV6_INTERNET_DESTINATION
 
 # Must match bpf/address.h in services/ipv6-router.
 TENANT_BITS = 24
 MACHINE_BITS = 20
 MAXIMUM_PREFIX_LENGTH = 128 - TENANT_BITS - MACHINE_BITS
-ROUTED_DESTINATION = "2000::/3"
 
 
 @redis_cache(ttl=36000)
@@ -53,9 +53,9 @@ def parse_ipv6_network(prefix: str) -> ipaddress.IPv6Network:
 
 def validate_router_network(network: ipaddress.IPv6Network) -> None:
 	"""Require a global-unicast block with space for the tenant and VM fields."""
-	if not network.subnet_of(ipaddress.IPv6Network(ROUTED_DESTINATION)):
+	if not network.subnet_of(ipaddress.IPv6Network(IPV6_INTERNET_DESTINATION)):
 		frappe.throw(
-			_("IPv6 router block {0} must be within {1}.").format(network, ROUTED_DESTINATION),
+			_("IPv6 router block {0} must be within {1}.").format(network, IPV6_INTERNET_DESTINATION),
 			exc=AtlasUserError,
 		)
 

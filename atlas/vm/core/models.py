@@ -7,15 +7,77 @@ from typing import Any
 
 import frappe
 
+from atlas.atlas.core.mesh_address import MESH_NETWORK
 from atlas.atlas.core.parsing import strict_bool
 
-EGRESS_MODES = ("uplink", "mesh", "none")
+ROUTE_VIA_HOST = "host"
+IPV4_INTERNET_DESTINATION = "0.0.0.0/0"
+IPV6_INTERNET_DESTINATION = "2000::/3"
 MINIMUM_CPU_MILLICORES = 100
 MAXIMUM_CPU_MILLICORES = 32_000
 MAXIMUM_SLEEP_AFTER_IDLE_SECONDS = 9_223_372_036
 FIREWALL_PROTOCOLS = ("any", "tcp", "udp", "icmp")
 MAXIMUM_FIREWALL_PREFIXES = 50
 FIREWALL_PORTS_PATTERN = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
+
+
+@dataclass(frozen=True, slots=True)
+class Route:
+	"""Send one destination range through the host uplink or through a gateway VM mesh address."""
+
+	destination: str
+	via: str
+
+	@property
+	def is_via_host(self) -> bool:
+		return self.via == ROUTE_VIA_HOST
+
+	@property
+	def is_ipv4(self) -> bool:
+		return ipaddress.ip_network(self.destination).version == 4
+
+	def as_dict(self) -> dict[str, str]:
+		return {"destination": self.destination, "via": self.via}
+
+	@classmethod
+	def from_value(cls, value: Any) -> Route:
+		"""Parse one route. Only the host carries IPv4, because a gateway VM is reached over the IPv6 mesh."""
+		if not isinstance(value, dict):
+			raise ValueError("A route must be an object with destination and via.")
+		try:
+			destination = ipaddress.ip_network(str(value.get("destination") or ""))
+		except ValueError as error:
+			raise ValueError("Route destination must be an IP prefix, such as 2000::/3.") from error
+
+		via = str(value.get("via") or "")
+		if via == ROUTE_VIA_HOST:
+			return cls(str(destination), via)
+		try:
+			gateway = ipaddress.IPv6Address(via)
+		except ValueError as error:
+			raise ValueError(
+				f"Route via must be {ROUTE_VIA_HOST} or a gateway address in {MESH_NETWORK}."
+			) from error
+		if gateway not in MESH_NETWORK:
+			raise ValueError(f"Route via must be {ROUTE_VIA_HOST} or a gateway address in {MESH_NETWORK}.")
+		if destination.version == 4:
+			raise ValueError(f"IPv4 route {destination} must use via {ROUTE_VIA_HOST}.")
+		return cls(str(destination), str(gateway))
+
+
+DEFAULT_ROUTES = (Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST),)
+
+
+def parse_routes(value: Any) -> tuple[Route, ...]:
+	"""Parse a complete route list and reject a destination that appears twice."""
+	if not isinstance(value, list):
+		raise ValueError("Routes must be a list.")
+
+	routes = tuple(Route.from_value(route) for route in value)
+	destinations = [route.destination for route in routes]
+	if len(destinations) != len(set(destinations)):
+		raise ValueError("Each route destination can appear only once.")
+	return routes
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +245,7 @@ class VirtualMachineCreateRequest:
 	hostname: str = ""
 	ssh_keys: tuple[str, ...] = ()
 	user_data: str = ""
-	egress: str = "uplink"
+	routes: tuple[Route, ...] = DEFAULT_ROUTES
 	sleep_after_idle_seconds: int = 0
 	disk_throughput_mibps: int = 0
 	disk_iops: int = 0
@@ -216,15 +278,10 @@ class VirtualMachineCreateRequest:
 		if not isinstance(tenant_id, int) or isinstance(tenant_id, bool) or not 0 <= tenant_id <= 0xFFFFFFFF:
 			raise ValueError("Tenant ID must be a 32-bit unsigned integer.")
 
-		egress = payload.get("egress") or "uplink"
-		if egress not in EGRESS_MODES:
-			raise ValueError("Egress must be uplink, mesh, or none.")
-
+		routes = DEFAULT_ROUTES if payload.get("routes") is None else parse_routes(payload["routes"])
 		public_network_throughput_mibps = cls.non_negative_integer(payload, "public_network_throughput_mibps")
 		public_ipv4 = payload.get("public_ipv4") or None
 		public_ipv6 = payload.get("public_ipv6") or None
-		if egress != "uplink" and public_ipv4:
-			raise ValueError("A public IPv4 address requires uplink egress.")
 
 		sleep_after_idle_seconds = cls.non_negative_integer(payload, "sleep_after_idle_seconds")
 		if sleep_after_idle_seconds > MAXIMUM_SLEEP_AFTER_IDLE_SECONDS:
@@ -243,7 +300,7 @@ class VirtualMachineCreateRequest:
 			hostname=str(payload.get("hostname") or ""),
 			ssh_keys=cls.ssh_keys_tuple(payload),
 			user_data=str(payload.get("user_data") or ""),
-			egress=egress,
+			routes=routes,
 			sleep_after_idle_seconds=sleep_after_idle_seconds,
 			disk_throughput_mibps=cls.non_negative_integer(payload, "disk_throughput_mibps"),
 			disk_iops=cls.non_negative_integer(payload, "disk_iops"),
