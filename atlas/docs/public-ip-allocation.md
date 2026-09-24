@@ -46,7 +46,7 @@ Routed allocations cannot be reserved. Atlas deletes a routed allocation after d
 
 ## Automatic IPv6
 
-The **Route Automatic IPv6** setting controls only an automatic IPv6 request.
+The **Route Automatic IPv6** setting controls only an automatic IPv6 request. Atlas setup enables it for AWS and Scaleway.
 
 | Setting | Automatic selection |
 |---|---|

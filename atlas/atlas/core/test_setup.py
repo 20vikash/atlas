@@ -122,6 +122,30 @@ class TestAtlasSetup(UnitTestCase):
 		self.assertEqual(settings.is_unicast_network_enabled, 1)
 		settings.save.assert_called_once_with(ignore_permissions=True)
 
+	def test_cloud_providers_route_automatic_ipv6(self) -> None:
+		for provider_configuration in (configuration(), aws_configuration()):
+			settings = MagicMock(use_ipv6_router_for_auto_assignment=0)
+			with patch("atlas.atlas.core.setup.frappe.get_single", return_value=settings):
+				setup = AtlasSetup(provider_configuration)
+
+			setup._apply_settings()
+
+			self.assertEqual(settings.use_ipv6_router_for_auto_assignment, 1)
+
+	def test_generic_provider_keeps_direct_automatic_ipv6(self) -> None:
+		values = configuration().settings_values()
+		for field in tuple(values):
+			if field.startswith("scaleway_"):
+				values.pop(field)
+		values["server_provider"] = "Generic"
+		settings = MagicMock(use_ipv6_router_for_auto_assignment=0)
+		with patch("atlas.atlas.core.setup.frappe.get_single", return_value=settings):
+			setup = AtlasSetup(AtlasSetupConfiguration.from_dict(values))
+
+		setup._apply_settings()
+
+		self.assertEqual(settings.use_ipv6_router_for_auto_assignment, 0)
+
 	def test_completed_provider_refuses_immutable_drift(self) -> None:
 		settings = MagicMock(is_server_provider_setup_completed=1, is_dns_setup_completed=0)
 		settings.get.side_effect = lambda field: (
