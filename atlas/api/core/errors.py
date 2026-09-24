@@ -125,7 +125,7 @@ def as_api_error(exception: Exception) -> ApiError:
 	if isinstance(exception, AtlasUserError):
 		return as_status_error(exception, str(exception))
 	if isinstance(exception, PydanticValidationError):
-		return InvalidRequest("The request is not valid.", fields=get_validation_fields(exception))
+		return InvalidRequest(get_validation_message(exception), fields=get_validation_fields(exception))
 	if isinstance(exception, frappe.AuthenticationError | frappe.SessionExpired):
 		return AuthenticationRequired("Authentication is required.")
 	if isinstance(exception, frappe.PermissionError):
@@ -153,9 +153,18 @@ def as_status_error(exception: Exception, message: str | None = None) -> ApiErro
 	)
 
 
+def get_validation_message(exception: PydanticValidationError) -> str:
+	"""Return the first request-level reason, which names no field."""
+	for error in exception.errors():
+		if not error["loc"] and "error" in error.get("ctx", {}):
+			return str(error["ctx"]["error"])
+	return "The request is not valid."
+
+
 def get_validation_fields(exception: PydanticValidationError) -> list[dict[str, str]]:
 	"""Return one entry for each field that failed validation."""
 	return [
 		{"name": ".".join(str(part) for part in error["loc"]), "message": error["msg"]}
 		for error in exception.errors()
+		if error["loc"]
 	]
