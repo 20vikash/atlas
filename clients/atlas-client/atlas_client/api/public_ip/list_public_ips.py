@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.api_error_response import ApiErrorResponse
+from ...models.list_public_ips_version_type_0 import ListPublicIpsVersionType0
 from ...models.page_public_ip_response import PagePublicIPResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -20,6 +21,7 @@ def _get_kwargs(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     tag: None | str | Unset = UNSET,
+    version: ListPublicIpsVersionType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> dict[str, Any]:
@@ -43,6 +45,15 @@ def _get_kwargs(
     else:
         json_tag = tag
     params["tag"] = json_tag
+
+    json_version: None | str | Unset
+    if isinstance(version, Unset):
+        json_version = UNSET
+    elif isinstance(version, ListPublicIpsVersionType0):
+        json_version = version.value
+    else:
+        json_version = version
+    params["version"] = json_version
 
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
@@ -117,18 +128,21 @@ def sync_detailed(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     tag: None | str | Unset = UNSET,
+    version: ListPublicIpsVersionType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> Response[ApiErrorResponse | PagePublicIPResponse]:
     """ List public IPs
 
-     Returns the tenant's reserved and attached public IPs in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order. Pass `version` as `4`
+    or `6` to return only that version.
 
     Args:
         offset (int | Unset): Number of matching resources to skip. Default: 0.
         limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
+        version (ListPublicIpsVersionType0 | None | Unset): Return only this IP protocol version.
         x_tenant_id (int):
 
     Raises:
@@ -144,6 +158,7 @@ def sync_detailed(
         offset=offset,
 limit=limit,
 tag=tag,
+version=version,
 x_tenant_id=x_tenant_id,
 
     )
@@ -160,18 +175,21 @@ def sync(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     tag: None | str | Unset = UNSET,
+    version: ListPublicIpsVersionType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> ApiErrorResponse | PagePublicIPResponse | None:
     """ List public IPs
 
-     Returns the tenant's reserved and attached public IPs in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order. Pass `version` as `4`
+    or `6` to return only that version.
 
     Args:
         offset (int | Unset): Number of matching resources to skip. Default: 0.
         limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
+        version (ListPublicIpsVersionType0 | None | Unset): Return only this IP protocol version.
         x_tenant_id (int):
 
     Raises:
@@ -188,6 +206,7 @@ def sync(
 offset=offset,
 limit=limit,
 tag=tag,
+version=version,
 x_tenant_id=x_tenant_id,
 
     ).parsed
@@ -198,18 +217,21 @@ async def asyncio_detailed(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     tag: None | str | Unset = UNSET,
+    version: ListPublicIpsVersionType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> Response[ApiErrorResponse | PagePublicIPResponse]:
     """ List public IPs
 
-     Returns the tenant's reserved and attached public IPs in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order. Pass `version` as `4`
+    or `6` to return only that version.
 
     Args:
         offset (int | Unset): Number of matching resources to skip. Default: 0.
         limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
+        version (ListPublicIpsVersionType0 | None | Unset): Return only this IP protocol version.
         x_tenant_id (int):
 
     Raises:
@@ -225,6 +247,7 @@ async def asyncio_detailed(
         offset=offset,
 limit=limit,
 tag=tag,
+version=version,
 x_tenant_id=x_tenant_id,
 
     )
@@ -241,18 +264,21 @@ async def asyncio(
     offset: int | Unset = 0,
     limit: int | Unset = 20,
     tag: None | str | Unset = UNSET,
+    version: ListPublicIpsVersionType0 | None | Unset = UNSET,
     x_tenant_id: int,
 
 ) -> ApiErrorResponse | PagePublicIPResponse | None:
     """ List public IPs
 
-     Returns the tenant's reserved and attached public IPs in newest-first order.
+     Returns the tenant's reserved and attached public IPs in newest-first order. Pass `version` as `4`
+    or `6` to return only that version.
 
     Args:
         offset (int | Unset): Number of matching resources to skip. Default: 0.
         limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
+        version (ListPublicIpsVersionType0 | None | Unset): Return only this IP protocol version.
         x_tenant_id (int):
 
     Raises:
@@ -269,6 +295,7 @@ async def asyncio(
 offset=offset,
 limit=limit,
 tag=tag,
+version=version,
 x_tenant_id=x_tenant_id,
 
     )).parsed
