@@ -77,7 +77,7 @@ Inbound:  Internet -> Metal host -> gateway VM -> WG Mesh -> application VM
 Outbound: application VM -> gateway route -> gateway VM -> Metal host -> Internet
 ```
 
-The Metal host sends inbound traffic for the public prefix to the gateway VM. The gateway sends each packet to the application VM through WG Mesh.
+The Metal host sends inbound traffic for the public prefix to the gateway VM. The gateway sends each packet to the application VM through WG Mesh. WG Mesh delivers an inbound packet only when the application VM has a gateway route to its source. Other inbound packets are dropped.
 
 The gateway owns packet forwarding, address translation, and firewall policy. WG Mesh only transports packets between the gateway and the application VM.
 

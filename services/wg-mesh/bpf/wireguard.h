@@ -168,6 +168,9 @@ int handle_wireguard_packet(struct __sk_buff *packet)
 	if (!is_local_vm(&destination))
 		return reply_not_here(packet, config, &destination, &sender);
 
+	if (!is_vm_address(&source) && !has_gateway_return_route(&destination, &source))
+		return TC_ACT_SHOT;
+
 	return remove_mesh_tunnel(packet);
 }
 

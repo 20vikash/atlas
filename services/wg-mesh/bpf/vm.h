@@ -136,7 +136,7 @@ int handle_vm_packet(struct __sk_buff *packet)
 
 	/* Linux delivers same-host traffic through the VM host route. */
 	if (is_local_vm(&destination))
-		return TC_ACT_OK;
+		return is_vm_address(&source) || has_gateway_return_route(&destination, &source) ? TC_ACT_OK : TC_ACT_SHOT;
 
 	return tunnel_to_remote_vm(packet, &destination, inner_length, NULL);
 }

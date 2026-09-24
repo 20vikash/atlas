@@ -65,9 +65,10 @@ The virtual machine hook applies these rules in order:
 2. Send a configured external destination to its gateway.
 3. Check source ownership.
 4. Check tenant access.
-5. Leave local delivery to Linux.
-6. Tunnel a known remote destination through WireGuard.
-7. Start NDP for an unknown destination.
+5. Drop a foreign source to a local VM that has no gateway route back to that source.
+6. Leave local delivery to Linux.
+7. Tunnel a known remote destination through WireGuard.
+8. Start NDP for an unknown destination.
 
 Each interface can start 10 NDP requests each second, with a burst of 50 requests.
 
@@ -102,6 +103,7 @@ The WireGuard hook handles packets only between addresses in `fdab::/16`.
 | Packet | Action |
 | --- | --- |
 | Tunnel to a local virtual machine | Remove the outer IPv6 header. |
+| Foreign source to a local virtual machine without a gateway route back to that source | Drop the packet. |
 | Tunnel to a missing virtual machine | Return `NOT_HERE` to the sender. |
 | Gateway tunnel for an external client | Send the packet to the local gateway that the tunnel names. |
 | Client packet for a local prefix | Advertise the address on the public interface once, then deliver later packets. |
