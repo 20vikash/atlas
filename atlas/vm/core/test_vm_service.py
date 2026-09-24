@@ -284,6 +284,18 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 		for allocation in allocations.values():
 			allocation.begin_detach.assert_called_once_with()
 
+	# An allocation job can run before Metal stores a new VM. An empty route list
+	# would then replace the create routes, so the read must fail and retry.
+	def test_a_route_edit_fails_until_metal_holds_the_vm(self) -> None:
+		service = self.build_service(None)
+
+		with (
+			patch.object(service, "get_information", return_value=None),
+			patch.object(service, "require_information", side_effect=frappe.ValidationError("not found")),
+			self.assertRaises(frappe.ValidationError),
+		):
+			service.get_routes_with(Route("2000::/3", "fdaa:1::56"))
+
 	def test_an_invalid_route_is_rejected(self) -> None:
 		service = self.build_service(None)
 

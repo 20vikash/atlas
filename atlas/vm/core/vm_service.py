@@ -383,9 +383,8 @@ class VirtualMachineService:
 		return routes
 
 	def get_routes(self) -> list[Route]:
-		"""Return the routes that Metal holds now."""
-		information = self.get_information()
-		return list(information.desired.network.routes) if information else []
+		"""Read current Metal routes so an edit cannot replace pending state."""
+		return list(self.require_information().desired.network.routes)
 
 	def has_gateway_routes(self) -> bool:
 		return any(not route.is_via_host for route in self.get_routes())
