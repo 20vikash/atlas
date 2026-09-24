@@ -117,6 +117,8 @@ Use `PUT /api/atlas/public-ips/{id}/reserve` to keep an attached direct public I
 
 Use `DELETE /api/atlas/public-ips/{id}` to release a detached reservation.
 
+Use `GET /api/atlas/public-ips?version=6` to list only one IP version.
+
 Tenants cannot select a pool and cannot reserve a routed IPv6 address.
 
 Use the VM `public-ipv4` and `public-ipv6` routes to attach or detach an allocation.

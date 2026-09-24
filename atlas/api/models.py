@@ -172,6 +172,14 @@ class WebhookConfigurationResponse(BaseModel):
 	webhooks: list[str] = Field(description="Frappe webhook records managed for this Central.")
 
 
+class PublicIPListQuery(ListQuery):
+	"""Page through public IPs, and narrow them to one IP version when asked."""
+
+	version: Literal["4", "6"] | None = Field(
+		default=None, description="Return only this IP protocol version."
+	)
+
+
 class ReservePublicIPPayload(StrictModel):
 	"""Select the IP version of one direct reservation."""
 
