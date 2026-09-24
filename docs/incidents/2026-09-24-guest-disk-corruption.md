@@ -6,7 +6,7 @@
 | Environment    | Staging, region par-2                                              |
 | Component      | Metal (`metal/internal/firecracker`)                               |
 | Severity       | High: guest data loss                                              |
-| Status         | Fixed. Prevention actions open.                                    |
+| Status         | Fixed                                                              |
 | Affected up to | `4483743e67e84c3004c19437cc77799a01725f97` (2026-09-24, `develop`) |
 
 ## Summary
@@ -63,18 +63,6 @@ Sleep and wake use the saved memory of the VM itself, so they were not affected.
 ## Resolution
 
 `machine.Start` checks `HasDisk` first. It resumes the warm image only on the first boot, before the VM has its own disk. Every later start uses a cold boot. The same change stops the warm failure path from releasing the disk of an existing VM.
-
-## Actions
-
-| Action                                                                                                                  | Owner      | Status |
-| ----------------------------------------------------------------------------------------------------------------------- | ---------- | ------ |
-| Resume a warm image only on a new disk.                                                                                 | Metal      | Done   |
-| Before a warm resume, check that the disk is an unchanged clone of the warm root snapshot (ZFS `origin` and `written`). | Metal      | Open   |
-| Shut the guest down before Metal stops Firecracker, with a timeout.                                                     | Metal      | Open   |
-| Capture an image disk from a stopped or frozen VM.                                                                      | Atlas      | Open   |
-| Mount the guest root file system with `errors=remount-ro`, and report ext4 errors.                                      | Atlas      | Open   |
-| Snapshot all VM disks before a bulk restart or upgrade.                                                                 | Operations | Open   |
-| Recover the data of vm-0000090, then recreate it from a current image.                                                  | Operations | Open   |
 
 ## Lessons
 
