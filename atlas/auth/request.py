@@ -23,7 +23,7 @@ REALTIME_PATHS = frozenset(
 	}
 )
 GUEST_PATHS = frozenset({"/login", "/api/method/login", "/api/method/logout"})
-PUBLIC_ATLAS_PATHS = frozenset({"/api/atlas/jwks.json"})
+PUBLIC_ATLAS_PATHS = frozenset({"/api/atlas/jwks.json", "/vm_console"})
 GUEST_PATH_PREFIXES = ("/assets/", "/files/")
 
 
