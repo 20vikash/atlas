@@ -29,14 +29,15 @@ class SnapshotPayload:
     """ Values that create one image from a virtual machine.
 
         Attributes:
-            title (str):
-            cache_image (bool | Unset):  Default: False.
-            image_type (SnapshotPayloadImageType | Unset):  Default: SnapshotPayloadImageType.MACHINE.
-            is_termination_protected (bool | Unset):  Default: False.
-            memory_snapshot (bool | Unset):  Default: False.
+            title (str): Display title for the new image.
+            cache_image (bool | Unset): Whether hosts may keep this image cached. Default: False.
+            image_type (SnapshotPayloadImageType | Unset): Image visibility and intended use. Default:
+                SnapshotPayloadImageType.MACHINE.
+            is_termination_protected (bool | Unset): Whether deletion of the new image is blocked. Default: False.
+            memory_snapshot (bool | Unset): Whether to include guest memory. Default: False.
             memory_snapshot_configuration (MemorySnapshotConfigurationPayload | Unset): The virtual machine shape that a
                 warm artifact serves.
-            tags (SnapshotPayloadTags | Unset):
+            tags (SnapshotPayloadTags | Unset): Resource tags as key-value pairs.
      """
 
     title: str

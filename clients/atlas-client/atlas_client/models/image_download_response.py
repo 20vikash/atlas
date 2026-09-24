@@ -24,12 +24,12 @@ class ImageDownloadResponse:
     """ Signed downloads for one image.
 
         Attributes:
-            artifact (ImageDownloadResponseArtifact):
-            expires_at (int):
-            expires_in (int):
-            sha256 (str):
-            size_mib (int):
-            url (str):
+            artifact (ImageDownloadResponseArtifact): Image artifact represented by this URL.
+            expires_at (int): URL expiry time as Unix seconds.
+            expires_in (int): Seconds until the URL expires.
+            sha256 (str): Lowercase SHA-256 digest.
+            size_mib (int): Artifact size in MiB.
+            url (str): Temporary signed download URL.
      """
 
     artifact: ImageDownloadResponseArtifact

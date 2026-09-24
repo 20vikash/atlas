@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ipaddress
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Never, TypedDict, cast
 
@@ -9,22 +8,23 @@ from frappe import _
 
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
-from atlas.metal_server.core.ip_address_service import UNOWNED_TENANT_ID
+from atlas.metal_server.core.public_ip_service import PublicIPService
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
 from atlas.vm.core.models import (
-	EGRESS_MODES,
+	IPV4_INTERNET_DESTINATION,
+	IPV6_INTERNET_DESTINATION,
+	ROUTE_VIA_HOST,
 	FirewallConfiguration,
+	Route,
 	VirtualMachineCreateRequest,
+	parse_routes,
 )
 from atlas.vm.core.placement import PlacementRequirements, PlacementStrategy
 from atlas.vm.core.placement.transaction import use_read_committed
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
-	from atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address import (
-		MetalServerIPAddress,
-	)
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
@@ -89,10 +89,10 @@ class VirtualMachineService:
 		server_name = PlacementStrategy.find_server(requirements)
 		virtual_machine = cls.insert_draft(request, image, server_name)
 		service = cls(virtual_machine)
-		server_ip_address = (
-			service.assign_ip_address(request.server_ip_address) if request.server_ip_address else None
-		)
-		metal_request = service.get_metal_request(request, image, server_ip_address)
+		for version, selector in ((4, request.public_ipv4), (6, request.public_ipv6)):
+			if selector:
+				PublicIPService().attach(virtual_machine, version, selector)
+		metal_request = service.get_metal_request(request, image)
 		frappe.db.commit()  # nosemgrep
 
 		virtual_machine_name = cast(str, virtual_machine.name)
@@ -153,7 +153,6 @@ class VirtualMachineService:
 		self,
 		request: VirtualMachineCreateRequest,
 		image: VirtualMachineImage,
-		server_ip_address: MetalServerIPAddress | None,
 	) -> dict[str, Any]:
 		"""Return the complete Metal create request."""
 		return {
@@ -169,12 +168,12 @@ class VirtualMachineService:
 			},
 			"image": image.get_metal_image_request(),
 			"network": {
-				"public_ipv4": (server_ip_address.host_address or "") if server_ip_address else "",
+				"public_ipv4": "",
 				"wireguard_mesh_ipv6": get_virtual_machine_mesh_address(self.virtual_machine),
 				"is_network_gateway": bool(self.virtual_machine.is_network_gateway),
 				"private_network_throughput_mibps": request.private_network_throughput_mibps,
 				"public_network_throughput_mibps": request.public_network_throughput_mibps,
-				"egress": request.egress,
+				"routes": [route.as_dict() for route in request.routes],
 				"firewall": request.firewall.as_dict(),
 			},
 			"guest": {
@@ -215,6 +214,10 @@ class VirtualMachineService:
 					exc=AtlasUserError,
 				)
 		self.release_public_addresses()
+		for name in frappe.get_all(
+			"Public IP Allocation", filters={"virtual_machine": self.virtual_machine.name}, pluck="name"
+		):
+			frappe.get_doc("Public IP Allocation", name).reconcile()
 
 	def terminate(self) -> None:
 		"""Request deletion in Metal, then release the public address intent."""
@@ -312,10 +315,9 @@ class VirtualMachineService:
 			firewall = {**firewall, **firewall_change}
 			firewall = FirewallConfiguration.from_value(firewall).as_dict()
 		request = {
-			"egress": current_network.egress,
 			"public_ipv4": current_network.public_ipv4,
 			"wireguard_mesh_ipv6": current_network.wireguard_mesh_ipv6,
-			"gateway_routes": [route.as_dict() for route in current_network.gateway_routes],
+			"routes": [route.as_dict() for route in current_network.routes],
 			"is_network_gateway": current_network.is_network_gateway,
 			"public_ipv6": current_network.public_ipv6,
 			"private_network_throughput_mibps": current_network.private_network_throughput_mibps,
@@ -331,16 +333,18 @@ class VirtualMachineService:
 		return information.as_dict()
 
 	def apply_network_changes(self, changes: dict[str, Any]) -> dict[str, Any]:
-		"""Apply selected network changes after the egress and address rules."""
+		"""Validate and apply selected network changes."""
 		self.virtual_machine.validate_network_change()
-		egress = changes.get("egress")
-		if egress is not None and egress not in EGRESS_MODES:
-			frappe.throw(_("Egress must be uplink, mesh, or none."), exc=AtlasUserError)
-		if egress not in (None, "uplink") and self.get_ipv4_address_name():
-			frappe.throw(
-				_("Detach the public IPv4 address before you remove the internet path."),
-				exc=AtlasUserError,
+		if "ipv4_internet_access" in changes:
+			changes = {**changes}
+			changes["routes"] = self._routes_for_ipv4_internet_access(
+				bool(changes.pop("ipv4_internet_access"))
 			)
+		if "routes" in changes:
+			changes = {
+				**changes,
+				"routes": [route.as_dict() for route in self.validate_routes(changes["routes"])],
+			}
 
 		try:
 			return self.update_network(changes)
@@ -348,63 +352,62 @@ class VirtualMachineService:
 			frappe.throw(_(str(error)), exc=AtlasUserError)
 			raise AssertionError from error
 
-	def attach_public_ipv4(self, server_ip_address: str) -> dict[str, Any]:
-		"""Set the address intent before provider reconciliation."""
-		self.assign_ip_address(server_ip_address)
-		return self.update_network({"egress": "uplink"})
+	def _routes_for_ipv4_internet_access(self, enabled: bool) -> list[dict[str, str]]:
+		if enabled:
+			return self.get_routes_with(Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST))
+		return self.get_routes_without(IPV4_INTERNET_DESTINATION)
 
-	def apply_attached_ip_address(self, host_address: str) -> None:
-		"""Send the attached host address to Metal."""
-		self.update_network({"egress": "uplink", "public_ipv4": host_address})
+	def set_routes(self, value: Any) -> dict[str, Any]:
+		"""Replace the complete route list. Metal owns the routes."""
+		return self.update_network({"routes": [route.as_dict() for route in self.validate_routes(value)]})
 
-	def detach_public_ipv4(self) -> dict[str, Any]:
-		"""Update Metal before the address release intent."""
-		information = self.update_network({"public_ipv4": ""})
-		self.release_ipv4_address()
-		return information
-
-	def set_gateway_routes(self, routes: list[dict[str, str]]) -> dict[str, Any]:
-		"""Send each destination range and the mesh address of its gateway VM to Metal. Metal owns the routes."""
-		if routes and (self.virtual_machine.is_network_gateway or self.get_public_ipv6()):
-			frappe.throw(
-				_("A gateway or a VM with its own IPv6 block reaches every destination through its host."),
-				exc=AtlasUserError,
-			)
-
-		return self.update_network({"gateway_routes": [self.parse_gateway_route(route) for route in routes]})
-
-	def parse_gateway_route(self, route: dict[str, str]) -> dict[str, str]:
-		"""Return one route for Metal. The gateway must be an active network gateway VM."""
+	def validate_routes(self, value: Any) -> tuple[Route, ...]:
+		"""Parse a route list. An attached public IPv6 address owns the IPv6 Internet route."""
 		try:
-			destination = str(ipaddress.IPv6Network(route.get("destination") or ""))
-		except ValueError:
-			frappe.throw(_("Destination must be an IPv6 prefix, such as ::/0."), exc=AtlasUserError)
+			routes = parse_routes(value)
+		except ValueError as error:
+			frappe.throw(_(str(error)), exc=AtlasUserError)
+			raise AssertionError from error
 
-		gateway = frappe.db.get_value(
-			"Virtual Machine",
-			{"name": route.get("gateway"), "is_network_gateway": 1, "is_terminating": 0, "is_draft": 0},
-			["name", "tenant_id"],
-			as_dict=True,
-		)
-		if not gateway:
+		if self.get_ipv4_address_name() and _find_route(routes, IPV4_INTERNET_DESTINATION) != Route(
+			IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST
+		):
 			frappe.throw(
-				_("Gateway {0} is not an active network gateway VM.").format(route.get("gateway")),
+				_("Detach the public IPv4 address before you remove its IPv4 route via host."),
 				exc=AtlasUserError,
 			)
+		if self.virtual_machine.is_network_gateway and any(not route.is_via_host for route in routes):
+			frappe.throw(
+				_("A network gateway VM reaches other destinations only through its host."),
+				exc=AtlasUserError,
+			)
+		if self.get_public_ipv6() and _find_route(routes, IPV6_INTERNET_DESTINATION) != _find_route(
+			self.get_routes(), IPV6_INTERNET_DESTINATION
+		):
+			frappe.throw(
+				_("Detach the public IPv6 address before you change the {0} route.").format(
+					IPV6_INTERNET_DESTINATION
+				),
+				exc=AtlasUserError,
+			)
+		return routes
 
-		return {"destination": destination, "gateway": get_virtual_machine_mesh_address(gateway)}
+	def get_routes(self) -> list[Route]:
+		"""Read current Metal routes so an edit cannot replace pending state."""
+		return list(self.require_information().desired.network.routes)
 
 	def has_gateway_routes(self) -> bool:
-		"""Report whether Metal holds gateway routes for this VM."""
-		information = self.virtual_machine.get_metal_vm_info()
-		return bool(information and information.desired.network.gateway_routes)
+		return any(not route.is_via_host for route in self.get_routes())
 
-	def get_gateway_routes(self) -> list[dict[str, str]]:
-		"""Return the routes that Metal holds, with each gateway as its VM name."""
-		information = self.virtual_machine.get_metal_vm_info()
-		if not information or not information.desired.network.gateway_routes:
-			return []
+	def get_routes_with(self, route: Route) -> list[dict[str, str]]:
+		routes = [current for current in self.get_routes() if current.destination != route.destination]
+		return [current.as_dict() for current in [*routes, route]]
 
+	def get_routes_without(self, destination: str) -> list[dict[str, str]]:
+		return [route.as_dict() for route in self.get_routes() if route.destination != destination]
+
+	def get_route_editor_rows(self) -> list[dict[str, str]]:
+		"""Add known gateway VM names for the route editor."""
 		gateway_names = {
 			get_virtual_machine_mesh_address(gateway): gateway.name
 			for gateway in frappe.get_all(
@@ -412,85 +415,32 @@ class VirtualMachineService:
 			)
 		}
 		return [
-			{"destination": route.destination, "gateway": gateway_names.get(route.gateway, route.gateway)}
-			for route in information.desired.network.gateway_routes
+			route.as_dict() | {"gateway_virtual_machine": gateway_names.get(route.via, "")}
+			for route in self.get_routes()
 		]
 
-	def attach_public_ipv6(self, block: MetalServerIPAddress) -> dict[str, Any]:
-		"""Attach one IPv6 block, then send it to Metal. A VM holds one block."""
-		if block.tenant_id not in (self.virtual_machine.tenant_id, UNOWNED_TENANT_ID):
-			frappe.throw(_("The IPv6 block belongs to another tenant."), exc=frappe.PermissionError)
-		if block.status != "Allocated":
-			frappe.throw(_("IPv6 block {0} is not available.").format(block.name), exc=AtlasUserError)
-		if self.get_public_ipv6():
-			frappe.throw(
-				_("Virtual Machine {0} already has an IPv6 block.").format(self.virtual_machine.name),
-				exc=AtlasUserError,
-			)
-		if self.has_gateway_routes():
-			frappe.throw(
-				_("Remove the gateway routes of this VM before it owns an IPv6 block."), exc=AtlasUserError
-			)
-
-		information = self.update_network({"public_ipv6": block.prefix})
-		block.tenant_id = self.virtual_machine.tenant_id
-		block.begin_assignment(cast(str, self.virtual_machine.server), cast(str, self.virtual_machine.name))
-		return information
-
-	def detach_public_ipv6(self, block: MetalServerIPAddress) -> dict[str, Any]:
-		"""Remove the IPv6 block from Metal, then release it."""
-		information = self.update_network({"public_ipv6": ""})
-		block.release()
-		return information
-
 	def get_public_ipv6(self) -> str:
-		"""Return the IPv6 block that this VM holds or is attaching."""
-		row = frappe.db.get_value(
-			"Metal Server IP Address",
-			{
-				"virtual_machine": self.virtual_machine.name,
-				"version": "6",
-				"status": ["in", ["Attaching", "Attached"]],
-			},
-			["address", "cidr"],
-			as_dict=True,
+		"""Return the public IPv6 prefix that Atlas assigned to this VM."""
+		return (
+			frappe.db.get_value(
+				"Public IP Allocation",
+				{"virtual_machine": self.virtual_machine.name, "version": "6"},
+				"prefix",
+			)
+			or ""
 		)
-		return f"{row.address}/{row.cidr}" if row else ""
-
-	def assign_ip_address(self, server_ip_address: str) -> MetalServerIPAddress:
-		"""Set an attach intent; pool addresses stay unreserved."""
-		address = cast(
-			"MetalServerIPAddress",
-			frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True),
-		)
-		if address.tenant_id not in (self.virtual_machine.tenant_id, UNOWNED_TENANT_ID):
-			frappe.throw(_("The IP address belongs to another tenant."), exc=frappe.PermissionError)
-		if address.is_ipv6:
-			frappe.throw(_("This address is an IPv6 block. Choose an IPv4 address."), exc=AtlasUserError)
-		if address.status != "Allocated" or address.virtual_machine:
-			frappe.throw(_("The IP address is not available."), exc=AtlasUserError)
-
-		address.tenant_id = self.virtual_machine.tenant_id
-		address.begin_assignment(self.virtual_machine.server, self.virtual_machine.name)
-		return address
 
 	def release_public_addresses(self) -> None:
-		"""Set a release intent for every public address of a VM that is going away."""
+		"""Set a detach intent for every public allocation of a VM that is going away."""
 		for name in frappe.get_all(
-			"Metal Server IP Address", filters={"virtual_machine": self.virtual_machine.name}, pluck="name"
+			"Public IP Allocation", filters={"virtual_machine": self.virtual_machine.name}, pluck="name"
 		):
-			frappe.get_doc("Metal Server IP Address", name).release()
-
-	def release_ipv4_address(self) -> None:
-		"""Set a release intent for the public IPv4 address."""
-		address_name = self.get_ipv4_address_name()
-		if address_name:
-			frappe.get_doc("Metal Server IP Address", address_name).release()
+			frappe.get_doc("Public IP Allocation", name).begin_detach()
 
 	def get_ipv4_address_name(self) -> str | None:
-		"""Return the public IPv4 address this virtual machine holds, when there is one."""
+		"""Return the public IPv4 allocation this virtual machine holds."""
 		return frappe.db.get_value(
-			"Metal Server IP Address", {"virtual_machine": self.virtual_machine.name, "version": "4"}
+			"Public IP Allocation", {"virtual_machine": self.virtual_machine.name, "version": "4"}
 		)
 
 	def require_information(self) -> MetalVirtualMachine:
@@ -530,3 +480,7 @@ class VirtualMachineService:
 			)
 		frappe.throw(_("Metal request failed: {0}").format(error), exc=MetalOperationError)
 		raise AssertionError from error
+
+
+def _find_route(routes: list[Route] | tuple[Route, ...], destination: str) -> Route | None:
+	return next((route for route in routes if route.destination == destination), None)

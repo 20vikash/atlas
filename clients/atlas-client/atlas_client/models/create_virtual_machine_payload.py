@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.create_virtual_machine_payload_egress import CreateVirtualMachinePayloadEgress
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -29,24 +28,28 @@ class CreateVirtualMachinePayload:
     """ Values that create one virtual machine.
 
         Attributes:
-            cpu_millicores (int):
-            disk_mib (int):
-            image_id (str):
-            memory_mib (int):
-            disk_iops (int | Unset):  Default: 0.
-            disk_throughput_mibps (int | Unset):  Default: 0.
-            egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
+            cpu_millicores (int): CPU capacity in millicores. 1000 millicores equals one virtual CPU.
+            disk_mib (int): Root disk capacity in MiB.
+            image_id (str): Image used to create the virtual machine.
+            memory_mib (int): Memory capacity in MiB.
+            disk_iops (int | Unset): Disk IOPS limit. Zero removes the limit. Default: 0.
+            disk_throughput_mibps (int | Unset): Disk throughput limit in MiB/s. Zero removes the limit. Default: 0.
             firewall (FirewallPayload | Unset): The complete desired firewall configuration.
-            hostname (str | Unset):  Default: ''.
-            ip_address_id (None | str | Unset):
-            is_privileged (bool | Unset):  Default: False.
-            is_termination_protected (bool | Unset):  Default: False.
-            metadata (CreateVirtualMachinePayloadMetadata | Unset):
-            private_network_throughput_mibps (int | Unset):  Default: 0.
-            public_network_throughput_mibps (int | Unset):  Default: 0.
-            sleep_after_idle_seconds (int | Unset):  Default: 0.
-            ssh_keys (list[str] | Unset):
-            user_data (str | Unset):  Default: ''.
+            hostname (str | Unset): Guest hostname. Default: ''.
+            ipv4_internet_access (bool | Unset): Reach the IPv4 internet through host NAT. A public IPv4 address needs it.
+                Without it and without a public IPv6 address, the VM reaches only the mesh. Default: True.
+            is_privileged (bool | Unset): Whether the guest can reach every tenant through the mesh. Default: False.
+            is_termination_protected (bool | Unset): Whether deletion is blocked. Default: False.
+            metadata (CreateVirtualMachinePayloadMetadata | Unset): Custom guest metadata.
+            private_network_throughput_mibps (int | Unset): Private network throughput limit in MiB/s. Zero removes the
+                limit. Default: 0.
+            public_ipv4 (None | str | Unset): Reserved public IPv4 allocation ID, or null.
+            public_ipv6 (None | str | Unset): Reserved public IPv6 allocation ID, or null.
+            public_network_throughput_mibps (int | Unset): Public network throughput limit in MiB/s. Zero removes the limit.
+                Default: 0.
+            sleep_after_idle_seconds (int | Unset): Idle time before automatic stop. Zero disables it. Default: 0.
+            ssh_keys (list[str] | Unset): Authorized SSH public keys.
+            user_data (str | Unset): Cloud-init user data supplied to the guest. Default: ''.
      """
 
     cpu_millicores: int
@@ -55,14 +58,15 @@ class CreateVirtualMachinePayload:
     memory_mib: int
     disk_iops: int | Unset = 0
     disk_throughput_mibps: int | Unset = 0
-    egress: CreateVirtualMachinePayloadEgress | Unset = CreateVirtualMachinePayloadEgress.UPLINK
     firewall: FirewallPayload | Unset = UNSET
     hostname: str | Unset = ''
-    ip_address_id: None | str | Unset = UNSET
+    ipv4_internet_access: bool | Unset = True
     is_privileged: bool | Unset = False
     is_termination_protected: bool | Unset = False
     metadata: CreateVirtualMachinePayloadMetadata | Unset = UNSET
     private_network_throughput_mibps: int | Unset = 0
+    public_ipv4: None | str | Unset = UNSET
+    public_ipv6: None | str | Unset = UNSET
     public_network_throughput_mibps: int | Unset = 0
     sleep_after_idle_seconds: int | Unset = 0
     ssh_keys: list[str] | Unset = UNSET
@@ -87,22 +91,13 @@ class CreateVirtualMachinePayload:
 
         disk_throughput_mibps = self.disk_throughput_mibps
 
-        egress: str | Unset = UNSET
-        if not isinstance(self.egress, Unset):
-            egress = self.egress.value
-
-
         firewall: dict[str, Any] | Unset = UNSET
         if not isinstance(self.firewall, Unset):
             firewall = self.firewall.to_dict()
 
         hostname = self.hostname
 
-        ip_address_id: None | str | Unset
-        if isinstance(self.ip_address_id, Unset):
-            ip_address_id = UNSET
-        else:
-            ip_address_id = self.ip_address_id
+        ipv4_internet_access = self.ipv4_internet_access
 
         is_privileged = self.is_privileged
 
@@ -113,6 +108,18 @@ class CreateVirtualMachinePayload:
             metadata = self.metadata.to_dict()
 
         private_network_throughput_mibps = self.private_network_throughput_mibps
+
+        public_ipv4: None | str | Unset
+        if isinstance(self.public_ipv4, Unset):
+            public_ipv4 = UNSET
+        else:
+            public_ipv4 = self.public_ipv4
+
+        public_ipv6: None | str | Unset
+        if isinstance(self.public_ipv6, Unset):
+            public_ipv6 = UNSET
+        else:
+            public_ipv6 = self.public_ipv6
 
         public_network_throughput_mibps = self.public_network_throughput_mibps
 
@@ -139,14 +146,12 @@ class CreateVirtualMachinePayload:
             field_dict["disk_iops"] = disk_iops
         if disk_throughput_mibps is not UNSET:
             field_dict["disk_throughput_mibps"] = disk_throughput_mibps
-        if egress is not UNSET:
-            field_dict["egress"] = egress
         if firewall is not UNSET:
             field_dict["firewall"] = firewall
         if hostname is not UNSET:
             field_dict["hostname"] = hostname
-        if ip_address_id is not UNSET:
-            field_dict["ip_address_id"] = ip_address_id
+        if ipv4_internet_access is not UNSET:
+            field_dict["ipv4_internet_access"] = ipv4_internet_access
         if is_privileged is not UNSET:
             field_dict["is_privileged"] = is_privileged
         if is_termination_protected is not UNSET:
@@ -155,6 +160,10 @@ class CreateVirtualMachinePayload:
             field_dict["metadata"] = metadata
         if private_network_throughput_mibps is not UNSET:
             field_dict["private_network_throughput_mibps"] = private_network_throughput_mibps
+        if public_ipv4 is not UNSET:
+            field_dict["public_ipv4"] = public_ipv4
+        if public_ipv6 is not UNSET:
+            field_dict["public_ipv6"] = public_ipv6
         if public_network_throughput_mibps is not UNSET:
             field_dict["public_network_throughput_mibps"] = public_network_throughput_mibps
         if sleep_after_idle_seconds is not UNSET:
@@ -185,16 +194,6 @@ class CreateVirtualMachinePayload:
 
         disk_throughput_mibps = d.pop("disk_throughput_mibps", UNSET)
 
-        _egress = d.pop("egress", UNSET)
-        egress: CreateVirtualMachinePayloadEgress | Unset
-        if isinstance(_egress,  Unset):
-            egress = UNSET
-        else:
-            egress = CreateVirtualMachinePayloadEgress(_egress)
-
-
-
-
         _firewall = d.pop("firewall", UNSET)
         firewall: FirewallPayload | Unset
         if isinstance(_firewall,  Unset):
@@ -207,15 +206,7 @@ class CreateVirtualMachinePayload:
 
         hostname = d.pop("hostname", UNSET)
 
-        def _parse_ip_address_id(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        ip_address_id = _parse_ip_address_id(d.pop("ip_address_id", UNSET))
-
+        ipv4_internet_access = d.pop("ipv4_internet_access", UNSET)
 
         is_privileged = d.pop("is_privileged", UNSET)
 
@@ -233,6 +224,26 @@ class CreateVirtualMachinePayload:
 
         private_network_throughput_mibps = d.pop("private_network_throughput_mibps", UNSET)
 
+        def _parse_public_ipv4(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        public_ipv4 = _parse_public_ipv4(d.pop("public_ipv4", UNSET))
+
+
+        def _parse_public_ipv6(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        public_ipv6 = _parse_public_ipv6(d.pop("public_ipv6", UNSET))
+
+
         public_network_throughput_mibps = d.pop("public_network_throughput_mibps", UNSET)
 
         sleep_after_idle_seconds = d.pop("sleep_after_idle_seconds", UNSET)
@@ -249,14 +260,15 @@ class CreateVirtualMachinePayload:
             memory_mib=memory_mib,
             disk_iops=disk_iops,
             disk_throughput_mibps=disk_throughput_mibps,
-            egress=egress,
             firewall=firewall,
             hostname=hostname,
-            ip_address_id=ip_address_id,
+            ipv4_internet_access=ipv4_internet_access,
             is_privileged=is_privileged,
             is_termination_protected=is_termination_protected,
             metadata=metadata,
             private_network_throughput_mibps=private_network_throughput_mibps,
+            public_ipv4=public_ipv4,
+            public_ipv6=public_ipv6,
             public_network_throughput_mibps=public_network_throughput_mibps,
             sleep_after_idle_seconds=sleep_after_idle_seconds,
             ssh_keys=ssh_keys,

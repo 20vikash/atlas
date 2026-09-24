@@ -1,6 +1,6 @@
 # Tenant API
 
-Atlas exposes a tenant control plane at `/api/atlas` for virtual machines, public IPv4 addresses, and virtual machine images. It does not expose Metal Servers or bare metal operations.
+Atlas exposes a tenant control plane at `/api/atlas` for virtual machines, public IPs, and virtual machine images. It does not expose Public IP Pools, Metal Servers, or bare metal operations.
 
 Use `GET /api/atlas/docs` to explore every route, request body, and response. The OpenAPI document is at `GET /api/atlas/docs/openapi.json`. This guide describes the rules that apply to every route, and how to add a route.
 
@@ -64,7 +64,7 @@ Send `X-Tenant-ID` on every request with an unsigned 32-bit integer from 0 throu
 
 A Central route serves every tenant and needs no `X-Tenant-ID`. A regional token that calls one receives `403`. `PUT /api/atlas/webhooks` is a Central route. See [state delivery](../vm/SPEC.md#state-delivery).
 
-Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token with `X-Tenant-ID: 0`, uses every route and can create a privileged virtual machine and a System image. An unallocated IP address carries tenant `-1` and stays outside every tenant. A request for another tenant's resource returns `404`. Each resource response carries `tenant_id`.
+Tenant `0` is the system tenant. A token with `tenant=0`, or a Central token with `X-Tenant-ID: 0`, uses every route and can create a privileged virtual machine and a System image. An Available Public IP Allocation has no tenant and stays outside every tenant. A request for another tenant's resource returns `404`. Each tenant resource response carries `tenant_id`.
 
 A snapshot request accepts `image_type=system`, `cache_image`, and `memory_snapshot` only from tenant `0`. Any other tenant that sends one receives `400`, and its snapshot becomes a `machine` image. These values cannot change after the image exists.
 
@@ -95,19 +95,57 @@ Do not treat `placement_busy` as a capacity limit. It clears as soon as the comp
 
 A list response carries `items`, `offset`, `limit`, and `has_more`. The default limit is 20 and the maximum limit is 100.
 
-Every list route accepts `tag`, a comma separated list of `key:value` pairs. A resource must carry every pair, such as `?tag=os:Ubuntu,channel:lts`. A pair without `:` and a repeated key return `400`. Images, virtual machines, and IP addresses each carry a `tags` map in their response.
+Every list route accepts `tag`, a comma separated list of `key:value` pairs. A resource must carry every pair, such as `?tag=os:Ubuntu,channel:lts`. A pair without `:` and a repeated key return `400`. Images, virtual machines, and public IPs each carry a `tags` map in their response.
 
 A `PATCH` request needs at least one supported field. A field that is not in the request does not change. A `PUT` request replaces the complete stored value.
 
 A route that asks the host for work returns `202`. Poll the resource route for completion.
 
+## Public IP allocations
+
+VM creation accepts `public_ipv4` and `public_ipv6`.
+
+Omit a field or set it to `null` to create the VM without that IP version.
+
+Set it to `auto` to let Atlas select an allocation.
+
+Set it to a Public IP Allocation UUID to attach a reserved direct allocation that the tenant owns.
+
+Use `POST /api/atlas/public-ips` with `{"version": 4}` or `{"version": 6}` to reserve one direct public IP.
+
+Use `PUT /api/atlas/public-ips/{id}/reserve` to keep an attached direct public IP after detach.
+
+Use `DELETE /api/atlas/public-ips/{id}` to release a detached reservation.
+
+Tenants cannot select a pool and cannot reserve a routed IPv6 address.
+
+Use the VM `public-ipv4` and `public-ipv6` routes to attach or detach an allocation.
+
+An attach or detach returns `202` because Atlas applies provider and Metal changes asynchronously.
+
+The VM and allocation responses contain structured `public_ipv4` and `public_ipv6` allocation objects.
+
+The **Use IPv6 Router For Auto Assignment** Atlas setting selects direct or routed delivery for automatic IPv6.
+
+Atlas does not fall back to the other delivery mode when the selected mode has no capacity.
+
+A routed IPv6 allocation can change after detach and attach.
+
 Use `PATCH /api/atlas/virtual-machines/{id}/network` to change firewall fields. The firewall contains `enabled`, `inbound`, and `outbound`. A missing field does not change.
+
+`ipv4_internet_access` controls IPv4 internet access through host NAT. It is `true` by default at creation, and the same `PATCH` route changes it. A public IPv4 address needs it, so Atlas refuses `false` while one is attached. A public IPv6 address brings its own internet path. A VM without `ipv4_internet_access` and without a public IPv6 address reaches only the mesh.
+
+```json
+{"ipv4_internet_access": false}
+```
+
+A tenant cannot set routes. Atlas turns these choices into the route list that it sends to Metal.
 
 All absolute time fields use Unix timestamps in seconds. Duration fields such as `expires_in` also use seconds.
 
 ## Behavior
 
-Use [the virtual machine specification](../vm/SPEC.md) for the virtual machine and image rules. Use [the image guide](images.md) for the image lifecycle. Use [the Metal Server specification](../metal_server/SPEC.md) for IP address reservation and release.
+Use [the virtual machine specification](../vm/SPEC.md) for the virtual machine, image, and public IP rules. Use [the image guide](images.md) for the image lifecycle.
 
 ## Layout
 

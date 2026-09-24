@@ -38,13 +38,13 @@ Atlas gets Central public keys every 5 minutes. It keeps the last valid key set 
 
 Each tenant record carries a `tenant_id`. The `tenant` claim of the token decides the tenant of a request. Atlas signs a regional caller in as `tenant-<tenant ID>@atlas.local` and creates that user on first use, so the tenant belongs to the authenticated user and not to a request header. A Central caller (`tenant=*`) is not bound to one tenant and sends `X-Tenant-ID`.
 
-The Frappe permission hooks are the enforcement point. `permission_query_conditions` filters each list query and `has_permission` checks each document, both for `Virtual Machine`, `Virtual Machine Image`, and `Metal Server IP Address`. A list route uses `frappe.get_list`, so the hook applies. `get_owned_document` applies the same rule to a single resource and returns `404` for a record of another tenant. Outside an Atlas API request there is no identity, so a caller without the System Manager role reads nothing.
+The Frappe permission hooks are the enforcement point. `permission_query_conditions` filters each list query and `has_permission` checks each document for `Virtual Machine`, `Virtual Machine Image`, and `Public IP Allocation`. A list route uses `frappe.get_list`, so the hook applies. `get_owned_document` applies the same rule to a single resource and returns `404` for a record of another tenant. Outside an Atlas API request there is no identity, so a caller without the System Manager role reads nothing.
 
 A System image is the one shared record. Every tenant can read, boot, and download it. Only its owner can write or delete an image it owns.
 
 A snapshot request carries `image_type`. Only tenant `0` may ask for `system`, and only tenant `0` may set the `cache_image` and `memory_snapshot` flags. Any other tenant that sends one of these values receives an error, and the default image type is `machine`. All 3 values are set at creation, and no route changes them later.
 
-Tenant `0` is the system tenant. A privileged virtual machine reaches every tenant through the mesh, so it must use tenant `0`, and only a caller that acts for tenant `0` can create one or hold the privileged flag. An unallocated IP address carries tenant `-1`, so no tenant can read it.
+Tenant `0` is the system tenant. A privileged virtual machine reaches every tenant through the mesh, so it must use tenant `0`, and only a caller that acts for tenant `0` can create one or hold the privileged flag. An Available Public IP Allocation has no tenant, so no tenant can read it.
 
 ## Accepted risks
 

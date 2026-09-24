@@ -23,9 +23,9 @@ class VirtualMachineCompute:
     """ The compute shape of one virtual machine.
 
         Attributes:
-            cpu_millicores (int):
-            memory_mib (int):
-            sleep_after_idle_seconds (int):
+            cpu_millicores (int): CPU capacity in millicores.
+            memory_mib (int): Memory capacity in MiB.
+            sleep_after_idle_seconds (int): Idle time before automatic stop. Zero disables it.
      """
 
     cpu_millicores: int

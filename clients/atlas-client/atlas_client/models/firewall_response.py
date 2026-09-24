@@ -26,9 +26,9 @@ class FirewallResponse:
     """ The complete desired firewall configuration.
 
         Attributes:
-            enabled (bool):
-            inbound (list[FirewallRuleResponse]):
-            outbound (list[FirewallRuleResponse]):
+            enabled (bool): Whether the firewall enforces these rules.
+            inbound (list[FirewallRuleResponse]): Inbound allow rules.
+            outbound (list[FirewallRuleResponse]): Outbound allow rules.
      """
 
     enabled: bool

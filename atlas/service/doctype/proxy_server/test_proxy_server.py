@@ -208,7 +208,7 @@ class TestProxyServerCreate(UnitTestCase):
 					"cpu_millicores": 2000,
 					"memory_mib": 4096,
 					"disk_mib": 16384,
-					"server_ip_address": "203.0.113.9",
+					"public_ipv4": "32eb57bc-9548-4a89-8358-543e26883569",
 				}
 			)
 
@@ -218,7 +218,10 @@ class TestProxyServerCreate(UnitTestCase):
 		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_privileged"])
 		self.assertTrue(virtual_machine_service.create.call_args.args[0]["is_termination_protected"])
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["hostname"], "proxy-001")
-		self.assertEqual(virtual_machine_service.create.call_args.args[0]["server_ip_address"], "203.0.113.9")
+		self.assertEqual(
+			virtual_machine_service.create.call_args.args[0]["public_ipv4"],
+			"32eb57bc-9548-4a89-8358-543e26883569",
+		)
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["cpu_millicores"], 2000)
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["memory_mib"], 4096)
 		self.assertEqual(virtual_machine_service.create.call_args.args[0]["disk_mib"], 16384)
@@ -253,7 +256,7 @@ class TestProxyServerCreate(UnitTestCase):
 					"cpu_millicores": 2000,
 					"memory_mib": 4096,
 					"disk_mib": 16384,
-					"server_ip_address": "203.0.113.9",
+					"public_ipv4": "32eb57bc-9548-4a89-8358-543e26883569",
 				}
 			)
 
@@ -262,7 +265,7 @@ class TestProxyServerCreate(UnitTestCase):
 	def test_creation_needs_an_allocated_public_ipv4_address(self) -> None:
 		with (
 			patch.object(proxy_server_module.frappe, "only_for"),
-			self.assertRaisesRegex(frappe.ValidationError, "allocated public IPv4"),
+			self.assertRaisesRegex(frappe.ValidationError, "reserved public IPv4"),
 		):
 			proxy_server_module.create(
 				{

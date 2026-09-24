@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.image_response import ImageResponse
 from ...models.termination_protection_payload import TerminationProtectionPayload
 from typing import cast
@@ -45,7 +46,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ImageResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | ImageResponse | None:
     if response.status_code == 202:
         response_202 = ImageResponse.from_dict(response.json())
 
@@ -53,13 +54,48 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_202
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ImageResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | ImageResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -75,7 +111,7 @@ def sync_detailed(
     body: TerminationProtectionPayload,
     x_tenant_id: int,
 
-) -> Response[ImageResponse]:
+) -> Response[ApiErrorResponse | ImageResponse]:
     """ Update termination protection
 
      Sets or clears termination protection. Deletion of a protected image is refused until a later
@@ -91,7 +127,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ImageResponse]
+        Response[ApiErrorResponse | ImageResponse]
      """
 
 
@@ -115,7 +151,7 @@ def sync(
     body: TerminationProtectionPayload,
     x_tenant_id: int,
 
-) -> ImageResponse | None:
+) -> ApiErrorResponse | ImageResponse | None:
     """ Update termination protection
 
      Sets or clears termination protection. Deletion of a protected image is refused until a later
@@ -131,7 +167,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ImageResponse
+        ApiErrorResponse | ImageResponse
      """
 
 
@@ -150,7 +186,7 @@ async def asyncio_detailed(
     body: TerminationProtectionPayload,
     x_tenant_id: int,
 
-) -> Response[ImageResponse]:
+) -> Response[ApiErrorResponse | ImageResponse]:
     """ Update termination protection
 
      Sets or clears termination protection. Deletion of a protected image is refused until a later
@@ -166,7 +202,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ImageResponse]
+        Response[ApiErrorResponse | ImageResponse]
      """
 
 
@@ -190,7 +226,7 @@ async def asyncio(
     body: TerminationProtectionPayload,
     x_tenant_id: int,
 
-) -> ImageResponse | None:
+) -> ApiErrorResponse | ImageResponse | None:
     """ Update termination protection
 
      Sets or clears termination protection. Deletion of a protected image is refused until a later
@@ -206,7 +242,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ImageResponse
+        ApiErrorResponse | ImageResponse
      """
 
 

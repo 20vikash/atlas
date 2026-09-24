@@ -81,28 +81,25 @@ type imageArtifactResponse struct {
 
 // networkResponse is the desired VM network.
 type networkResponse struct {
-	PublicIPv4                    string                 `json:"public_ipv4,omitempty"`
-	GatewayRoutes                 []gatewayRouteResponse `json:"gateway_routes,omitempty"`
-	IsNetworkGateway              bool                   `json:"is_network_gateway,omitempty"`
-	PublicIPv6                    string                 `json:"public_ipv6,omitempty"`
-	WireGuardMeshIPv6             string                 `json:"wireguard_mesh_ipv6"`
-	PrivateNetworkThroughputMiBps int                    `json:"private_network_throughput_mibps"`
-	PublicNetworkThroughputMiBps  int                    `json:"public_network_throughput_mibps"`
-	Egress                        string                 `json:"egress"`
-	Firewall                      firewallResponse       `json:"firewall"`
+	PublicIPv4                    string           `json:"public_ipv4,omitempty"`
+	Routes                        []routeResponse  `json:"routes"`
+	IsNetworkGateway              bool             `json:"is_network_gateway,omitempty"`
+	PublicIPv6                    string           `json:"public_ipv6,omitempty"`
+	WireGuardMeshIPv6             string           `json:"wireguard_mesh_ipv6"`
+	PrivateNetworkThroughputMiBps int              `json:"private_network_throughput_mibps"`
+	PublicNetworkThroughputMiBps  int              `json:"public_network_throughput_mibps"`
+	Firewall                      firewallResponse `json:"firewall"`
 }
 
-// gatewayRouteResponse names the gateway that carries one destination range.
-type gatewayRouteResponse struct {
+type routeResponse struct {
 	Destination string `json:"destination"`
-	Gateway     string `json:"gateway"`
+	Via         string `json:"via"`
 }
 
-// toGatewayRoutes converts the routes into their response form.
-func toGatewayRoutes(routes []vm.GatewayRoute) []gatewayRouteResponse {
-	responses := make([]gatewayRouteResponse, len(routes))
+func toRoutes(routes []vm.Route) []routeResponse {
+	responses := make([]routeResponse, len(routes))
 	for index, route := range routes {
-		responses[index] = gatewayRouteResponse{Destination: route.Destination, Gateway: route.Gateway}
+		responses[index] = routeResponse{Destination: route.Destination, Via: route.Via}
 	}
 	return responses
 }
@@ -167,13 +164,12 @@ func toVirtualMachine(information vm.Information) virtualMachineResponse {
 			Image: toVirtualMachineImage(information.Image),
 			Network: networkResponse{
 				PublicIPv4:                    information.PublicIPv4,
-				GatewayRoutes:                 toGatewayRoutes(information.GatewayRoutes),
+				Routes:                        toRoutes(information.Routes),
 				IsNetworkGateway:              information.IsNetworkGateway,
 				PublicIPv6:                    information.PublicIPv6,
 				WireGuardMeshIPv6:             information.WireGuardMeshIPv6,
 				PrivateNetworkThroughputMiBps: information.PrivateNetworkThroughputMiBps,
 				PublicNetworkThroughputMiBps:  information.PublicNetworkThroughputMiBps,
-				Egress:                        string(information.Egress),
 				Firewall:                      toFirewall(information.Firewall),
 			},
 			Guest: guestResponse{

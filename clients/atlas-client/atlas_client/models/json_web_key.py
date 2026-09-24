@@ -26,13 +26,13 @@ class JSONWebKey:
     """ One public Ed25519 signature key.
 
         Attributes:
-            alg (Literal['EdDSA']):
-            crv (Literal['Ed25519']):
-            kid (str):
-            kty (Literal['OKP']):
-            use (Literal['sig']):
-            x (str):
-            key_ops (list[Literal['verify']] | Unset):
+            alg (Literal['EdDSA']): Signing algorithm.
+            crv (Literal['Ed25519']): Edwards curve name.
+            kid (str): Key ID used to select this key.
+            kty (Literal['OKP']): JSON Web Key type.
+            use (Literal['sig']): Intended key use.
+            x (str): Base64url-encoded public key.
+            key_ops (list[Literal['verify']] | Unset): Operations allowed for this public key.
      """
 
     alg: Literal['EdDSA']

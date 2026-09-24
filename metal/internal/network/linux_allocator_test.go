@@ -134,7 +134,7 @@ func TestDisabledFirewallIgnoresRetainedRuleChanges(t *testing.T) {
 
 func TestMeshRegistrationIsSkippedWithoutAMesh(t *testing.T) {
 	allocator := NewLinuxAllocator(nil, nil)
-	if err := allocator.addMeshRegistration(context.Background(), request{VirtualMachineID: "vm-1", UserID: 100000, WireGuardMeshIPv6: "fdaa:1:0:1::1"}); err != nil {
+	if err := allocator.addMeshRegistration(context.Background(), request{VirtualMachineID: "vm-1", UserID: 100000, NetworkConfiguration: vm.NetworkConfiguration{WireGuardMeshIPv6: "fdaa:1:0:1::1"}}); err != nil {
 		t.Fatal(err)
 	}
 }

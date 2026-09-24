@@ -17,7 +17,7 @@ The record name is the Metal VM ID. Atlas assigns each name from the `vm-.######
 | `VirtualMachine` (DocType) | The reservation, permissions, and the whitelisted API. Runtime values read through. |
 | `VirtualMachineImage` (DocType) | The durable boot artifact and its immutable reference. |
 | `Virtual Machine State` (DocType) | The last status a host reported for one VM. The name is the VM name. It also answers whether a live VM still needs an image. |
-| `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Metal Server IP Address. |
+| `Atlas Tag` (DocType) | One key and value label on a Virtual Machine, a Virtual Machine Image, or a Public IP Allocation. |
 | `VirtualMachineService` | Every operation that spans an Atlas record and a Metal host. |
 | `PlacementStrategy` | Selects and reserves Metal Servers for one set of placement requirements. |
 | `MetalClient` | `/v1` mutual-TLS transport, regional CA verification, and error classification. |
@@ -232,7 +232,7 @@ The service also reads `meta-data/host-routes`, a comma-separated list of destin
 
 `atlas-metadata.service` reads MMDS every 250 ms. This lets a warm VM receive its own hostname and address after resume. cloud-init uses `preserve_hostname`, so the service owns the hostname.
 
-When the service writes a new mesh drop-in, it also resets the server features of systemd-resolved, flushes the resolver cache, and queues a restart of systemd-timesyncd. A warm snapshot is captured without egress, so the resolver and time sync resume in a backed-off state. Without this reset, DNS and time sync stay stalled for about 40 seconds after resume.
+When the service writes a new mesh drop-in, it also resets the server features of systemd-resolved, flushes the resolver cache, and queues a restart of systemd-timesyncd. A warm snapshot is captured without a network, so the resolver and time sync resume in a backed-off state. Without this reset, DNS and time sync stay stalled for about 40 seconds after resume.
 
 ## Custom metadata
 
@@ -252,39 +252,42 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 
 | Action | Behavior |
 |---|---|
-| Attach IPv4 Address | Sets an attach intent and sends the address with `uplink` egress. |
-| Detach IPv4 Address | Sends an empty address and sets a detach intent. |
+| Attach Public IPv4 | Attaches an automatic or reserved `/32` allocation. |
+| Detach Public IPv4 | Clears the Metal address and completes the allocation detach. |
+| Attach Public IPv6 | Attaches an automatic direct or routed allocation. |
+| Detach Public IPv6 | Clears the direct prefix and its `2000::/3` host route, or the routed `2000::/3` route. |
 | Edit Network Throughput | Sends private and public limits in MiB/s. `0` removes a limit. |
 | Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
-| Change Egress Mode | Sends `uplink`, `mesh`, or `none`. |
-| Edit Gateway Routes | Sends each destination range with the mesh address of its gateway VM. The gateway must be an active network gateway VM. |
-| Make Network Gateway | Sets `is_network_gateway`. It needs the privileged flag. |
-| Attach IPv6 Block | Sends `public_ipv6`, then sets the provider attach intent. A VM holds one block. System Manager only. |
-| Detach IPv6 Block | Sends an empty `public_ipv6`, then sets a detach intent. System Manager only. |
+| Edit Routes | Sends the complete route list. Each destination goes via `host` or a gateway mesh address. The editor identifies the gateway VM when Atlas knows the address. |
+| Make Network Gateway | Sets `is_network_gateway` and the `2000::/3` route via `host`. It needs the privileged flag. |
 
-Metal owns the gateway routes. Atlas shows them as a read-only virtual field. A gateway or a VM with a block has no gateway routes, because it reaches every destination through its host. Migration moves each attached public address to the destination server at cutover. A scheduled job retries a move that failed.
+Metal owns the routes. Atlas shows them as a read-only virtual field. A network gateway has no routes via another gateway. Migration moves direct provider allocations to the destination server. A routed allocation stays on its gateway. Scheduled jobs retry incomplete provider and allocation intents.
 
-Atlas applies the Metal change before it releases an address. A VM can hold one public IPv4 address. Public IPv4, egress, throughput limits, and firewall rules can also be set during creation.
+A VM can hold one IPv4 allocation and one IPv6 allocation. VM creation attaches no public allocation unless `public_ipv4` or `public_ipv6` is `auto` or a reserved allocation UUID.
 
-An attach first records the provider intent. The provider reconcile job gets the host address and then sends that address to Metal. VM creation leaves the Metal address empty until this reconcile job succeeds.
+A direct allocation sets `network.public_ipv4` or `network.public_ipv6` and its host route: `0.0.0.0/0` or `2000::/3` via `host`. Metal maps a direct IPv6 `/128` to the mesh address, so the guest needs no configuration. A routed IPv6 allocation keeps the prefix on an IPv6 Router Server and sets the VM route for `2000::/3` to that router mesh address.
 
-The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change one firewall field. Atlas merges it with the current desired firewall and sends the complete network to Metal.
+The Atlas setting **Use IPv6 Router For Auto Assignment** selects direct or routed delivery for automatic IPv6. Atlas does not fall back to the other mode when the selected mode has no capacity.
+
+Tenants can reserve direct allocations. They cannot reserve routed IPv6. Detach deletes an unreserved routed allocation, so a later attach can return a different address.
+
+The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change `ipv4_internet_access` or one firewall field. `ipv4_internet_access` adds or removes only the `0.0.0.0/0` route via `host`. Tenants cannot send routes. The route list is part of the Atlas to Metal contract, and System Managers edit it in Desk. Atlas merges it with the current desired firewall and sends the complete network to Metal.
 
 Firewall rules are allow rules for public and mesh traffic. They support `any`, `tcp`, `udp`, and `icmp`. TCP and UDP rules can select one destination port or one inclusive range. Each rule needs one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries.
 
 A disabled firewall permits all traffic and keeps its rules. An enabled firewall blocks unmatched new traffic. An empty direction blocks new traffic in that direction. Established and related connections continue.
 
-Egress controls internet reachability. It does not control mesh reachability.
+Routes control reachability outside the mesh. Every VM has the mesh. A new VM gets `0.0.0.0/0` via `host`. A VM without routes reaches only mesh peers.
 
-| Mode | VM can reach | Public IPv4 | Throughput limits |
-|---|---|---|---|
-| `uplink` | mesh peers and the internet | allowed | private and public |
-| `mesh` | mesh peers only | rejected | private applied, public stored |
-| `none` | nothing | rejected | none |
+| Route | VM can reach |
+|---|---|
+| `0.0.0.0/0` via `host` | the IPv4 internet through host NAT |
+| `2000::/3` via `host` | the IPv6 internet from its public IPv6 address |
+| `2000::/3` via a router mesh address | the IPv6 internet through an IPv6 router |
 
-A public IPv4 address needs `uplink`. Atlas refuses `mesh` and `none` while an address is attached.
+Atlas refuses a route list that drops the IPv4 host route while a public IPv4 address is attached. It also refuses a change to the `2000::/3` route while a public IPv6 allocation is attached, because the allocation owns that route. A public limit applies only when an IPv4 route uses `host`.
 
-Active connections can stop when the public IPv4 address or the egress mode changes.
+Active connections can stop when a public address or a route changes.
 
 ## Resize
 

@@ -25,10 +25,10 @@ class ResizePayload:
     """ VM resource and idle shutdown changes.
 
         Attributes:
-            cpu_millicores (int | None | Unset):
-            disk_mib (int | None | Unset):
-            memory_mib (int | None | Unset):
-            sleep_after_idle_seconds (int | None | Unset):
+            cpu_millicores (int | None | Unset): New CPU capacity in millicores.
+            disk_mib (int | None | Unset): New root disk capacity in MiB.
+            memory_mib (int | None | Unset): New memory capacity in MiB.
+            sleep_after_idle_seconds (int | None | Unset): New idle time before automatic stop. Zero disables it.
      """
 
     cpu_millicores: int | None | Unset = UNSET

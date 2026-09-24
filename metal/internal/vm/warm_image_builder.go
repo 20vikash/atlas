@@ -133,7 +133,7 @@ func warmupSpecification(image Image, configuration MemorySnapshotConfiguration)
 		MemoryMiB:     configuration.MemoryMiB,
 		DiskMiB:       configuration.DiskMiB,
 		Image:         image,
-		Network:       NetworkConfiguration{Egress: EgressNone},
+		Network:       NetworkConfiguration{},
 	}
 }
 

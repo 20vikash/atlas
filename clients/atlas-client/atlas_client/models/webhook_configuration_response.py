@@ -24,9 +24,9 @@ class WebhookConfigurationResponse:
     """ The configured event deliveries of one Central.
 
         Attributes:
-            central_id (int):
-            enabled (bool):
-            webhooks (list[str]):
+            central_id (int): Receiving Central.
+            enabled (bool): Whether Atlas sends webhook events.
+            webhooks (list[str]): Frappe webhook records managed for this Central.
      """
 
     central_id: int

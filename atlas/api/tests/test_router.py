@@ -283,7 +283,11 @@ class TestSpecification(unittest.TestCase):
 		router = make_router(
 			name="Machines",
 			description="Machine operations",
-			docs=DocsConfig(title="Atlas API", version="2.0.0"),
+			docs=DocsConfig(
+				title="Atlas API",
+				version="2.0.0",
+				description="Manage machines in one region.",
+			),
 		)
 
 		@router.post("machines")
@@ -310,7 +314,14 @@ class TestSpecification(unittest.TestCase):
 
 	def test_document_metadata(self):
 		self.assertEqual(self.specification["openapi"], "3.1.0")
-		self.assertEqual(self.specification["info"], {"title": "Atlas API", "version": "2.0.0"})
+		self.assertEqual(
+			self.specification["info"],
+			{
+				"title": "Atlas API",
+				"version": "2.0.0",
+				"description": "Manage machines in one region.",
+			},
+		)
 		self.assertIn({"name": "Machines", "description": "Machine operations"}, self.specification["tags"])
 
 	def test_nested_tags_include_their_parent(self):
@@ -386,13 +397,27 @@ class TestSpecification(unittest.TestCase):
 		responses = self.operation("machines", "post")["responses"]
 		self.assertEqual(responses["201"]["description"], "Created")
 		self.assertNotIn("404", responses)
+		self.assertIn("400", responses)
+		self.assertIn("401", responses)
+		self.assertIn("403", responses)
+		self.assertIn("500", responses)
+
+	def test_standard_errors_use_the_atlas_error_schema(self):
+		responses = self.operation("machines", "post")["responses"]
+		for status in ("400", "401", "403", "500"):
+			self.assertEqual(
+				responses[status]["content"]["application/json"]["schema"],
+				{"$ref": "#/components/schemas/ApiErrorResponse"},
+			)
 
 	def test_path_and_query_parameters_are_described(self):
 		operation = self.operation("machines/{name}", "get")
 		parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
 		self.assertTrue(parameters["X-Tenant-ID"]["required"])
+		self.assertEqual(parameters["X-Tenant-ID"]["schema"]["minimum"], 0)
 		self.assertEqual(parameters["name"]["in"], "path")
 		self.assertTrue(parameters["name"]["required"])
+		self.assertEqual(parameters["name"]["description"], "Name.")
 		self.assertTrue(parameters["region"]["required"])
 		self.assertFalse(parameters["limit"]["required"])
 		self.assertEqual(parameters["limit"]["schema"]["type"], "integer")

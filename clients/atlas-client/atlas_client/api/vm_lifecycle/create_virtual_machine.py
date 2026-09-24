@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.capacity_unavailable_response import CapacityUnavailableResponse
 from ...models.create_virtual_machine_payload import CreateVirtualMachinePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
@@ -45,13 +46,41 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
-    if response.status_code == 201:
-        response_201 = VirtualMachineResponse.from_dict(response.json())
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse | None:
+    if response.status_code == 202:
+        response_202 = VirtualMachineResponse.from_dict(response.json())
 
 
 
-        return response_201
+        return response_202
+
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
 
     if response.status_code == 503:
         response_503 = CapacityUnavailableResponse.from_dict(response.json())
@@ -66,7 +95,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -81,7 +110,7 @@ def sync_detailed(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
+) -> Response[ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse]:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -100,7 +129,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CapacityUnavailableResponse | VirtualMachineResponse]
+        Response[ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse]
      """
 
 
@@ -122,7 +151,7 @@ def sync(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
+) -> ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse | None:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -141,7 +170,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CapacityUnavailableResponse | VirtualMachineResponse
+        ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse
      """
 
 
@@ -158,7 +187,7 @@ async def asyncio_detailed(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> Response[CapacityUnavailableResponse | VirtualMachineResponse]:
+) -> Response[ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse]:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -177,7 +206,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CapacityUnavailableResponse | VirtualMachineResponse]
+        Response[ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse]
      """
 
 
@@ -199,7 +228,7 @@ async def asyncio(
     body: CreateVirtualMachinePayload,
     x_tenant_id: int,
 
-) -> CapacityUnavailableResponse | VirtualMachineResponse | None:
+) -> ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse | None:
     """ Create VM
 
      Creates a tenant VM from an image and requests the specified compute, disk, network, and guest
@@ -218,7 +247,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CapacityUnavailableResponse | VirtualMachineResponse
+        ApiErrorResponse | CapacityUnavailableResponse | VirtualMachineResponse
      """
 
 

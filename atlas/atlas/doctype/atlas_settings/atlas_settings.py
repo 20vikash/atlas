@@ -68,6 +68,8 @@ class AtlasSettings(Document):
 		dns_provider: DF.Literal["Route53"]
 		http_proxy_package_file: DF.Link | None
 		http_proxy_package_hash: DF.Data | None
+		ipv6_router_package_file: DF.Link | None
+		ipv6_router_package_hash: DF.Data | None
 		is_dns_setup_completed: DF.Check
 		is_letsencrypt_staging: DF.Check
 		is_server_provider_setup_completed: DF.Check
@@ -123,6 +125,7 @@ class AtlasSettings(Document):
 		server_provider: DF.Literal["Generic", "Scaleway", "AWS"]
 		sleepy_vm_overcommit_factor: DF.Float
 		use_dedicated_sleepy_vm_hosts: DF.Check
+		use_ipv6_router_for_auto_assignment: DF.Check
 		use_public_ip_for_metald: DF.Check
 		wg_mesh_binary_hash: DF.Data | None
 		wg_mesh_binary_x86_64_file: DF.Link | None

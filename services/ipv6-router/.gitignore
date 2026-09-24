@@ -1,0 +1,3 @@
+# Generated eBPF object and configuration.
+*.bpf.o
+config.h

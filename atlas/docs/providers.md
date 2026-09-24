@@ -119,11 +119,23 @@ An existing size must match the host architecture and CPU count. An existing ima
 
 Atlas stores the host facts in `provider_metadata`, including `storage_pool_device`. Provisioning does not create or prepare the host. It checks the private IPv4 address, then installs WireGuard and Metal.
 
-### Add a public IPv4 address
+### Add a static public IP pool
 
-On the Metal Server IP Address list, select **Add**. Enter an IPv4 address that the provider network routes to every Metal Server through VXLAN. Confirm this route when you save the address.
+Open **Public IP Pool** and add a Static pool.
 
-For Generic, the IPv4 address is also the provider resource ID. Atlas sends this address to Metal when it attaches the address to a VM. Atlas does not change the provider route during attach or detach.
+For IPv4, enter the routed network and use allocation prefix length `32`.
+
+For example, `203.0.113.0/24` provides `/32` allocations.
+
+The provider network must route the complete pool to every eligible Metal Server, such as through VXLAN.
+
+For direct IPv6, select the allocation prefix length that each VM receives.
+
+The complete IPv6 pool must be reachable on every eligible Metal Server.
+
+Atlas changes only the Metal VM network for a static direct pool.
+
+It does not change the provider route during attach or detach.
 
 ### Unsupported operations
 
@@ -132,7 +144,7 @@ For Generic, the IPv4 address is also the provider resource ID. Atlas sends this
 | Automatic host creation | Refused. Atlas Settings rejects **Metal Auto-spawn Config > Enabled**. |
 | Power actions | Refused. |
 | Archive | Marks the record Deleted. The host keeps running, and the operator reclaims it. |
-| Public IPv4 reservation | Refused. Use **Add** on the Metal Server IP Address list. |
+| Provider public IP reservation | Refused. Add a Static Public IP Pool. |
 | Public IPv4 attach | Returns the public address. Metal adds the address to the VM port. |
 | Public IPv4 detach and delete | Do nothing. |
 

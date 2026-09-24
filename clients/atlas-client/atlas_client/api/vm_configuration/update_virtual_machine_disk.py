@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.disk_update_payload import DiskUpdatePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
 from typing import cast
@@ -45,7 +46,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | VirtualMachineResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | VirtualMachineResponse | None:
     if response.status_code == 202:
         response_202 = VirtualMachineResponse.from_dict(response.json())
 
@@ -53,9 +54,47 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_202
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
     if response.status_code == 409:
-        response_409 = cast(Any, None)
+        response_409 = ApiErrorResponse.from_dict(response.json())
+
+
+
         return response_409
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -63,7 +102,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -79,7 +118,7 @@ def sync_detailed(
     body: DiskUpdatePayload,
     x_tenant_id: int,
 
-) -> Response[Any | VirtualMachineResponse]:
+) -> Response[ApiErrorResponse | VirtualMachineResponse]:
     """ Update disk in-place
 
      Works while the VM runs. The disk only grows, and `0` removes a limit. A full host returns `409
@@ -95,7 +134,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | VirtualMachineResponse]
+        Response[ApiErrorResponse | VirtualMachineResponse]
      """
 
 
@@ -119,7 +158,7 @@ def sync(
     body: DiskUpdatePayload,
     x_tenant_id: int,
 
-) -> Any | VirtualMachineResponse | None:
+) -> ApiErrorResponse | VirtualMachineResponse | None:
     """ Update disk in-place
 
      Works while the VM runs. The disk only grows, and `0` removes a limit. A full host returns `409
@@ -135,7 +174,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | VirtualMachineResponse
+        ApiErrorResponse | VirtualMachineResponse
      """
 
 
@@ -154,7 +193,7 @@ async def asyncio_detailed(
     body: DiskUpdatePayload,
     x_tenant_id: int,
 
-) -> Response[Any | VirtualMachineResponse]:
+) -> Response[ApiErrorResponse | VirtualMachineResponse]:
     """ Update disk in-place
 
      Works while the VM runs. The disk only grows, and `0` removes a limit. A full host returns `409
@@ -170,7 +209,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | VirtualMachineResponse]
+        Response[ApiErrorResponse | VirtualMachineResponse]
      """
 
 
@@ -194,7 +233,7 @@ async def asyncio(
     body: DiskUpdatePayload,
     x_tenant_id: int,
 
-) -> Any | VirtualMachineResponse | None:
+) -> ApiErrorResponse | VirtualMachineResponse | None:
     """ Update disk in-place
 
      Works while the VM runs. The disk only grows, and `0` removes a limit. A full host returns `409
@@ -210,7 +249,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | VirtualMachineResponse
+        ApiErrorResponse | VirtualMachineResponse
      """
 
 

@@ -9,10 +9,10 @@ import frappe
 import requests
 from frappe import _
 
-from atlas.atlas.core.artifacts import get_download_url
 from atlas.atlas.core.ssh import SSHRunner, wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.service.core.proxy.configuration import ProxyConfiguration
+from atlas.service.core.service_package import HTTP_PROXY_PACKAGE
 
 if TYPE_CHECKING:
 	from atlas.service.doctype.proxy_server.proxy_server import ProxyServer
@@ -223,24 +223,16 @@ class ProxyServerProvisioner:
 
 	def install_package(self, save: bool = True) -> None:
 		"""Download the published package and run the proxy setup script."""
-		settings = frappe.get_single("Atlas Settings")
-		package_file = settings.get("http_proxy_package_file")
-		package_hash = settings.get("http_proxy_package_hash")
-		if not package_file or not package_hash:
-			frappe.throw(_("Atlas Settings holds no HTTP proxy package. Run build-http-proxy-package."))
-
-		if self.proxy_server.installed_package_hash == package_hash:
+		environment = HTTP_PROXY_PACKAGE.get_install_environment()
+		if self.proxy_server.installed_package_hash == environment["PACKAGE_SHA256"]:
 			self.save_progress(save)
 			return
 
 		task = SSHTask.create_for_script_file(
 			target_type="Virtual Machine",
 			target=self.proxy_server.virtual_machine,
-			script_path="install-http-proxy.sh",
-			environment={
-				"HTTP_PROXY_DOWNLOAD_URL": get_download_url(package_file),
-				"HTTP_PROXY_PACKAGE_SHA256": package_hash,
-			},
+			script_path="install-service-package.sh",
+			environment=environment,
 			timeout_seconds=INSTALL_TIMEOUT_SECONDS,
 			run_in_background=False,
 		)
@@ -248,7 +240,7 @@ class ProxyServerProvisioner:
 		if result is None or not result.is_success:
 			frappe.throw(_("The HTTP proxy install failed. See SSH Task {0}.").format(task.name))
 
-		self.proxy_server.installed_package_hash = package_hash
+		self.proxy_server.installed_package_hash = environment["PACKAGE_SHA256"]
 		self.save_progress(save)
 
 	@property

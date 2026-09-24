@@ -5,6 +5,7 @@ import frappe
 from frappe.tests import UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
+from atlas.vm.core.models import Route
 from atlas.vm.core.placement import OutOfCapacity, PlacementStrategy
 from atlas.vm.core.vm_service import (
 	InsufficientHostCapacity,
@@ -257,44 +258,78 @@ class TestVirtualMachineDisk(UnitTestCase):
 class TestVirtualMachineNetworkChanges(UnitTestCase):
 	def build_service(self, attached: str | None) -> VirtualMachineService:
 		"""Return a service for a managed virtual machine."""
-		virtual_machine = SimpleNamespace(name="VM-00001", validate_network_change=Mock())
+		virtual_machine = SimpleNamespace(
+			name="VM-00001", validate_network_change=Mock(), is_network_gateway=0
+		)
 		service = VirtualMachineService(virtual_machine)
 		service.get_ipv4_address_name = Mock(return_value=attached)
+		service.get_public_ipv6 = Mock(return_value="")
 		return service
 
-	def test_termination_releases_the_ipv4_address_and_the_ipv6_block(self) -> None:
+	def test_termination_detaches_all_public_ip_allocations(self) -> None:
 		virtual_machine = SimpleNamespace(name="VM-00001", db_set=Mock())
 		service = VirtualMachineService(virtual_machine)
-		addresses = {"203.0.113.10": Mock(), "2001:db8:1:2::": Mock()}
+		allocations = {"allocation-4": Mock(), "allocation-6": Mock()}
 
 		with (
 			patch.object(VirtualMachineService, "metal_client", Mock()),
-			patch("atlas.vm.core.vm_service.frappe.get_all", return_value=list(addresses)),
+			patch("atlas.vm.core.vm_service.frappe.get_all", return_value=list(allocations)),
 			patch(
-				"atlas.vm.core.vm_service.frappe.get_doc", side_effect=lambda _doctype, name: addresses[name]
+				"atlas.vm.core.vm_service.frappe.get_doc",
+				side_effect=lambda _doctype, name: allocations[name],
 			),
 		):
 			service.terminate()
 
-		for address in addresses.values():
-			address.release.assert_called_once_with()
+		for allocation in allocations.values():
+			allocation.begin_detach.assert_called_once_with()
 
-	def test_an_unknown_egress_mode_is_rejected(self) -> None:
+	# An allocation job can run before Metal stores a new VM. An empty route list
+	# would then replace the create routes, so the read must fail and retry.
+	def test_a_route_edit_fails_until_metal_holds_the_vm(self) -> None:
+		service = self.build_service(None)
+
+		with (
+			patch.object(service, "get_information", return_value=None),
+			patch.object(service, "require_information", side_effect=frappe.ValidationError("not found")),
+			self.assertRaises(frappe.ValidationError),
+		):
+			service.get_routes_with(Route("2000::/3", "fdaa:1::56"))
+
+	def test_ipv4_internet_access_adds_and_removes_only_the_ipv4_host_route(self) -> None:
+		service = self.build_service(None)
+		gateway_route = Route("2000::/3", "fdaa:1::56")
+
+		for enabled, routes in (
+			(True, [gateway_route]),
+			(False, [gateway_route, Route("0.0.0.0/0", "host")]),
+		):
+			with (
+				patch.object(service, "get_routes", return_value=routes),
+				patch.object(service, "update_network", return_value={}) as update_network,
+			):
+				service.apply_network_changes({"ipv4_internet_access": enabled})
+
+			sent = update_network.call_args.args[0]["routes"]
+			self.assertIn(gateway_route.as_dict(), sent)
+			self.assertEqual({"destination": "0.0.0.0/0", "via": "host"} in sent, enabled)
+
+	def test_an_invalid_route_is_rejected(self) -> None:
 		service = self.build_service(None)
 
 		with patch.object(service, "update_network") as update_network:
 			with self.assertRaises(frappe.ValidationError):
-				service.apply_network_changes({"egress": "server"})
+				service.apply_network_changes({"routes": [{"destination": "0.0.0.0/0", "via": "server"}]})
 
 			update_network.assert_not_called()
 
-	def test_an_attached_address_keeps_the_internet_path(self) -> None:
+	def test_an_attached_ipv4_address_keeps_its_host_route(self) -> None:
 		service = self.build_service("203.0.113.10")
 
-		for egress in ("mesh", "none"):
+		for routes in ([], [{"destination": "10.0.0.0/8", "via": "host"}]):
 			with patch.object(service, "update_network") as update_network:
-				with self.assertRaises(frappe.ValidationError):
-					service.apply_network_changes({"egress": egress})
+				with self.assertRaisesRegex(frappe.ValidationError, "Detach the public IPv4"):
+					service.apply_network_changes({"routes": routes})
 
 				update_network.assert_not_called()
 
@@ -305,48 +340,3 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 			service.apply_network_changes({"public_network_throughput_mibps": 25})
 
 		update_network.assert_called_once_with({"public_network_throughput_mibps": 25})
-
-	def test_an_unowned_pool_address_is_claimed_for_the_tenant(self) -> None:
-		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
-		address = SimpleNamespace(
-			tenant_id=-1,
-			reserved=0,
-			status="Allocated",
-			virtual_machine=None,
-			is_ipv6=False,
-			begin_assignment=Mock(),
-		)
-
-		with patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address):
-			VirtualMachineService(virtual_machine).assign_ip_address("203.0.113.10")
-
-		self.assertEqual(address.tenant_id, 7)
-		self.assertFalse(address.reserved)
-		address.begin_assignment.assert_called_once_with("server-1", "VM-00001")
-
-	def test_an_attached_pool_address_is_not_claimed(self) -> None:
-		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
-		address = SimpleNamespace(
-			tenant_id=-1, status="Attached", virtual_machine=None, is_ipv6=False, begin_assignment=Mock()
-		)
-
-		with (
-			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address),
-			self.assertRaises(frappe.ValidationError),
-		):
-			VirtualMachineService(virtual_machine).assign_ip_address("203.0.113.10")
-
-		self.assertEqual(address.tenant_id, -1)
-		address.begin_assignment.assert_not_called()
-
-	def test_an_ip_address_from_another_tenant_is_rejected(self) -> None:
-		virtual_machine = SimpleNamespace(name="VM-00001", tenant_id=7, server="server-1")
-		address = SimpleNamespace(tenant_id=8, status="Allocated", virtual_machine=None)
-
-		with (
-			patch("atlas.vm.core.vm_service.frappe.get_doc", return_value=address) as get_doc,
-			self.assertRaises(frappe.PermissionError),
-		):
-			VirtualMachineService(virtual_machine).assign_ip_address("203.0.113.10")
-
-		get_doc.assert_called_once_with("Metal Server IP Address", "203.0.113.10", for_update=True)

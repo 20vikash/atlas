@@ -8,9 +8,11 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.virtual_machine_detail_response_architecture import VirtualMachineDetailResponseArchitecture
 from typing import cast
 
 if TYPE_CHECKING:
+  from ..models.public_ip_response import PublicIPResponse
   from ..models.virtual_machine_compute import VirtualMachineCompute
   from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags
   from ..models.virtual_machine_disk import VirtualMachineDisk
@@ -30,23 +32,25 @@ class VirtualMachineDetailResponse:
     """ One virtual machine with its state, addresses, and guest configuration.
 
         Attributes:
-            architecture (str):
+            architecture (VirtualMachineDetailResponseArchitecture): CPU architecture.
             compute (VirtualMachineCompute): The compute shape of one virtual machine.
-            created_at (int):
-            current_state (str):
-            desired_state (None | str):
+            created_at (int): Creation time as Unix seconds.
+            current_state (str): Current state reported by the host or managed by Atlas.
+            desired_state (None | str): State requested from the host, or null when unavailable.
             disk (VirtualMachineDisk): The disk size and its rate limits.
-            error (None | str):
+            error (None | str): Current host-reported error, or null.
             guest (VirtualMachineGuest): The guest configuration of one virtual machine.
-            id (str):
-            image_id (str):
-            is_privileged (bool):
-            network (VirtualMachineNetwork): The addresses and network limits of one virtual machine.
-            tags (VirtualMachineDetailResponseTags):
-            tenant_id (int):
+            id (str): Virtual machine ID.
+            image_id (str): Image used to create the virtual machine.
+            is_privileged (bool): Whether the guest can reach every tenant through the mesh.
+            network (VirtualMachineNetwork): The addresses, internet access, and network limits of one virtual machine.
+            public_ipv4 (None | PublicIPResponse): Attached public IPv4 allocation, or null.
+            public_ipv6 (None | PublicIPResponse): Attached public IPv6 allocation, or null.
+            tags (VirtualMachineDetailResponseTags): Resource tags as key-value pairs.
+            tenant_id (int): Tenant that owns the virtual machine.
      """
 
-    architecture: str
+    architecture: VirtualMachineDetailResponseArchitecture
     compute: VirtualMachineCompute
     created_at: int
     current_state: str
@@ -58,6 +62,8 @@ class VirtualMachineDetailResponse:
     image_id: str
     is_privileged: bool
     network: VirtualMachineNetwork
+    public_ipv4: None | PublicIPResponse
+    public_ipv6: None | PublicIPResponse
     tags: VirtualMachineDetailResponseTags
     tenant_id: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -67,12 +73,13 @@ class VirtualMachineDetailResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         from ..models.virtual_machine_compute import VirtualMachineCompute # noqa: PLC0415
         from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags # noqa: PLC0415
         from ..models.virtual_machine_disk import VirtualMachineDisk # noqa: PLC0415
         from ..models.virtual_machine_guest import VirtualMachineGuest # noqa: PLC0415
         from ..models.virtual_machine_network import VirtualMachineNetwork # noqa: PLC0415
-        architecture = self.architecture
+        architecture = self.architecture.value
 
         compute = self.compute.to_dict()
 
@@ -98,6 +105,18 @@ class VirtualMachineDetailResponse:
 
         network = self.network.to_dict()
 
+        public_ipv4: dict[str, Any] | None
+        if isinstance(self.public_ipv4, PublicIPResponse):
+            public_ipv4 = self.public_ipv4.to_dict()
+        else:
+            public_ipv4 = self.public_ipv4
+
+        public_ipv6: dict[str, Any] | None
+        if isinstance(self.public_ipv6, PublicIPResponse):
+            public_ipv6 = self.public_ipv6.to_dict()
+        else:
+            public_ipv6 = self.public_ipv6
+
         tags = self.tags.to_dict()
 
         tenant_id = self.tenant_id
@@ -118,6 +137,8 @@ class VirtualMachineDetailResponse:
             "image_id": image_id,
             "is_privileged": is_privileged,
             "network": network,
+            "public_ipv4": public_ipv4,
+            "public_ipv6": public_ipv6,
             "tags": tags,
             "tenant_id": tenant_id,
         })
@@ -128,13 +149,17 @@ class VirtualMachineDetailResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.public_ip_response import PublicIPResponse # noqa: PLC0415
         from ..models.virtual_machine_compute import VirtualMachineCompute # noqa: PLC0415
         from ..models.virtual_machine_detail_response_tags import VirtualMachineDetailResponseTags # noqa: PLC0415
         from ..models.virtual_machine_disk import VirtualMachineDisk # noqa: PLC0415
         from ..models.virtual_machine_guest import VirtualMachineGuest # noqa: PLC0415
         from ..models.virtual_machine_network import VirtualMachineNetwork # noqa: PLC0415
         d = dict(src_dict)
-        architecture = d.pop("architecture")
+        architecture = VirtualMachineDetailResponseArchitecture(d.pop("architecture"))
+
+
+
 
         compute = VirtualMachineCompute.from_dict(d.pop("compute"))
 
@@ -182,6 +207,42 @@ class VirtualMachineDetailResponse:
 
 
 
+        def _parse_public_ipv4(data: object) -> None | PublicIPResponse:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                public_ipv4_type_0 = PublicIPResponse.from_dict(data)
+
+
+
+                return public_ipv4_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicIPResponse, data)
+
+        public_ipv4 = _parse_public_ipv4(d.pop("public_ipv4"))
+
+
+        def _parse_public_ipv6(data: object) -> None | PublicIPResponse:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                public_ipv6_type_0 = PublicIPResponse.from_dict(data)
+
+
+
+                return public_ipv6_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | PublicIPResponse, data)
+
+        public_ipv6 = _parse_public_ipv6(d.pop("public_ipv6"))
+
+
         tags = VirtualMachineDetailResponseTags.from_dict(d.pop("tags"))
 
 
@@ -202,6 +263,8 @@ class VirtualMachineDetailResponse:
             image_id=image_id,
             is_privileged=is_privileged,
             network=network,
+            public_ipv4=public_ipv4,
+            public_ipv6=public_ipv6,
             tags=tags,
             tenant_id=tenant_id,
         )

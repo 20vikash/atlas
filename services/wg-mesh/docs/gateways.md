@@ -40,9 +40,9 @@ Use Atlas Desk for all gateway and route settings:
 1. Open the tenant-0 gateway VM.
 2. Select **Dangerous Actions > Grant Privilege**.
 3. Select **Actions > Make Network Gateway**.
-4. Open the public IPv6 prefix in **Metal Server IP Address**.
-5. Select **Actions > Attach to Virtual Machine**.
-6. Select the gateway VM and click **Attach**.
+4. Open the public IPv6 prefix in **Public IP Pool**.
+5. Create an **IPv6 Router Server** for this pool.
+6. Wait until the router is Active.
 
 Atlas now assigns the public prefix to the gateway VM.
 
@@ -70,69 +70,18 @@ Store these interface settings in the network configuration of the gateway image
 
 ## Send a public address to another VM
 
-This example maps `2001:db8:100::10` to the mesh address `fdaa:1:10:20::5`.
+A gateway can provide a public path to another VM. The application VM sends traffic for the configured destination through an Atlas gateway route.
 
 ```text
-Internet -> Metal public interface -> gateway VM
-         -> destination NAT -> WG Mesh -> application VM
-         <- reverse NAT <- gateway route <- reply
+Inbound:  Internet -> Metal host -> gateway VM -> WG Mesh -> application VM
+Outbound: application VM -> gateway route -> gateway VM -> Metal host -> Internet
 ```
 
-Configure the application VM in Atlas Desk:
+The Metal host sends inbound traffic for the public prefix to the gateway VM. The gateway sends each packet to the application VM through WG Mesh.
 
-1. Open the application VM.
-2. Select **Actions > Edit Gateway Routes**.
-3. Add a route with destination `2000::/3`.
-4. Select the gateway VM in the **Gateway** field.
-5. Click **Save**.
+The gateway owns packet forwarding, address translation, and firewall policy. WG Mesh only transports packets between the gateway and the application VM.
 
-This setting is enough in Atlas. Do not run an `atlas-wg-mesh` command on the host.
-
-Enable IPv6 forwarding in the gateway VM:
-
-```sh
-sudo tee /etc/sysctl.d/90-atlas-ipv6-gateway.conf >/dev/null <<'EOF'
-net.ipv6.conf.all.forwarding = 1
-EOF
-sudo sysctl -p /etc/sysctl.d/90-atlas-ipv6-gateway.conf
-```
-
-Add this `nftables` configuration to the firewall configuration of the gateway VM:
-
-```text
-table ip6 atlas_gateway {
-  chain prerouting {
-    type nat hook prerouting priority dstnat; policy accept;
-    ip6 daddr 2001:db8:100::10 dnat to fdaa:1:10:20::5
-  }
-
-  chain postrouting {
-    type nat hook postrouting priority srcnat; policy accept;
-    ip6 saddr fdaa:1:10:20::5 snat to 2001:db8:100::10
-  }
-
-  chain forward {
-    type filter hook forward priority filter; policy drop;
-    ct state established,related counter accept
-    ip6 daddr fdaa:1:10:20::5 counter accept
-    ip6 saddr fdaa:1:10:20::5 counter accept
-  }
-}
-```
-
-Load the configuration with the method for your Linux distribution.
-
-For a temporary check, save the rules in `/tmp/atlas-gateway.nft` and run this command:
-
-```sh
-sudo nft -f /tmp/atlas-gateway.nft
-```
-
-The destination network address translation rule sends new public connections to the application VM.
-
-The source network address translation rule gives outbound application traffic the same public address.
-
-The gateway firewall permits forwarded traffic only for this application VM.
+This path is transparent to the application VM. The application VM only needs the Atlas gateway route. The [Atlas IPv6 router](../../ipv6-router/README.md) provides this path for all VMs in a region.
 
 ## Check the gateway
 
@@ -142,8 +91,9 @@ Run these commands inside the gateway VM:
 sysctl net.ipv6.conf.all.forwarding
 ip -6 address show dev eth0
 ip -6 route show
-sudo nft list table ip6 atlas_gateway
 ```
+
+Use the gateway software tools to check its forwarding and firewall state.
 
 Run these checks from a system outside the public prefix:
 

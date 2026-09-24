@@ -20,7 +20,9 @@ T = TypeVar("T", bound="VirtualMachineListResponseTags")
 
 @_attrs_define
 class VirtualMachineListResponseTags:
-    
+    """ Resource tags as key-value pairs.
+
+     """
 
     additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
 

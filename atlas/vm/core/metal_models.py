@@ -6,6 +6,8 @@ from typing import Any
 
 from frappe.utils import convert_utc_to_system_timezone
 
+from atlas.vm.core.models import Route, parse_routes
+
 
 @dataclass(frozen=True, slots=True)
 class MetalCompute:
@@ -46,25 +48,12 @@ class MetalImage:
 
 
 @dataclass(frozen=True, slots=True)
-class MetalGatewayRoute:
-	"""Store the gateway that carries one destination range."""
-
-	destination: str
-	gateway: str
-
-	def as_dict(self) -> dict[str, str]:
-		"""Return the route as Metal sends it."""
-		return {"destination": self.destination, "gateway": self.gateway}
-
-
-@dataclass(frozen=True, slots=True)
 class MetalNetwork:
 	"""Store the complete desired network specification."""
 
-	egress: str
 	public_ipv4: str
 	wireguard_mesh_ipv6: str
-	gateway_routes: tuple[MetalGatewayRoute, ...]
+	routes: tuple[Route, ...]
 	is_network_gateway: bool
 	public_ipv6: str
 	private_network_throughput_mibps: int
@@ -212,10 +201,9 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 		),
 		image=parse_image(image),
 		network=MetalNetwork(
-			egress=string_field(network, "egress"),
 			public_ipv4=string_field(network, "public_ipv4", default=""),
 			wireguard_mesh_ipv6=string_field(network, "wireguard_mesh_ipv6"),
-			gateway_routes=parse_gateway_routes(network),
+			routes=parse_routes(network.get("routes") or []),
 			is_network_gateway=boolean_field(network, "is_network_gateway", default=False),
 			public_ipv6=string_field(network, "public_ipv6", default=""),
 			private_network_throughput_mibps=integer_field(network, "private_network_throughput_mibps"),
@@ -232,24 +220,6 @@ def parse_desired_state(value: dict[str, Any]) -> MetalDesiredState:
 			metadata=string_map_field(guest, "metadata"),
 		),
 	)
-
-
-def parse_gateway_routes(network: dict[str, Any]) -> tuple[MetalGatewayRoute, ...]:
-	"""Parse the gateway routes of one Metal response."""
-	routes = network.get("gateway_routes") or []
-	if not isinstance(routes, list):
-		raise ValueError("gateway_routes must be a list")
-
-	parsed = []
-	for route in routes:
-		route_object = object_value(route, "gateway_routes")
-		parsed.append(
-			MetalGatewayRoute(
-				destination=string_field(route_object, "destination"),
-				gateway=string_field(route_object, "gateway"),
-			)
-		)
-	return tuple(parsed)
 
 
 def parse_firewall_rules(value: dict[str, Any], field_name: str) -> tuple[MetalFirewallRule, ...]:

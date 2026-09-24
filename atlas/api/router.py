@@ -10,7 +10,11 @@ atlas_router = Router(
 	prefix=API_PREFIX,
 	name="Atlas",
 	description="Tenant control plane for virtual machines, IP addresses, and images.",
-	docs=DocsConfig(title="Atlas API", version=API_VERSION),
+	docs=DocsConfig(
+		title="Atlas API",
+		version=API_VERSION,
+		description="Manage tenant virtual machines, public IP addresses, images, and webhooks in one Atlas region.",
+	),
 )
 
 virtual_machine_group = atlas_router.subrouter(
@@ -41,10 +45,10 @@ virtual_machine_configuration = virtual_machine_group.subrouter(
 	tag_parent="Virtual Machines",
 )
 
-ip_addresses = atlas_router.subrouter(
-	"ip-addresses",
-	name="IP Addresses",
-	description="Reserve and release public IPv4 addresses for one tenant.",
+public_ips = atlas_router.subrouter(
+	"public-ips",
+	name="Public IP",
+	description="Reserve, inspect, and release public IPs for one tenant.",
 )
 
 images = atlas_router.subrouter(
@@ -62,7 +66,7 @@ def get_resource_location(collection: str, resource_id: str) -> str:
 def register_atlas_api() -> None:
 	"""Import each module that registers Atlas API routes."""
 	import atlas.api.routes.images
-	import atlas.api.routes.ip_addresses
 	import atlas.api.routes.jwks
+	import atlas.api.routes.public_ips
 	import atlas.api.routes.virtual_machines
 	import atlas.api.routes.webhooks

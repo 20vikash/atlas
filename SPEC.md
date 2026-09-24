@@ -4,7 +4,7 @@
 
 Atlas is a monorepo for Frappe Cloud V2 VM infrastructure.
 
-The root contains the Frappe app and three components. They are not separate Git repositories. Each component has its own code, tests, docs, and specification.
+The root contains the Frappe app and four components. They are not separate Git repositories. Each component has its own code, tests, docs, and specification.
 
 ## Root layout
 
@@ -14,6 +14,7 @@ clients/                       Generated API clients
 metal/                         VM management
 llm/                           Review guides for language models
 services/http-proxy/           HTTP proxy
+services/ipv6-router/          Public IPv6 translation
 services/wg-mesh/              Private VM network
 .github/workflows/             CI workflows
 .greptile/rules.md             Review rules
@@ -27,6 +28,7 @@ SPEC.md                        This file
 - [Atlas app](atlas/SPEC.md): Frappe application and provider catalog.
 - [Metal](metal/SPEC.md): Host VM management.
 - [HTTP proxy](services/http-proxy/SPEC.md): Regional proxy service.
+- [IPv6 router](services/ipv6-router/SPEC.md): Public IPv6 translation for VMs.
 - [WG Mesh](services/wg-mesh/SPEC.md): Private VM network.
 
 Read the matching specification before you change a component.

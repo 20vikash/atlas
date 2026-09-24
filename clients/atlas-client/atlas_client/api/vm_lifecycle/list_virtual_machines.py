@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.page_virtual_machine_list_response import PageVirtualMachineListResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -59,7 +60,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> PageVirtualMachineListResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | PageVirtualMachineListResponse | None:
     if response.status_code == 200:
         response_200 = PageVirtualMachineListResponse.from_dict(response.json())
 
@@ -67,13 +68,41 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[PageVirtualMachineListResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | PageVirtualMachineListResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -90,15 +119,15 @@ def sync_detailed(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PageVirtualMachineListResponse]:
+) -> Response[ApiErrorResponse | PageVirtualMachineListResponse]:
     """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -108,7 +137,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageVirtualMachineListResponse]
+        Response[ApiErrorResponse | PageVirtualMachineListResponse]
      """
 
 
@@ -134,15 +163,15 @@ def sync(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PageVirtualMachineListResponse | None:
+) -> ApiErrorResponse | PageVirtualMachineListResponse | None:
     """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -152,7 +181,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageVirtualMachineListResponse
+        ApiErrorResponse | PageVirtualMachineListResponse
      """
 
 
@@ -173,15 +202,15 @@ async def asyncio_detailed(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> Response[PageVirtualMachineListResponse]:
+) -> Response[ApiErrorResponse | PageVirtualMachineListResponse]:
     """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -191,7 +220,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[PageVirtualMachineListResponse]
+        Response[ApiErrorResponse | PageVirtualMachineListResponse]
      """
 
 
@@ -217,15 +246,15 @@ async def asyncio(
     tag: None | str | Unset = UNSET,
     x_tenant_id: int,
 
-) -> PageVirtualMachineListResponse | None:
+) -> ApiErrorResponse | PageVirtualMachineListResponse | None:
     """ List VMs
 
      Returns one page of tenant VM records in newest-first order, with the state each host last reported.
     This request does not contact the host.
 
     Args:
-        offset (int | Unset):  Default: 0.
-        limit (int | Unset):  Default: 20.
+        offset (int | Unset): Number of matching resources to skip. Default: 0.
+        limit (int | Unset): Maximum number of resources to return. Default: 20.
         tag (None | str | Unset): Comma separated key:value tags. A resource must carry every
             pair, such as tag=os:Ubuntu,channel:lts.
         x_tenant_id (int):
@@ -235,7 +264,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        PageVirtualMachineListResponse
+        ApiErrorResponse | PageVirtualMachineListResponse
      """
 
 

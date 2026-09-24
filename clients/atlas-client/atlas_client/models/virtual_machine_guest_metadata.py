@@ -20,7 +20,9 @@ T = TypeVar("T", bound="VirtualMachineGuestMetadata")
 
 @_attrs_define
 class VirtualMachineGuestMetadata:
-    
+    """ Custom guest metadata.
+
+     """
 
     additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
 

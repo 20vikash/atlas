@@ -11,35 +11,38 @@ func TestSleepingIsNotAVirtualMachineState(t *testing.T) {
 	}
 }
 
-func TestEgressCapabilities(t *testing.T) {
-	for _, testCase := range []struct {
-		egress          Egress
-		virtualEthernet bool
-		internetPath    bool
-	}{
-		{EgressUplink, true, true},
-		{EgressMesh, true, false},
-		{EgressNone, false, false},
-	} {
-		if got := testCase.egress.HasVirtualEthernet(); got != testCase.virtualEthernet {
-			t.Fatalf("egress %q veth = %v, want %v", testCase.egress, got, testCase.virtualEthernet)
-		}
-		if got := testCase.egress.HasInternetPath(); got != testCase.internetPath {
-			t.Fatalf("egress %q internet = %v, want %v", testCase.egress, got, testCase.internetPath)
-		}
+func TestRoutesDecideHostPaths(t *testing.T) {
+	network := NetworkConfiguration{
+		WireGuardMeshIPv6: "fdaa:1::7",
+		Routes: []Route{
+			{Destination: "0.0.0.0/0", Via: RouteViaHost},
+			{Destination: "2000::/3", Via: "fdaa:1::56"},
+		},
+	}
+
+	if !network.HasNetworkAttachment() || !network.HasIPv4HostRoute() {
+		t.Fatal("an attached VM with an IPv4 host route must report both")
+	}
+	if network.HasIPv6HostRoute() {
+		t.Fatal("a gateway route must not count as an IPv6 host route")
+	}
+	if got := network.RoutesViaGateway(); !slices.Equal(got, []Route{{Destination: "2000::/3", Via: "fdaa:1::56"}}) {
+		t.Fatalf("gateway routes = %v", got)
 	}
 }
 
-func TestEgressIsValidRejectsUnknownModes(t *testing.T) {
-	for _, egress := range []Egress{EgressUplink, EgressMesh, EgressNone} {
-		if !egress.IsValid() {
-			t.Fatalf("egress %q must be valid", egress)
-		}
+func TestEmptyNetworkHasNoAttachment(t *testing.T) {
+	if (NetworkConfiguration{}).HasNetworkAttachment() {
+		t.Fatal("an empty network must not have an attachment")
 	}
-	for _, egress := range []Egress{"", "host", "server"} {
-		if egress.IsValid() {
-			t.Fatalf("egress %q must not be valid", egress)
-		}
+}
+
+func TestOnlyOneAddressIsAPublicIPv6Address(t *testing.T) {
+	if !(NetworkConfiguration{PublicIPv6: "2001:db8::7/128"}).HasPublicIPv6Address() {
+		t.Fatal("a /128 must be a public IPv6 address")
+	}
+	if (NetworkConfiguration{PublicIPv6: "2001:db8::/64"}).HasPublicIPv6Address() {
+		t.Fatal("a /64 must stay a routed block")
 	}
 }
 
@@ -95,21 +98,17 @@ func TestCloneSpecificationCopiesFirewallRules(t *testing.T) {
 	}
 }
 
-func TestHostReachedDestinations(t *testing.T) {
-	routes := []GatewayRoute{{Destination: "2000::/3", Gateway: "fdaa:1::1"}, {Destination: "fdac::/16", Gateway: "fdaa:1::2"}}
-	cases := map[string]struct {
-		network NetworkConfiguration
-		want    []string
-	}{
-		"plain VM":      {NetworkConfiguration{}, []string{}},
-		"gateway route": {NetworkConfiguration{GatewayRoutes: routes}, []string{"2000::/3", "fdac::/16"}},
-		"block owner":   {NetworkConfiguration{PublicIPv6: "2001:db8:1::/64"}, []string{"::/0"}},
-		"gateway":       {NetworkConfiguration{IsNetworkGateway: true, GatewayRoutes: routes}, []string{"::/0"}},
-	}
+func TestHostReachedDestinationsListIPv6Routes(t *testing.T) {
+	network := NetworkConfiguration{Routes: []Route{
+		{Destination: "0.0.0.0/0", Via: RouteViaHost},
+		{Destination: "2000::/3", Via: RouteViaHost},
+		{Destination: "fdac::/16", Via: "fdaa:1::2"},
+	}}
 
-	for name, test := range cases {
-		if got := HostReachedDestinations(test.network); !slices.Equal(got, test.want) {
-			t.Errorf("%s: got %v, want %v", name, got, test.want)
-		}
+	if got := HostReachedDestinations(network); !slices.Equal(got, []string{"2000::/3", "fdac::/16"}) {
+		t.Fatalf("destinations = %v", got)
+	}
+	if got := HostReachedDestinations(NetworkConfiguration{}); len(got) != 0 {
+		t.Fatalf("a VM without routes reached %v", got)
 	}
 }

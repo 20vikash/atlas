@@ -75,18 +75,10 @@ func newLinuxAllocator(mesh meshRegistrar, trafficMonitor trafficMonitor) *Linux
 // Ensure converges all host network resources to the requested state.
 func (allocator *LinuxAllocator) Ensure(ctx context.Context, desired vm.NetworkRequest) (vm.NetworkInterface, error) {
 	request := request{
-		VirtualMachineID:              desired.VirtualMachineID,
-		Egress:                        desired.Configuration.Egress,
-		PublicIPv4:                    desired.Configuration.PublicIPv4,
-		WireGuardMeshIPv6:             desired.Configuration.WireGuardMeshIPv6,
-		GatewayRoutes:                 desired.Configuration.GatewayRoutes,
-		IsNetworkGateway:              desired.Configuration.IsNetworkGateway,
-		PublicIPv6:                    desired.Configuration.PublicIPv6,
-		PrivateNetworkThroughputMiBps: desired.Configuration.PrivateNetworkThroughputMiBps,
-		PublicNetworkThroughputMiBps:  desired.Configuration.PublicNetworkThroughputMiBps,
-		Firewall:                      desired.Configuration.Firewall,
-		UserID:                        desired.UserID,
-		GroupID:                       desired.GroupID,
+		NetworkConfiguration: desired.Configuration,
+		VirtualMachineID:     desired.VirtualMachineID,
+		UserID:               desired.UserID,
+		GroupID:              desired.GroupID,
 	}
 	namespaceCreated, err := ensureNamespace(ctx, request.VirtualMachineID)
 	if err != nil {
@@ -113,7 +105,7 @@ func (allocator *LinuxAllocator) Release(ctx context.Context, request ReleaseReq
 		trafficError = allocator.trafficMonitor.Detach(virtualMachineID)
 	}
 	meshError := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
-	rulesError := removePublicIPv4Rules(ctx, virtualMachineID)
+	rulesError := errors.Join(removePublicIPv4Rules(ctx, virtualMachineID), removePublicIPv6Rules(ctx, virtualMachineID))
 
 	exists, err := networkNamespaceExists(ctx, virtualMachineID)
 	if err != nil {
@@ -164,11 +156,14 @@ func ensureNamespace(ctx context.Context, virtualMachineID string) (bool, error)
 	return true, nil
 }
 
-// converge removes dropped resources before adding requested ones, so an egress
-// mode change never leaves both network shapes in place.
+// converge removes dropped resources before adding requested ones, so a route
+// change never leaves both network shapes in place.
 func (allocator *LinuxAllocator) converge(ctx context.Context, request request, namespaceCreated bool) error {
-	if request.PublicIPv4 != "" && !request.Egress.HasInternetPath() {
-		return fmt.Errorf("public IPv4 requires %s egress", vm.EgressUplink)
+	if request.PublicIPv4 != "" && !request.HasIPv4HostRoute() {
+		return fmt.Errorf("public IPv4 requires an IPv4 route via %s", vm.RouteViaHost)
+	}
+	if request.PublicIPv6 != "" && !request.HasIPv6HostRoute() {
+		return fmt.Errorf("public IPv6 requires an IPv6 route via %s", vm.RouteViaHost)
 	}
 
 	if err := ensureNamespaceBase(ctx, request); err != nil {
@@ -270,48 +265,44 @@ func (allocator *LinuxAllocator) removeUnwanted(ctx context.Context, request req
 			return err
 		}
 	}
-	if !request.Egress.HasVirtualEthernet() {
-		if err := allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6); err != nil {
+	if !request.HasPublicIPv6Address() {
+		if err := removePublicIPv6Rules(ctx, request.VirtualMachineID); err != nil {
 			return err
 		}
 	}
-	if !request.Egress.HasInternetPath() {
-		if err := removeInternetPath(ctx, request.VirtualMachineID, request.UserID); err != nil {
-			return err
-		}
+	if !request.HasNetworkAttachment() {
+		return allocator.removeMeshRegistration(ctx, request.UserID, request.WireGuardMeshIPv6)
 	}
-
 	return nil
 }
 
 // addWanted builds requested resources in dependency order. Mesh registration is
 // last, so its first packet finds a complete path.
 func (allocator *LinuxAllocator) addWanted(ctx context.Context, request request) error {
-	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.Egress.HasVirtualEthernet()); err != nil {
+	if err := setVirtualEthernet(ctx, request.VirtualMachineID, request.UserID, request.HasNetworkAttachment()); err != nil {
 		return err
 	}
-	if request.Egress.HasVirtualEthernet() {
-		if err := ensureMaximumSegmentSizeClamp(ctx, request.VirtualMachineID, request.UserID); err != nil {
-			return err
-		}
+	if !request.HasNetworkAttachment() {
+		return nil
 	}
-	if request.Egress.HasInternetPath() {
-		if err := addInternetPath(ctx, request.VirtualMachineID, request.UserID); err != nil {
-			return err
-		}
+
+	if err := ensureMaximumSegmentSizeClamp(ctx, request.VirtualMachineID, request.UserID); err != nil {
+		return err
+	}
+	if err := convergeNamespaceRoutes(ctx, request); err != nil {
+		return err
 	}
 	if request.PublicIPv4 != "" {
 		if err := ensurePublicIPv4(ctx, request.VirtualMachineID, request.UserID, request.PublicIPv4); err != nil {
 			return err
 		}
 	}
-	if request.Egress.HasVirtualEthernet() {
-		if err := allocator.addMeshRegistration(ctx, request); err != nil {
+	if request.HasPublicIPv6Address() {
+		if err := ensurePublicIPv6(ctx, request.VirtualMachineID, request.PublicIPv6, request.WireGuardMeshIPv6); err != nil {
 			return err
 		}
 	}
-
-	return nil
+	return allocator.addMeshRegistration(ctx, request)
 }
 
 // interfaceFor returns the values a runtime needs to attach one VM.

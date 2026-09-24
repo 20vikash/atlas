@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
-	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // One tc priority holds one protocol, so IPv4 and IPv6 filters need separate
@@ -36,14 +35,15 @@ var privatePrefixes = []struct {
 type trafficControlRequest struct {
 	VirtualMachineID              string
 	UserID                        uint32
-	Egress                        vm.Egress
+	HasNetworkAttachment          bool
+	HasIPv4HostRoute              bool
 	PrivateNetworkThroughputMiBps int
 	PublicNetworkThroughputMiBps  int
 }
 
 // hasVirtualEthernet reports whether the VM has a veth pair that can hold the policers.
 func (request trafficControlRequest) hasVirtualEthernet() bool {
-	return request.Egress.HasVirtualEthernet()
+	return request.HasNetworkAttachment
 }
 
 // configureTrafficControl applies the policers to the namespace end of the veth.
@@ -91,7 +91,7 @@ func removeTrafficControl(ctx context.Context, namespace, interfaceName string) 
 // The VM is inside the namespace: egress carries traffic from it and matches the
 // destination, ingress carries traffic to it and matches the source.
 func trafficControlSteps(namespace, guestVirtualEthernet string, request trafficControlRequest) [][]string {
-	hasPublicLimit := request.PublicNetworkThroughputMiBps > 0 && request.Egress.HasInternetPath()
+	hasPublicLimit := request.PublicNetworkThroughputMiBps > 0 && request.HasIPv4HostRoute
 	hasPrivateLimit := request.PrivateNetworkThroughputMiBps > 0
 	if !hasPrivateLimit && !hasPublicLimit {
 		return nil

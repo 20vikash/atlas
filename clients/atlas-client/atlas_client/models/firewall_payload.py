@@ -27,9 +27,9 @@ class FirewallPayload:
     """ The complete desired firewall configuration.
 
         Attributes:
-            enabled (bool | Unset):  Default: False.
-            inbound (list[FirewallRulePayload] | Unset):
-            outbound (list[FirewallRulePayload] | Unset):
+            enabled (bool | Unset): Whether the firewall enforces these rules. Default: False.
+            inbound (list[FirewallRulePayload] | Unset): Inbound allow rules.
+            outbound (list[FirewallRulePayload] | Unset): Outbound allow rules.
      """
 
     enabled: bool | Unset = False

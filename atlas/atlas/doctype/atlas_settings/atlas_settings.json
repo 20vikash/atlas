@@ -20,11 +20,6 @@
   "region_name",
   "column_break_kxwi",
   "region_id",
-  "private_network_config_section",
-  "private_network_cidr",
-  "is_unicast_network_enabled",
-  "column_break_jzip",
-  "private_network_mtu",
   "ssh_section",
   "public_ssh_key",
   "metald_section",
@@ -46,6 +41,17 @@
   "jwt_signing_private_key",
   "column_break_abbx",
   "central_jwks",
+  "networking_tab",
+  "private_network_config_section",
+  "private_network_cidr",
+  "is_unicast_network_enabled",
+  "column_break_jzip",
+  "private_network_mtu",
+  "ipv6_router_section",
+  "use_ipv6_router_for_auto_assignment",
+  "ipv6_router_package_file",
+  "column_break_ipv6_router",
+  "ipv6_router_package_hash",
   "scaleway_tab",
   "scaleway_settings_section",
   "scaleway_organization_id",
@@ -65,11 +71,11 @@
   "column_break_awsa",
   "aws_access_key_id",
   "aws_secret_access_key",
-  "aws_vpc_id",
   "section_break_aijf",
+  "aws_vpc_id",
   "aws_subnet_id",
-  "aws_security_group_id",
   "column_break_qavs",
+  "aws_security_group_id",
   "aws_key_pair_name",
   "proxy_tab",
   "dns_provider",
@@ -215,7 +221,7 @@
   },
   {
    "default": "0",
-   "description": "Atlas WG Mesh transports NDP between hosts over the routed IPv4 underlay instead of the shared Layer-2 VLAN. AWS requires it.",
+   "description": "If provider doesn't support, L2 IPv6 multicast, use this mode.",
    "fieldname": "is_unicast_network_enabled",
    "fieldtype": "Check",
    "label": "Use Unicast Networking",
@@ -575,6 +581,36 @@
    "read_only": 1
   },
   {
+   "fieldname": "ipv6_router_section",
+   "fieldtype": "Section Break",
+   "label": "IPv6 Router"
+  },
+  {
+   "default": "0",
+   "description": "Use an active IPv6 Router Server when a tenant requests automatic IPv6.",
+   "fieldname": "use_ipv6_router_for_auto_assignment",
+   "fieldtype": "Check",
+   "label": "Route Automatic IPv6",
+   "show_description_on_click": 1
+  },
+  {
+   "fieldname": "ipv6_router_package_file",
+   "fieldtype": "Link",
+   "label": "Package",
+   "options": "File",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_ipv6_router",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ipv6_router_package_hash",
+   "fieldtype": "Data",
+   "label": "Package SHA-256",
+   "read_only": 1
+  },
+  {
    "fieldname": "central_jwks_url",
    "fieldtype": "Data",
    "label": "Central JWKS URL"
@@ -772,13 +808,18 @@
   {
    "fieldname": "column_break_qavs",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "networking_tab",
+   "fieldtype": "Tab Break",
+   "label": "Networking"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-09-23 03:59:49.903882",
+ "modified": "2026-09-24 04:43:01.505736",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Atlas Settings",

@@ -24,9 +24,9 @@ class ConsoleTokenResponse:
     """ A single-use console token.
 
         Attributes:
-            expires_in (int):
-            mode (ConsoleTokenResponseMode):
-            token (str):
+            expires_in (int): Seconds until the token expires.
+            mode (ConsoleTokenResponseMode): Console protocol opened by the token.
+            token (str): Single-use console token.
      """
 
     expires_in: int

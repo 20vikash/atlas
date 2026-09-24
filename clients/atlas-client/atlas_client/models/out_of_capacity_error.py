@@ -27,9 +27,9 @@ class OutOfCapacityError:
     """ No host can accept the VM. The fleet needs more capacity.
 
         Attributes:
-            code (Literal['out_of_capacity']):
-            fields (list[ApiErrorField]):
-            message (str):
+            code (Literal['out_of_capacity']): Stable machine-readable error code.
+            fields (list[ApiErrorField]): Invalid request fields, or an empty list.
+            message (str): Safe description of the failure.
      """
 
     code: Literal['out_of_capacity']

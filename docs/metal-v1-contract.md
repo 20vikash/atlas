@@ -79,7 +79,7 @@ Secure Shell key and metadata updates use an immediate operation with a 2-second
     "memory_snapshot": false
   },
   "network": {
-    "egress": "uplink",
+    "routes": [{"destination": "0.0.0.0/0", "via": "host"}],
     "public_ipv4": "203.0.113.10",
     "wireguard_mesh_ipv6": "fdaa:1:1::1",
     "private_network_throughput_mibps": 100,
@@ -127,7 +127,7 @@ Create, read, and mutation routes return the same nested resource shape.
       "memory_snapshot": false
     },
     "network": {
-      "egress": "uplink",
+      "routes": [{"destination": "0.0.0.0/0", "via": "host"}],
       "public_ipv4": "203.0.113.10",
       "wireguard_mesh_ipv6": "fdaa:1:1::1",
       "private_network_throughput_mibps": 100,
@@ -193,10 +193,9 @@ Network replaces the complete network object:
 
 ```json
 {
-  "egress": "mesh",
   "public_ipv4": "",
   "wireguard_mesh_ipv6": "fdaa:1:1::1",
-  "gateway_routes": [{"destination": "2000::/3", "gateway": "fdaa:1::49"}],
+  "routes": [{"destination": "2000::/3", "via": "fdaa:1::49"}],
   "is_network_gateway": false,
   "public_ipv6": "",
   "private_network_throughput_mibps": 100,
@@ -209,7 +208,7 @@ Network replaces the complete network object:
 }
 ```
 
-`gateway_routes` sends each destination range to the mesh address of a gateway VM. The longest prefix wins. `is_network_gateway` lets the VM send a source address it does not own. `public_ipv6` is the IPv6 block that the host routes into the VM. The three fields are empty when omitted.
+`routes` sends each destination range through the host uplink (`via` is `host`) or through the mesh address of a gateway VM. Only the host carries IPv4. The longest prefix wins, and a VM without routes reaches only the mesh. A public address needs a route via `host`. `is_network_gateway` lets the VM send a source address it does not own. `public_ipv6` is one `/128` that the host maps to the mesh address, or a larger block that the host routes into the VM. These fields are empty when omitted.
 
 The firewall supports `any`, `tcp`, `udp`, and `icmp`. An empty `ports` value selects all ports. Other port values select one port or one inclusive range from 1 through 65535.
 

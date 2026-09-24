@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.json_web_key_set_response import JSONWebKeySetResponse
 from typing import cast
 
@@ -32,7 +33,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> JSONWebKeySetResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | JSONWebKeySetResponse | None:
     if response.status_code == 200:
         response_200 = JSONWebKeySetResponse.from_dict(response.json())
 
@@ -40,13 +41,20 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[JSONWebKeySetResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | JSONWebKeySetResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -59,15 +67,17 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[JSONWebKeySetResponse]:
+) -> Response[ApiErrorResponse | JSONWebKeySetResponse]:
     """ JSON Web Key Set (JWKS)
+
+     Returns the public keys that verify Atlas service tokens issued by this region.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[JSONWebKeySetResponse]
+        Response[ApiErrorResponse | JSONWebKeySetResponse]
      """
 
 
@@ -85,15 +95,17 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
 
-) -> JSONWebKeySetResponse | None:
+) -> ApiErrorResponse | JSONWebKeySetResponse | None:
     """ JSON Web Key Set (JWKS)
+
+     Returns the public keys that verify Atlas service tokens issued by this region.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        JSONWebKeySetResponse
+        ApiErrorResponse | JSONWebKeySetResponse
      """
 
 
@@ -106,15 +118,17 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
 
-) -> Response[JSONWebKeySetResponse]:
+) -> Response[ApiErrorResponse | JSONWebKeySetResponse]:
     """ JSON Web Key Set (JWKS)
+
+     Returns the public keys that verify Atlas service tokens issued by this region.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[JSONWebKeySetResponse]
+        Response[ApiErrorResponse | JSONWebKeySetResponse]
      """
 
 
@@ -132,15 +146,17 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
 
-) -> JSONWebKeySetResponse | None:
+) -> ApiErrorResponse | JSONWebKeySetResponse | None:
     """ JSON Web Key Set (JWKS)
+
+     Returns the public keys that verify Atlas service tokens issued by this region.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        JSONWebKeySetResponse
+        ApiErrorResponse | JSONWebKeySetResponse
      """
 
 

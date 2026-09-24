@@ -116,12 +116,7 @@ def apply_mesh_network(address, routes):
 
 
 def reset_network_services():
-    """Clear the resolver and time sync state that a memory snapshot resumes with.
-
-    A warm snapshot is captured without egress, so the resolver has backed off and
-    time sync has stopped trying. Without a reset, both stay stalled for about 40
-    seconds after resume.
-    """
+    """Reset services that remain backed off after a networkless warm snapshot."""
     subprocess.run(["resolvectl", "reset-server-features"], check=False)
     subprocess.run(["resolvectl", "flush-caches"], check=False)
 

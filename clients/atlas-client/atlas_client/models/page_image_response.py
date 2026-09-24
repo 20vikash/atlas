@@ -25,10 +25,10 @@ T = TypeVar("T", bound="PageImageResponse")
 class PageImageResponse:
     """ 
         Attributes:
-            has_more (bool):
-            items (list[ImageResponse]):
-            limit (int):
-            offset (int):
+            has_more (bool): Whether another page follows this page.
+            items (list[ImageResponse]): Resources in this page.
+            limit (int): Requested maximum page size.
+            offset (int): Number of matching resources skipped before this page.
      """
 
     has_more: bool

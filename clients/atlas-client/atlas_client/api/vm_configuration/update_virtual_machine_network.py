@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.network_update_payload import NetworkUpdatePayload
 from ...models.virtual_machine_response import VirtualMachineResponse
 from typing import cast
@@ -45,7 +46,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> VirtualMachineResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | VirtualMachineResponse | None:
     if response.status_code == 202:
         response_202 = VirtualMachineResponse.from_dict(response.json())
 
@@ -53,13 +54,48 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_202
 
+    if response.status_code == 400:
+        response_400 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
+
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[VirtualMachineResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | VirtualMachineResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -75,23 +111,25 @@ def sync_detailed(
     body: NetworkUpdatePayload,
     x_tenant_id: int,
 
-) -> Response[VirtualMachineResponse]:
+) -> Response[ApiErrorResponse | VirtualMachineResponse]:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[VirtualMachineResponse]
+        Response[ApiErrorResponse | VirtualMachineResponse]
      """
 
 
@@ -115,23 +153,25 @@ def sync(
     body: NetworkUpdatePayload,
     x_tenant_id: int,
 
-) -> VirtualMachineResponse | None:
+) -> ApiErrorResponse | VirtualMachineResponse | None:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        VirtualMachineResponse
+        ApiErrorResponse | VirtualMachineResponse
      """
 
 
@@ -150,23 +190,25 @@ async def asyncio_detailed(
     body: NetworkUpdatePayload,
     x_tenant_id: int,
 
-) -> Response[VirtualMachineResponse]:
+) -> Response[ApiErrorResponse | VirtualMachineResponse]:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[VirtualMachineResponse]
+        Response[ApiErrorResponse | VirtualMachineResponse]
      """
 
 
@@ -190,23 +232,25 @@ async def asyncio(
     body: NetworkUpdatePayload,
     x_tenant_id: int,
 
-) -> VirtualMachineResponse | None:
+) -> ApiErrorResponse | VirtualMachineResponse | None:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        VirtualMachineResponse
+        ApiErrorResponse | VirtualMachineResponse
      """
 
 

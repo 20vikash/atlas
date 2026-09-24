@@ -72,14 +72,14 @@ Use Frappe Desk Error Log and the named documents first. Keep the durable Atlas 
 - Safe recovery: Restore synchronization, remove only confirmed stale drafts, or add real host capacity.
 - Do not: Do not remove a draft that Metal might have created. Do not edit capacity samples.
 
-## Public IPv4 intent stays pending
+## Public IP intent stays pending
 
-- Symptom: A Metal Server IP Address stays Attaching or Detaching.
-- Owner: The provider address operation or its reconcile job.
-- Safe checks: Read the address, `intent_version`, Metal Server, and provider resource ID. Find the Error Log that names the same address, action, and version. Check provider state.
-- Expected evidence: A failed job leaves the current intent unchanged. An old job cannot complete a newer version.
-- Safe recovery: Correct provider access and wait for the scheduled retry. Queue reconcile again only for the current intent.
-- Do not: Do not reduce `intent_version`. Do not attach or detach the provider address manually while Atlas has pending intent.
+- Symptom: A Public IP Allocation stays Attaching or Detaching, or its pool has pending provider state.
+- Owner: The allocation reconcile job, the provider operation, or the Metal network operation.
+- Safe checks: Read the allocation and pool `intent_version` values, server, provider resource ID, and `failure_message`. Find the Error Log for the same resource and version.
+- Expected evidence: A failed job keeps the current intent. An old job cannot complete a newer version.
+- Safe recovery: Correct provider or Metal access and wait for the scheduled retry. Queue reconcile again only for the current intent.
+- Do not: Do not reduce `intent_version`. Do not change the provider attachment manually while Atlas has pending intent.
 
 ## Machine image transfer does not finish
 

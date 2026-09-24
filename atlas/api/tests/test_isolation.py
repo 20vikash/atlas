@@ -4,28 +4,40 @@ from frappe.tests import IntegrationTestCase
 from atlas.api.core.base import get_owned_document
 from atlas.api.core.errors import ResourceNotFound
 from atlas.api.routes.images import get_image
-from atlas.api.routes.ip_addresses import get_ip_address, list_ip_addresses
+from atlas.api.routes.public_ips import (
+	get_public_ip,
+	list_public_ips,
+)
 from atlas.api.tests.test_images import insert_image
 from atlas.api.tests.test_support import OTHER_TENANT_ID, TENANT_ID, api_request, call_route
 
 
-def insert_ip_address(tenant_id: int) -> str:
-	"""Insert one reserved IP address and return its name. The address names the record."""
-	address = f"203.0.113.{frappe.db.count('Metal Server IP Address') + 20}"
-	return (
-		frappe.get_doc(
-			{
-				"doctype": "Metal Server IP Address",
-				"address": address,
-				"provider_resource_id": f"provider-{address}",
-				"tenant_id": tenant_id,
-				"reserved": 1,
-				"status": "Allocated",
-			}
-		)
-		.insert()
-		.name
+def insert_public_ip_allocation(tenant_id: int) -> str:
+	"""Insert one static pool and one reserved allocation."""
+	index = frappe.db.count("Public IP Pool") + 20
+	prefix = f"198.18.{index // 256}.{index % 256}/32"
+	pool = frappe.get_doc(
+		{
+			"doctype": "Public IP Pool",
+			"prefix": prefix,
+			"allocation_prefix_length": 32,
+			"source": "Static",
+			"enabled": 1,
+		}
+	).insert(ignore_permissions=True)
+	allocation = frappe.get_doc(
+		{
+			"doctype": "Public IP Allocation",
+			"prefix": prefix,
+			"pool": pool.name,
+			"version": "4",
+			"status": "Reserved",
+			"tenant_id": tenant_id,
+			"is_reserved": 1,
+		}
 	)
+	allocation.flags.created_by_public_ip_allocator = True
+	return allocation.insert(ignore_permissions=True).name
 
 
 class TestOwnedDocument(IntegrationTestCase):
@@ -85,25 +97,28 @@ class TestPermissionQueryConditions(IntegrationTestCase):
 			frappe.set_user(previous_user)
 
 
-class TestIPAddressIsolation(IntegrationTestCase):
+class TestPublicIPAllocationIsolation(IntegrationTestCase):
 	def setUp(self) -> None:
-		self.own_address = insert_ip_address(TENANT_ID)
-		self.other_address = insert_ip_address(OTHER_TENANT_ID)
+		self.own_allocation = insert_public_ip_allocation(TENANT_ID)
+		self.other_allocation = insert_public_ip_allocation(OTHER_TENANT_ID)
 
 	def test_a_list_holds_only_the_tenant_addresses(self) -> None:
 		with api_request(
-			"GET", "/api/atlas/ip-addresses", tenant_id=TENANT_ID, query_string={"limit": "100"}
+			"GET",
+			"/api/atlas/public-ips",
+			tenant_id=TENANT_ID,
+			query_string={"limit": "100"},
 		):
-			status, body = call_route(list_ip_addresses)
+			status, body = call_route(list_public_ips)
 
 		self.assertEqual(status, 200)
 		names = {item["id"] for item in body["items"]}
-		self.assertIn(self.own_address, names)
-		self.assertNotIn(self.other_address, names)
+		self.assertIn(self.own_allocation, names)
+		self.assertNotIn(self.other_allocation, names)
 
 	def test_another_tenant_cannot_read_the_address(self) -> None:
-		with api_request("GET", "/api/atlas/ip-addresses/x", tenant_id=OTHER_TENANT_ID):
-			status, body = call_route(get_ip_address, ip_address_id=self.own_address)
+		with api_request("GET", "/api/atlas/public-ips/x", tenant_id=OTHER_TENANT_ID):
+			status, body = call_route(get_public_ip, public_ip_id=self.own_allocation)
 
 		self.assertEqual(status, 404)
-		self.assertEqual(body["error"]["code"], "not_found")
+		self.assertEqual(body["error"]["code"], "public_ip_not_found")

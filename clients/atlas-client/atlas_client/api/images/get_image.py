@@ -8,6 +8,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.api_error_response import ApiErrorResponse
 from ...models.image_response import ImageResponse
 from typing import cast
 
@@ -40,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ImageResponse | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> ApiErrorResponse | ImageResponse | None:
     if response.status_code == 200:
         response_200 = ImageResponse.from_dict(response.json())
 
@@ -48,13 +49,41 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_200
 
+    if response.status_code == 401:
+        response_401 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
+    if response.status_code == 500:
+        response_500 = ApiErrorResponse.from_dict(response.json())
+
+
+
+        return response_500
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ImageResponse]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[ApiErrorResponse | ImageResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -69,7 +98,7 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Response[ImageResponse]:
+) -> Response[ApiErrorResponse | ImageResponse]:
     """ Get image
 
      Returns one tenant image with its artifact metadata and transfer state.
@@ -83,7 +112,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ImageResponse]
+        Response[ApiErrorResponse | ImageResponse]
      """
 
 
@@ -105,7 +134,7 @@ def sync(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> ImageResponse | None:
+) -> ApiErrorResponse | ImageResponse | None:
     """ Get image
 
      Returns one tenant image with its artifact metadata and transfer state.
@@ -119,7 +148,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ImageResponse
+        ApiErrorResponse | ImageResponse
      """
 
 
@@ -136,7 +165,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> Response[ImageResponse]:
+) -> Response[ApiErrorResponse | ImageResponse]:
     """ Get image
 
      Returns one tenant image with its artifact metadata and transfer state.
@@ -150,7 +179,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ImageResponse]
+        Response[ApiErrorResponse | ImageResponse]
      """
 
 
@@ -172,7 +201,7 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     x_tenant_id: int,
 
-) -> ImageResponse | None:
+) -> ApiErrorResponse | ImageResponse | None:
     """ Get image
 
      Returns one tenant image with its artifact metadata and transfer state.
@@ -186,7 +215,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ImageResponse
+        ApiErrorResponse | ImageResponse
      """
 
 

@@ -25,9 +25,9 @@ class FirewallRuleResponse:
     """ One desired firewall allow rule.
 
         Attributes:
-            cidrs (list[str]):
-            ports (str):
-            protocol (FirewallRuleResponseProtocol):
+            cidrs (list[str]): Source or destination networks in CIDR notation.
+            ports (str): Allowed ports or ranges. Empty means all ports.
+            protocol (FirewallRuleResponseProtocol): Allowed IP protocol.
      """
 
     cidrs: list[str]

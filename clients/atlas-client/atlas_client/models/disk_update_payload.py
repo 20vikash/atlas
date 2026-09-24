@@ -25,9 +25,9 @@ class DiskUpdatePayload:
     """ New disk size and disk rate limits.
 
         Attributes:
-            disk_iops (int | None | Unset):
-            disk_mib (int | None | Unset):
-            disk_throughput_mibps (int | None | Unset):
+            disk_iops (int | None | Unset): New disk IOPS limit. Zero removes the limit.
+            disk_mib (int | None | Unset): New root disk capacity in MiB.
+            disk_throughput_mibps (int | None | Unset): New disk throughput limit in MiB/s. Zero removes the limit.
      """
 
     disk_iops: int | None | Unset = UNSET

@@ -102,12 +102,12 @@ code_only_modules = {
 after_install = [
 	"atlas.atlas.core.install.complete_setup_wizard",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
-	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+	"atlas.service.core.service_package.publish_service_packages",
 ]
 after_migrate = [
 	"atlas.atlas.core.install.realign_scheduled_job_baselines",
 	"atlas.atlas.core.host_binaries.publish_host_binaries",
-	"atlas.service.core.http_proxy_package.publish_http_proxy_package",
+	"atlas.service.core.service_package.publish_service_packages",
 ]
 
 # Uninstallation
@@ -155,14 +155,14 @@ after_migrate = [
 # Permissions evaluated in scripted ways
 
 permission_query_conditions = {
-	"Metal Server IP Address": "atlas.auth.overrides.get_permission_query_conditions",
+	"Public IP Allocation": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine Image": "atlas.auth.overrides.get_permission_query_conditions",
 	"Virtual Machine Migration": "atlas.auth.overrides.get_permission_query_conditions",
 }
 
 has_permission = {
-	"Metal Server IP Address": "atlas.auth.overrides.has_permission",
+	"Public IP Allocation": "atlas.auth.overrides.has_permission",
 	"Virtual Machine": "atlas.auth.overrides.has_permission",
 	"Virtual Machine Image": "atlas.auth.overrides.has_permission",
 	"Virtual Machine Migration": "atlas.auth.overrides.has_permission",
@@ -205,10 +205,13 @@ scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
 			"atlas.auth.jwks.sync_central_jwks",
+			"atlas.metal_server.core.public_ip_service.stock_direct_allocations",
 		],
 		"* * * * * */10": [
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_terminating_virtual_machines",
-			"atlas.metal_server.doctype.metal_server_ip_address.metal_server_ip_address.enqueue_pending_ip_address_reconcilation",
+			"atlas.metal_server.doctype.public_ip_pool.public_ip_pool.enqueue_pending_pool_reconciliation",
+			"atlas.metal_server.doctype.public_ip_allocation.public_ip_allocation.enqueue_pending_allocation_reconciliation",
+			"atlas.metal_server.doctype.public_ip_allocation.public_ip_allocation.enqueue_allocation_moves",
 			"atlas.metal_server.usage.enqueue_server_syncs",
 		],
 		"* * * * * */30": [
@@ -234,6 +237,7 @@ scheduler_events = {
 			"atlas.service.core.cargo.bucket.enqueue_pending_bucket_provisioning",
 			"atlas.service.doctype.cargo_server.cargo_server.enqueue_pending_pilot_release_tracker_enable",
 			"atlas.service.doctype.proxy_server.proxy_server.enqueue_pending_proxies_provisioning",
+			"atlas.service.doctype.ipv6_router_server.ipv6_router_server.enqueue_pending_ipv6_router_provisioning",
 			"atlas.service.core.proxy.configuration.reconcile_proxy_configurations",
 		],
 	},

@@ -30,7 +30,7 @@ class CapacityUnavailableResponse:
     caller can retry a busy placement at once and escalate a full one.
 
         Attributes:
-            error (OutOfCapacityError | PlacementBusyError):
+            error (OutOfCapacityError | PlacementBusyError): Capacity failure details.
      """
 
     error: OutOfCapacityError | PlacementBusyError

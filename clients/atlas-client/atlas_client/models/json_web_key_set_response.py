@@ -26,7 +26,7 @@ class JSONWebKeySetResponse:
     """ The public keys that this Atlas region trusts.
 
         Attributes:
-            keys (list[JSONWebKey]):
+            keys (list[JSONWebKey]): Active public signature keys.
      """
 
     keys: list[JSONWebKey]

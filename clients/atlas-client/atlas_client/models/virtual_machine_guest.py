@@ -26,9 +26,9 @@ class VirtualMachineGuest:
     """ The guest configuration of one virtual machine.
 
         Attributes:
-            hostname (None | str):
-            metadata (VirtualMachineGuestMetadata):
-            ssh_keys (list[str]):
+            hostname (None | str): Guest hostname, or null.
+            metadata (VirtualMachineGuestMetadata): Custom guest metadata.
+            ssh_keys (list[str]): Authorized SSH public keys.
      """
 
     hostname: None | str

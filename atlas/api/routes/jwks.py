@@ -7,5 +7,8 @@ from atlas.auth.jwks import trusted_keys
 
 @atlas_router.get("jwks.json", public=True)
 def get_jwks() -> JSONWebKeySetResponse:
-	"""JSON Web Key Set (JWKS)"""
+	"""JSON Web Key Set (JWKS).
+
+	Returns the public keys that verify Atlas service tokens issued by this region.
+	"""
 	return JSONWebKeySetResponse.model_validate(trusted_keys().document)

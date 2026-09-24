@@ -16,7 +16,12 @@ from atlas.atlas.core.tags import validate_tags
 from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import VirtualMachineCreateRequest
+from atlas.vm.core.models import (
+	IPV6_INTERNET_DESTINATION,
+	ROUTE_VIA_HOST,
+	Route,
+	VirtualMachineCreateRequest,
+)
 from atlas.vm.core.vm_service import VirtualMachineService
 
 DRAFT_EXPIRY_MINUTES = 2
@@ -43,7 +48,6 @@ class VirtualMachine(Document):
 		cpu_millicores: DF.Int
 		disk_mib: DF.Int
 		firewall_summary: DF.Code | None
-		gateway_routes: DF.Code | None
 		is_draft: DF.Check
 		is_network_gateway: DF.Check
 		is_privileged: DF.Check
@@ -151,12 +155,6 @@ class VirtualMachine(Document):
 		return information.observed.network.mac if information else None
 
 	@property
-	def egress(self) -> str | None:
-		"""Return the requested egress mode."""
-		information = self.get_metal_vm_info()
-		return information.desired.network.egress if information else None
-
-	@property
 	def wireguard_mesh_ipv6(self) -> str | None:
 		"""Return the Atlas WG Mesh address of the guest."""
 		information = self.get_metal_vm_info()
@@ -165,9 +163,10 @@ class VirtualMachine(Document):
 	@property
 	def public_ipv4(self) -> str | None:
 		"""Return the public IPv4 address assigned in Atlas."""
-		return frappe.db.get_value(
-			"Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}, "address"
+		prefix = frappe.db.get_value(
+			"Public IP Allocation", {"virtual_machine": self.name, "version": "4"}, "prefix"
 		)
+		return prefix.partition("/")[0] if prefix else None
 
 	@property
 	def public_ipv6(self) -> str:
@@ -175,18 +174,31 @@ class VirtualMachine(Document):
 		return VirtualMachineService(self).get_public_ipv6()
 
 	@property
-	def gateway_routes(self) -> str:
-		"""Return the gateway routes that Metal holds, with each gateway as its VM name."""
-		return json.dumps(VirtualMachineService(self).get_gateway_routes(), indent=2)
+	def routed_ipv6(self) -> str:
+		"""Return the routed public address of this VM, or an empty string."""
+		row = frappe.db.get_value(
+			"Public IP Allocation",
+			{"virtual_machine": self.name, "version": "6"},
+			["prefix", "pool"],
+			as_dict=True,
+		)
+		if not row or not frappe.db.get_value("Public IP Pool", row.pool, "gateway"):
+			return ""
+		return row.prefix.partition("/")[0]
+
+	@property
+	def routes(self) -> str:
+		"""Return the routes that Metal holds."""
+		information = self.get_metal_vm_info()
+		routes = information.desired.network.routes if information else ()
+		return json.dumps([route.as_dict() for route in routes], indent=2)
 
 	@property
 	def ssh_host(self) -> str:
 		"""Return the address an SSH Task connects to."""
 		if not self.public_ipv4:
 			frappe.throw(
-				_("Virtual Machine {0} has no public IPv4 address. Attach one and use uplink egress.").format(
-					self.name
-				)
+				_("Virtual Machine {0} has no public IPv4 address. Attach one first.").format(self.name)
 			)
 
 		return self.public_ipv4
@@ -266,12 +278,18 @@ class VirtualMachine(Document):
 		self.save()
 
 	@frappe.whitelist(methods=["POST"])
-	def set_gateway_routes(self, routes: list[dict[str, str]] | str | None = None) -> None:
-		"""Replace which gateway VM carries each destination range."""
+	def set_routes(self, routes: list[dict[str, str]] | str | None = None) -> None:
+		"""Replace the host or gateway address that carries each destination range."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
-		VirtualMachineService(self).set_gateway_routes(frappe.parse_json(routes) or [])
+		VirtualMachineService(self).set_routes(frappe.parse_json(routes) or [])
+
+	@frappe.whitelist(methods=["GET"])
+	def read_routes(self) -> list[dict[str, str]]:
+		"""Return the routes with optional gateway VM names for the editor."""
+		self.check_permission("read")
+		return VirtualMachineService(self).get_route_editor_rows()
 
 	@frappe.whitelist(methods=["POST"])
 	def set_network_gateway(self, is_network_gateway: bool | int | str) -> None:
@@ -281,13 +299,15 @@ class VirtualMachine(Document):
 		self.validate_network_change()
 		service = VirtualMachineService(self)
 		self.is_network_gateway = strict_bool(is_network_gateway, "is_network_gateway")
+		changes: dict[str, Any] = {"is_network_gateway": bool(self.is_network_gateway)}
 		if self.is_network_gateway:
 			self.validate_network_gateway()
 			if service.has_gateway_routes():
 				frappe.throw(
 					_("Remove the gateway routes of this VM before it becomes a gateway."), exc=AtlasUserError
 				)
-		service.update_network({"is_network_gateway": bool(self.is_network_gateway)})
+			changes["routes"] = service.get_routes_with(Route(IPV6_INTERNET_DESTINATION, ROUTE_VIA_HOST))
+		service.update_network(changes)
 		self.save()
 
 	@frappe.whitelist(methods=["POST"])
@@ -406,62 +426,20 @@ class VirtualMachine(Document):
 		return VirtualMachineService(self).replace_metadata(metadata)
 
 	@frappe.whitelist(methods=["POST"])
-	def attach_public_ipv4(self, server_ip_address: str) -> dict[str, Any]:
-		"""Attach one reserved public IPv4 address without a VM restart."""
+	def attach_public_ip(self, version: int, allocation: str) -> None:
+		"""Store one public IP attachment intent."""
 		self.check_permission("write")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-		if frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}):
-			frappe.throw(_("Detach the current public IPv4 address first."), exc=AtlasUserError)
+		from atlas.metal_server.core.public_ip_service import PublicIPService
 
-		return VirtualMachineService(self).attach_public_ipv4(server_ip_address)
+		PublicIPService().attach(self, int(version), allocation)
 
 	@frappe.whitelist(methods=["POST"])
-	def detach_public_ipv4(self) -> dict[str, Any]:
-		"""Remove the public IPv4 address without a VM restart."""
+	def detach_public_ip(self, version: int) -> None:
+		"""Store one public IP detach intent."""
 		self.check_permission("write")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-		if not frappe.db.exists("Metal Server IP Address", {"virtual_machine": self.name, "version": "4"}):
-			frappe.throw(_("This Virtual Machine has no public IPv4 address."), exc=AtlasUserError)
+		from atlas.metal_server.core.public_ip_service import PublicIPService
 
-		return VirtualMachineService(self).detach_public_ipv4()
-
-	@frappe.whitelist(methods=["POST"])
-	def attach_public_ipv6(self, server_ip_address: str) -> dict[str, Any]:
-		"""Attach one IPv6 block. Only a System Manager assigns public blocks."""
-		frappe.only_for("System Manager")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-		block = frappe.get_doc("Metal Server IP Address", server_ip_address, for_update=True)
-		if not block.is_ipv6:
-			frappe.throw(_("Choose an IPv6 block."), exc=AtlasUserError)
-
-		return VirtualMachineService(self).attach_public_ipv6(block)
-
-	@frappe.whitelist(methods=["POST"])
-	def detach_public_ipv6(self) -> dict[str, Any]:
-		"""Remove the IPv6 block without a VM restart."""
-		frappe.only_for("System Manager")
-		self.ensure_not_migrating()
-		self.validate_network_change()
-
-		# Detach also cancels an attach that the provider keeps refusing.
-		block_name = frappe.db.get_value(
-			"Metal Server IP Address",
-			{"virtual_machine": self.name, "version": "6", "status": ["in", ["Attaching", "Attached"]]},
-		)
-		if not block_name:
-			frappe.throw(_("This Virtual Machine has no IPv6 block."), exc=AtlasUserError)
-
-		return VirtualMachineService(self).detach_public_ipv6(
-			frappe.get_doc("Metal Server IP Address", block_name)
-		)
-
-	@frappe.whitelist(methods=["POST"])
-	def update_egress(self, egress: str) -> dict[str, Any]:
-		"""Change internet reachability without a VM restart. Mesh reachability does not change."""
-		return self.update_network({"egress": egress})
+		PublicIPService().detach(self, int(version))
 
 	@frappe.whitelist(methods=["POST"])
 	def update_network_throughput(

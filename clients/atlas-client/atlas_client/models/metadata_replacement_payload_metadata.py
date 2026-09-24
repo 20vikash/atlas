@@ -20,7 +20,9 @@ T = TypeVar("T", bound="MetadataReplacementPayloadMetadata")
 
 @_attrs_define
 class MetadataReplacementPayloadMetadata:
-    
+    """ Complete custom guest metadata map.
+
+     """
 
     additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
 

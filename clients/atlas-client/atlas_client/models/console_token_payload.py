@@ -25,7 +25,8 @@ class ConsoleTokenPayload:
     """ The console mode that the token opens.
 
         Attributes:
-            mode (ConsoleTokenPayloadMode | Unset):  Default: ConsoleTokenPayloadMode.TTY.
+            mode (ConsoleTokenPayloadMode | Unset): Console protocol opened by the token. Default:
+                ConsoleTokenPayloadMode.TTY.
      """
 
     mode: ConsoleTokenPayloadMode | Unset = ConsoleTokenPayloadMode.TTY

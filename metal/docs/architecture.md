@@ -136,7 +136,7 @@ Warm start is an optimization. Cold start remains the recovery path when a warm 
 | --- | --- |
 | VM lifecycle and power state | [VM functionality](vm.md) |
 | Images, disks, and snapshots | [Storage](storage.md) |
-| Namespaces, egress, and WG Mesh | [Networking](networking.md) |
+| Namespaces, routes, and WG Mesh | [Networking](networking.md) |
 | Controller endpoints | [HTTP API](api.md) |
 | Files and host resources | [Host layout](host-layout.md) |
 | Development host setup | [Integration testing](testing.md) |
