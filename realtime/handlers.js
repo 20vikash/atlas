@@ -1,13 +1,15 @@
-// Bridge browser console sessions to Metal on the node socketio backend. Frappe's
-// socketio server loads this file for a site that has Atlas installed. The python
-// backend stays the preferred one and uses atlas/realtime/handlers.py instead.
+// Bridge browser console sessions to Metal on the node socketio backend.
 const { get_redis_subscriber } = require("../../frappe/node_utils");
+// The built-in WebSocket cannot send a client certificate.
+const WebSocket = require("../../frappe/node_modules/ws");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const BENCH_PATH = process.env.FRAPPE_BENCH_ROOT || path.resolve(__dirname, "..", "..", "..");
 const TLS_DIRECTORY = ["private", "atlas-metal-tls"];
 const CONSOLE_TOKEN_PREFIX = "atlas:console:token:";
+// Matches atlas/vm/core/console_token.py.
+const CONSOLE_TOKEN_LENGTH = 256;
 const MAXIMUM_CONSOLE_INPUT_BYTES = 64 * 1024;
 const INVALID_TOKEN_MESSAGE = "This console link is invalid or expired.";
 const UNREACHABLE_MESSAGE = "Could not reach the virtual machine console.";
@@ -83,7 +85,11 @@ class ConsoleSession {
 
 /** Return whether a value has the generated console token format. */
 function is_valid_console_token(value) {
-	return typeof value === "string" && value.length === 48 && /^[a-z0-9]+$/i.test(value);
+	return (
+		typeof value === "string" &&
+		value.length === CONSOLE_TOKEN_LENGTH &&
+		/^[a-z0-9]+$/i.test(value)
+	);
 }
 
 /** Return the site of one socket. The authenticate middleware checked the namespace. */
@@ -165,7 +171,7 @@ async function open_console(socket, token) {
 			return;
 		}
 
-		const metal_connection = new WebSocket(connection.url, tls_options(socket.site));
+		const metal_connection = new WebSocket(connection.url, tls_options(site_of(socket)));
 		if (!(await wait_for_open(metal_connection))) {
 			metal_connection.close();
 			socket.emit("atlas_console_error", UNREACHABLE_MESSAGE);
