@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from frappe.tests import UnitTestCase
 
@@ -48,6 +48,54 @@ class TestGatewayPoolSelection(UnitTestCase):
 			selected = PublicIPService()._select_routed_pool(SimpleNamespace(server="metal-1"))
 
 		self.assertEqual(selected.name, "remote-pool")
+
+
+class TestAllocationAssignment(UnitTestCase):
+	def test_named_reservation_is_validated_after_its_row_is_locked(self) -> None:
+		allocation = SimpleNamespace(
+			tenant_id=7,
+			version="4",
+			is_reserved=0,
+			is_routed=False,
+		)
+		with patch.object(service_module.frappe, "get_doc", return_value=allocation) as get_doc:
+			with self.assertRaises(service_module.PublicIPNotFound):
+				PublicIPService()._owned_reserved_allocation("allocation-1", 7, 4)
+
+		get_doc.assert_called_once_with("Public IP Allocation", "allocation-1", for_update=True)
+
+	def test_attach_locks_the_vm_before_checking_existing_allocations(self) -> None:
+		virtual_machine = SimpleNamespace(
+			name="vm-1",
+			is_draft=False,
+			tenant_id=7,
+			server="metal-1",
+			ensure_not_migrating=Mock(),
+			validate_network_change=Mock(),
+		)
+		allocation = SimpleNamespace(
+			name="32eb57bc-9548-4a89-8358-543e26883569",
+			tenant_id=7,
+			version="4",
+			is_reserved=1,
+			is_routed=False,
+			status="Reserved",
+			virtual_machine=None,
+			begin_attach=Mock(),
+		)
+
+		def get_doc(doctype, _name, **kwargs):
+			self.assertTrue(kwargs.get("for_update"))
+			return virtual_machine if doctype == "Virtual Machine" else allocation
+
+		with (
+			patch.object(service_module.frappe, "get_doc", side_effect=get_doc),
+			patch.object(service_module.frappe.db, "get_value", return_value=None),
+		):
+			result = PublicIPService().attach(virtual_machine, 4, allocation.name)
+
+		self.assertIs(result, allocation)
+		allocation.begin_attach.assert_called_once_with("vm-1", "metal-1", 7)
 
 
 UNRELATED_ROUTE = Route("2001:db8:ffff::/48", "fdaa:1::2")

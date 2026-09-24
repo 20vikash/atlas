@@ -429,8 +429,6 @@ class VirtualMachine(Document):
 	def attach_public_ip(self, version: int, allocation: str) -> None:
 		"""Store one public IP attachment intent."""
 		self.check_permission("write")
-		self.ensure_not_migrating()
-		self.validate_network_change()
 		from atlas.metal_server.core.public_ip_service import PublicIPService
 
 		PublicIPService().attach(self, int(version), allocation)
@@ -439,8 +437,6 @@ class VirtualMachine(Document):
 	def detach_public_ip(self, version: int) -> None:
 		"""Store one public IP detach intent."""
 		self.check_permission("write")
-		self.ensure_not_migrating()
-		self.validate_network_change()
 		from atlas.metal_server.core.public_ip_service import PublicIPService
 
 		PublicIPService().detach(self, int(version))

@@ -87,6 +87,8 @@ A virtual machine can attach an address that its own tenant holds, or an unowned
 
 An unreserved address returns to the shared pool after detach, including VM deletion. The guarded update clears the tenant only after provider detach succeeds. A reserved address keeps its tenant until release.
 
+Attachment changes lock the virtual machine, and a named reservation is checked after its allocation row is locked. This preserves one allocation of each IP version per VM during concurrent requests.
+
 A tenant can reserve an address it already holds to stop that return, even while it is attached. A `Detaching` address is refused because reconciliation has already decided its pool return.
 
 Reset Tenant returns one unattached address to the shared pool. It needs the System Manager role, refuses unowned addresses, and records the previous tenant in a comment.

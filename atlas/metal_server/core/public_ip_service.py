@@ -80,6 +80,11 @@ class PublicIPService:
 		return allocation
 
 	def attach(self, virtual_machine: VirtualMachine, version: int, selector: str) -> PublicIPAllocation:
+		is_creation = bool(virtual_machine.is_draft)
+		virtual_machine = frappe.get_doc("Virtual Machine", virtual_machine.name, for_update=True)
+		if not is_creation:
+			virtual_machine.ensure_not_migrating()
+			virtual_machine.validate_network_change()
 		if selector != AUTO_ALLOCATION:
 			try:
 				UUID(selector)
@@ -97,16 +102,11 @@ class PublicIPService:
 
 		if selector == AUTO_ALLOCATION:
 			allocation = self._automatic_allocation(virtual_machine, version)
+			locked: PublicIPAllocation = frappe.get_doc(
+				"Public IP Allocation", allocation.name, for_update=True
+			)
 		else:
-			allocation = self._owned_reserved_allocation(selector, virtual_machine.tenant_id, version)
-		pool: PublicIPPool = frappe.get_doc("Public IP Pool", allocation.pool)
-		if version == 6 and not pool.is_routed:
-			from atlas.vm.core.vm_service import VirtualMachineService
-
-			if VirtualMachineService(virtual_machine).has_gateway_routes():
-				raise PublicIPAlreadyAttached(_("Remove the gateway routes before you attach direct IPv6."))
-
-		locked: PublicIPAllocation = frappe.get_doc("Public IP Allocation", allocation.name, for_update=True)
+			locked = self._owned_reserved_allocation(selector, virtual_machine.tenant_id, version)
 		if locked.status not in {"Available", "Reserved"} or locked.virtual_machine:
 			raise PublicIPAllocationInUse(_("This public IP is not available."))
 		locked.begin_attach(
@@ -115,6 +115,9 @@ class PublicIPService:
 		return locked
 
 	def detach(self, virtual_machine: VirtualMachine, version: int) -> PublicIPAllocation | None:
+		virtual_machine = frappe.get_doc("Virtual Machine", virtual_machine.name, for_update=True)
+		virtual_machine.ensure_not_migrating()
+		virtual_machine.validate_network_change()
 		allocation = self.allocation_for_vm(cast(str, virtual_machine.name), version)
 		if not allocation:
 			return None
@@ -256,7 +259,7 @@ class PublicIPService:
 
 	def _owned_reserved_allocation(self, name: str, tenant_id: int, version: int) -> PublicIPAllocation:
 		try:
-			allocation: PublicIPAllocation = frappe.get_doc("Public IP Allocation", name)
+			allocation: PublicIPAllocation = frappe.get_doc("Public IP Allocation", name, for_update=True)
 		except frappe.DoesNotExistError as error:
 			raise PublicIPNotFound(_("The public IP does not exist.")) from error
 		if (
@@ -285,13 +288,13 @@ class PublicIPService:
 			pool.begin_provider_attach(server)
 			pool.reconcile()
 			pool.reload()
+		# Replies from a public address leave through the host uplink.
 		address = str(ipaddress.ip_network(prefix).network_address)
 		if pool.version == "4":
 			route = Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST)
 			service.update_network(
 				{"public_ipv4": pool.host_address or address, "routes": service.get_routes_with(route)}
 			)
-		# Replies from a public address leave through the host uplink.
 		else:
 			route = Route(IPV6_INTERNET_DESTINATION, ROUTE_VIA_HOST)
 			service.update_network({"public_ipv6": prefix, "routes": service.get_routes_with(route)})
