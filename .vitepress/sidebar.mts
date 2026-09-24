@@ -6,7 +6,7 @@ export const sidebar: DefaultTheme.Sidebar = {
 	'/docs/': [
 		{
 			text: 'Start here',
-			items: [link('How Atlas works', '/docs/architecture'), link('Development setup', '/docs/development'), link('Operations guide', '/docs/operations'), link('Glossary', '/docs/glossary')],
+			items: [link('How Atlas works', '/docs/architecture'), link('Development setup', '/docs/development'), link('Operations guide', '/docs/operations'), link('Incidents', '/docs/incidents/'), link('Glossary', '/docs/glossary')],
 		},
 		{
 			text: 'Reference',
