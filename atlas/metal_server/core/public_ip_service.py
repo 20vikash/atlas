@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 
 AUTO_ALLOCATION = "auto"
-STOCK_BATCH_SIZE = 1_000
+ALLOCATION_BATCH_SIZE = 1_000
+ALLOCATION_REPLENISH_THRESHOLD = ALLOCATION_BATCH_SIZE // 5
 
 
 class PublicIPError(AtlasUserError):
@@ -384,23 +385,34 @@ class PublicIPService:
 		frappe.db.set_value("Public IP Allocation", name, values, update_modified=False)
 
 
-def stock_direct_allocations() -> None:
+def replenish_direct_allocations() -> None:
 	for name in frappe.get_all(
-		"Public IP Pool", filters={"enabled": 1, "gateway": ["is", "not set"]}, pluck="name"
+		"Public IP Pool",
+		filters={"enabled": 1, "gateway": ["is", "not set"], "source": "Static"},
+		pluck="name",
 	):
-		if frappe.db.exists("Public IP Allocation", {"pool": name, "status": "Available"}):
+		pool: PublicIPPool = frappe.get_doc("Public IP Pool", name, for_update=True)
+		if not pool.enabled or pool.is_routed or pool.source == "Provider":
 			continue
-		create_allocation_stock(name)
+		available = frappe.db.count("Public IP Allocation", {"pool": pool.name, "status": "Available"})
+		if available <= ALLOCATION_REPLENISH_THRESHOLD:
+			_generate_available_allocations(pool, ALLOCATION_BATCH_SIZE)
 
 
-def create_allocation_stock(pool_name: str, limit: int = STOCK_BATCH_SIZE) -> int:
+def generate_available_allocations(pool_name: str, limit: int = ALLOCATION_BATCH_SIZE) -> int:
 	"""Create the next direct allocation records and return the number created."""
 	pool: PublicIPPool = frappe.get_doc("Public IP Pool", pool_name, for_update=True)
 	if pool.is_routed:
 		raise ValueError("Routed pools create allocations when a VM requests IPv6")
+	if pool.source == "Provider":
+		raise ValueError("Provider pools create allocations when an address is requested")
+	return _generate_available_allocations(pool, limit)
+
+
+def _generate_available_allocations(pool: PublicIPPool, limit: int) -> int:
 	service = PublicIPService()
 	created = 0
-	for _allocation_index in range(min(max(int(limit), 0), STOCK_BATCH_SIZE)):
+	for _allocation_index in range(min(max(int(limit), 0), ALLOCATION_BATCH_SIZE)):
 		try:
 			service._create_next(pool)
 		except PublicIPPoolEmpty:

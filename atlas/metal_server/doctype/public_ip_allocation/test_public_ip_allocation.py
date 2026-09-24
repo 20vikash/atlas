@@ -1,7 +1,9 @@
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from atlas.metal_server.core.public_ip_service import PublicIPService, create_allocation_stock
+from atlas.metal_server.core.public_ip_service import PublicIPService, generate_available_allocations
 
 
 def insert_pool(prefix: str, allocation_prefix_length: int):
@@ -46,18 +48,19 @@ class TestPublicIPAllocation(IntegrationTestCase):
 			service._create_next(pool)
 
 	def test_direct_ipv6_reservation_keeps_the_configured_prefix_size(self) -> None:
-		insert_pool("2001:db8:42::/64", 80)
+		pool = insert_pool("2001:db8:42::/64", 80)
 
-		allocation = PublicIPService().reserve(7, 6)
+		with patch.object(PublicIPService, "_select_direct_pool", return_value=pool):
+			allocation = PublicIPService().reserve(7, 6)
 
 		self.assertEqual(allocation.prefix, "2001:db8:42::/80")
 		self.assertEqual(allocation.status, "Reserved")
 
-	def test_manual_stock_creation_stops_at_the_end_of_the_pool(self) -> None:
+	def test_manual_generation_stops_at_the_end_of_the_pool(self) -> None:
 		pool = insert_pool("198.19.43.0/30", 32)
 
-		created = create_allocation_stock(pool.name)
+		created = generate_available_allocations(pool.name)
 
 		self.assertEqual(created, 4)
 		self.assertEqual(frappe.db.count("Public IP Allocation", {"pool": pool.name}), 4)
-		self.assertEqual(create_allocation_stock(pool.name), 0)
+		self.assertEqual(generate_available_allocations(pool.name), 0)

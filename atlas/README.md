@@ -60,6 +60,7 @@ Read [VM control plane](docs/vm-control-plane.md) for the complete placement and
 | Move a VM between hosts | [VM migration](docs/virtual-machine-migrations.md) |
 | Provision and manage a host | [Metal Server lifecycle](docs/metal-server-lifecycle.md) |
 | Build, transfer, and remove images | [Image lifecycle](docs/images.md) |
+| Understand public IP pools and allocations | [Public IP allocation](docs/public-ip-allocation.md) |
 | Add or change a cloud provider | [Provider guide](docs/providers.md) |
 | Understand tenant boundaries | [Tenant API](docs/tenant-api.md) and [security model](docs/security.md) |
 | Investigate a failure | [Atlas operations](docs/operations.md) |

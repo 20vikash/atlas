@@ -13,10 +13,10 @@ frappe.ui.form.on("Public IP Pool", {
 		}
 
 		if (frm.is_new() || !frappe.user.has_role("System Manager")) return;
-		if (!frm.doc.gateway) {
+		if (!frm.doc.gateway && frm.doc.source === "Static") {
 			frm.add_custom_button(
-				__("Create Allocation Stock"),
-				() => createAllocationStock(frm),
+				__("Generate Available Allocations"),
+				() => generateAvailableAllocations(frm),
 				__("Actions")
 			);
 		}
@@ -37,12 +37,12 @@ frappe.ui.form.on("Public IP Pool", {
 	},
 });
 
-function createAllocationStock(frm) {
+function generateAvailableAllocations(frm) {
 	return frm
-		.call({ method: "create_allocation_stock", doc: frm.doc, freeze: true })
+		.call({ method: "generate_available_allocations", doc: frm.doc, freeze: true })
 		.then((response) => {
 			frappe.show_alert(
-				__("Created {0} public IP allocations.", [response.message]),
+				__("Generated {0} available public IP allocations.", [response.message]),
 				response.message ? "green" : "blue"
 			);
 			frm.reload_doc();

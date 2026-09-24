@@ -205,7 +205,6 @@ scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
 			"atlas.auth.jwks.sync_central_jwks",
-			"atlas.metal_server.core.public_ip_service.stock_direct_allocations",
 		],
 		"* * * * * */10": [
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_terminating_virtual_machines",
@@ -219,17 +218,15 @@ scheduler_events = {
 			"atlas.vm.core.vm_image_deletion.enqueue_pending_virtual_machine_image_deletions",
 		],
 		"*/15 * * * *": [
-			# Remove the published files that a newer build replaced.
 			"atlas.atlas.core.artifacts.delete_unlinked_files",
-			# Migrate bootstrap images after object storage is configured.
 			"atlas.vm.core.vm_image_storage_migration.enqueue_site_file_image_migrations",
-			# Drop the site files that object storage replaced, after their retention time.
 			"atlas.vm.core.vm_image_storage_migration.delete_expired_site_files",
 		],
 		"0 */12 * * *": [
 			"atlas.atlas.doctype.atlas_settings.atlas_settings.rotate_proxy_cluster_password",
 		],
 		"* * * * *": [
+			"atlas.metal_server.core.public_ip_service.replenish_direct_allocations",
 			"atlas.atlas.doctype.ssh_task.ssh_task.mark_timed_out_ssh_tasks",
 			"atlas.vm.core.vm_migration.reconcile_migrations",
 			"atlas.vm.doctype.virtual_machine.virtual_machine.reconcile_stale_drafts",

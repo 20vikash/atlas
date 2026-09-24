@@ -13,6 +13,57 @@ def pool(name: str, gateway: str):
 	return SimpleNamespace(name=name, gateway=gateway, prefix="2001:db8::/64", is_routed=True)
 
 
+class TestAllocationReplenishment(UnitTestCase):
+	def test_only_static_direct_pools_are_replenished(self) -> None:
+		public_pool = SimpleNamespace(name="pool-1", enabled=1, is_routed=False, source="Static")
+		with (
+			patch.object(service_module.frappe, "get_all", return_value=["pool-1"]) as get_all,
+			patch.object(service_module.frappe, "get_doc", return_value=public_pool),
+			patch.object(service_module.frappe.db, "count", return_value=0),
+			patch.object(service_module, "_generate_available_allocations") as generate,
+		):
+			service_module.replenish_direct_allocations()
+
+		get_all.assert_called_once_with(
+			"Public IP Pool",
+			filters={"enabled": 1, "gateway": ["is", "not set"], "source": "Static"},
+			pluck="name",
+		)
+		generate.assert_called_once_with(public_pool, service_module.ALLOCATION_BATCH_SIZE)
+
+	def test_pool_is_replenished_after_eighty_percent_is_consumed(self) -> None:
+		public_pool = SimpleNamespace(name="pool-1", enabled=1, is_routed=False, source="Static")
+		with (
+			patch.object(service_module.frappe, "get_all", return_value=[public_pool.name]),
+			patch.object(service_module.frappe, "get_doc", return_value=public_pool),
+			patch.object(
+				service_module.frappe.db,
+				"count",
+				return_value=service_module.ALLOCATION_REPLENISH_THRESHOLD,
+			),
+			patch.object(service_module, "_generate_available_allocations", return_value=1) as generate,
+		):
+			service_module.replenish_direct_allocations()
+
+		generate.assert_called_once_with(public_pool, service_module.ALLOCATION_BATCH_SIZE)
+
+	def test_pool_is_not_replenished_above_the_threshold(self) -> None:
+		public_pool = SimpleNamespace(name="pool-1", enabled=1, is_routed=False, source="Static")
+		with (
+			patch.object(service_module.frappe, "get_all", return_value=[public_pool.name]),
+			patch.object(service_module.frappe, "get_doc", return_value=public_pool),
+			patch.object(
+				service_module.frappe.db,
+				"count",
+				return_value=service_module.ALLOCATION_REPLENISH_THRESHOLD + 1,
+			),
+			patch.object(service_module, "_generate_available_allocations") as generate,
+		):
+			service_module.replenish_direct_allocations()
+
+		generate.assert_not_called()
+
+
 class TestGatewayPoolSelection(UnitTestCase):
 	def test_a_gateway_on_the_vm_server_is_preferred(self) -> None:
 		pools = {
