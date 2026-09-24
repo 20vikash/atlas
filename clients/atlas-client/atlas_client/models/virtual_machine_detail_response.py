@@ -42,7 +42,7 @@ class VirtualMachineDetailResponse:
             id (str):
             image_id (str):
             is_privileged (bool):
-            network (VirtualMachineNetwork): The addresses and network limits of one virtual machine.
+            network (VirtualMachineNetwork): The addresses, internet access, and network limits of one virtual machine.
             public_ipv4 (None | PublicIPResponse):
             public_ipv6 (None | PublicIPResponse):
             tags (VirtualMachineDetailResponseTags):

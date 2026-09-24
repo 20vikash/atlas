@@ -23,24 +23,26 @@ T = TypeVar("T", bound="VirtualMachineNetwork")
 
 @_attrs_define
 class VirtualMachineNetwork:
-    """ The addresses and network limits of one virtual machine.
+    """ The addresses, internet access, and network limits of one virtual machine.
 
         Attributes:
-            egress (None | str):
             firewall (FirewallResponse): The complete desired firewall configuration.
+            ipv4_internet_access (bool):
             mac (None | str):
             mesh_ipv6 (None | str):
             private_network_throughput_mibps (int):
             public_ipv4 (None | str):
+            public_ipv6 (None | str):
             public_network_throughput_mibps (int):
      """
 
-    egress: None | str
     firewall: FirewallResponse
+    ipv4_internet_access: bool
     mac: None | str
     mesh_ipv6: None | str
     private_network_throughput_mibps: int
     public_ipv4: None | str
+    public_ipv6: None | str
     public_network_throughput_mibps: int
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -50,10 +52,9 @@ class VirtualMachineNetwork:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.firewall_response import FirewallResponse # noqa: PLC0415
-        egress: None | str
-        egress = self.egress
-
         firewall = self.firewall.to_dict()
+
+        ipv4_internet_access = self.ipv4_internet_access
 
         mac: None | str
         mac = self.mac
@@ -66,18 +67,22 @@ class VirtualMachineNetwork:
         public_ipv4: None | str
         public_ipv4 = self.public_ipv4
 
+        public_ipv6: None | str
+        public_ipv6 = self.public_ipv6
+
         public_network_throughput_mibps = self.public_network_throughput_mibps
 
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update({
-            "egress": egress,
             "firewall": firewall,
+            "ipv4_internet_access": ipv4_internet_access,
             "mac": mac,
             "mesh_ipv6": mesh_ipv6,
             "private_network_throughput_mibps": private_network_throughput_mibps,
             "public_ipv4": public_ipv4,
+            "public_ipv6": public_ipv6,
             "public_network_throughput_mibps": public_network_throughput_mibps,
         })
 
@@ -89,18 +94,12 @@ class VirtualMachineNetwork:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.firewall_response import FirewallResponse # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_egress(data: object) -> None | str:
-            if data is None:
-                return data
-            return cast(None | str, data)
-
-        egress = _parse_egress(d.pop("egress"))
-
-
         firewall = FirewallResponse.from_dict(d.pop("firewall"))
 
 
 
+
+        ipv4_internet_access = d.pop("ipv4_internet_access")
 
         def _parse_mac(data: object) -> None | str:
             if data is None:
@@ -128,15 +127,24 @@ class VirtualMachineNetwork:
         public_ipv4 = _parse_public_ipv4(d.pop("public_ipv4"))
 
 
+        def _parse_public_ipv6(data: object) -> None | str:
+            if data is None:
+                return data
+            return cast(None | str, data)
+
+        public_ipv6 = _parse_public_ipv6(d.pop("public_ipv6"))
+
+
         public_network_throughput_mibps = d.pop("public_network_throughput_mibps")
 
         virtual_machine_network = cls(
-            egress=egress,
             firewall=firewall,
+            ipv4_internet_access=ipv4_internet_access,
             mac=mac,
             mesh_ipv6=mesh_ipv6,
             private_network_throughput_mibps=private_network_throughput_mibps,
             public_ipv4=public_ipv4,
+            public_ipv6=public_ipv6,
             public_network_throughput_mibps=public_network_throughput_mibps,
         )
 

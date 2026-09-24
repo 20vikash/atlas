@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.create_virtual_machine_payload_egress import CreateVirtualMachinePayloadEgress
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -35,9 +34,10 @@ class CreateVirtualMachinePayload:
             memory_mib (int):
             disk_iops (int | Unset):  Default: 0.
             disk_throughput_mibps (int | Unset):  Default: 0.
-            egress (CreateVirtualMachinePayloadEgress | Unset):  Default: CreateVirtualMachinePayloadEgress.UPLINK.
             firewall (FirewallPayload | Unset): The complete desired firewall configuration.
             hostname (str | Unset):  Default: ''.
+            ipv4_internet_access (bool | Unset): Reach the IPv4 internet through host NAT. A public IPv4 address needs it.
+                Without it and without a public IPv6 address, the VM reaches only the mesh. Default: True.
             is_privileged (bool | Unset):  Default: False.
             is_termination_protected (bool | Unset):  Default: False.
             metadata (CreateVirtualMachinePayloadMetadata | Unset):
@@ -56,9 +56,9 @@ class CreateVirtualMachinePayload:
     memory_mib: int
     disk_iops: int | Unset = 0
     disk_throughput_mibps: int | Unset = 0
-    egress: CreateVirtualMachinePayloadEgress | Unset = CreateVirtualMachinePayloadEgress.UPLINK
     firewall: FirewallPayload | Unset = UNSET
     hostname: str | Unset = ''
+    ipv4_internet_access: bool | Unset = True
     is_privileged: bool | Unset = False
     is_termination_protected: bool | Unset = False
     metadata: CreateVirtualMachinePayloadMetadata | Unset = UNSET
@@ -89,16 +89,13 @@ class CreateVirtualMachinePayload:
 
         disk_throughput_mibps = self.disk_throughput_mibps
 
-        egress: str | Unset = UNSET
-        if not isinstance(self.egress, Unset):
-            egress = self.egress.value
-
-
         firewall: dict[str, Any] | Unset = UNSET
         if not isinstance(self.firewall, Unset):
             firewall = self.firewall.to_dict()
 
         hostname = self.hostname
+
+        ipv4_internet_access = self.ipv4_internet_access
 
         is_privileged = self.is_privileged
 
@@ -147,12 +144,12 @@ class CreateVirtualMachinePayload:
             field_dict["disk_iops"] = disk_iops
         if disk_throughput_mibps is not UNSET:
             field_dict["disk_throughput_mibps"] = disk_throughput_mibps
-        if egress is not UNSET:
-            field_dict["egress"] = egress
         if firewall is not UNSET:
             field_dict["firewall"] = firewall
         if hostname is not UNSET:
             field_dict["hostname"] = hostname
+        if ipv4_internet_access is not UNSET:
+            field_dict["ipv4_internet_access"] = ipv4_internet_access
         if is_privileged is not UNSET:
             field_dict["is_privileged"] = is_privileged
         if is_termination_protected is not UNSET:
@@ -195,16 +192,6 @@ class CreateVirtualMachinePayload:
 
         disk_throughput_mibps = d.pop("disk_throughput_mibps", UNSET)
 
-        _egress = d.pop("egress", UNSET)
-        egress: CreateVirtualMachinePayloadEgress | Unset
-        if isinstance(_egress,  Unset):
-            egress = UNSET
-        else:
-            egress = CreateVirtualMachinePayloadEgress(_egress)
-
-
-
-
         _firewall = d.pop("firewall", UNSET)
         firewall: FirewallPayload | Unset
         if isinstance(_firewall,  Unset):
@@ -216,6 +203,8 @@ class CreateVirtualMachinePayload:
 
 
         hostname = d.pop("hostname", UNSET)
+
+        ipv4_internet_access = d.pop("ipv4_internet_access", UNSET)
 
         is_privileged = d.pop("is_privileged", UNSET)
 
@@ -269,9 +258,9 @@ class CreateVirtualMachinePayload:
             memory_mib=memory_mib,
             disk_iops=disk_iops,
             disk_throughput_mibps=disk_throughput_mibps,
-            egress=egress,
             firewall=firewall,
             hostname=hostname,
+            ipv4_internet_access=ipv4_internet_access,
             is_privileged=is_privileged,
             is_termination_protected=is_termination_protected,
             metadata=metadata,

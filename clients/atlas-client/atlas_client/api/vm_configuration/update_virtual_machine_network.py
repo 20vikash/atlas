@@ -78,13 +78,15 @@ def sync_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -118,13 +120,15 @@ def sync(
 ) -> VirtualMachineResponse | None:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -153,13 +157,15 @@ async def asyncio_detailed(
 ) -> Response[VirtualMachineResponse]:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -193,13 +199,15 @@ async def asyncio(
 ) -> VirtualMachineResponse | None:
     """ Update network
 
-     Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability
-    and does not change mesh reachability.
+     Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access`
+    reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6
+    address brings its own internet path.
 
     Args:
         virtual_machine_id (str):
         x_tenant_id (int):
-        body (NetworkUpdatePayload): New egress mode and network rate limits.
+        body (NetworkUpdatePayload): New IPv4 internet access, network rate limits, or firewall
+            fields.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

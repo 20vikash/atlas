@@ -164,16 +164,6 @@
             "title": "Disk Throughput Mibps",
             "type": "integer"
           },
-          "egress": {
-            "default": "uplink",
-            "enum": [
-              "uplink",
-              "mesh",
-              "none"
-            ],
-            "title": "Egress",
-            "type": "string"
-          },
           "firewall": {
             "$ref": "#/components/schemas/FirewallPayload"
           },
@@ -186,6 +176,12 @@
             "minLength": 1,
             "title": "Image Id",
             "type": "string"
+          },
+          "ipv4_internet_access": {
+            "default": true,
+            "description": "Reach the IPv4 internet through host NAT. A public IPv4 address needs it. Without it and without a public IPv6 address, the VM reaches only the mesh.",
+            "title": "Ipv4 Internet Access",
+            "type": "boolean"
           },
           "is_privileged": {
             "default": false,
@@ -806,25 +802,8 @@
       },
       "NetworkUpdatePayload": {
         "additionalProperties": false,
-        "description": "New egress mode and network rate limits.",
+        "description": "New IPv4 internet access, network rate limits, or firewall fields.",
         "properties": {
-          "egress": {
-            "anyOf": [
-              {
-                "enum": [
-                  "uplink",
-                  "mesh",
-                  "none"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Egress"
-          },
           "firewall": {
             "anyOf": [
               {
@@ -835,6 +814,11 @@
               }
             ],
             "default": null
+          },
+          "ipv4_internet_access": {
+            "description": "Reach the IPv4 internet through host NAT. A public IPv4 address needs it.",
+            "title": "Ipv4 Internet Access",
+            "type": "boolean"
           },
           "private_network_throughput_mibps": {
             "anyOf": [
@@ -1370,16 +1354,17 @@
             "image_id": "8f1c2d3e4b5a6978",
             "is_privileged": false,
             "network": {
-              "egress": "uplink",
               "firewall": {
                 "enabled": false,
                 "inbound": [],
                 "outbound": []
               },
+              "ipv4_internet_access": true,
               "mac": "52:54:00:12:34:56",
               "mesh_ipv6": "fdaa:1::5",
               "private_network_throughput_mibps": 0,
               "public_ipv4": "203.0.113.10",
+              "public_ipv6": "2001:db8:5::7/128",
               "public_network_throughput_mibps": 0
             },
             "tenant_id": 7
@@ -1696,21 +1681,14 @@
         "type": "object"
       },
       "VirtualMachineNetwork": {
-        "description": "The addresses and network limits of one virtual machine.",
+        "description": "The addresses, internet access, and network limits of one virtual machine.",
         "properties": {
-          "egress": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Egress"
-          },
           "firewall": {
             "$ref": "#/components/schemas/FirewallResponse"
+          },
+          "ipv4_internet_access": {
+            "title": "Ipv4 Internet Access",
+            "type": "boolean"
           },
           "mac": {
             "anyOf": [
@@ -1749,14 +1727,26 @@
             ],
             "title": "Public Ipv4"
           },
+          "public_ipv6": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Ipv6"
+          },
           "public_network_throughput_mibps": {
             "title": "Public Network Throughput Mibps",
             "type": "integer"
           }
         },
         "required": [
-          "egress",
+          "ipv4_internet_access",
           "public_ipv4",
+          "public_ipv6",
           "mesh_ipv6",
           "mac",
           "private_network_throughput_mibps",
@@ -3263,7 +3253,7 @@
     },
     "/api/atlas/virtual-machines/{virtual_machine_id}/network": {
       "patch": {
-        "description": "Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability and does not change mesh reachability.",
+        "description": "Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access` reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6 address brings its own internet path.",
         "operationId": "update_virtual_machine_network",
         "parameters": [
           {

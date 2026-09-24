@@ -8,7 +8,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.network_update_payload_egress_type_0 import NetworkUpdatePayloadEgressType0
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -25,17 +24,17 @@ T = TypeVar("T", bound="NetworkUpdatePayload")
 
 @_attrs_define
 class NetworkUpdatePayload:
-    """ New egress mode and network rate limits.
+    """ New IPv4 internet access, network rate limits, or firewall fields.
 
         Attributes:
-            egress (NetworkUpdatePayloadEgressType0 | None | Unset):
             firewall (FirewallUpdatePayload | None | Unset):
+            ipv4_internet_access (bool | Unset): Reach the IPv4 internet through host NAT. A public IPv4 address needs it.
             private_network_throughput_mibps (int | None | Unset):
             public_network_throughput_mibps (int | None | Unset):
      """
 
-    egress: NetworkUpdatePayloadEgressType0 | None | Unset = UNSET
     firewall: FirewallUpdatePayload | None | Unset = UNSET
+    ipv4_internet_access: bool | Unset = UNSET
     private_network_throughput_mibps: int | None | Unset = UNSET
     public_network_throughput_mibps: int | None | Unset = UNSET
 
@@ -45,14 +44,6 @@ class NetworkUpdatePayload:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.firewall_update_payload import FirewallUpdatePayload # noqa: PLC0415
-        egress: None | str | Unset
-        if isinstance(self.egress, Unset):
-            egress = UNSET
-        elif isinstance(self.egress, NetworkUpdatePayloadEgressType0):
-            egress = self.egress.value
-        else:
-            egress = self.egress
-
         firewall: dict[str, Any] | None | Unset
         if isinstance(self.firewall, Unset):
             firewall = UNSET
@@ -60,6 +51,8 @@ class NetworkUpdatePayload:
             firewall = self.firewall.to_dict()
         else:
             firewall = self.firewall
+
+        ipv4_internet_access = self.ipv4_internet_access
 
         private_network_throughput_mibps: int | None | Unset
         if isinstance(self.private_network_throughput_mibps, Unset):
@@ -78,10 +71,10 @@ class NetworkUpdatePayload:
 
         field_dict.update({
         })
-        if egress is not UNSET:
-            field_dict["egress"] = egress
         if firewall is not UNSET:
             field_dict["firewall"] = firewall
+        if ipv4_internet_access is not UNSET:
+            field_dict["ipv4_internet_access"] = ipv4_internet_access
         if private_network_throughput_mibps is not UNSET:
             field_dict["private_network_throughput_mibps"] = private_network_throughput_mibps
         if public_network_throughput_mibps is not UNSET:
@@ -95,26 +88,6 @@ class NetworkUpdatePayload:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.firewall_update_payload import FirewallUpdatePayload # noqa: PLC0415
         d = dict(src_dict)
-        def _parse_egress(data: object) -> NetworkUpdatePayloadEgressType0 | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, str):
-                    raise TypeError()
-                egress_type_0 = NetworkUpdatePayloadEgressType0(data)
-
-
-
-                return egress_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(NetworkUpdatePayloadEgressType0 | None | Unset, data)
-
-        egress = _parse_egress(d.pop("egress", UNSET))
-
-
         def _parse_firewall(data: object) -> FirewallUpdatePayload | None | Unset:
             if data is None:
                 return data
@@ -134,6 +107,8 @@ class NetworkUpdatePayload:
 
         firewall = _parse_firewall(d.pop("firewall", UNSET))
 
+
+        ipv4_internet_access = d.pop("ipv4_internet_access", UNSET)
 
         def _parse_private_network_throughput_mibps(data: object) -> int | None | Unset:
             if data is None:
@@ -156,8 +131,8 @@ class NetworkUpdatePayload:
 
 
         network_update_payload = cls(
-            egress=egress,
             firewall=firewall,
+            ipv4_internet_access=ipv4_internet_access,
             private_network_throughput_mibps=private_network_throughput_mibps,
             public_network_throughput_mibps=public_network_throughput_mibps,
         )

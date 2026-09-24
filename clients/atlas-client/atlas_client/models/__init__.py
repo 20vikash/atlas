@@ -8,7 +8,6 @@ from .console_token_payload_mode import ConsoleTokenPayloadMode
 from .console_token_response import ConsoleTokenResponse
 from .console_token_response_mode import ConsoleTokenResponseMode
 from .create_virtual_machine_payload import CreateVirtualMachinePayload
-from .create_virtual_machine_payload_egress import CreateVirtualMachinePayloadEgress
 from .create_virtual_machine_payload_metadata import CreateVirtualMachinePayloadMetadata
 from .disk_update_payload import DiskUpdatePayload
 from .download_image_artifact import DownloadImageArtifact
@@ -30,7 +29,6 @@ from .memory_snapshot_configuration_payload import MemorySnapshotConfigurationPa
 from .metadata_replacement_payload import MetadataReplacementPayload
 from .metadata_replacement_payload_metadata import MetadataReplacementPayloadMetadata
 from .network_update_payload import NetworkUpdatePayload
-from .network_update_payload_egress_type_0 import NetworkUpdatePayloadEgressType0
 from .out_of_capacity_error import OutOfCapacityError
 from .page_image_response import PageImageResponse
 from .page_public_ip_response import PagePublicIPResponse
@@ -70,7 +68,6 @@ __all__ = (
     "ConsoleTokenResponse",
     "ConsoleTokenResponseMode",
     "CreateVirtualMachinePayload",
-    "CreateVirtualMachinePayloadEgress",
     "CreateVirtualMachinePayloadMetadata",
     "DiskUpdatePayload",
     "DownloadImageArtifact",
@@ -92,7 +89,6 @@ __all__ = (
     "MetadataReplacementPayload",
     "MetadataReplacementPayloadMetadata",
     "NetworkUpdatePayload",
-    "NetworkUpdatePayloadEgressType0",
     "OutOfCapacityError",
     "PageImageResponse",
     "PagePublicIPResponse",
