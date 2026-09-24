@@ -228,7 +228,9 @@ install_ssh_metadata
 
 step "create ext4 image"
 truncate -s 4G "$image_path.part"
-mkfs.ext4 -q -F -d "$rootfs_directory" "$image_path.part"
+
+# Remount read-only at the first file system error, so a damaged disk stops taking writes.
+mkfs.ext4 -q -F -e remount-ro -d "$rootfs_directory" "$image_path.part"
 mv "$image_path.part" "$image_path"
 
 echo "Built $image_path"
