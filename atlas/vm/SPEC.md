@@ -271,7 +271,7 @@ The Atlas setting **Use IPv6 Router For Auto Assignment** selects direct or rout
 
 Tenants can reserve direct allocations. They cannot reserve routed IPv6. Detach deletes an unreserved routed allocation, so a later attach can return a different address.
 
-The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change one firewall field. Atlas merges it with the current desired firewall and sends the complete network to Metal.
+The tenant API uses `PATCH /api/atlas/virtual-machines/{id}/network`. A request can change `ipv4_internet_access` or one firewall field. `ipv4_internet_access` adds or removes only the `0.0.0.0/0` route via `host`. Tenants cannot send routes. The route list is part of the Atlas to Metal contract, and System Managers edit it in Desk. Atlas merges it with the current desired firewall and sends the complete network to Metal.
 
 Firewall rules are allow rules for public and mesh traffic. They support `any`, `tcp`, `udp`, and `icmp`. TCP and UDP rules can select one destination port or one inclusive range. Each rule needs one or more canonical IPv4 or IPv6 prefixes. One firewall can have at most 50 prefix entries.
 

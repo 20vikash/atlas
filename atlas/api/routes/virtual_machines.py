@@ -402,7 +402,7 @@ def update_virtual_machine_network(
 ) -> ApiResult[VirtualMachineResponse]:
 	"""Update network.
 
-	Changes egress, network throughput limits, or firewall fields. Egress controls internet reachability and does not change mesh reachability.
+	Changes IPv4 internet access, network throughput limits, or firewall fields. `ipv4_internet_access` reaches the IPv4 internet through host NAT, and a public IPv4 address needs it. A public IPv6 address brings its own internet path.
 	"""
 	virtual_machine = get_owned_virtual_machine(virtual_machine_id)
 	virtual_machine.update_network(payload.model_dump(exclude_unset=True))

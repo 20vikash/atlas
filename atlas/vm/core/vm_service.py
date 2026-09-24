@@ -335,6 +335,11 @@ class VirtualMachineService:
 	def apply_network_changes(self, changes: dict[str, Any]) -> dict[str, Any]:
 		"""Validate and apply selected network changes."""
 		self.virtual_machine.validate_network_change()
+		if "ipv4_internet_access" in changes:
+			changes = {**changes}
+			changes["routes"] = self._routes_for_ipv4_internet_access(
+				bool(changes.pop("ipv4_internet_access"))
+			)
 		if "routes" in changes:
 			changes = {
 				**changes,
@@ -346,6 +351,11 @@ class VirtualMachineService:
 		except ValueError as error:
 			frappe.throw(_(str(error)), exc=AtlasUserError)
 			raise AssertionError from error
+
+	def _routes_for_ipv4_internet_access(self, enabled: bool) -> list[dict[str, str]]:
+		if enabled:
+			return self.get_routes_with(Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST))
+		return self.get_routes_without(IPV4_INTERNET_DESTINATION)
 
 	def set_routes(self, value: Any) -> dict[str, Any]:
 		"""Replace the complete route list. Metal owns the routes."""

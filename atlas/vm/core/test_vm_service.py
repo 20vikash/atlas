@@ -296,6 +296,24 @@ class TestVirtualMachineNetworkChanges(UnitTestCase):
 		):
 			service.get_routes_with(Route("2000::/3", "fdaa:1::56"))
 
+	def test_ipv4_internet_access_adds_and_removes_only_the_ipv4_host_route(self) -> None:
+		service = self.build_service(None)
+		gateway_route = Route("2000::/3", "fdaa:1::56")
+
+		for enabled, routes in (
+			(True, [gateway_route]),
+			(False, [gateway_route, Route("0.0.0.0/0", "host")]),
+		):
+			with (
+				patch.object(service, "get_routes", return_value=routes),
+				patch.object(service, "update_network", return_value={}) as update_network,
+			):
+				service.apply_network_changes({"ipv4_internet_access": enabled})
+
+			sent = update_network.call_args.args[0]["routes"]
+			self.assertIn(gateway_route.as_dict(), sent)
+			self.assertEqual({"destination": "0.0.0.0/0", "via": "host"} in sent, enabled)
+
 	def test_an_invalid_route_is_rejected(self) -> None:
 		service = self.build_service(None)
 

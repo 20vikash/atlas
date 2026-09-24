@@ -133,6 +133,14 @@ A routed IPv6 allocation can change after detach and attach.
 
 Use `PATCH /api/atlas/virtual-machines/{id}/network` to change firewall fields. The firewall contains `enabled`, `inbound`, and `outbound`. A missing field does not change.
 
+`ipv4_internet_access` controls IPv4 internet access through host NAT. It is `true` by default at creation, and the same `PATCH` route changes it. A public IPv4 address needs it, so Atlas refuses `false` while one is attached. A public IPv6 address brings its own internet path. A VM without `ipv4_internet_access` and without a public IPv6 address reaches only the mesh.
+
+```json
+{"ipv4_internet_access": false}
+```
+
+A tenant cannot set routes. Atlas turns these choices into the route list that it sends to Metal.
+
 All absolute time fields use Unix timestamps in seconds. Duration fields such as `expires_in` also use seconds.
 
 ## Behavior

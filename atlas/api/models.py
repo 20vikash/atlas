@@ -17,6 +17,8 @@ from atlas.atlas.core.tags import (
 	read_tags_for,
 )
 from atlas.vm.core.models import (
+	DEFAULT_ROUTES,
+	IPV4_INTERNET_DESTINATION,
 	MAXIMUM_CPU_MILLICORES,
 	MAXIMUM_FIREWALL_PREFIXES,
 	MINIMUM_CPU_MILLICORES,
@@ -33,7 +35,6 @@ if TYPE_CHECKING:
 	from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
 	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
-EgressMode = Literal["uplink", "mesh", "none"]
 TagMap = Annotated[
 	dict[
 		Annotated[str, StringConstraints(max_length=MAXIMUM_TAG_KEY_LENGTH)],
@@ -400,7 +401,10 @@ class CreateVirtualMachinePayload(StrictModel):
 	metadata: dict[str, str] = Field(default_factory=dict)
 	public_ipv4: str | None = None
 	public_ipv6: str | None = None
-	egress: EgressMode = "uplink"
+	ipv4_internet_access: bool = Field(
+		default=True,
+		description="Reach the IPv4 internet through host NAT. A public IPv4 address needs it. Without it and without a public IPv6 address, the VM reaches only the mesh.",
+	)
 	is_privileged: bool = False
 	is_termination_protected: bool = False
 	sleep_after_idle_seconds: int = Field(default=0, ge=0, le=9_223_372_036)
@@ -409,6 +413,12 @@ class CreateVirtualMachinePayload(StrictModel):
 	private_network_throughput_mibps: int = Field(default=0, ge=0)
 	public_network_throughput_mibps: int = Field(default=0, ge=0)
 	firewall: FirewallPayload = Field(default_factory=FirewallPayload)
+
+	@model_validator(mode="after")
+	def validate_ipv4_internet_access(self) -> CreateVirtualMachinePayload:
+		if self.public_ipv4 and not self.ipv4_internet_access:
+			raise ValueError("A public IPv4 address needs ipv4_internet_access.")
+		return self
 
 	def to_domain_request(self, tenant_id: int, image_name: str) -> VirtualMachineCreateRequest:
 		"""Build the domain request for this API payload."""
@@ -422,7 +432,7 @@ class CreateVirtualMachinePayload(StrictModel):
 			ssh_keys=tuple(self.ssh_keys),
 			user_data=self.user_data,
 			metadata=self.metadata,
-			egress=self.egress,
+			routes=DEFAULT_ROUTES if self.ipv4_internet_access else (),
 			is_privileged=self.is_privileged,
 			is_termination_protected=self.is_termination_protected,
 			sleep_after_idle_seconds=self.sleep_after_idle_seconds,
@@ -461,9 +471,12 @@ class DiskUpdatePayload(PatchPayload):
 
 
 class NetworkUpdatePayload(PatchPayload):
-	"""New egress mode and network rate limits."""
+	"""New IPv4 internet access, network rate limits, or firewall fields."""
 
-	egress: EgressMode | None = None
+	ipv4_internet_access: bool = Field(
+		default_factory=lambda: True,
+		description="Reach the IPv4 internet through host NAT. A public IPv4 address needs it.",
+	)
 	private_network_throughput_mibps: int | None = Field(default=None, ge=0)
 	public_network_throughput_mibps: int | None = Field(default=None, ge=0)
 	firewall: FirewallUpdatePayload | None = None
@@ -660,10 +673,11 @@ class FirewallResponse(BaseModel):
 
 
 class VirtualMachineNetwork(BaseModel):
-	"""The addresses and network limits of one virtual machine."""
+	"""The addresses, internet access, and network limits of one virtual machine."""
 
-	egress: str | None
+	ipv4_internet_access: bool
 	public_ipv4: str | None
+	public_ipv6: str | None
 	mesh_ipv6: str | None
 	mac: str | None
 	private_network_throughput_mibps: int
@@ -697,8 +711,9 @@ class VirtualMachineDetailResponse(BaseModel):
 					"compute": {"cpu_millicores": 2000, "memory_mib": 2048, "sleep_after_idle_seconds": 0},
 					"disk": {"size_mib": 20480, "throughput_mibps": 0, "iops": 0, "used_mib": 8123},
 					"network": {
-						"egress": "uplink",
+						"ipv4_internet_access": True,
 						"public_ipv4": "203.0.113.10",
+						"public_ipv6": "2001:db8:5::7/128",
 						"mesh_ipv6": "fdaa:1::5",
 						"mac": "52:54:00:12:34:56",
 						"private_network_throughput_mibps": 0,
@@ -765,8 +780,13 @@ class VirtualMachineDetailResponse(BaseModel):
 				used_mib=observed.disk.used_mib if observed else None,
 			),
 			network=VirtualMachineNetwork(
-				egress=desired.network.egress if desired else None,
+				ipv4_internet_access=bool(desired)
+				and any(
+					route.destination == IPV4_INTERNET_DESTINATION and route.is_via_host
+					for route in desired.network.routes
+				),
 				public_ipv4=desired.network.public_ipv4 or None if desired else None,
+				public_ipv6=virtual_machine.public_ipv6 or None,
 				mesh_ipv6=desired.network.wireguard_mesh_ipv6 or None if desired else None,
 				mac=observed.network.mac or None if observed else None,
 				private_network_throughput_mibps=(

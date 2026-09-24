@@ -34,6 +34,7 @@ from atlas.atlas.core.tags import (
 	MAXIMUM_TAGS,
 )
 from atlas.vm.core.metal_models import MetalFirewall, MetalFirewallRule
+from atlas.vm.core.models import DEFAULT_ROUTES, Route
 from atlas.vm.core.placement import OutOfCapacity
 
 CREATE_BODY = {
@@ -65,6 +66,7 @@ def build_virtual_machine(tenant_id: int = TENANT_ID, **overrides) -> SimpleName
 		"reboot": Mock(),
 		"terminate": Mock(),
 		"get_metal_vm_info": Mock(return_value=None),
+		"public_ipv6": "2001:db8:5::7/128",
 		"resize": Mock(),
 		"attach_public_ip": Mock(),
 		"detach_public_ip": Mock(),
@@ -82,7 +84,7 @@ def build_metal_information() -> SimpleNamespace:
 			state="running",
 			disk=SimpleNamespace(throughput_mibps=100, iops=500),
 			network=SimpleNamespace(
-				egress="uplink",
+				routes=(Route("0.0.0.0/0", "host"),),
 				public_ipv4="203.0.113.10",
 				wireguard_mesh_ipv6="fdaa:1::5",
 				private_network_throughput_mibps=0,
@@ -152,7 +154,8 @@ class TestVirtualMachineViews(UnitTestCase):
 		self.assertEqual(detail.network.public_ipv4, "203.0.113.10")
 		self.assertEqual(detail.network.mesh_ipv6, "fdaa:1::5")
 		self.assertEqual(detail.network.mac, "52:54:00:12:34:56")
-		self.assertEqual(detail.network.egress, "uplink")
+		self.assertTrue(detail.network.ipv4_internet_access)
+		self.assertEqual(detail.network.public_ipv6, "2001:db8:5::7/128")
 		self.assertTrue(detail.network.firewall.enabled)
 		self.assertEqual(detail.network.firewall.inbound[0].ports, "22")
 		self.assertEqual(detail.disk.iops, 500)
@@ -160,6 +163,14 @@ class TestVirtualMachineViews(UnitTestCase):
 		self.assertEqual(detail.guest.ssh_keys, ["ssh-ed25519 AAAA"])
 		self.assertEqual(detail.guest.metadata, {"role": "worker"})
 		self.assertEqual(detail.error, "boot failed")
+
+	def test_detail_requires_the_default_route_for_ipv4_internet_access(self) -> None:
+		information = build_metal_information()
+		information.desired.network.routes = (Route("10.0.0.0/8", "host"),)
+
+		detail = VirtualMachineDetailResponse.from_document_and_metal(build_virtual_machine(), information)
+
+		self.assertFalse(detail.network.ipv4_internet_access)
 
 	def test_a_migration_hides_the_host_state(self) -> None:
 		detail = VirtualMachineDetailResponse.from_document_and_metal(
@@ -261,6 +272,27 @@ class TestCreateVirtualMachine(UnitTestCase):
 		self.assertEqual(status, 202)
 		self.assertEqual(create.call_args.args[0].public_ipv4, "auto")
 		self.assertEqual(create.call_args.args[0].public_ipv6, "auto")
+
+	def test_create_turns_off_ipv4_internet_access(self) -> None:
+		status, _, create = self.create({**CREATE_BODY, "ipv4_internet_access": False})
+
+		self.assertEqual(status, 202)
+		self.assertEqual(create.call_args.args[0].routes, ())
+
+	def test_create_uses_ipv4_internet_access_by_default(self) -> None:
+		status, _, create = self.create(CREATE_BODY)
+
+		self.assertEqual(status, 202)
+		self.assertEqual(create.call_args.args[0].routes, DEFAULT_ROUTES)
+
+	def test_create_refuses_routes_and_a_public_ipv4_without_ipv4_internet_access(self) -> None:
+		for body in (
+			{**CREATE_BODY, "routes": [{"destination": "0.0.0.0/0", "via": "host"}]},
+			{**CREATE_BODY, "public_ipv4": "auto", "ipv4_internet_access": False},
+		):
+			status, _, create = self.create(body)
+			self.assertEqual(status, 400)
+			create.assert_not_called()
 
 	def test_create_rejects_a_field_the_caller_cannot_set(self) -> None:
 		for field in ("tenant_id", "server", "is_sleepy", "idle_timeout_seconds"):
@@ -411,6 +443,36 @@ class TestVirtualMachineConfiguration(UnitTestCase):
 
 		self.assertEqual(status, 202)
 		virtual_machine.update_network.assert_called_once_with({"firewall": {"enabled": True}})
+
+	def test_network_change_passes_ipv4_internet_access(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/network",
+				tenant_id=TENANT_ID,
+				json={"ipv4_internet_access": False},
+			),
+			owned_document(virtual_machine := build_virtual_machine(update_network=Mock(return_value={}))),
+		):
+			status, _ = call_route(update_virtual_machine_network, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 202)
+		virtual_machine.update_network.assert_called_once_with({"ipv4_internet_access": False})
+
+	def test_network_change_rejects_null_ipv4_internet_access(self) -> None:
+		with (
+			api_request(
+				"PATCH",
+				"/api/atlas/virtual-machines/vm-00001/network",
+				tenant_id=TENANT_ID,
+				json={"ipv4_internet_access": None},
+			),
+			owned_document(virtual_machine := build_virtual_machine()),
+		):
+			status, _ = call_route(update_virtual_machine_network, virtual_machine_id="vm-00001")
+
+		self.assertEqual(status, 400)
+		virtual_machine.update_network.assert_not_called()
 
 	def test_network_change_rejects_an_invalid_firewall_rule(self) -> None:
 		with (
