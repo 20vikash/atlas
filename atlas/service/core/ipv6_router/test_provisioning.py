@@ -8,6 +8,7 @@ from frappe.tests import UnitTestCase
 
 import atlas.service.core.ipv6_router.provisioning as provisioning
 from atlas.service.core.ipv6_router.provisioning import IPv6RouterServerProvisioner
+from atlas.vm.core.models import Route
 
 PACKAGE_ENVIRONMENT = {
 	"PACKAGE_NAME": "ipv6-router",
@@ -73,8 +74,10 @@ class TestRouterNetwork(UnitTestCase):
 		self.configure(machine)
 
 		machine.set_network_gateway.assert_called_once_with(True)
-		self.network_service.return_value.update_network.assert_called_once_with(
-			{"public_ipv6": "2001:db8::/64"}
+		network_service = self.network_service.return_value
+		network_service.get_routes_with.assert_called_once_with(Route("2000::/3", "host"))
+		network_service.update_network.assert_called_once_with(
+			{"public_ipv6": "2001:db8::/64", "routes": network_service.get_routes_with.return_value}
 		)
 
 	# A retry after a later failure must not attach the block twice.

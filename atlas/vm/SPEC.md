@@ -255,7 +255,7 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 | Attach Public IPv4 | Attaches an automatic or reserved `/32` allocation. |
 | Detach Public IPv4 | Clears the Metal address and completes the allocation detach. |
 | Attach Public IPv6 | Attaches an automatic direct or routed allocation. |
-| Detach Public IPv6 | Clears the direct prefix or the routed `2000::/3` route. |
+| Detach Public IPv6 | Clears the direct prefix and its `2000::/3` host route, or the routed `2000::/3` route. |
 | Edit Network Throughput | Sends private and public limits in MiB/s. `0` removes a limit. |
 | Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
 | Edit Routes | Sends the complete route list. Each destination goes via `host` or a gateway mesh address. The editor identifies the gateway VM when Atlas knows the address. |
@@ -265,7 +265,7 @@ Metal owns the routes. Atlas shows them as a read-only virtual field. A network 
 
 A VM can hold one IPv4 allocation and one IPv6 allocation. VM creation attaches no public allocation unless `public_ipv4` or `public_ipv6` is `auto` or a reserved allocation UUID.
 
-A direct allocation sets `network.public_ipv4` or `network.public_ipv6`. A routed IPv6 allocation keeps the prefix on an IPv6 Router Server and sets the VM route for `2000::/3` to that router mesh address.
+A direct allocation sets `network.public_ipv4` or `network.public_ipv6` and its host route: `0.0.0.0/0` or `2000::/3` via `host`. Metal maps a direct IPv6 `/128` to the mesh address, so the guest needs no configuration. A routed IPv6 allocation keeps the prefix on an IPv6 Router Server and sets the VM route for `2000::/3` to that router mesh address.
 
 The Atlas setting **Use IPv6 Router For Auto Assignment** selects direct or routed delivery for automatic IPv6. Atlas does not fall back to the other mode when the selected mode has no capacity.
 

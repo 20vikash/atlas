@@ -16,7 +16,12 @@ from atlas.atlas.core.tags import validate_tags
 from atlas.atlas.doctype.ssh_task.ssh_task import delete_tasks_for_target
 from atlas.vm.core import reconciliation
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import VirtualMachineCreateRequest
+from atlas.vm.core.models import (
+	IPV6_INTERNET_DESTINATION,
+	ROUTE_VIA_HOST,
+	Route,
+	VirtualMachineCreateRequest,
+)
 from atlas.vm.core.vm_service import VirtualMachineService
 
 DRAFT_EXPIRY_MINUTES = 2
@@ -294,13 +299,15 @@ class VirtualMachine(Document):
 		self.validate_network_change()
 		service = VirtualMachineService(self)
 		self.is_network_gateway = strict_bool(is_network_gateway, "is_network_gateway")
+		changes: dict[str, Any] = {"is_network_gateway": bool(self.is_network_gateway)}
 		if self.is_network_gateway:
 			self.validate_network_gateway()
 			if service.has_gateway_routes():
 				frappe.throw(
 					_("Remove the gateway routes of this VM before it becomes a gateway."), exc=AtlasUserError
 				)
-		service.update_network({"is_network_gateway": bool(self.is_network_gateway)})
+			changes["routes"] = service.get_routes_with(Route(IPV6_INTERNET_DESTINATION, ROUTE_VIA_HOST))
+		service.update_network(changes)
 		self.save()
 
 	@frappe.whitelist(methods=["POST"])

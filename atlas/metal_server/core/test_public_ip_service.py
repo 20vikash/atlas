@@ -5,6 +5,8 @@ from frappe.tests import UnitTestCase
 
 import atlas.metal_server.core.public_ip_service as service_module
 from atlas.metal_server.core.public_ip_service import PublicIPService
+from atlas.vm.core.models import Route
+from atlas.vm.core.vm_service import VirtualMachineService
 
 
 def pool(name: str, gateway: str):
@@ -48,42 +50,68 @@ class TestGatewayPoolSelection(UnitTestCase):
 		self.assertEqual(selected.name, "remote-pool")
 
 
-class TestRoutedAttachment(UnitTestCase):
-	def test_attach_keeps_unrelated_gateway_routes(self) -> None:
-		public_pool = pool("pool-1", "router-1")
-		virtual_machine = SimpleNamespace(name="vm-1")
-		router = SimpleNamespace(wireguard_mesh_ipv6="fdaa:1::1")
-		network_service = MagicMock()
-		network_service.get_gateway_routes.return_value = [
-			{"destination": "2001:db8:ffff::/48", "gateway": "fdaa:1::2"},
-			{"destination": "2000::/3", "gateway": "fdaa:1::9"},
-		]
+UNRELATED_ROUTE = Route("2001:db8:ffff::/48", "fdaa:1::2")
 
+
+def direct_pool(version: str):
+	return SimpleNamespace(
+		name="pool-1", gateway=None, is_routed=False, source="Static", version=version, host_address=None
+	)
+
+
+class TestRouteAttachment(UnitTestCase):
+	def attach(self, public_pool, prefix: str, routes: list[Route]) -> MagicMock:
+		router = SimpleNamespace(wireguard_mesh_ipv6="fdaa:1::1")
 		with (
 			patch.object(service_module.frappe, "get_doc", return_value=router),
-			patch("atlas.vm.core.vm_service.VirtualMachineService", return_value=network_service),
+			patch.object(VirtualMachineService, "get_routes", return_value=routes),
+			patch.object(VirtualMachineService, "update_network") as update_network,
 		):
-			PublicIPService()._apply_attach(public_pool, virtual_machine, "2001:db8::1/128", "metal-1")
+			PublicIPService()._apply_attach(public_pool, SimpleNamespace(name="vm-1"), prefix, "metal-1")
+		return update_network
 
-		network_service.set_gateway_routes.assert_called_once_with(
-			[
-				{"destination": "2001:db8:ffff::/48", "gateway": "fdaa:1::2"},
-				{"destination": "2000::/3", "gateway": "fdaa:1::1"},
-			]
+	def detach(self, public_pool, routes: list[Route]) -> MagicMock:
+		with (
+			patch.object(VirtualMachineService, "get_routes", return_value=routes),
+			patch.object(VirtualMachineService, "update_network") as update_network,
+		):
+			PublicIPService()._apply_detach(public_pool, SimpleNamespace(name="vm-1", is_terminating=0))
+		return update_network
+
+	def test_routed_attach_replaces_the_internet_route_and_keeps_other_routes(self) -> None:
+		update_network = self.attach(
+			pool("pool-1", "router-1"), "2001:db8::1/128", [UNRELATED_ROUTE, Route("2000::/3", "fdaa:1::9")]
 		)
 
-	def test_detach_removes_only_the_public_route(self) -> None:
-		public_pool = pool("pool-1", "router-1")
-		virtual_machine = SimpleNamespace(name="vm-1", is_terminating=0)
-		network_service = MagicMock()
-		network_service.get_gateway_routes.return_value = [
-			{"destination": "2001:db8:ffff::/48", "gateway": "fdaa:1::2"},
-			{"destination": "2000::/3", "gateway": "fdaa:1::1"},
-		]
-
-		with patch("atlas.vm.core.vm_service.VirtualMachineService", return_value=network_service):
-			PublicIPService()._apply_detach(public_pool, virtual_machine)
-
-		network_service.set_gateway_routes.assert_called_once_with(
-			[{"destination": "2001:db8:ffff::/48", "gateway": "fdaa:1::2"}]
+		update_network.assert_called_once_with(
+			{"routes": [UNRELATED_ROUTE.as_dict(), {"destination": "2000::/3", "via": "fdaa:1::1"}]}
 		)
+
+	def test_direct_ipv6_attach_sets_the_address_and_its_host_route(self) -> None:
+		update_network = self.attach(direct_pool("6"), "2001:db8::7/128", [UNRELATED_ROUTE])
+
+		update_network.assert_called_once_with(
+			{
+				"public_ipv6": "2001:db8::7/128",
+				"routes": [UNRELATED_ROUTE.as_dict(), {"destination": "2000::/3", "via": "host"}],
+			}
+		)
+
+	def test_direct_ipv4_attach_sets_the_address_and_its_host_route(self) -> None:
+		update_network = self.attach(direct_pool("4"), "203.0.113.7/32", [])
+
+		update_network.assert_called_once_with(
+			{"public_ipv4": "203.0.113.7", "routes": [{"destination": "0.0.0.0/0", "via": "host"}]}
+		)
+
+	def test_routed_detach_removes_only_the_internet_route(self) -> None:
+		update_network = self.detach(
+			pool("pool-1", "router-1"), [UNRELATED_ROUTE, Route("2000::/3", "fdaa:1::1")]
+		)
+
+		update_network.assert_called_once_with({"routes": [UNRELATED_ROUTE.as_dict()]})
+
+	def test_direct_ipv6_detach_removes_the_address_and_its_host_route(self) -> None:
+		update_network = self.detach(direct_pool("6"), [UNRELATED_ROUTE, Route("2000::/3", "host")])
+
+		update_network.assert_called_once_with({"public_ipv6": "", "routes": [UNRELATED_ROUTE.as_dict()]})

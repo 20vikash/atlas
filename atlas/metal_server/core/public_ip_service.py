@@ -11,7 +11,13 @@ from frappe import _
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.core.mesh_address import get_virtual_machine_mesh_address
 from atlas.metal_server.doctype.public_ip_allocation.public_ip_allocation import UNOWNED_TENANT_ID
-from atlas.service.core.ipv6_router.address import ROUTED_DESTINATION, get_routed_ipv6
+from atlas.service.core.ipv6_router.address import get_routed_ipv6
+from atlas.vm.core.models import (
+	IPV4_INTERNET_DESTINATION,
+	IPV6_INTERNET_DESTINATION,
+	ROUTE_VIA_HOST,
+	Route,
+)
 
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.public_ip_allocation.public_ip_allocation import (
@@ -270,12 +276,8 @@ class PublicIPService:
 		service = VirtualMachineService(virtual_machine)
 		if pool.is_routed:
 			router = frappe.get_doc("IPv6 Router Server", pool.gateway)
-			routes = [
-				route for route in service.get_gateway_routes() if route["destination"] != ROUTED_DESTINATION
-			]
-			service.set_gateway_routes(
-				[*routes, {"destination": ROUTED_DESTINATION, "gateway": router.wireguard_mesh_ipv6}]
-			)
+			route = Route(IPV6_INTERNET_DESTINATION, router.wireguard_mesh_ipv6)
+			service.update_network({"routes": service.get_routes_with(route)})
 			return
 
 		if pool.source == "Provider":
@@ -285,9 +287,14 @@ class PublicIPService:
 			pool.reload()
 		address = str(ipaddress.ip_network(prefix).network_address)
 		if pool.version == "4":
-			service.update_network({"egress": "uplink", "public_ipv4": pool.host_address or address})
+			route = Route(IPV4_INTERNET_DESTINATION, ROUTE_VIA_HOST)
+			service.update_network(
+				{"public_ipv4": pool.host_address or address, "routes": service.get_routes_with(route)}
+			)
+		# Replies from a public address leave through the host uplink.
 		else:
-			service.update_network({"public_ipv6": prefix})
+			route = Route(IPV6_INTERNET_DESTINATION, ROUTE_VIA_HOST)
+			service.update_network({"public_ipv6": prefix, "routes": service.get_routes_with(route)})
 
 	def _move_provider_pool(self, pool: PublicIPPool, server: str) -> None:
 		if pool.provider_status != "Attached" or pool.attached_server == server:
@@ -308,14 +315,13 @@ class PublicIPService:
 			return
 		service = VirtualMachineService(virtual_machine)
 		if pool.is_routed:
-			routes = [
-				route for route in service.get_gateway_routes() if route["destination"] != ROUTED_DESTINATION
-			]
-			service.set_gateway_routes(routes)
+			service.update_network({"routes": service.get_routes_without(IPV6_INTERNET_DESTINATION)})
 		elif pool.version == "4":
 			service.update_network({"public_ipv4": ""})
 		else:
-			service.update_network({"public_ipv6": ""})
+			service.update_network(
+				{"public_ipv6": "", "routes": service.get_routes_without(IPV6_INTERNET_DESTINATION)}
+			)
 
 	def _complete_attach(self, name: str, intent_version: int) -> None:
 		allocation = frappe.qb.DocType("Public IP Allocation")

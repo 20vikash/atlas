@@ -11,6 +11,7 @@ from atlas.atlas.core.ssh import wait_for_server
 from atlas.atlas.doctype.ssh_task.ssh_task import SSHTask
 from atlas.service.core.service_package import IPV6_ROUTER_PACKAGE
 from atlas.service.doctype.ipv6_router_server.ipv6_router_server import ipv6_router_lifecycle_lock
+from atlas.vm.core.models import IPV6_INTERNET_DESTINATION, ROUTE_VIA_HOST, Route
 
 if TYPE_CHECKING:
 	from atlas.service.doctype.ipv6_router_server.ipv6_router_server import IPv6RouterServer
@@ -113,7 +114,9 @@ class IPv6RouterServerProvisioner:
 				frappe.throw(_("The router has no Public IP Pool."))
 			pool.begin_provider_attach(virtual_machine.server)
 			pool.reconcile()
-			VirtualMachineService(virtual_machine).update_network({"public_ipv6": pool.prefix})
+			service = VirtualMachineService(virtual_machine)
+			route = Route(IPV6_INTERNET_DESTINATION, ROUTE_VIA_HOST)
+			service.update_network({"public_ipv6": pool.prefix, "routes": service.get_routes_with(route)})
 
 	def wait_for_ssh(self) -> None:
 		"""Wait for root SSH on the public IPv4 address."""

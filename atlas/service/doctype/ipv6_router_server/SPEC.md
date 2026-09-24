@@ -67,7 +67,7 @@ If no local gateway has capacity, Atlas selects a random active gateway in the r
 
 Atlas derives a `/128` address from the pool and the VM WireGuard mesh IPv6 address.
 
-It sets the VM route for `2000::/3` to the gateway mesh IPv6 address and keeps unrelated gateway routes.
+It sets the VM route for `2000::/3` to the gateway mesh IPv6 address and keeps unrelated routes.
 
 The application VM does not hold the public prefix directly.
 
