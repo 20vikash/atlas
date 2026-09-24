@@ -73,6 +73,8 @@ The same exchange carries the Atlas public keys that the host must trust. Each h
 
 ## Public IPv4
 
+The Public IP Pool list exposes one creation path: Generic installations add a static pool, while managed providers reserve one from their API. Provider pools expose Release Provider Pool under Dangerous Actions. Release deletes Available allocations, refuses allocations in use, and then releases the provider resource.
+
 An address carries a desired intent and an intent version. Reconciliation applies the intent and preserves a pending one for a retry, so a failed apply is never mistaken for a completed one.
 
 The provider attach operation returns the host address that receives public traffic. Atlas stores this value in `host_address` and then sends it to Metal. A newer intent prevents the old reconcile job from sending its value to Metal.
@@ -85,9 +87,9 @@ A tenant reservation claims an address from the shared pool. An operator fills t
 
 A virtual machine can attach an address that its own tenant holds, or an unowned address from the shared pool. Attaching an unowned address claims it for the tenant of the virtual machine but does not reserve it. An address that another tenant holds is refused. The attach route accepts `auto` and borrows the oldest free pool address.
 
-An unreserved address returns to the shared pool after detach, including VM deletion. The guarded update clears the tenant only after provider detach succeeds. A reserved address keeps its tenant until release.
-
 Attachment changes lock the virtual machine, and a named reservation is checked after its allocation row is locked. This preserves one allocation of each IP version per VM during concurrent requests.
+
+An unreserved address returns to the shared pool after detach, including VM deletion. The guarded update clears the tenant only after provider detach succeeds. A reserved address keeps its tenant until release.
 
 A tenant can reserve an address it already holds to stop that return, even while it is attached. A `Detaching` address is refused because reconciliation has already decided its pool return.
 
@@ -100,6 +102,8 @@ An IPv4 record is one `/32` address, and validation refuses any other length. Th
 ## Public IPv6 blocks
 
 A record with `version` 6 is one IPv6 block. `cidr` holds its length, which the provider sets: `/64` on Scaleway and `/80` on AWS. An operator sets it on a Generic network. A block never joins the shared pool, and a tenant cannot reserve it.
+
+A pool assigned to an IPv6 Router Server cannot be deleted until the router is archived.
 
 A System Manager attaches one block to one VM from the VM form or the block form. Both paths run the VM network checks. Atlas sends `public_ipv6` to Metal first, then sets the attach intent. The host routes the whole block into the VM and answers neighbour solicitations for it on its public interface.
 

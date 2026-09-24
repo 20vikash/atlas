@@ -27,6 +27,17 @@ function reserveProviderPool() {
 	dialog.show();
 }
 
+function setProviderPrimaryAction(listview) {
+	if (!listview.serverProvider || !frappe.user.has_role("System Manager")) return;
+	if (listview.serverProvider === "Generic") return;
+
+	listview.page.set_primary_action(
+		{ label: __("Reserve Public IP Pool"), short_label: __("Reserve") },
+		reserveProviderPool,
+		"plus"
+	);
+}
+
 frappe.listview_settings["Public IP Pool"] = {
 	async onload(listview) {
 		listview.serverProvider = await frappe.db.get_single_value(
@@ -35,9 +46,5 @@ frappe.listview_settings["Public IP Pool"] = {
 		);
 		listview.refresh();
 	},
-	refresh(listview) {
-		if (listview.serverProvider === "Generic" || !frappe.user.has_role("System Manager"))
-			return;
-		listview.page.add_inner_button(__("Reserve Provider Pool"), reserveProviderPool);
-	},
+	refresh: setProviderPrimaryAction,
 };

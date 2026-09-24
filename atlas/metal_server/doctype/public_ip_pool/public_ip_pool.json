@@ -7,16 +7,16 @@
  "field_order": [
   "prefix",
   "version",
-  "allocation_prefix_length",
+  "gateway",
   "top_column",
   "enabled",
-  "gateway",
+  "allocation_prefix_length",
   "provider_section",
   "source",
   "provider_resource_id",
+  "provider_status",
   "intent_version",
   "provider_column",
-  "provider_status",
   "attached_server",
   "host_address",
   "next_allocation_offset",
@@ -156,7 +156,7 @@
    "link_fieldname": "pool"
   }
  ],
- "modified": "2026-09-24 04:33:10.972348",
+ "modified": "2026-09-24 10:45:14.557558",
  "modified_by": "Administrator",
  "module": "Metal Server",
  "name": "Public IP Pool",

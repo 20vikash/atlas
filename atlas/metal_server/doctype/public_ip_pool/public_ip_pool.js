@@ -27,6 +27,13 @@ frappe.ui.form.on("Public IP Pool", {
 				__("Actions")
 			);
 		}
+		if (frm.doc.source === "Provider") {
+			frm.add_custom_button(
+				__("Release Provider Pool"),
+				() => frm.savetrash(),
+				__("Dangerous Actions")
+			);
+		}
 	},
 });
 

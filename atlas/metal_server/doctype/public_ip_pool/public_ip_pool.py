@@ -67,10 +67,11 @@ class PublicIPPool(Document):
 		self._validate_immutable_geometry()
 
 	def on_trash(self) -> None:
-		if frappe.db.exists("Public IP Allocation", {"pool": self.name}):
-			frappe.throw(_("Remove all allocations before you delete this pool."))
+		if self.gateway:
+			frappe.throw(_("Archive this pool's IPv6 Router Server before deletion."))
 		if self.provider_status not in {"Not Applicable", "Available"}:
 			frappe.throw(_("Detach this pool from its Metal Server before deletion."))
+		self._delete_available_allocations()
 		if self.source == "Provider":
 			frappe.get_single("Atlas Settings").server_provider_controller.delete_public_ip_address(
 				self.provider_resource_id
@@ -260,6 +261,12 @@ class PublicIPPool(Document):
 			frappe.throw(
 				_("Remove this pool's allocations before you change its address geometry or gateway.")
 			)
+
+	def _delete_available_allocations(self) -> None:
+		if frappe.db.exists("Public IP Allocation", {"pool": self.name, "status": ["!=", "Available"]}):
+			frappe.throw(_("Release or detach all allocations in use before you delete this pool."))
+		for name in frappe.get_all("Public IP Allocation", filters={"pool": self.name}, pluck="name"):
+			frappe.delete_doc("Public IP Allocation", name, ignore_permissions=True, delete_permanently=True)
 
 
 @frappe.whitelist(methods=["POST"])
