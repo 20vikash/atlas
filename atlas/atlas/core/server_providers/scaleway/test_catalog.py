@@ -28,8 +28,15 @@ class TestScalewayCatalog(UnitTestCase):
 				)
 				self.assertEqual(sizes[0].architecture, architecture)
 
-	def test_size_architecture_rejects_unknown_or_mixed_cpus(self) -> None:
-		for cpu_names in ([], ["Unknown"], ["AMD EPYC", "Ampere Altra"]):
+	def test_size_architecture_skips_an_unknown_cpu(self) -> None:
+		sizes = ScalewayCatalog().get_server_sizes(
+			[{"name": "size", "subscription_period": "hourly", "cpus": [{"name": "TH1520", "core_count": 4}]}]
+		)
+
+		self.assertEqual(sizes, ())
+
+	def test_size_architecture_rejects_missing_or_mixed_cpus(self) -> None:
+		for cpu_names in ([], ["AMD EPYC", "Ampere Altra"]):
 			with self.subTest(cpu_names=cpu_names), self.assertRaises(ScalewayError):
 				ScalewayCatalog().get_server_sizes(
 					[

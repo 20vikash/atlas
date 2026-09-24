@@ -78,9 +78,12 @@ class PublicIPService:
 	"""Allocate public prefixes and reconcile their VM network state."""
 
 	def reserve(self, tenant_id: int, version: int) -> PublicIPAllocation:
-		pool = self._select_direct_pool(version)
+		return self.reserve_from_pool(self._select_direct_pool(version), tenant_id)
+
+	def reserve_from_pool(self, pool: PublicIPPool, tenant_id: int) -> PublicIPAllocation:
+		if pool.is_routed:
+			raise UnsupportedIPReservation()
 		allocation = self._claim_direct_allocation(pool, tenant_id, is_reserved=True)
-		allocation.status = "Reserved"
 		allocation.save(ignore_permissions=True)
 		return allocation
 

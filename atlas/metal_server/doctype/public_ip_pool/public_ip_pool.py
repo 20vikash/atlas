@@ -12,6 +12,8 @@ from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.tags import validate_tags
 from atlas.service.core.ipv6_router.address import validate_router_network
 
+ATLAS_TENANT_ID = 0
+
 if TYPE_CHECKING:
 	from atlas.metal_server.doctype.metal_server.metal_server import MetalServer
 
@@ -127,6 +129,14 @@ class PublicIPPool(Document):
 		from atlas.metal_server.core.public_ip_service import generate_available_allocations
 
 		return generate_available_allocations(self.name)
+
+	@frappe.whitelist(methods=["POST"])
+	def reserve_allocation(self) -> str:
+		"""Reserve the next allocation of this direct pool for Atlas services, which use tenant 0."""
+		frappe.only_for("System Manager")
+		from atlas.metal_server.core.public_ip_service import PublicIPService
+
+		return PublicIPService().reserve_from_pool(self, ATLAS_TENANT_ID).name
 
 	@frappe.whitelist(methods=["POST"])
 	def retry_provider_operation(self) -> None:

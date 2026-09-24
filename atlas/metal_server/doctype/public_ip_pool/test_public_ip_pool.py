@@ -1,7 +1,12 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from atlas.metal_server.core.public_ip_service import PublicIPService, generate_available_allocations
+from atlas.metal_server.core.public_ip_service import (
+	PublicIPPoolEmpty,
+	PublicIPService,
+	UnsupportedIPReservation,
+	generate_available_allocations,
+)
 
 
 def insert_pool(prefix: str, allocation_prefix_length: int, **values):
@@ -101,3 +106,32 @@ class TestPublicIPPool(IntegrationTestCase):
 			frappe.delete_doc("Public IP Pool", pool.name, ignore_permissions=True)
 
 		self.assertTrue(frappe.db.exists("Public IP Pool", pool.name))
+
+	def test_reserve_allocation_reserves_the_next_prefix_for_atlas(self) -> None:
+		pool = insert_pool("198.19.33.0/31", 32)
+
+		name = pool.reserve_allocation()
+
+		allocation = frappe.get_doc("Public IP Allocation", name)
+		self.assertEqual(allocation.prefix, "198.19.33.0/32")
+		self.assertEqual(allocation.status, "Reserved")
+		self.assertEqual(allocation.tenant_id, 0)
+		self.assertEqual(allocation.is_reserved, 1)
+		self.assertFalse(allocation.virtual_machine)
+
+	def test_reserve_allocation_refuses_a_full_pool(self) -> None:
+		pool = insert_pool("198.19.34.0/32", 32)
+		pool.reserve_allocation()
+
+		with self.assertRaises(PublicIPPoolEmpty):
+			pool.reserve_allocation()
+
+	def test_reserve_allocation_refuses_a_routed_pool(self) -> None:
+		pool = insert_pool("2001:db8:34::/64", 128)
+		pool.db_set("gateway", f"ipv6-router-{pool.name}", update_modified=False)
+		pool.reload()
+
+		with self.assertRaises(UnsupportedIPReservation):
+			pool.reserve_allocation()
+
+		self.assertFalse(frappe.db.exists("Public IP Allocation", {"pool": pool.name}))

@@ -27,7 +27,11 @@ class ScalewayCatalog:
 			name = offer.get("name")
 			if not isinstance(name, str):
 				raise ScalewayError("Scaleway offer has no name")
-			sizes[name] = self._merge_offer(sizes.get(name), offer)
+			architecture = self.offer_architecture(offer)
+			# Atlas runs only amd64 and arm64 hosts. Skip other offers, such as RISC-V.
+			if architecture is None:
+				continue
+			sizes[name] = self._merge_offer(sizes.get(name), offer, architecture)
 		return tuple(sizes.values())
 
 	def get_server_images(self, images: object) -> tuple[ServerImageData, ...]:
@@ -80,8 +84,7 @@ class ScalewayCatalog:
 				return option["id"]
 		raise ScalewayError(f"Metal Server Size {size_name} has no Private Network option")
 
-	def _merge_offer(self, size: ServerSizeData | None, offer: Mapping) -> ServerSizeData:
-		architecture = self.offer_architecture(offer)
+	def _merge_offer(self, size: ServerSizeData | None, offer: Mapping, architecture: str) -> ServerSizeData:
 		if size and size.architecture != architecture:
 			raise ScalewayError(f"Scaleway offers for {offer['name']} disagree on architecture")
 
@@ -109,8 +112,8 @@ class ScalewayCatalog:
 		)
 
 	@staticmethod
-	def offer_architecture(offer: Mapping) -> str:
-		"""Return the CPU architecture reported by one Scaleway offer."""
+	def offer_architecture(offer: Mapping) -> str | None:
+		"""Return the CPU architecture of one Scaleway offer, or None for a CPU family Atlas does not run."""
 		cpus = offer.get("cpus")
 		if not isinstance(cpus, list) or not cpus:
 			raise ScalewayError(f"Scaleway offer {offer.get('name')} has no CPUs")
@@ -125,7 +128,7 @@ class ScalewayCatalog:
 			elif name.startswith(("AMD", "Intel")):
 				architectures.add("amd64")
 			else:
-				raise ScalewayError(f"Scaleway offer {offer.get('name')} has an unknown CPU: {name}")
+				return None
 
 		if len(architectures) != 1:
 			raise ScalewayError(f"Scaleway offer {offer.get('name')} has mixed CPU architectures")

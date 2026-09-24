@@ -88,3 +88,5 @@ Pool and allocation locks protect allocation creation and assignment from concur
 An unreserved direct allocation returns to `Available` after detach. A reserved allocation returns to `Reserved` and keeps its tenant.
 
 Release removes the reservation and returns the allocation to `Available`. A routed allocation is removed after detach.
+
+A System Manager can reserve the next allocation of a direct pool for Atlas services with **Reserve Allocation** on the pool form. The allocation gets tenant 0. An IPv6 Router Server uses such an IPv4 allocation.
