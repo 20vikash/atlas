@@ -9,7 +9,13 @@ from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.vm.core import vm_service as virtual_machine_service_module
 from atlas.vm.core.metal_client import MetalClientError
 from atlas.vm.core.metal_models import MetalVirtualMachine
-from atlas.vm.core.models import FirewallConfiguration, FirewallRule, VirtualMachineCreateRequest
+from atlas.vm.core.models import (
+	DEFAULT_ROUTES,
+	FirewallConfiguration,
+	FirewallRule,
+	Route,
+	VirtualMachineCreateRequest,
+)
 from atlas.vm.core.vm_service import VirtualMachineService
 from atlas.vm.doctype.virtual_machine import virtual_machine as virtual_machine_module
 from atlas.vm.doctype.virtual_machine.virtual_machine import VirtualMachine
@@ -36,7 +42,7 @@ METAL_VIRTUAL_MACHINE_RESPONSE = {
 			"memory_snapshot_configuration": None,
 		},
 		"network": {
-			"egress": "uplink",
+			"routes": [{"destination": "0.0.0.0/0", "via": "host"}],
 			"public_ipv4": "203.0.113.10",
 			"wireguard_mesh_ipv6": "fdaa:1::1",
 			"private_network_throughput_mibps": 100,
@@ -79,7 +85,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 
 		self.assertEqual(request.ssh_keys, ("key-one", "key-two"))
 		self.assertEqual(request.cpu_millicores, 1500)
-		self.assertEqual(request.egress, "uplink")
+		self.assertEqual(request.routes, DEFAULT_ROUTES)
 		self.assertEqual(request.firewall, FirewallConfiguration())
 
 	def test_request_parses_a_firewall(self) -> None:
@@ -231,7 +237,7 @@ class TestVirtualMachineRequest(UnitTestCase):
 		self.assertEqual(request.private_network_throughput_mibps, 100)
 		self.assertEqual(request.public_network_throughput_mibps, 0)
 
-	def test_request_accepts_mesh_egress(self) -> None:
+	def test_request_accepts_an_empty_route_list(self) -> None:
 		request = VirtualMachineCreateRequest.from_value(
 			{
 				"virtual_machine_image": "Ubuntu 24.04",
@@ -239,29 +245,29 @@ class TestVirtualMachineRequest(UnitTestCase):
 				"memory_mib": 2048,
 				"disk_mib": 10240,
 				"tenant_id": 7,
-				"egress": "mesh",
-				"private_network_throughput_mibps": 100,
+				"routes": [],
+				"public_network_throughput_mibps": 50,
 			}
 		)
 
-		self.assertEqual(request.egress, "mesh")
-		self.assertEqual(request.private_network_throughput_mibps, 100)
+		self.assertEqual(request.routes, ())
+		self.assertEqual(request.public_network_throughput_mibps, 50)
 
-	def test_request_rejects_a_public_address_without_uplink(self) -> None:
+	def test_request_rejects_an_invalid_route(self) -> None:
 		base = {
 			"virtual_machine_image": "Ubuntu 24.04",
 			"cpu_millicores": 2000,
 			"memory_mib": 2048,
 			"disk_mib": 10240,
 			"tenant_id": 7,
-			"egress": "mesh",
 		}
-		with self.assertRaises(ValueError):
-			VirtualMachineCreateRequest.from_value({**base, "public_ipv4": "auto"})
-
-		# Store the public limit; a mode change needs no cleanup.
-		request = VirtualMachineCreateRequest.from_value({**base, "public_network_throughput_mibps": 50})
-		self.assertEqual(request.public_network_throughput_mibps, 50)
+		for routes in (
+			[{"destination": "0.0.0.0/0", "via": "fdaa:1::56"}],
+			[{"destination": "2000::/3", "via": "2001:db8::1"}],
+			[{"destination": "2000::/3", "via": "host"}, {"destination": "2000::/3", "via": "fdaa:1::56"}],
+		):
+			with self.assertRaises(ValueError):
+				VirtualMachineCreateRequest.from_value({**base, "routes": routes})
 
 	def test_request_rejects_negative_throughput(self) -> None:
 		with self.assertRaises(ValueError):
@@ -445,7 +451,9 @@ class TestVirtualMachineVirtualFields(UnitTestCase):
 		self.assertEqual(virtual_machine.desired_state, "running")
 		self.assertEqual(virtual_machine.hostname, "worker-1")
 		self.assertEqual(virtual_machine.mac, "06:00:00:00:00:01")
-		self.assertEqual(virtual_machine.egress, "uplink")
+		self.assertEqual(
+			virtual_machine.routes, '[\n  {\n    "destination": "0.0.0.0/0",\n    "via": "host"\n  }\n]'
+		)
 		self.assertEqual(virtual_machine.wireguard_mesh_ipv6, "fdaa:1::1")
 		self.assertEqual(virtual_machine.disk_throughput_mibps, 50)
 		self.assertEqual(virtual_machine.disk_iops, 2000)
@@ -521,7 +529,6 @@ class TestVirtualMachineNetwork(UnitTestCase):
 	def test_update_network_keeps_the_unchanged_metal_values(self) -> None:
 		virtual_machine, client = self.build_virtual_machine(
 			{
-				"egress": "uplink",
 				"public_ipv4": "203.0.113.10",
 				"wireguard_mesh_ipv6": "fdaa:1::1",
 				"private_network_throughput_mibps": 100,
@@ -540,10 +547,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		client.set_virtual_machine_network.assert_called_once_with(
 			"VM-00001",
 			{
-				"egress": "uplink",
 				"public_ipv4": "203.0.113.10",
 				"wireguard_mesh_ipv6": "fdaa:1::1",
-				"gateway_routes": [],
+				"routes": [{"destination": "0.0.0.0/0", "via": "host"}],
 				"is_network_gateway": False,
 				"public_ipv6": "",
 				"private_network_throughput_mibps": 100,
@@ -604,7 +610,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		client.set_virtual_machine_network.assert_not_called()
 
 	def test_update_network_rejects_a_draft(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, client = self.build_virtual_machine({})
 		virtual_machine.is_draft = 1
 
 		with (
@@ -615,73 +621,78 @@ class TestVirtualMachineNetwork(UnitTestCase):
 				{"public_network_throughput_mibps": 25}
 			)
 
-	def test_a_gateway_route_accepts_an_arbitrary_mesh_address(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+	def test_set_routes_canonicalizes_a_gateway_address(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({})
 		virtual_machine.is_network_gateway = 0
 
 		with (
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
 			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+			patch.object(VirtualMachineService, "get_ipv4_address_name", return_value=None),
 			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
 		):
-			VirtualMachineService(virtual_machine).set_gateway_routes(
-				[{"destination": "::/0", "gateway": "fdaa:0001:0000::49"}]
+			VirtualMachineService(virtual_machine).set_routes(
+				[
+					{"destination": "0.0.0.0/0", "via": "host"},
+					{"destination": "::/0", "via": "fdaa:0001:0000::49"},
+				]
 			)
 
 		self.assertEqual(
-			client.set_virtual_machine_network.call_args.args[1]["gateway_routes"],
-			[{"destination": "::/0", "gateway": "fdaa:1::49"}],
+			client.set_virtual_machine_network.call_args.args[1]["routes"],
+			[{"destination": "0.0.0.0/0", "via": "host"}, {"destination": "::/0", "via": "fdaa:1::49"}],
 		)
 
-	def test_a_gateway_route_outside_the_mesh_is_refused(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+	def test_a_route_outside_the_mesh_is_refused(self) -> None:
+		virtual_machine, client = self.build_virtual_machine({})
 		virtual_machine.is_network_gateway = 0
 
 		with (
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
+			patch.object(VirtualMachineService, "get_ipv4_address_name", return_value=None),
 			patch.object(VirtualMachineService, "get_public_ipv6", return_value=""),
 			self.assertRaisesRegex(AtlasUserError, "fdaa::/16"),
 		):
-			VirtualMachineService(virtual_machine).set_gateway_routes(
-				[{"destination": "::/0", "gateway": "2001:db8::7"}]
-			)
+			VirtualMachineService(virtual_machine).set_routes([{"destination": "::/0", "via": "2001:db8::7"}])
 
 		client.set_virtual_machine_network.assert_not_called()
 
-	def test_gateway_route_editor_identifies_a_known_gateway_vm(self) -> None:
+	def test_route_editor_identifies_a_known_gateway_vm(self) -> None:
 		service = VirtualMachineService(Mock())
 		gateway = frappe._dict(name="VM-00049", tenant_id=0)
-		routes = [{"destination": "::/0", "gateway": "fdaa:1::49"}]
+		routes = [Route("::/0", "fdaa:1::49")]
 
 		with (
-			patch.object(service, "get_gateway_routes", return_value=routes),
+			patch.object(service, "get_routes", return_value=routes),
 			patch.object(virtual_machine_service_module.frappe, "get_all", return_value=[gateway]),
 			patch.object(
 				virtual_machine_service_module, "get_virtual_machine_mesh_address", return_value="fdaa:1::49"
 			),
 		):
 			self.assertEqual(
-				service.get_gateway_route_editor_rows(),
-				[{**routes[0], "gateway_virtual_machine": "VM-00049"}],
+				service.get_route_editor_rows(),
+				[{"destination": "::/0", "via": "fdaa:1::49", "gateway_virtual_machine": "VM-00049"}],
 			)
 
-	def test_a_vm_with_a_block_has_no_gateway_routes(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+	def test_the_public_ipv6_route_cannot_change_while_the_address_is_attached(self) -> None:
+		virtual_machine, client = self.build_virtual_machine(
+			{"routes": [{"destination": "2000::/3", "via": "host"}]}
+		)
 		virtual_machine.is_network_gateway = 0
 
 		with (
 			patch.object(virtual_machine_service_module, "MetalClient", return_value=client),
-			patch.object(VirtualMachineService, "has_direct_public_ipv6", return_value=True),
-			self.assertRaisesRegex(AtlasUserError, "every destination"),
+			patch.object(virtual_machine_module.frappe, "get_doc", return_value=Mock()),
+			patch.object(VirtualMachineService, "get_ipv4_address_name", return_value=None),
+			patch.object(VirtualMachineService, "get_public_ipv6", return_value="2001:db8::7/128"),
+			self.assertRaisesRegex(AtlasUserError, "Detach the public IPv6"),
 		):
-			VirtualMachineService(virtual_machine).set_gateway_routes(
-				[{"destination": "::/0", "gateway": "fdaa:1::49"}]
-			)
+			VirtualMachineService(virtual_machine).set_routes([])
 
 		client.set_virtual_machine_network.assert_not_called()
 
 	def test_a_network_gateway_needs_the_privileged_flag(self) -> None:
-		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, _ = self.build_virtual_machine({})
 		virtual_machine.check_permission = Mock()
 		virtual_machine.is_privileged = 0
 
@@ -689,7 +700,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			virtual_machine.validate_network_gateway()
 
 	def test_attach_public_ip_stores_an_intent(self) -> None:
-		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, _ = self.build_virtual_machine({})
 		virtual_machine.check_permission = Mock()
 		virtual_machine.ensure_not_migrating = Mock()
 		virtual_machine.validate_network_change = Mock()
@@ -698,7 +709,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 		service.return_value.attach.assert_called_once_with(virtual_machine, 6, "auto")
 
 	def test_detach_public_ip_stores_an_intent(self) -> None:
-		virtual_machine, _ = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, _ = self.build_virtual_machine({})
 		virtual_machine.check_permission = Mock()
 		virtual_machine.ensure_not_migrating = Mock()
 		virtual_machine.validate_network_change = Mock()
@@ -706,40 +717,9 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			virtual_machine.detach_public_ip(4)
 		service.return_value.detach.assert_called_once_with(virtual_machine, 4)
 
-	def test_update_egress_sends_the_new_mode(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
-		metal_client, get_doc, check_permission, database = self.patches(client, None)
-
-		with metal_client, get_doc, check_permission, database:
-			virtual_machine.update_egress("mesh")
-
-		self.assertEqual(client.set_virtual_machine_network.call_args.args[1]["egress"], "mesh")
-
-	def test_update_egress_rejects_an_unknown_mode(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
-		metal_client, get_doc, check_permission, database = self.patches(client, None)
-
-		with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
-			virtual_machine.update_egress("server")
-
-		client.set_virtual_machine_network.assert_not_called()
-
-	def test_update_egress_keeps_the_internet_path_for_an_attached_address(self) -> None:
-		"""A public IPv4 address needs uplink, so Atlas refuses mesh and none."""
-		virtual_machine, client = self.build_virtual_machine(
-			{"egress": "uplink", "public_ipv4": "203.0.113.10"}
-		)
-
-		for egress in ("mesh", "none"):
-			metal_client, get_doc, check_permission, database = self.patches(client, "203.0.113.10")
-			with metal_client, get_doc, check_permission, database, self.assertRaises(frappe.ValidationError):
-				virtual_machine.update_egress(egress)
-
-		client.set_virtual_machine_network.assert_not_called()
-
 	def test_update_network_throughput_rejects_bad_values(self) -> None:
 		"""A malformed value must fail, not silently become 0 and remove the limit."""
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, client = self.build_virtual_machine({})
 
 		for private, public in ((-1, 0), ("abc", 0), (0, "")):
 			metal_client, get_doc, check_permission, database = self.patches(client, None)
@@ -750,7 +730,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 
 	def test_update_disk_limits_names_the_failing_limit(self) -> None:
 		"""The IOPS limit must not report a throughput unit."""
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, client = self.build_virtual_machine({})
 		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
 		with (
@@ -763,7 +743,7 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			virtual_machine.update_disk_limits(0, "abc")
 
 	def test_update_disk_rejects_a_draft(self) -> None:
-		virtual_machine, client = self.build_virtual_machine({"egress": "uplink"})
+		virtual_machine, client = self.build_virtual_machine({})
 		virtual_machine.is_draft = 1
 		metal_client, get_doc, check_permission, database = self.patches(client, None)
 
@@ -771,20 +751,6 @@ class TestVirtualMachineNetwork(UnitTestCase):
 			virtual_machine.update_disk({"size_mib": 40960})
 
 		client.set_virtual_machine_disk.assert_not_called()
-
-	def test_update_egress_keeps_a_stored_public_limit(self) -> None:
-		"""Atlas resends every setting, so a stored public limit must not block a mode change."""
-		virtual_machine, client = self.build_virtual_machine(
-			{"egress": "uplink", "public_network_throughput_mibps": 31}
-		)
-		metal_client, get_doc, check_permission, database = self.patches(client, None)
-
-		with metal_client, get_doc, check_permission, database:
-			virtual_machine.update_egress("mesh")
-
-		request = client.set_virtual_machine_network.call_args.args[1]
-		self.assertEqual(request["egress"], "mesh")
-		self.assertEqual(request["public_network_throughput_mibps"], 31)
 
 
 class TestVirtualMachineTrash(UnitTestCase):

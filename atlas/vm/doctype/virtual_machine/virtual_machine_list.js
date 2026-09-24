@@ -111,15 +111,6 @@ function showCreateVirtualMachineDialog() {
 			},
 			{ fieldtype: "Section Break", label: __("Network") },
 			{
-				fieldname: "egress",
-				fieldtype: "Select",
-				label: __("Egress"),
-				options: "uplink\nmesh\nnone",
-				default: "uplink",
-				reqd: 1,
-				description: __("uplink reaches the internet. mesh reaches tenant VMs only."),
-			},
-			{
 				fieldname: "tenant_id",
 				fieldtype: "Int",
 				label: __("Tenant ID"),
@@ -152,7 +143,6 @@ function showCreateVirtualMachineDialog() {
 				fieldname: "public_ipv4",
 				fieldtype: "Data",
 				label: __("Public IPv4 Selector"),
-				depends_on: 'eval:doc.egress == "uplink"',
 				description: __("Use auto or a reserved allocation UUID. Leave empty for none."),
 			},
 			{

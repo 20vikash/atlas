@@ -258,11 +258,10 @@ Metal owns the VM network state. Atlas reads the typed desired state and changes
 | Detach Public IPv6 | Clears the direct prefix or the routed `2000::/3` route. |
 | Edit Network Throughput | Sends private and public limits in MiB/s. `0` removes a limit. |
 | Edit Firewall | Sends the enabled state and the inbound and outbound allow rules. |
-| Change Egress Mode | Sends `uplink`, `mesh`, or `none`. |
-| Edit Gateway Routes | Sends each destination range with a gateway address in the Atlas WG Mesh. The editor identifies the gateway VM when Atlas knows the address. |
-| Make Network Gateway | Sets `is_network_gateway`. It needs the privileged flag. |
+| Edit Routes | Sends the complete route list. Each destination goes via `host` or a gateway mesh address. The editor identifies the gateway VM when Atlas knows the address. |
+| Make Network Gateway | Sets `is_network_gateway` and the `2000::/3` route via `host`. It needs the privileged flag. |
 
-Metal owns the gateway routes. Atlas shows them as a read-only virtual field. A network gateway or a VM with a direct IPv6 block has no gateway routes. Migration moves direct provider allocations to the destination server. A routed allocation stays on its gateway. Scheduled jobs retry incomplete provider and allocation intents.
+Metal owns the routes. Atlas shows them as a read-only virtual field. A network gateway has no routes via another gateway. Migration moves direct provider allocations to the destination server. A routed allocation stays on its gateway. Scheduled jobs retry incomplete provider and allocation intents.
 
 A VM can hold one IPv4 allocation and one IPv6 allocation. VM creation attaches no public allocation unless `public_ipv4` or `public_ipv6` is `auto` or a reserved allocation UUID.
 
@@ -278,17 +277,17 @@ Firewall rules are allow rules for public and mesh traffic. They support `any`, 
 
 A disabled firewall permits all traffic and keeps its rules. An enabled firewall blocks unmatched new traffic. An empty direction blocks new traffic in that direction. Established and related connections continue.
 
-Egress controls internet reachability. It does not control mesh reachability.
+Routes control reachability outside the mesh. Every VM has the mesh. A new VM gets `0.0.0.0/0` via `host`. A VM without routes reaches only mesh peers.
 
-| Mode | VM can reach | Public IPv4 | Throughput limits |
-|---|---|---|---|
-| `uplink` | mesh peers and the internet | allowed | private and public |
-| `mesh` | mesh peers only | rejected | private applied, public stored |
-| `none` | nothing | rejected | none |
+| Route | VM can reach |
+|---|---|
+| `0.0.0.0/0` via `host` | the IPv4 internet through host NAT |
+| `2000::/3` via `host` | the IPv6 internet from its public IPv6 address |
+| `2000::/3` via a router mesh address | the IPv6 internet through an IPv6 router |
 
-A public IPv4 address needs `uplink`. Atlas refuses `mesh` and `none` while an address is attached.
+Atlas refuses a route list that drops the IPv4 host route while a public IPv4 address is attached. It also refuses a change to the `2000::/3` route while a public IPv6 allocation is attached, because the allocation owns that route. A public limit applies only when an IPv4 route uses `host`.
 
-Active connections can stop when the public IPv4 address or the egress mode changes.
+Active connections can stop when a public address or a route changes.
 
 ## Resize
 

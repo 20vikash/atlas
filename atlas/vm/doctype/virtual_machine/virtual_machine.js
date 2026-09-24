@@ -66,7 +66,7 @@ frappe.ui.form.on("Virtual Machine", {
 				Boolean(frm.doc.public_ipv6 || frm.doc.routed_ipv6),
 				ACTIONS,
 			],
-			[__("Change Egress Mode"), () => showEgressDialog(frm), true, ACTIONS],
+			[__("Edit Routes"), () => showRoutesDialog(frm), true, ACTIONS],
 			[
 				frm.doc.is_termination_protected
 					? __("Disable Termination Protection")
@@ -93,7 +93,6 @@ frappe.ui.form.on("Virtual Machine", {
 				frm.doc.tenant_id === 0,
 				DANGEROUS,
 			],
-			[__("Edit Gateway Routes"), () => showGatewayRoutesDialog(frm), true, DANGEROUS],
 			[
 				frm.doc.is_network_gateway
 					? __("Stop Network Gateway")
@@ -626,34 +625,6 @@ function openEditFirewallDialog(frm, current) {
 	dialog.show();
 }
 
-function showEgressDialog(frm) {
-	frappe.prompt(
-		{
-			fieldname: "egress",
-			fieldtype: "Select",
-			label: __("Egress"),
-			options: ["uplink", "mesh", "none"],
-			reqd: 1,
-			default: frm.doc.egress,
-			description: __(
-				"uplink reaches the internet. mesh reaches tenant VMs only. none isolates the VM. Active connections can stop."
-			),
-		},
-		({ egress }) =>
-			frm
-				.call({
-					method: "update_egress",
-					doc: frm.doc,
-					args: { egress },
-					freeze: true,
-					freeze_message: __("Changing egress mode..."),
-				})
-				.then(() => frm.reload_doc()),
-		__("Change Egress Mode"),
-		__("Save")
-	);
-}
-
 function showAttachPublicIPDialog(frm, version) {
 	frappe.prompt(
 		{
@@ -730,18 +701,24 @@ function showEditDiskLimitsDialog(frm) {
 	);
 }
 
-function showGatewayRoutesDialog(frm) {
+function showRoutesDialog(frm) {
 	frm.call({
-		method: "read_gateway_routes",
+		method: "read_routes",
 		doc: frm.doc,
 		type: "GET",
 		freeze: true,
-		freeze_message: __("Reading gateway routes..."),
+		freeze_message: __("Reading routes..."),
 	}).then(({ message: routes }) => {
 		const dialog = new frappe.ui.Dialog({
-			title: __("Gateway Routes"),
+			title: __("Routes"),
 			size: "large",
 			fields: [
+				{
+					fieldtype: "HTML",
+					options: `<p class="text-muted small">${__(
+						"A VM without routes reaches only the mesh. 0.0.0.0/0 via host reaches the IPv4 internet. Active connections can stop."
+					)}</p>`,
+				},
 				{
 					fieldname: "routes",
 					fieldtype: "Table",
@@ -756,18 +733,16 @@ function showGatewayRoutesDialog(frm) {
 							label: __("Destination"),
 							in_list_view: 1,
 							reqd: 1,
-							description: __(
-								"::/0 for the internet, or a range such as fdac::/16."
-							),
+							description: __("0.0.0.0/0, 2000::/3, or a range such as fdac::/16."),
 						},
 						{
-							fieldname: "gateway",
+							fieldname: "via",
 							fieldtype: "Data",
-							label: __("Gateway"),
+							label: __("Via"),
 							in_list_view: 1,
 							reqd: 1,
 							description: __(
-								"The WireGuard mesh IPv6 address that carries the range."
+								"host for the host uplink, or the WireGuard mesh IPv6 address of a gateway VM."
 							),
 						},
 						{
@@ -786,10 +761,10 @@ function showGatewayRoutesDialog(frm) {
 			primary_action(values) {
 				const routes = (values.routes || []).map((route) => ({
 					destination: route.destination,
-					gateway: route.gateway,
+					via: route.via,
 				}));
 				frm.call({
-					method: "set_gateway_routes",
+					method: "set_routes",
 					doc: frm.doc,
 					args: { routes },
 					freeze: true,

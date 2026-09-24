@@ -28,7 +28,6 @@
   "disk_iops",
   "section_break_network",
   "mac",
-  "egress",
   "wireguard_mesh_ipv6",
   "is_network_gateway",
   "column_break_network",
@@ -38,7 +37,7 @@
   "private_network_throughput_mibps",
   "public_network_throughput_mibps",
   "other_data_section",
-  "gateway_routes",
+  "routes",
   "ssh_keys",
   "firewall_summary",
   "metadata",
@@ -209,13 +208,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "egress",
-   "fieldtype": "Data",
-   "is_virtual": 1,
-   "label": "Egress",
-   "read_only": 1
-  },
-  {
    "fieldname": "wireguard_mesh_ipv6",
    "fieldtype": "Data",
    "is_virtual": 1,
@@ -223,13 +215,14 @@
    "read_only": 1
   },
   {
-   "fieldname": "gateway_routes",
+   "fieldname": "routes",
    "fieldtype": "Code",
    "is_virtual": 1,
-   "label": "Gateway Routes",
+   "label": "Routes",
    "options": "JSON",
    "read_only": 1,
-   "show_description_on_click": 1
+   "show_description_on_click": 1,
+   "description": "Each destination leaves through the host uplink (via host) or a gateway VM mesh address."
   },
   {
    "default": "0",
@@ -360,7 +353,7 @@
    "link_fieldname": "virtual_machine"
   }
  ],
- "modified": "2026-09-24 12:00:00.000000",
+ "modified": "2026-09-24 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "VM",
  "name": "Virtual Machine",

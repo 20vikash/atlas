@@ -43,7 +43,6 @@ class VirtualMachine(Document):
 		cpu_millicores: DF.Int
 		disk_mib: DF.Int
 		firewall_summary: DF.Code | None
-		gateway_routes: DF.Code | None
 		is_draft: DF.Check
 		is_network_gateway: DF.Check
 		is_privileged: DF.Check
@@ -151,12 +150,6 @@ class VirtualMachine(Document):
 		return information.observed.network.mac if information else None
 
 	@property
-	def egress(self) -> str | None:
-		"""Return the requested egress mode."""
-		information = self.get_metal_vm_info()
-		return information.desired.network.egress if information else None
-
-	@property
 	def wireguard_mesh_ipv6(self) -> str | None:
 		"""Return the Atlas WG Mesh address of the guest."""
 		information = self.get_metal_vm_info()
@@ -189,18 +182,18 @@ class VirtualMachine(Document):
 		return row.prefix.partition("/")[0]
 
 	@property
-	def gateway_routes(self) -> str:
-		"""Return the gateway routes that Metal holds."""
-		return json.dumps(VirtualMachineService(self).get_gateway_routes(), indent=2)
+	def routes(self) -> str:
+		"""Return the routes that Metal holds."""
+		information = self.get_metal_vm_info()
+		routes = information.desired.network.routes if information else ()
+		return json.dumps([route.as_dict() for route in routes], indent=2)
 
 	@property
 	def ssh_host(self) -> str:
 		"""Return the address an SSH Task connects to."""
 		if not self.public_ipv4:
 			frappe.throw(
-				_("Virtual Machine {0} has no public IPv4 address. Attach one and use uplink egress.").format(
-					self.name
-				)
+				_("Virtual Machine {0} has no public IPv4 address. Attach one first.").format(self.name)
 			)
 
 		return self.public_ipv4
@@ -280,18 +273,18 @@ class VirtualMachine(Document):
 		self.save()
 
 	@frappe.whitelist(methods=["POST"])
-	def set_gateway_routes(self, routes: list[dict[str, str]] | str | None = None) -> None:
-		"""Replace the gateway address that carries each destination range."""
+	def set_routes(self, routes: list[dict[str, str]] | str | None = None) -> None:
+		"""Replace the host or gateway address that carries each destination range."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
 		self.validate_network_change()
-		VirtualMachineService(self).set_gateway_routes(frappe.parse_json(routes) or [])
+		VirtualMachineService(self).set_routes(frappe.parse_json(routes) or [])
 
 	@frappe.whitelist(methods=["GET"])
-	def read_gateway_routes(self) -> list[dict[str, str]]:
-		"""Return gateway routes with optional VM ownership hints for the editor."""
+	def read_routes(self) -> list[dict[str, str]]:
+		"""Return the routes with optional gateway VM names for the editor."""
 		self.check_permission("read")
-		return VirtualMachineService(self).get_gateway_route_editor_rows()
+		return VirtualMachineService(self).get_route_editor_rows()
 
 	@frappe.whitelist(methods=["POST"])
 	def set_network_gateway(self, is_network_gateway: bool | int | str) -> None:
@@ -444,11 +437,6 @@ class VirtualMachine(Document):
 		from atlas.metal_server.core.public_ip_service import PublicIPService
 
 		PublicIPService().detach(self, int(version))
-
-	@frappe.whitelist(methods=["POST"])
-	def update_egress(self, egress: str) -> dict[str, Any]:
-		"""Change internet reachability without a VM restart. Mesh reachability does not change."""
-		return self.update_network({"egress": egress})
 
 	@frappe.whitelist(methods=["POST"])
 	def update_network_throughput(
