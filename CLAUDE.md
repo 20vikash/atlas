@@ -15,6 +15,8 @@ Read the [root specification](SPEC.md) for the project layout and component map.
 
 Re-read `CLAUDE.md` after context compaction or a resumed session before you continue work.
 
+Read the [incident reports](docs/incidents/README.md) before you change a component. Do not repeat a past root cause. A person files an incident report. You can suggest a report, but do not add or change one unless a person asks.
+
 - [Atlas app](atlas/SPEC.md)
 - [Metal](metal/SPEC.md)
 - [HTTP proxy](services/http-proxy/SPEC.md)

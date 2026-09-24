@@ -2,6 +2,8 @@
 
 This folder holds one report for each production or staging incident. A report states the impact, the timeline, the root cause, the fix, and the actions that prevent a repeat.
 
+A person files each report. An agent can suggest a report, but it must not add or change one unless a person asks. Record only incidents in a deployed environment, such as production or staging. Do not record local development issues.
+
 ## Reports
 
 | Date | Environment | Incident | Status |
