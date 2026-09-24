@@ -10,6 +10,7 @@ import (
 
 	"github.com/frappe/atlas/metal/internal/firecracker/api"
 	platform "github.com/frappe/atlas/metal/internal/platform"
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -75,10 +76,17 @@ func (m *machine) state(ctx context.Context, status platform.Status) (vm.State, 
 	}
 }
 
-// Start uses a matching shared warm image when available, then falls back to a
-// cold boot. It never restores VM saved state.
+// Start resumes the shared warm image only on the first boot, before the VM has
+// its own disk. A later start cold boots the existing disk. It never restores VM
+// saved state.
 func (m *machine) Start(ctx context.Context) error {
-	if m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
+	hasDisk, err := m.runtime.virtualMachineStorage.HasDisk(ctx, m.input.ID)
+	if err != nil {
+		return err
+	}
+
+	// Warm memory matches only a fresh clone of the image disk. Resuming it over a used disk corrupts the guest file system.
+	if !hasDisk && m.runtime.hasMatchingMemorySnapshot(m.input.Specification) {
 		err := m.runtime.launchWarmImage(ctx, m.input, m.input.Specification.Image.Name)
 		if err == nil {
 			m.recordImageUse()
@@ -86,6 +94,10 @@ func (m *machine) Start(ctx context.Context) error {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if errors.Is(err, storage.ErrDiskNotFresh) {
+			m.runtime.logger.Warn("VM disk changed, using cold boot", "virtual_machine_id", m.input.ID, "error", err)
+			return m.coldBoot(ctx)
 		}
 
 		m.runtime.logger.Warn("warm boot failed, using cold boot", "virtual_machine_id", m.input.ID, "error", err)
