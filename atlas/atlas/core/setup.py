@@ -208,6 +208,8 @@ class AtlasSetup:
 		# A VPC does not carry link-local multicast, so an AWS region always uses unicast NDP.
 		if self.configuration.server_provider == "AWS":
 			self.settings.is_unicast_network_enabled = 1
+		if self.configuration.server_provider in ("AWS", "Scaleway"):
+			self.settings.use_ipv6_router_for_auto_assignment = 1
 		self.settings.save(ignore_permissions=True)
 
 	def _validate_immutable_values(self) -> None:
