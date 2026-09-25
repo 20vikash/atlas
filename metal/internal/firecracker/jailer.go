@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // apiSocketRelativePath is the firecracker API socket path relative to the chroot root.
@@ -14,9 +15,6 @@ const apiSocketRelativePath = "run/firecracker.socket"
 
 // firecrackerLogRelativePath is the Firecracker log path inside the chroot.
 const firecrackerLogRelativePath = "firecracker.log"
-
-// metadataServiceSizeLimitBytes bounds the MMDS document and its API request.
-const metadataServiceSizeLimitBytes = 256 * 1024
 
 // chrootRoot returns the path where jailer builds the VM chroot. The base is the
 // VM's own directory, so removing that directory takes the chroot with it, and
@@ -61,8 +59,8 @@ func (configuration Config) jailerArgs(id string, userID, groupID uint32, networ
 		"--api-sock", apiSocketRelativePath,
 		"--log-path", firecrackerLogRelativePath,
 		"--level", "Warn",
-		"--mmds-size-limit", fmt.Sprint(metadataServiceSizeLimitBytes),
-		"--http-api-max-payload-size", fmt.Sprint(metadataServiceSizeLimitBytes),
+		"--mmds-size-limit", fmt.Sprint(vm.MetadataServiceSizeLimitBytes),
+		"--http-api-max-payload-size", fmt.Sprint(vm.MetadataServiceSizeLimitBytes),
 	}
 }
 

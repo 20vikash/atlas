@@ -196,7 +196,6 @@ func (request createRequest) validate() error {
 	return request.Guest.validate()
 }
 
-// validate bounds the guest values published through MMDS.
 func (request guestRequest) validate() error {
 	if len(request.Hostname) > maximumHostnameLength {
 		return fmt.Errorf("guest.hostname is too long")

@@ -11,6 +11,9 @@ var ErrNotFound = errors.New("vm: not found")
 // ErrConflict indicates that the current state blocks an operation.
 var ErrConflict = errors.New("vm: conflict")
 
+// ErrMetadataServiceTooLarge indicates that the guest values do not fit in MMDS.
+var ErrMetadataServiceTooLarge = errors.New("vm: metadata service document is too large")
+
 // TransitionError reports a missing state transition.
 type TransitionError struct {
 	DesiredState  State

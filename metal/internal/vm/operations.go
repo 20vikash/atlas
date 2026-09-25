@@ -145,6 +145,9 @@ func (manager *Manager) SetNetwork(ctx context.Context, identifier string, confi
 		return ErrConflict
 	}
 	record.Specification.Network = configuration
+	if err := record.Specification.validateMetadataServiceSize(identifier); err != nil {
+		return err
+	}
 	record.SpecificationGeneration++
 	record.Generation++
 	return manager.store.writeDesired(record)
@@ -157,7 +160,7 @@ func (manager *Manager) ReplaceSSHKeys(ctx context.Context, identifier string, s
 			return false, nil
 		}
 		record.Specification.SSHKeys = slices.Clone(sshKeys)
-		return true, nil
+		return true, record.Specification.validateMetadataServiceSize(identifier)
 	})
 	if err != nil {
 		return false, err
@@ -172,7 +175,7 @@ func (manager *Manager) ReplaceMetadata(ctx context.Context, identifier string, 
 			return false, nil
 		}
 		record.Specification.Metadata = maps.Clone(metadata)
-		return true, nil
+		return true, record.Specification.validateMetadataServiceSize(identifier)
 	})
 	if err != nil {
 		return false, err

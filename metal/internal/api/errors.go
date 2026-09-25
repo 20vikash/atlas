@@ -75,7 +75,7 @@ func publicAPIError(err error) *apiError {
 	}
 
 	switch {
-	case errors.Is(err, network.ErrInvalidPeers), errors.Is(err, storage.ErrInvalidUpload):
+	case errors.Is(err, network.ErrInvalidPeers), errors.Is(err, storage.ErrInvalidUpload), errors.Is(err, vm.ErrMetadataServiceTooLarge):
 		return newAPIError(http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, vm.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		return newAPIError(http.StatusNotFound, "not_found", "resource not found")

@@ -8,12 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Metadata is published to the guest through MMDS, so its size is bounded.
-const (
-	maximumMetadataCount       = 16
-	maximumMetadataKeyLength   = 128
-	maximumMetadataValueLength = 4096
-)
+const maximumMetadataKeyLength = 128
 
 // replaceVirtualMachineMetadataRequest carries the complete metadata map.
 type replaceVirtualMachineMetadataRequest struct {
@@ -67,19 +62,12 @@ func (s *Server) replaceVirtualMachineMetadata(c echo.Context) error {
 
 // validateMetadata accepts an empty map to remove all metadata.
 func validateMetadata(metadata map[string]string) error {
-	if len(metadata) > maximumMetadataCount {
-		return fmt.Errorf("metadata cannot contain more than %d entries", maximumMetadataCount)
-	}
-
-	for key, value := range metadata {
+	for key := range metadata {
 		if strings.TrimSpace(key) == "" {
 			return fmt.Errorf("metadata key is empty")
 		}
 		if len(key) > maximumMetadataKeyLength {
 			return fmt.Errorf("metadata key %q is too long", key)
-		}
-		if len(value) > maximumMetadataValueLength {
-			return fmt.Errorf("metadata %q value is too long", key)
 		}
 	}
 
