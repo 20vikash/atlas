@@ -90,8 +90,8 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 		):
 			VirtualMachineImageStorageMigration().migrate("image-1")
 
-		self.assertEqual(image.image_object_key, f"vm-images/sha256/{'a' * 64}/rootfs.ext4")
-		self.assertEqual(image.kernel_object_key, f"vm-images/sha256/{'b' * 64}/kernel")
+		self.assertEqual(image.image_object_key, "images/image-1/rootfs.img")
+		self.assertEqual(image.kernel_object_key, "images/image-1/kernel")
 		self.assertEqual(image.artifact_storage, "Object Storage")
 		self.assertEqual(image.image_file, "file-rootfs")
 		self.assertEqual(image.kernel_file, "file-kernel")
@@ -183,6 +183,7 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 		self.assertIsNone(image.site_file_retention_until)
 		image.save.assert_called_once()
 		self.assertEqual([call.args[1] for call in delete_doc.call_args_list], ["file-rootfs", "file-kernel"])
+		self.assertTrue(all(call.kwargs["force"] for call in delete_doc.call_args_list))
 
 	def test_a_failed_delete_leaves_the_image_for_the_next_sweep(self) -> None:
 		image = build_image(

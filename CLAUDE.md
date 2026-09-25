@@ -85,6 +85,8 @@ Atlas is in active development and is not deployed to production.
 
 ## Documentation
 
+- Mandatory: Write each document for Atlas engineers and operators. Keep each paragraph short and focused on one idea.
+- Mandatory: Split a long paragraph into short paragraphs whenever you edit its document.
 - Write documentation for the reader who must use, change, or operate the system.
 - Use ASD-STE100 Simplified Technical English. Use short, direct sentences and one term for one thing.
 - Keep each Markdown prose paragraph on one source line. Do not use em dashes.
