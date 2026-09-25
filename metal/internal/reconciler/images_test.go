@@ -15,6 +15,7 @@ type fakeImageStore struct {
 	prunedImages        bool
 	prunedSnapshots     bool
 	snapshotMaximumIdle time.Duration
+	imageMaximumIdle    time.Duration
 }
 
 func (store *fakeImageStore) ImagePolicies(context.Context) ([]vm.Image, error) {
@@ -32,12 +33,13 @@ func (store *fakeImageStore) RemoveWarmImages(_ context.Context, imageReference 
 }
 
 func (store *fakeImageStore) PruneImages(
-	context.Context,
-	[]vm.Image,
-	time.Time,
-	time.Duration,
+	_ context.Context,
+	_ []vm.Image,
+	_ time.Time,
+	maximumIdle time.Duration,
 ) error {
 	store.prunedImages = true
+	store.imageMaximumIdle = maximumIdle
 	return nil
 }
 
@@ -88,6 +90,9 @@ func TestImageReconcilerCachesAndWarmsDesiredImages(t *testing.T) {
 	}
 	if !store.prunedSnapshots {
 		t.Fatal("idle snapshots were not pruned")
+	}
+	if store.imageMaximumIdle != time.Hour {
+		t.Fatalf("image maximum idle = %s", store.imageMaximumIdle)
 	}
 	if store.snapshotMaximumIdle != 48*time.Hour {
 		t.Fatalf("snapshot maximum idle = %s", store.snapshotMaximumIdle)
