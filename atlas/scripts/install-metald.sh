@@ -10,7 +10,6 @@ set -eu
 : "${WG_MESH_SHA256:?WG_MESH_SHA256 is required}"
 : "${COORDINATION_LISTEN_ADDRESS:?COORDINATION_LISTEN_ADDRESS is required}"
 : "${ATLAS_COMMON_NAME:?ATLAS_COMMON_NAME is required}"
-: "${STORAGE_POOL_DEVICE:?STORAGE_POOL_DEVICE is required}"
 
 storage_pool_name=${STORAGE_POOL_NAME:-metal}
 firecracker_version=${FIRECRACKER_VERSION:-v1.16.1}
@@ -29,7 +28,6 @@ if [ "$(id -u)" -ne 0 ]; then
 	exit 1
 fi
 
-# Return whole disks that contain no filesystem or mount.
 step() { echo "==> $*"; }
 skip() { echo "    $* is already installed"; }
 
@@ -138,44 +136,6 @@ step "create directories for metald"
 mkdir -p "$machines_dir" "$images_dir"
 
 
-# is_empty_storage_pool_device checks the device immediately before ZFS can overwrite it.
-is_empty_storage_pool_device() {
-	if [ -f "$STORAGE_POOL_DEVICE" ]; then
-		! blkid --probe "$STORAGE_POOL_DEVICE" >/dev/null 2>&1
-		return
-	fi
-
-	[ -b "$STORAGE_POOL_DEVICE" ] || return 1
-	# Scaleway gives a software RAID array, such as /dev/md2.
-	case "$(lsblk --raw --noheadings --output TYPE "$STORAGE_POOL_DEVICE")" in
-	disk | raid*) ;;
-	*) return 1 ;;
-	esac
-	[ "$(lsblk --raw --noheadings --output NAME "$STORAGE_POOL_DEVICE" | wc -l)" -eq 1 ] || return 1
-	[ -z "$(lsblk --raw --noheadings --output FSTYPE,PTTYPE,MOUNTPOINT "$STORAGE_POOL_DEVICE" | tr -d '[:space:]')" ] || return 1
-	[ "$(lsblk --raw --noheadings --output RO "$STORAGE_POOL_DEVICE")" = 0 ] || return 1
-	[ "$(lsblk --raw --noheadings --output RM "$STORAGE_POOL_DEVICE")" = 0 ] || return 1
-	! blkid --probe "$STORAGE_POOL_DEVICE" >/dev/null 2>&1
-}
-
-
-step "zfs pool ($storage_pool_name)"
-if zpool list "$storage_pool_name" >/dev/null 2>&1; then
-	skip "pool $storage_pool_name"
-else
-	if ! is_empty_storage_pool_device; then
-		echo "$STORAGE_POOL_DEVICE is not an empty storage pool device" >&2
-		exit 1
-	fi
-	echo "    device: $STORAGE_POOL_DEVICE"
-	zpool create -m none "$storage_pool_name" "$STORAGE_POOL_DEVICE"
-fi
-zfs list "$storage_pool_name/images" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/images"
-zfs list "$storage_pool_name/vms" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/vms"
-zfs list "$storage_pool_name/staging" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/staging"
-zfs list "$storage_pool_name/warm" >/dev/null 2>&1 || zfs create -o mountpoint=none "$storage_pool_name/warm"
-
-
 # mesh_sections appends the WireGuard and Atlas WG Mesh settings. Atlas owns the
 # uplink name, because only Atlas knows which interface carries Atlas NDP.
 mesh_sections() {
@@ -275,6 +235,7 @@ cat > /etc/systemd/system/metal.service <<EOF
 Description=metal daemon
 Wants=network-online.target
 After=network-online.target
+RequiresMountsFor=$base_dir
 
 [Service]
 ExecStartPre=/usr/local/lib/metal/network-setup
@@ -294,6 +255,7 @@ cat > /etc/systemd/system/metal-vm@.service <<EOF
 [Unit]
 Description=metal microVM %i
 After=network.target
+RequiresMountsFor=$base_dir
 
 [Service]
 Type=exec

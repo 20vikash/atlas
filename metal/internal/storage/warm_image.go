@@ -140,8 +140,8 @@ func (store *ImageStore) PromoteWarmSnapshot(ctx context.Context, promotion Warm
 }
 
 // RemoveOtherWarmImages removes artifacts that do not match the desired key. An
-// empty key removes them all. The key covers the image content, the VM shape,
-// and the Firecracker build, so a change to any of those retires the old artifact.
+// empty key selects all of them. The key covers the image content, VM shape,
+// and Firecracker build. A dependent VM clone keeps its warm disk in use.
 func (store *ImageStore) RemoveOtherWarmImages(ctx context.Context, imageReference, desiredKey string) error {
 	directory := filepath.Join(store.imageDirectory(imageReference), "warm")
 	entries, err := os.ReadDir(directory)
@@ -151,22 +151,31 @@ func (store *ImageStore) RemoveOtherWarmImages(ctx context.Context, imageReferen
 	if err != nil {
 		return err
 	}
+	inUse := false
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == desiredKey {
 			continue
 		}
 		if err := destroyIfPresent(ctx, store.warmDataset(entry.Name())); err != nil {
+			if strings.Contains(err.Error(), "dependent clone") {
+				inUse = true
+				continue
+			}
 			return err
 		}
 		if err := os.RemoveAll(filepath.Join(directory, entry.Name())); err != nil {
 			return err
 		}
 	}
+	if inUse {
+		return ErrInUse
+	}
 	return nil
 }
 
-// removeWarmImages removes every warm artifact of one image.
-func (store *ImageStore) removeWarmImages(ctx context.Context, imageReference string) error {
+// RemoveWarmImages removes unused warm artifacts of one image and reports
+// ErrInUse if a VM disk clone keeps a warm disk.
+func (store *ImageStore) RemoveWarmImages(ctx context.Context, imageReference string) error {
 	return store.RemoveOtherWarmImages(ctx, imageReference, "")
 }
 

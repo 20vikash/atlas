@@ -19,6 +19,7 @@ flowchart LR
 | `<pool>/vms/<vm-id>` | One VM disk clone. The VM ID matches `machines/<vm-id>`. |
 | `<pool>/staging/<snapshot-id>` | Read-only Machine image upload source. |
 | `<pool>/warm/<key>@ready` | Warm boot disk for one image and exact VM shape. |
+| `<pool>/state` | File system mounted at `/var/lib/metal`. Downloads, warm memory, and saved state use pool space, not the root disk. |
 
 ## Files on the host
 
@@ -53,7 +54,13 @@ Metal applies Firecracker drive limiters and can update a live VM. It does not u
 
 ## Keep and remove cached images
 
-Host sync supplies image cache policy. Metal keeps requested images and prunes unused copies after their idle period.
+Host sync supplies image cache policy. Metal keeps each image that the policy caches.
+
+Metal removes an image that the policy does not cache one hour after its last VM start. This includes an image whose `cache_image` setting was turned off. A new image that no VM started from ages from its download time.
+
+When a cached image no longer requests a memory snapshot, Metal removes its unused warm artifacts.
+
+A VM disk clone keeps its source image and warm disk until the VM is removed. Metal can build a new warm artifact while an old warm disk stays in use.
 
 An existing VM clone can keep an image dataset in use after policy stops requesting it.
 

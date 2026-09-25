@@ -2,9 +2,11 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
+	"github.com/frappe/atlas/metal/internal/storage"
 	"github.com/frappe/atlas/metal/internal/vm"
 )
 
@@ -13,8 +15,9 @@ const (
 	// downloads and imports it, so the limit is generous.
 	defaultImageReconcileTimeout = 35 * time.Minute
 
-	// defaultImageMaximumIdle is how long an unused image stays on the host.
-	defaultImageMaximumIdle = 24 * time.Hour
+	// defaultImageMaximumIdle is how long an image that host sync does not cache
+	// stays on the host after its last VM start.
+	defaultImageMaximumIdle = time.Hour
 
 	// defaultSnapshotMaximumIdle is how long unused staging stays on the host.
 	defaultSnapshotMaximumIdle = 48 * time.Hour
@@ -24,6 +27,7 @@ const (
 type ImageStore interface {
 	ImagePolicies(ctx context.Context) ([]vm.Image, error)
 	EnsureImage(ctx context.Context, image vm.Image) error
+	RemoveWarmImages(ctx context.Context, imageReference string) error
 	PruneImages(ctx context.Context, policies []vm.Image, now time.Time, maximumIdle time.Duration) error
 }
 
@@ -118,6 +122,7 @@ func (r *ImageReconciler) reconcileAll(ctx context.Context) {
 }
 
 // reconcileImage caches one image and builds its warm artifact when requested.
+// An image without a memory snapshot request loses its warm artifacts.
 func (r *ImageReconciler) reconcileImage(ctx context.Context, image vm.Image) {
 	operationContext, cancel := context.WithTimeout(ctx, r.operationTimeout)
 	defer cancel()
@@ -131,6 +136,13 @@ func (r *ImageReconciler) reconcileImage(ctx context.Context, image vm.Image) {
 		if err := r.builder.EnsureMemorySnapshot(operationContext, image); err != nil {
 			r.logFailure(ctx, "warm image "+image.Name, err)
 		}
+		return
+	}
+
+	// A warm disk with a VM disk cloned from it stays until that VM is gone.
+	err := r.imageStore.RemoveWarmImages(operationContext, image.Name)
+	if err != nil && !errors.Is(err, storage.ErrInUse) {
+		r.logFailure(ctx, "remove warm image "+image.Name, err)
 	}
 }
 

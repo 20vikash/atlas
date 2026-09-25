@@ -26,6 +26,9 @@ const (
 	maximumMemoryMiB             = (math.MaxInt - 128) / 2
 	maximumSleepAfterIdleSeconds = int64(math.MaxInt64) / int64(time.Second)
 	maximumFirewallPrefixes      = 50
+
+	maximumHostnameLength = 253
+	maximumUserDataLength = 16 * 1024
 )
 
 // Patterns that keep caller-supplied values usable as host paths and names.
@@ -190,10 +193,20 @@ func (request createRequest) validate() error {
 		return err
 	}
 
-	if _, err := validateSSHKeys(request.Guest.SSHKeys); err != nil {
+	return request.Guest.validate()
+}
+
+func (request guestRequest) validate() error {
+	if len(request.Hostname) > maximumHostnameLength {
+		return fmt.Errorf("guest.hostname is too long")
+	}
+	if len(request.UserData) > maximumUserDataLength {
+		return fmt.Errorf("guest.user_data must not exceed %d bytes", maximumUserDataLength)
+	}
+	if _, err := validateSSHKeys(request.SSHKeys); err != nil {
 		return err
 	}
-	return validateMetadata(request.Guest.Metadata)
+	return validateMetadata(request.Metadata)
 }
 
 // specification converts the request into the domain VM specification.

@@ -95,4 +95,6 @@ class TestStorageClusterConfig(UnitTestCase):
 			script,
 			re.compile(r"set-config -p default_storage_cluster_config \$q_cluster_config"),
 		)
-		self.assertIn("for name in $ENROLMENT_VARS DEFAULT_STORAGE_CLUSTER_CONFIG; do", script)
+		self.assertIn(
+			"for name in $ENROLMENT_VARS DEFAULT_STORAGE_CLUSTER_CONFIG DEFAULT_TELEMETRY_CONFIG; do", script
+		)

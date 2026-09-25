@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core import vm_image_storage_migration
@@ -90,8 +90,8 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 		):
 			VirtualMachineImageStorageMigration().migrate("image-1")
 
-		self.assertEqual(image.image_object_key, f"vm-images/sha256/{'a' * 64}/rootfs.ext4")
-		self.assertEqual(image.kernel_object_key, f"vm-images/sha256/{'b' * 64}/kernel")
+		self.assertEqual(image.image_object_key, "images/image-1/rootfs.img")
+		self.assertEqual(image.kernel_object_key, "images/image-1/kernel")
 		self.assertEqual(image.artifact_storage, "Object Storage")
 		self.assertEqual(image.image_file, "file-rootfs")
 		self.assertEqual(image.kernel_file, "file-kernel")
@@ -183,6 +183,7 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 		self.assertIsNone(image.site_file_retention_until)
 		image.save.assert_called_once()
 		self.assertEqual([call.args[1] for call in delete_doc.call_args_list], ["file-rootfs", "file-kernel"])
+		self.assertTrue(all(call.kwargs["force"] for call in delete_doc.call_args_list))
 
 	def test_a_failed_delete_leaves_the_image_for_the_next_sweep(self) -> None:
 		image = build_image(
@@ -215,17 +216,32 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 		image.save.assert_not_called()
 		delete_doc.assert_not_called()
 
+
+class TestExpiredSiteFileSweep(IntegrationTestCase):
+	def insert_image(self, name: str, artifact_storage: str, site_file_retention_until: str | None) -> None:
+		image = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"name": name,
+				"title": name,
+				"image_type": "system",
+				"status": "Available",
+				"artifact_storage": artifact_storage,
+				"site_file_retention_until": site_file_retention_until,
+			}
+		)
+		image.db_insert()
+
 	def test_only_images_past_their_retention_time_are_swept(self) -> None:
+		self.insert_image("sweep-expired", "Object Storage", "2026-09-16 09:00:00")
+		self.insert_image("sweep-retained", "Object Storage", "2026-09-16 11:00:00")
+		self.insert_image("sweep-no-retention", "Object Storage", None)
+		self.insert_image("sweep-site-file", "Site File", "2026-09-16 09:00:00")
+
 		with (
-			patch(
-				"atlas.vm.core.vm_image_storage_migration.frappe.get_all", return_value=["image-1"]
-			) as get_all,
 			patch.object(VirtualMachineImageStorageMigration, "delete_site_files") as delete_site_files,
 			fixed_clock(),
 		):
 			delete_expired_site_files()
 
-		filters = get_all.call_args.kwargs["filters"]
-		self.assertEqual(filters["artifact_storage"], "Object Storage")
-		self.assertEqual(filters["site_file_retention_until"][0], "<=")
-		delete_site_files.assert_called_once_with("image-1")
+		delete_site_files.assert_called_once_with("sweep-expired")

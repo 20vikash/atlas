@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/network/traffic"
@@ -329,6 +330,36 @@ func TestSpecificationGenerationTracksShapeNotPower(t *testing.T) {
 	}
 	if afterShape.SpecificationGeneration <= afterPower.SpecificationGeneration {
 		t.Error("a network change did not raise the specification generation")
+	}
+}
+
+func TestSetNetworkRejectsOversizedMetadataServiceDocument(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	specification := testSpecification()
+	specification.Metadata = map[string]string{
+		"large": strings.Repeat("x", MetadataServiceSizeLimitBytes-metadataServiceReserveBytes-600),
+	}
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+
+	network := specification.Network
+	for index := range 40 {
+		network.Routes = append(network.Routes, Route{
+			Destination: fmt.Sprintf("2001:db8:%x::/48", index),
+			Via:         RouteViaHost,
+		})
+	}
+	if err := manager.SetNetwork(context.Background(), "machine-1", network); !errors.Is(err, ErrMetadataServiceTooLarge) {
+		t.Fatalf("error = %v", err)
+	}
+
+	record, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Specification.Network.Routes) != len(specification.Network.Routes) {
+		t.Fatal("rejected network change was saved")
 	}
 }
 
@@ -686,5 +717,38 @@ func TestATornRemovalIsOnlyOneMissingRecord(t *testing.T) {
 	}
 	if isTornRemoval(errors.New("permission denied"), nil) {
 		t.Fatal("an unrelated failure is not a torn read")
+	}
+}
+
+func TestStartWakesASleepingVirtualMachine(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	specification := testSpecification()
+	specification.SleepAfterIdleSeconds = 60
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+	runtime.hasSavedState = true
+
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.restores != 1 || runtime.state != StateRunning {
+		t.Fatalf("restores = %d, state = %s, want one restore to running", runtime.restores, runtime.state)
+	}
+}
+
+func TestStartLeavesAStoppedVirtualMachineWithoutSavedStateToReconcile(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	specification := testSpecification()
+	specification.SleepAfterIdleSeconds = 60
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.restores != 0 {
+		t.Fatalf("restores = %d, want 0", runtime.restores)
 	}
 }

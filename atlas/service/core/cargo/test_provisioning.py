@@ -33,9 +33,20 @@ STORAGE_CLUSTER_JSON = (
 )
 
 
+TELEMETRY_JSON = (
+	'{"repository":"https://github.com/frappe/Datum.git","version":"main",'
+	'"telemetry":{"cpu_millicores":2000,"ram_gb":4,"disk_gb":20}}'
+)
+
+
 def stored_storage_cluster():
 	"""Stand in for the cluster the provision request stored."""
 	return patch.object(provisioning, "storage_cluster_config_json", return_value=STORAGE_CLUSTER_JSON)
+
+
+def stored_telemetry():
+	"""Stand in for the Datum host the provision request stored."""
+	return patch.object(provisioning, "telemetry_config_json", return_value=TELEMETRY_JSON)
 
 
 def cargo_server(**values) -> SimpleNamespace:
@@ -149,6 +160,7 @@ class TestCargoInstallation(UnitTestCase):
 			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
 			patch.object(provisioning, "issue_token", side_effect=["atlas-token", "proxy-token"]) as issue,
 			stored_storage_cluster(),
+			stored_telemetry(),
 		):
 			environment = provisioner.install_environment()
 
@@ -180,6 +192,7 @@ class TestCargoInstallation(UnitTestCase):
 		self.assertEqual(environment["SITE"], "cargo.example.com")
 		self.assertEqual(environment["ADMIN_DOMAIN"], "cargo-pilot.example.com")
 		self.assertEqual(environment["DEFAULT_STORAGE_CLUSTER_CONFIG"], STORAGE_CLUSTER_JSON)
+		self.assertEqual(environment["DEFAULT_TELEMETRY_CONFIG"], TELEMETRY_JSON)
 
 	def test_every_enrolment_variable_the_script_requires_is_supplied(self) -> None:
 		settings = atlas_settings()
@@ -189,6 +202,7 @@ class TestCargoInstallation(UnitTestCase):
 			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
 			patch.object(provisioning, "issue_token", side_effect=["atlas-token", "proxy-token"]),
 			stored_storage_cluster(),
+			stored_telemetry(),
 		):
 			environment = provisioner.install_environment()
 
@@ -221,6 +235,7 @@ class TestCargoInstallation(UnitTestCase):
 			patch.object(provisioner.__class__, "settings", new=property(lambda self: settings)),
 			patch.object(provisioning.frappe.utils, "get_url", return_value="https://atlas.example.com"),
 			stored_storage_cluster(),
+			stored_telemetry(),
 		):
 			environment = provisioner.install_environment()
 
