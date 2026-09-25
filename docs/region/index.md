@@ -47,7 +47,8 @@ Atlas writes the control address and a coordination listener on the WireGuard ad
 - [Metal Server controller](../../atlas/metal_server/doctype/metal_server/metal_server.py) queues setup and retry.
 - [Provisioner](../../atlas/metal_server/core/provisioning.py) owns step order, commits, and failure status.
 - [Host installation](../../atlas/metal_server/core/host_installation.py) sends WireGuard, TLS, and Metal setup work.
-- [Host install script](../../atlas/scripts/install-metald.sh) creates host services and storage.
+- [Host storage script](../../atlas/scripts/install-metal-storage.sh) creates the ZFS pool and mounts host state on it.
+- [Host install script](../../atlas/scripts/install-metald.sh) creates host services.
 - [Provisioning tests](../../atlas/metal_server/core/test_provisioning.py) check repeat and failure behavior.
 
 :::

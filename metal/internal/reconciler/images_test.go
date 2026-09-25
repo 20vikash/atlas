@@ -11,6 +11,7 @@ import (
 type fakeImageStore struct {
 	policies            []vm.Image
 	cached              []string
+	removedWarmImages   []string
 	prunedImages        bool
 	prunedSnapshots     bool
 	snapshotMaximumIdle time.Duration
@@ -22,6 +23,11 @@ func (store *fakeImageStore) ImagePolicies(context.Context) ([]vm.Image, error) 
 
 func (store *fakeImageStore) EnsureImage(_ context.Context, image vm.Image) error {
 	store.cached = append(store.cached, image.Name)
+	return nil
+}
+
+func (store *fakeImageStore) RemoveWarmImages(_ context.Context, imageReference string) error {
+	store.removedWarmImages = append(store.removedWarmImages, imageReference)
 	return nil
 }
 
@@ -73,6 +79,9 @@ func TestImageReconcilerCachesAndWarmsDesiredImages(t *testing.T) {
 	}
 	if len(builder.images) != 1 || builder.images[0] != "warm" {
 		t.Fatalf("warm images = %v", builder.images)
+	}
+	if len(store.removedWarmImages) != 1 || store.removedWarmImages[0] != "cold" {
+		t.Fatalf("removed warm images = %v", store.removedWarmImages)
 	}
 	if !store.prunedImages {
 		t.Fatal("unused images were not pruned")
