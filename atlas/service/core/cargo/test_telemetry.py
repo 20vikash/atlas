@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import UnitTestCase
 
+import atlas
 import atlas.service.core.cargo.telemetry as telemetry
 from atlas.service.core.cargo.telemetry import (
 	remove_telemetry_config,
@@ -63,3 +65,14 @@ class TestTelemetryConfig(UnitTestCase):
 			frappe.ValidationError, "telemetry must hold cpu_millicores, ram_gb and disk_gb"
 		):
 			store_telemetry_config(VALID_CONFIG | {"telemetry": {"cpu_millicores": 2000}})
+
+	def test_the_installer_writes_the_stored_datum_host_to_site_config(self) -> None:
+		script = (Path(atlas.__file__).parent / "scripts" / "install-cargo.sh").read_text()
+
+		self.assertRegex(
+			script,
+			re.compile(r"set-config -p default_telemetry_config \$q_telemetry_config"),
+		)
+		self.assertIn(
+			"for name in $ENROLMENT_VARS DEFAULT_STORAGE_CLUSTER_CONFIG DEFAULT_TELEMETRY_CONFIG; do", script
+		)
