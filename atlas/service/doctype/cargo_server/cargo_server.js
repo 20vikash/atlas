@@ -18,6 +18,18 @@ function storageClusterConfig(values) {
 	};
 }
 
+function telemetryConfig(values) {
+	return {
+		repository: values.datum_repository,
+		version: values.datum_version,
+		telemetry: {
+			cpu_millicores: values.datum_cpu_millicores,
+			ram_gb: values.datum_ram_gb,
+			disk_gb: values.datum_disk_gb,
+		},
+	};
+}
+
 function showProvisionDialog(frm) {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Provision Cargo Server"),
@@ -117,6 +129,45 @@ function showProvisionDialog(frm) {
 				default: 500,
 				description: __("Garage weights each node by this size."),
 			},
+			{ fieldtype: "Section Break", label: __("Datum Host") },
+			{
+				fieldname: "datum_repository",
+				fieldtype: "Data",
+				label: __("Datum Repository"),
+				reqd: 1,
+				default: "https://github.com/frappe/Datum.git",
+			},
+			{
+				fieldname: "datum_version",
+				fieldtype: "Data",
+				label: __("Datum Version"),
+				description: __("A branch, tag or commit."),
+				reqd: 1,
+				default: "main",
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldname: "datum_cpu_millicores",
+				fieldtype: "Int",
+				label: __("Datum CPU (millicores)"),
+				description: __("1000 millicores equals one CPU core."),
+				reqd: 1,
+				default: 2000,
+			},
+			{
+				fieldname: "datum_ram_gb",
+				fieldtype: "Int",
+				label: __("Datum Memory (GB)"),
+				reqd: 1,
+				default: 4,
+			},
+			{
+				fieldname: "datum_disk_gb",
+				fieldtype: "Int",
+				label: __("Datum Disk (GB)"),
+				reqd: 1,
+				default: 20,
+			},
 			{ fieldtype: "Section Break" },
 			{
 				fieldname: "public_ipv4",
@@ -137,7 +188,13 @@ function showProvisionDialog(frm) {
 			frm.call({
 				method: "provision",
 				doc: frm.doc,
-				args: { request: { ...values, storage_cluster: storageClusterConfig(values) } },
+				args: {
+					request: {
+						...values,
+						storage_cluster: storageClusterConfig(values),
+						telemetry: telemetryConfig(values),
+					},
+				},
 				freeze: true,
 				freeze_message: __("Creating Cargo Server..."),
 			}).then(() => {
