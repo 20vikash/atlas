@@ -10,9 +10,9 @@ import (
 
 // Metadata is published to the guest through MMDS, so its size is bounded.
 const (
-	maximumMetadataCount       = 64
+	maximumMetadataCount       = 16
 	maximumMetadataKeyLength   = 128
-	maximumMetadataValueLength = 1024
+	maximumMetadataValueLength = 4096
 )
 
 // replaceVirtualMachineMetadataRequest carries the complete metadata map.

@@ -103,3 +103,29 @@ func TestPublicIPv6ValidationRejectsANonCanonicalPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestGuestValidationBoundsMetadataServiceValues(t *testing.T) {
+	metadata := make(map[string]string, maximumMetadataCount)
+	for index := range maximumMetadataCount {
+		metadata[fmt.Sprint(index)] = strings.Repeat("v", maximumMetadataValueLength)
+	}
+	request := guestRequest{
+		Hostname: strings.Repeat("h", maximumHostnameLength),
+		SSHKeys:  []string{},
+		Metadata: metadata,
+		UserData: strings.Repeat("u", maximumUserDataLength),
+	}
+	if err := request.validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	metadata["extra"] = ""
+	if err := request.validate(); err == nil || !strings.Contains(err.Error(), "entries") {
+		t.Fatalf("error = %v", err)
+	}
+	request.Metadata = nil
+	request.UserData += "u"
+	if err := request.validate(); err == nil || !strings.Contains(err.Error(), "user_data") {
+		t.Fatalf("error = %v", err)
+	}
+}

@@ -71,6 +71,8 @@ func TestJailerArgs(t *testing.T) {
 		"--api-sock", "run/firecracker.socket",
 		"--log-path", "firecracker.log",
 		"--level", "Warn",
+		"--mmds-size-limit", "262144",
+		"--http-api-max-payload-size", "262144",
 	}
 	if !slices.Equal(args, want) {
 		t.Errorf("args = %v", args)
