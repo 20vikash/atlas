@@ -80,8 +80,6 @@ def publish_ubuntu_image(
 	for image in previous_images:
 		if image.image_sha256 == image_sha256 and image.kernel_sha256 == kernel_sha256:
 			return
-	for image in previous_images:
-		image.ensure_not_termination_protected()
 
 	image_name = frappe.generate_hash(length=16)
 	if storage == "Site File":
@@ -111,8 +109,10 @@ def publish_ubuntu_image(
 		}
 	).insert(set_name=image_name)
 
+	# Every System image is protected at insert. The builder owns the build it replaces.
 	deletion = VirtualMachineImageDeletionService()
 	for image in previous_images:
+		image.is_termination_protected = 0
 		deletion.request(image)
 
 

@@ -49,11 +49,7 @@ class TestUbuntuImageBuilder(UnitTestCase):
 		deletion.assert_not_called()
 
 	def test_publish_adds_a_new_record_and_retires_the_previous_one(self) -> None:
-		previous = SimpleNamespace(
-			image_sha256="c" * 64,
-			kernel_sha256="b" * 64,
-			ensure_not_termination_protected=Mock(),
-		)
+		previous = SimpleNamespace(image_sha256="c" * 64, kernel_sha256="b" * 64, is_termination_protected=1)
 		created = {}
 
 		with (
@@ -80,6 +76,7 @@ class TestUbuntuImageBuilder(UnitTestCase):
 		self.assertEqual(created["image_object_key"], "rootfs-key")
 		upload.assert_called_once_with("new-image", Path("rootfs.img"), Path("kernel"))
 		deletion.return_value.request.assert_called_once_with(previous)
+		self.assertEqual(previous.is_termination_protected, 0)
 
 	def test_different_images_use_different_object_keys_for_the_same_files(self) -> None:
 		client = Mock()
@@ -99,23 +96,6 @@ class TestUbuntuImageBuilder(UnitTestCase):
 			second,
 			{"image_object_key": "images/image-2/rootfs.img", "kernel_object_key": "images/image-2/kernel"},
 		)
-
-	def test_a_protected_previous_image_stops_the_publish_before_upload(self) -> None:
-		previous = SimpleNamespace(
-			image_sha256="c" * 64,
-			kernel_sha256="b" * 64,
-			ensure_not_termination_protected=Mock(side_effect=frappe.ValidationError("protected")),
-		)
-
-		with (
-			patch("atlas.vm.core.image_builder.get_sha256", side_effect=["a" * 64, "b" * 64]),
-			patch("atlas.vm.core.image_builder.get_available_ubuntu_images", return_value=[previous]),
-			patch("atlas.vm.core.image_builder.upload_to_object_storage") as upload,
-		):
-			with self.assertRaises(frappe.ValidationError):
-				publish_ubuntu_image("Ubuntu 24.04", "24.04", "amd64", Path("rootfs.img"), Path("kernel"))
-
-		upload.assert_not_called()
 
 	def test_publish_to_site_files_does_not_touch_object_storage(self) -> None:
 		created = {}
@@ -166,10 +146,9 @@ class TestUbuntuImageBuilder(UnitTestCase):
 
 
 class TestUbuntuImageBuilderIntegration(IntegrationTestCase):
-	def test_published_record_owns_its_object_keys(self) -> None:
-		title = f"test-ubuntu-{frappe.generate_hash(length=8)}"
+	def publish(self, title: str, image_sha256: str) -> None:
 		with (
-			patch("atlas.vm.core.image_builder.get_sha256", side_effect=["a" * 64, "b" * 64]),
+			patch("atlas.vm.core.image_builder.get_sha256", side_effect=[image_sha256, "b" * 64]),
 			patch("atlas.vm.core.image_builder.Path.stat", return_value=SimpleNamespace(st_size=MEBIBYTE)),
 			patch(
 				"atlas.vm.core.image_builder.upload_to_object_storage",
@@ -180,6 +159,24 @@ class TestUbuntuImageBuilderIntegration(IntegrationTestCase):
 			),
 		):
 			publish_ubuntu_image(title, "24.04", "amd64", Path("rootfs.img"), Path("kernel"))
+
+	def test_each_build_retires_the_protected_build_before_it(self) -> None:
+		title = f"test-ubuntu-{frappe.generate_hash(length=8)}"
+		self.publish(title, "a" * 64)
+		self.publish(title, "c" * 64)
+		self.publish(title, "d" * 64)
+
+		images = frappe.get_all(
+			"Virtual Machine Image",
+			filters={"title": title},
+			fields=["image_sha256", "status", "is_termination_protected"],
+		)
+		statuses = {image.image_sha256[0]: (image.status, image.is_termination_protected) for image in images}
+		self.assertEqual(statuses, {"a": ("Archived", 0), "c": ("Archived", 0), "d": ("Available", 1)})
+
+	def test_published_record_owns_its_object_keys(self) -> None:
+		title = f"test-ubuntu-{frappe.generate_hash(length=8)}"
+		self.publish(title, "a" * 64)
 
 		name = frappe.get_all("Virtual Machine Image", filters={"title": title}, pluck="name")[0]
 		image = frappe.get_doc("Virtual Machine Image", name)

@@ -15,9 +15,9 @@ The Ubuntu builder publishes a kernel and root filesystem as a new Available Sys
 
 The builder checks earlier Available images with the same title and architecture. If one has the same digests, the build changes nothing.
 
-If an earlier image is termination protected, the builder stops before upload.
-
 After publication, the builder retires the earlier images.
+
+Atlas protects each new System image from termination. The builder removes this protection from the earlier images before it retires them.
 
 ::: info Guest disk errors
 New Ubuntu System images set ext4 to remount the root filesystem read-only when it detects an error. This stops further writes to a damaged filesystem.
