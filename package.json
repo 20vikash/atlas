@@ -8,6 +8,7 @@
 		"docs:preview": "vitepress preview"
 	},
 	"devDependencies": {
+		"@scalar/api-reference": "^1.72.0",
 		"mermaid": "^11.12.0",
 		"vitepress": "^1.6.4"
 	}

@@ -1,124 +1,35 @@
-# network: VM and host network
+# network: VM and host network code contract
 
-For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+For Go code, follow the [Go review guide](../../../llm/go-code-review-guide.md). Read [host networking](../../../docs/networking/host-networking.md) for packet paths, addresses, firewall behavior, and limits. Read [sleepy VMs](../../../docs/compute/sleepy-vms.md) for traffic tracking behavior.
 
-[internal SPEC](../SPEC.md) · overview: [docs/networking.md](../../docs/networking.md)
+This package converges one VM network and applies the host WireGuard peer set. It does not allocate guest addresses. Each VM has a separate namespace.
 
-## Purpose
+## Owners
 
-Every virtual machine gets the same private addresses. That is safe because each VM owns a network namespace. Fixed values and values derived from the VM user ID remove the need for an address allocator.
+| Type | Code responsibility |
+| --- | --- |
+| `LinuxAllocator` | Implements `vm.Network`. Reads and converges one VM's namespace, links, routes, firewall, and traffic control. |
+| `Mesh` | Registers VM addresses through the WG Mesh command. |
+| `WireGuardManager` | Replaces the managed peers of one WireGuard interface. |
+| `traffic.Monitor` | Owns TAP attachments, samples, packet events, and the event reader. |
 
-This package makes one virtual machine network agree with its desired state, and it applies the host WireGuard peer set.
+## Convergence invariants
 
-## Terms
+- `Ensure` stores no applied VM-network state. It reads host resources and accepts resources that already exist, so another pass can repair a partial failure.
+- Remove unwanted links and routes before adding new ones. Add the veth first and mesh registration last so the first attracted packet has a complete path.
+- Apply both firewall tables before exposing the VM through a veth, public address, or mesh registration. If the second table update fails, restore the first. The drift cache is memory only.
+- A VM with a mesh address needs a veth pair. Only a warm-image capture VM has neither. `Release` removes mesh registration before deleting the namespace.
+- `routes.go` restores the `default` prefix and host route lengths that `ip` omits. IPv4 NAT exists only while an IPv4 route uses `host`.
+- Public-address rules are found by their `metal-public-ipv4-<vm-id>` or `metal-public-ipv6-<vm-id>` comments. Treat each rule set as one unit. For `iptables -C`, only exit code 1 means absent.
+- Traffic policers sit on the namespace end of the veth. WG Mesh owns the host end. Private filters have priority over public filters.
+- `LinuxAllocator` attaches monitoring after TAP creation and detaches it before TAP removal. `vm.Manager` decides when a VM sleeps. The monitor only reports activity.
+- The TAP eBPF hook counts unicast packets and returns `TCX_NEXT`. IPv6 multicast must not keep an idle VM awake. Use attachment time as the idle baseline, not wall-clock time.
+- `withNetworkNamespace` is the only in-process namespace helper. Only TCX attachment uses it.
 
-- A network namespace is one isolated Linux network stack.
-- A TAP connects Firecracker to the guest network.
-- A veth pair connects a namespace to the host.
-- MASQUERADE gives source network address translation.
-- A tc policer drops traffic above a rate. It does not queue it.
+## Host sync boundary
 
-## Types
+`EnsureHost` applies uplink and WireGuard interfaces. The WG Mesh command refuses an uplink change until an operator resets the mesh. `ApplyPrivilegedAddresses` and `WireGuardManager.Apply` each replace a complete set. `Apply` drops this host from its peer set, changes only previously managed peers, and rejects missing, invalid, or duplicate mesh addresses. `SyncPeerState` replaces the BPF peer map.
 
-| Type | Owns |
-|---|---|
-| `LinuxAllocator` | Convergence of one VM network. Implements `vm.Network`. |
-| `Mesh` | Registration of VM addresses through the Atlas WG Mesh CLI. |
-| `WireGuardManager` | The managed peer set of one WireGuard interface. |
-| [`traffic.Monitor`](traffic/SPEC.md) | Traffic samples and packet events for monitored VMs. |
+## Validation
 
-## Convergence
-
-For one virtual machine network, `Ensure` is the only entry point. It reads the host and makes the host match. It does not store applied network state.
-
-```mermaid
-flowchart TD
-    Ensure[Ensure network] --> Namespace[Create namespace when absent]
-    Namespace --> Base[Ensure loopback, TAP, and gateway]
-    Base --> Firewall[Converge IPv4 and IPv6 firewall]
-    Firewall --> Remove[Remove resources no longer wanted]
-    Remove --> Add[Add veth, routes, public addresses, and mesh]
-    Add --> Traffic[Apply traffic control]
-```
-
-Removal comes before addition, so a route or address change never leaves both shapes in place at once. Within `addWanted` the order is load bearing: the veth carries everything above it, and the mesh registration announces the VM, so it is last and the first packet it attracts finds a complete path.
-
-A failed step leaves the partial host state. The next `Ensure` continues from it, so every step must accept a resource that already exists.
-
-A VM with a mesh address always has the veth pair. `routes.go` converges the namespace routes of both families from `network.routes`: IPv4 routes use the host transit address, and IPv6 routes use `fe80::1`. It reads the present routes with `ip route show via` and removes the routes that the VM no longer lists. `ip` prints a default prefix as `default` and a host route without its length, so the parser restores both forms. IPv4 NAT exists while an IPv4 route uses `host`. Only a warm image capture VM has no mesh address, so it gets no veth pair.
-
-`Release` removes the mesh registration first, because deleting the namespace also deletes the veth pair the registration names.
-
-## Firewall
-
-The firewall owns the filter tables inside the VM network namespace. It filters both public and mesh traffic before packets reach `tap0`.
-
-An enabled firewall gives `FORWARD` a default drop policy. It accepts established and related connections before it evaluates allow rules. An empty direction permits no new connection in that direction. A disabled firewall gives `FORWARD` an accept policy and keeps the desired rules for later use.
-
-Each allow rule selects `any`, `tcp`, `udp`, or `icmp`. A TCP or UDP rule can select one destination port or one inclusive destination port range. An empty port value selects all ports. Each rule has one or more canonical IPv4 or IPv6 prefixes.
-
-Metal reads both filter tables before it applies a firewall change. Metal replaces only tables that differ. If the second table update fails, Metal restores the first table to prevent a split policy. A new namespace and a changed effective firewall cause an immediate inspection. An unchanged firewall has a drift audit once per minute. The memory-only audit cache is not applied state. A process restart causes a new inspection.
-
-Metal applies the firewall before it adds the veth, public address, or mesh registration. Existing tracked connections continue because the first enabled rule accepts `ESTABLISHED,RELATED` traffic.
-
-## Host rules
-
-Public IPv4 needs 6 rules across 2 network stacks: DNAT in for forwarded and host-originated traffic, SNAT out, both conntrack directions, and a second DNAT inside the namespace. A public IPv6 `/128` needs 5 host rules: the same DNAT pair to the guest mesh address, SNAT out for a connection whose original destination is outside `fdaa::/16`, and both conntrack directions. The original destination makes hairpin work: a connection to the public address of another VM has a mesh destination after DNAT, but it still leaves with the public source. A routed IPv6 block also gets a namespace route to the guest. A `/128` does not, because that route would return the guest's traffic to its own public address to the guest. Each set is treated as one set. If any rule is missing, all are removed and rewritten, so a partial set from an interrupted run cannot survive.
-
-Every rule carries the comment `metal-public-ipv4-<vm-id>` or `metal-public-ipv6-<vm-id>`. Cleanup finds rules by that comment, which is why no rule state is kept anywhere.
-
-`iptables` and `ip6tables` fail on a duplicate add and on a delete of an absent rule, so each change tests with `-C` first. Exit code 1 means absent; any other failure is an error, so a broken check never reads as absent.
-
-## Maximum segment size
-
-The namespace clamps TCP MSS in the `mangle` table. The rule matches the outgoing veth, so it covers a SYN and a SYN-ACK to the guest.
-
-The guest image sets `eth0` to the veth MTU. The clamp protects TCP from older or custom images that use 1500. UDP still depends on ICMP `fragmentation needed`.
-
-## Traffic control
-
-Policers go on the namespace end of the veth. The host end belongs to Atlas WG Mesh and its terminating direct-action program, so each component owns one end and neither can displace the other.
-
-The VM is inside the namespace, so `egress` carries traffic away from it and matches the destination, while `ingress` carries traffic toward it and matches the source.
-
-Private filters take a lower `tc` priority than the public filter, which matches every IPv4 address. A private packet therefore stops at the private policer. One priority holds one protocol, so private IPv4 and IPv6 need separate priorities.
-
-Private traffic is the RFC 1918 IPv4 ranges `10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`, plus the IPv6 unique-local range `fc00::/7`, which contains every mesh prefix. Public traffic is every other IPv4 address.
-
-## Traffic tracking
-
-When traffic monitoring is enabled, the [traffic SPEC](traffic/SPEC.md) owns traffic samples and packet events. `LinuxAllocator` gives it the namespace path and TAP name after the namespace converges, and releases the attachment before it deletes the namespace.
-
-A stopped guest cannot answer ARP or neighbour discovery. Metal pins both guest addresses to the fixed guest MAC:
-
-```mermaid
-flowchart LR
-    IPv4[Fixed guest IPv4] --> MAC[Deterministic guest MAC]
-    Mesh[Per-VM mesh IPv6] --> TAP[tap0 and namespace routes]
-    MAC --> TAP
-```
-
-`ensureNamespaceBase` owns the IPv4 entry. Mesh setup owns the IPv6 entry. Both paths can deliver an IP packet while Firecracker is stopped.
-
-## Atlas WG Mesh
-
-When Atlas WG Mesh is enabled, it assumes the VM sits directly behind the interface it hooks. A namespace sits between them, so the namespace forwards IPv6 and answers neighbour solicitations for the guest with proxy NDP.
-
-The proxy answers without the default kernel delay, because the mesh drops packets until the host learns the guest.
-
-A gateway namespace has one more rule: every packet that enters from the host goes to the guest, in table `100`. The main table would send a destination outside the mesh back to the host.
-
-`EnsureHost` applies the configured uplink and WireGuard interfaces. The CLI refuses an uplink change until an operator resets the mesh.
-
-`ApplyPrivilegedAddresses` and `WireGuardManager.Apply` each replace a complete set. `Apply` drops this host from the peer set it receives and records what it applied, so it never peers with itself and never disturbs peers added by other tools.
-
-`SyncPeerState` replaces the BPF peer map. It also attaches the unicast NDP hook or selects multicast NDP.
-
-Each peer supplies `mesh_address`, which becomes its `AllowedIPs` entry. `Apply` rejects a set with a missing, invalid, or repeated mesh address.
-
-## Related
-
-- [docs/networking.md](../../docs/networking.md) gives the topology and the reasons behind this design.
-- [internal/vm/SPEC.md](../vm/SPEC.md) defines `Network`.
-- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) attaches Firecracker to the TAP.
-- [traffic/SPEC.md](traffic/SPEC.md) tracks traffic and emits packet events.
+Run `make bpf` before direct Go tests. The [integration tests](../../../docs/develop/metal-testing.md) need Linux, root, and the `integration` tag. The [VM contract](../vm/SPEC.md) defines `Network`. The [Firecracker contract](../firecracker/SPEC.md) attaches the guest to TAP.

@@ -33,7 +33,6 @@ func (r resizeRequest) validate() error {
 // @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id		path	string			true	"Virtual machine identifier"
 // @Param		request	body	resizeRequest	true	"Complete resize specification"
 // @Success	202		{object}	virtualMachineResponse

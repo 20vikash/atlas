@@ -3,42 +3,32 @@ layout: home
 
 hero:
   name: Atlas
-  text: VM infrastructure for Frappe Cloud
-  tagline: A practical guide to the control plane, host runtime, public proxy, and private network.
+  text: Developer handbook
+  tagline: How Frappe Cloud builds, runs, and connects virtual machines.
   image:
     src: /logo.svg
     alt: Atlas
   actions:
     - theme: brand
-      text: Start with the architecture
-      link: /docs/architecture
+      text: Start reading
+      link: /docs/start/what-atlas-is
 ---
 
-## Four systems, one VM platform
+## From a request to a usable VM
 
-Each component has one clear responsibility. Start with the component that owns the behavior you want to change.
-
-<div class="atlas-component-grid">
-  <a class="atlas-component" href="./atlas/">
-    <span>Control plane</span>
-    <strong>Atlas app</strong>
-    <p>Stores user intent, selects hosts, and manages provider resources.</p>
-  </a>
-  <a class="atlas-component" href="./metal/">
-    <span>Host runtime</span>
-    <strong>Metal</strong>
-    <p>Makes each host match the desired virtual machine state.</p>
-  </a>
-  <a class="atlas-component" href="./services/http-proxy/">
-    <span>Public traffic</span>
-    <strong>HTTP proxy</strong>
-    <p>Routes public HTTP and TLS traffic to virtual machines.</p>
-  </a>
-  <a class="atlas-component" href="./services/wg-mesh/">
-    <span>Private traffic</span>
-    <strong>WG Mesh</strong>
-    <p>Carries private virtual machine traffic between hosts.</p>
-  </a>
+<div class="atlas-home-flow">
+  <div class="atlas-home-flow-step">
+    <a href="./docs/start/how-a-vm-request-works">Atlas app</a>
+    <p>Records the request and selects a host.</p>
+  </div>
+  <div class="atlas-home-flow-step">
+    <a href="./docs/compute/runtime">Metal</a>
+    <p>Creates the disk and runs the VM with Firecracker.</p>
+  </div>
+  <div class="atlas-home-flow-step">
+    <a href="./docs/networking/">WG Mesh</a>
+    <p>Connects VMs across hosts while their addresses stay fixed.</p>
+  </div>
 </div>
 
-<p class="atlas-home-paths"><a href="./docs/development">Set up development</a><span>or</span><a href="./docs/operations">investigate a failure</a></p>
+<p class="atlas-home-services"><a href="./docs/region/service-vms">Regional services</a> use privileged VMs for web routing, public IPv6, and storage.</p>

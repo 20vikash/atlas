@@ -14,7 +14,6 @@ import (
 // @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id		path	string		true	"Virtual machine identifier"
 // @Param		request	body	diskRequest	true	"Complete disk specification"
 // @Success	202		{object}	virtualMachineResponse

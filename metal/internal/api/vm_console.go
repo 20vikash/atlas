@@ -26,7 +26,6 @@ type consoleControlMessage struct {
 // @Description	Upgrade the request to a WebSocket for the serial console or an SSH session.
 // @ID			getVirtualMachineConsole
 // @Tags		Virtual machines
-// @Security	BearerAuth
 // @Param		id		path	string	true	"Virtual machine identifier"
 // @Param		mode	query	string	false	"Console mode" Enums(tty, ssh) default(tty)
 // @Success	101	"Switching protocols"
