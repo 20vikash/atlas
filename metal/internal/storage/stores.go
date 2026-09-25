@@ -20,7 +20,7 @@ var (
 	ErrNotFound = errors.New("storage: not found")
 
 	// ErrInUse indicates that an image has dependent virtual machines.
-	ErrInUse = errors.New("storage: in use")
+	ErrInUse = vm.ErrInUse
 
 	// ErrImageConflict indicates that an image reference has different content.
 	ErrImageConflict = errors.New("storage: image content conflict")
