@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/frappe/atlas/metal/internal/network/traffic"
@@ -329,6 +330,36 @@ func TestSpecificationGenerationTracksShapeNotPower(t *testing.T) {
 	}
 	if afterShape.SpecificationGeneration <= afterPower.SpecificationGeneration {
 		t.Error("a network change did not raise the specification generation")
+	}
+}
+
+func TestSetNetworkRejectsOversizedMetadataServiceDocument(t *testing.T) {
+	manager, _, _, _ := newTestManager(t)
+	specification := testSpecification()
+	specification.Metadata = map[string]string{
+		"large": strings.Repeat("x", MetadataServiceSizeLimitBytes-metadataServiceReserveBytes-600),
+	}
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+
+	network := specification.Network
+	for index := range 40 {
+		network.Routes = append(network.Routes, Route{
+			Destination: fmt.Sprintf("2001:db8:%x::/48", index),
+			Via:         RouteViaHost,
+		})
+	}
+	if err := manager.SetNetwork(context.Background(), "machine-1", network); !errors.Is(err, ErrMetadataServiceTooLarge) {
+		t.Fatalf("error = %v", err)
+	}
+
+	record, err := manager.store.readDesired("machine-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Specification.Network.Routes) != len(specification.Network.Routes) {
+		t.Fatal("rejected network change was saved")
 	}
 }
 

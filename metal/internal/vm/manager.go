@@ -101,6 +101,9 @@ func (manager *Manager) Create(ctx context.Context, identifier string, specifica
 	if !validIdentifier(identifier) {
 		return Information{}, ErrConflict
 	}
+	if err := specification.validateMetadataServiceSize(identifier); err != nil {
+		return Information{}, err
+	}
 	unlock, err := manager.operationLocks.Lock(ctx, identifier)
 	if err != nil {
 		return Information{}, err

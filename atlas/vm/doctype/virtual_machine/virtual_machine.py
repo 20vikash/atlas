@@ -419,10 +419,10 @@ class VirtualMachine(Document):
 		"""Replace all custom metadata for this VM with a plain string-to-string map."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
-		if not isinstance(metadata, dict) or any(
-			not isinstance(key, str) or not isinstance(value, str) for key, value in metadata.items()
-		):
-			frappe.throw(_("Metadata must be a string-to-string map."), exc=AtlasUserError)
+		try:
+			metadata = VirtualMachineCreateRequest.metadata_map({"metadata": metadata})
+		except ValueError as error:
+			frappe.throw(_(str(error)), exc=AtlasUserError)
 
 		return VirtualMachineService(self).replace_metadata(metadata)
 

@@ -206,6 +206,26 @@ class TestVirtualMachineRequest(UnitTestCase):
 				}
 			)
 
+	def test_request_rejects_metadata_over_48_kib(self) -> None:
+		with self.assertRaisesRegex(ValueError, "48 KiB"):
+			VirtualMachineCreateRequest.metadata_map({"metadata": {"key": "v" * 48 * 1024}})
+
+	def test_request_accepts_16_metadata_entries(self) -> None:
+		metadata = {str(index): "value" for index in range(16)}
+		self.assertEqual(VirtualMachineCreateRequest.metadata_map({"metadata": metadata}), metadata)
+
+		metadata["extra"] = "value"
+		with self.assertRaisesRegex(ValueError, "16 entries"):
+			VirtualMachineCreateRequest.metadata_map({"metadata": metadata})
+
+	def test_request_rejects_duplicate_metadata_keys_after_trimming(self) -> None:
+		with self.assertRaisesRegex(ValueError, "appears more than once"):
+			VirtualMachineCreateRequest.metadata_map({"metadata": {"env": "prod", " env ": "dev"}})
+
+	def test_request_rejects_null_metadata(self) -> None:
+		with self.assertRaisesRegex(ValueError, "string-to-string map"):
+			VirtualMachineCreateRequest.metadata_map({"metadata": None})
+
 	def test_request_parses_disk_limits(self) -> None:
 		request = VirtualMachineCreateRequest.from_value(
 			{
