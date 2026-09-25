@@ -36,6 +36,9 @@ WILDCARD_DOMAIN="${WILDCARD_DOMAIN:-}"
 # first boot. JSON with storage_node_count, replication_factor, and a gateway and storage
 # block of cpu, ram_gb and disk_gb.
 DEFAULT_STORAGE_CLUSTER_CONFIG="${DEFAULT_STORAGE_CLUSTER_CONFIG:-}"
+# Site config, not a Cargo Settings field: Cargo reads it to build its Datum host on first
+# boot. JSON with repository, version, and a telemetry block of cpu_millicores, ram_gb and disk_gb.
+DEFAULT_TELEMETRY_CONFIG="${DEFAULT_TELEMETRY_CONFIG:-}"
 BENCH_USER="${BENCH_USER:-frappe}" # pilot refuses to run as root, so the bench gets its own user
 BENCH_UID="${BENCH_UID:-1000}"
 BENCH_GID="${BENCH_GID:-1000}"
@@ -72,7 +75,7 @@ ENROLMENT_VARS="CENTRAL_URL JWKS_URL ATLAS_URL CARGO_URL CENTRAL_WEBHOOK_SECRET 
 	ATLAS_TOKEN ATLAS_TENANT_ID PROXY_URL PROXY_TOKEN WILDCARD_DOMAIN"
 
 missing=""
-for name in $ENROLMENT_VARS DEFAULT_STORAGE_CLUSTER_CONFIG; do
+for name in $ENROLMENT_VARS DEFAULT_STORAGE_CLUSTER_CONFIG DEFAULT_TELEMETRY_CONFIG; do
 	[ -n "${!name}" ] || missing="$missing $name"
 done
 
@@ -105,6 +108,7 @@ q_admin_password=$(printf '%q' "$PILOT_ADMIN_PASSWORD")
 q_site_password=$(printf '%q' "$SITE_PASSWORD")
 q_admin_domain=$(printf '%q' "$ADMIN_DOMAIN")
 q_cluster_config=$(printf '%q' "$DEFAULT_STORAGE_CLUSTER_CONFIG")
+q_telemetry_config=$(printf '%q' "$DEFAULT_TELEMETRY_CONFIG")
 # The install hook reads these, so they are quoted once and exported into that one command.
 enrolment=""
 for name in $ENROLMENT_VARS; do
@@ -130,6 +134,7 @@ as_bench_user "pilot -b $q_bench frappe set-config -g -p scheduler_tick_interval
 as_bench_user "pilot -b $q_bench frappe --site $q_site enable-scheduler"
 # `-p` keeps the value JSON. Stored as a string, Cargo's spawner refuses it.
 as_bench_user "pilot -b $q_bench frappe --site $q_site set-config -p default_storage_cluster_config $q_cluster_config"
+as_bench_user "pilot -b $q_bench frappe --site $q_site set-config -p default_telemetry_config $q_telemetry_config"
 as_bench_user "pilot --yes -b $q_bench get-app $q_repo --branch $q_branch --install-dependencies"
 
 # Production before the app: it brings up Redis and the workload, which installing Cargo

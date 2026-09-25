@@ -98,6 +98,7 @@ class TestCargoServerProvisionRequest(UnitTestCase):
 			patch.object(cargo_server_module, "_validate_system_manager"),
 			patch.object(cargo_server_module, "cargo_lifecycle_lock", return_value=nullcontext()),
 			patch.object(cargo_server_module, "store_storage_cluster_config"),
+			patch.object(cargo_server_module, "store_telemetry_config"),
 			patch.object(cargo_server_module.frappe, "get_single", return_value=cargo_server),
 			patch.object(cargo_server_module.frappe, "msgprint"),
 			patch.object(cargo_server_module.frappe.db, "commit", side_effect=lambda: calls.append("commit")),
