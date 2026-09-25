@@ -11,6 +11,7 @@ import click
 import frappe
 
 from atlas.atlas.core.artifacts import publish_public_file_path
+from atlas.atlas.core.host_binaries import BUILDER_IMAGE, IS_MACOS
 from atlas.vm.core.multipart_upload import bytes_to_mib
 
 if TYPE_CHECKING:
@@ -23,13 +24,24 @@ def build_ubuntu_image(
 	version: str, architecture: str, minimal: bool, output_directory: Path
 ) -> tuple[Path, Path]:
 	"""Build one Ubuntu root file system and kernel."""
+	output_directory = output_directory.resolve()
 	output_directory.mkdir(parents=True, exist_ok=True)
 	image_type = "minimal-" if minimal else ""
 	image_path = output_directory / f"ubuntu-{version}-{image_type}{architecture}.ext4"
 	kernel_path = output_directory / f"vmlinux-ubuntu-{version}-{image_type}server"
 	builder_path = Path(__file__).parents[1] / "scripts" / "build_ubuntu_server_image.sh"
 	command = [builder_path]
-	if os.geteuid() != 0:
+	if IS_MACOS:
+		command = [
+			"docker",
+			"run",
+			"--rm",
+			f"--volume={builder_path.parent}:{builder_path.parent}",
+			f"--volume={output_directory}:{output_directory}",
+			BUILDER_IMAGE,
+			builder_path,
+		]
+	elif os.geteuid() != 0:
 		command.insert(0, "sudo")
 	command.extend(
 		[

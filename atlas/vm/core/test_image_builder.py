@@ -13,6 +13,7 @@ class TestUbuntuImageBuilder(UnitTestCase):
 	def test_build_uses_the_virtual_machine_image_script_and_complete_names(self) -> None:
 		with (
 			TemporaryDirectory() as temporary_directory,
+			patch("atlas.vm.core.image_builder.IS_MACOS", False),
 			patch("atlas.vm.core.image_builder.os.geteuid", return_value=1000),
 			patch("atlas.vm.core.image_builder.subprocess.run") as run,
 		):
