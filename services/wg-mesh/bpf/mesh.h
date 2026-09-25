@@ -170,10 +170,8 @@ static __always_inline int replace_with_neighbor_solicitation(struct __sk_buff *
 	return replace_with_ndp(packet, &eth, &ip6, &solicitation);
 }
 
-/* NDP lives on a link, so it fits in the minimum IPv6 MTU. The explicit upper
- * bound also lets the verifier check the packet-pointer arithmetic in
- * parse_ndp: a bare payload length from the packet proves no upper bound,
- * and the byteswap wipes the register range the check below must see. */
+/* NDP fits in the minimum IPv6 MTU. The cap also gives the verifier the upper
+ * bound that the packet length alone cannot prove. */
 #define NDP_MAX_PAYLOAD (1280 - sizeof(struct ipv6hdr))
 
 /* Packet parsing. Each function returns NULL for traffic that is not its protocol. */

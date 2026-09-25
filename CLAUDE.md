@@ -11,7 +11,7 @@ Atlas is a monorepo for Frappe Cloud V2 VM infrastructure. It contains a Frappe 
 
 ## Start here
 
-Read the [root specification](SPEC.md) for the project layout and component map. Read the matching component `SPEC.md` before you make a structural change.
+Read the [root specification](SPEC.md) for the project layout and component map. Read the matching component `SPEC.md`, and the handbook page it links, before you make a structural change. The [code map](docs/develop/code-map.md) links each topic to its page, specification, code, and tests.
 
 Re-read `CLAUDE.md` after context compaction or a resumed session before you continue work.
 
@@ -91,7 +91,7 @@ Atlas is in active development and is not deployed to production.
 - Describe current behavior only. Do not describe removed behavior or old interfaces.
 - Use a clear documentation tree: root README, component overview, focused topic documents, then detailed specifications when needed.
 - Keep closely related behavior together. Do not split documentation only to make files smaller.
-- Use a README as an entry point. Use `SPEC.md` as a short router to detailed documents when a component needs one.
+- Write behavior once, in the handbook under `docs/`. Use `SPEC.md` next to the code for the code contract: key files, types, extension points, invariants, and tests. Link to the handbook instead of repeating it. Keep a README to a few lines that link to both.
 - Put detailed behavior in one authoritative location. Link from summaries to the detailed document and back when useful.
 - Use headings that answer a reader question, such as Purpose, Configuration, Operation, or Validation.
 - Use a list or table for more than 3 related items. Use a small ASCII diagram only when it makes a relationship easier to understand.
@@ -116,7 +116,7 @@ Atlas is in active development and is not deployed to production.
 ### Commits
 
 - Use a short Conventional Commit subject: `type(scope): Sentence case`.
-- Use a kebab-case scope and one of `feat`, `fix`, `refactor`, `test`, `docs`, `build`, or `chore`.
+- Use one of `feat`, `fix`, `refactor`, `test`, `docs`, `build`, or `chore`. Use a component as the scope: `atlas`, `metal`, `http-proxy`, `ipv6-router`, or `wg-mesh`.
 - Do not add an AI co-author, session data, or agent data.
 
 ### Pull requests

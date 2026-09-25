@@ -121,8 +121,8 @@ func (s *Server) getMigration(c echo.Context) error {
 	return c.JSON(http.StatusOK, toMigration(record))
 }
 
-// finishMigration records the destination's finish request. Atlas calls it with the
-// static token. The destination then destroys the source over the mesh.
+// finishMigration records the destination's finish request. The destination then
+// destroys the source over the mesh.
 func (s *Server) finishMigration(c echo.Context) error {
 	identifier, err := migrationIdentifier(c)
 	if err != nil {

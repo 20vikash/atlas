@@ -1,63 +1,33 @@
 # Atlas Repository Specification
 
-## Purpose
+Atlas is a monorepo for Frappe Cloud V2 VM infrastructure. It holds one Frappe app and four components in one Git repository.
 
-Atlas is a monorepo for Frappe Cloud V2 VM infrastructure.
+## Components
 
-The root contains the Frappe app and four components. They are not separate Git repositories. Each component has its own code, tests, docs, and specification.
+| Component | Path | Owns |
+|---|---|---|
+| [Atlas app](atlas/SPEC.md) | `atlas/` | Frappe app |
+| [Metal](metal/SPEC.md) | `metal/` | Host VM management |
+| [HTTP proxy](services/http-proxy/SPEC.md) | `services/http-proxy/` | Regional proxy |
+| [IPv6 router](services/ipv6-router/SPEC.md) | `services/ipv6-router/` | Public IPv6 translation |
+| [WG Mesh](services/wg-mesh/SPEC.md) | `services/wg-mesh/` | Private VM network |
 
-## Root layout
+`clients/` holds the generated [API clients](docs/interfaces/api-clients.md). `llm/` and `.greptile/` hold review rules. `.vitepress/` builds the docs site.
 
-```text
-atlas/                         Frappe app
-clients/                       Generated API clients
-metal/                         VM management
-llm/                           Review guides for language models
-services/http-proxy/           HTTP proxy
-services/ipv6-router/          Public IPv6 translation
-services/wg-mesh/              Private VM network
-.github/workflows/             CI workflows
-.greptile/rules.md             Review rules
-.vitepress/                    Documentation site
-CLAUDE.md                      Agent rules
-SPEC.md                        This file
-```
+## Rules
 
-## Component specifications
-
-- [Atlas app](atlas/SPEC.md): Frappe application and provider catalog.
-- [Metal](metal/SPEC.md): Host VM management.
-- [HTTP proxy](services/http-proxy/SPEC.md): Regional proxy service.
-- [IPv6 router](services/ipv6-router/SPEC.md): Public IPv6 translation for VMs.
-- [WG Mesh](services/wg-mesh/SPEC.md): Private VM network.
-
-Read the matching specification before you change a component.
-
-`clients/` holds the generated Python clients for the Atlas API and the HTTP proxy control API. See [API clients](docs/api-clients.md).
-
-Each component specification links back to this file.
-
-## Root software
-
-The root app uses Python 3.14, Frappe, MariaDB, Redis, Node, and Yarn.
-
-The root has no `go.mod` or `go.work`. Run Go commands inside the matching component.
-
-## Ownership
-
-Keep component code inside its component. Use a clear API or contract for cross-component work.
+- Keep component code inside its component. Use an API or contract across components.
+- The root has no `go.mod` or `go.work`. Run Go commands inside the component.
 
 ## Continuous integration
 
-`pages.yml` builds the documentation site with VitePress and publishes it to GitHub Pages on a push to `develop`. The site reads the Markdown files in place.
-
-`tests.yml` holds one job for each component and `linter.yml` holds the checks that read every file. Neither uses a trigger path filter, so each job starts on every pull request and reports a result. A required check never waits for a workflow that did not start.
-
-Each job in `tests.yml` calls `.github/scripts/changed-paths.sh` with one regular expression and guards its later steps with the result, so a job with nothing to run passes. Add `tests.yml` and the script to the pattern of each job.
+- `pages.yml` publishes the VitePress site on a push to `develop`.
+- `tests.yml` and `linter.yml` have no path filter, so required checks always report.
+- Each `tests.yml` job skips its steps when `.github/scripts/changed-paths.sh` finds no match. Include `tests.yml` and the script in each pattern.
 
 | Job | Runs for |
 |---|---|
-| Atlas | Every pull request. The complete app test suite. |
+| Atlas | Every pull request |
 | Metal | `metal/` |
 | WG Mesh | `services/wg-mesh/` |
 | HTTP proxy | `services/http-proxy/` and the proxy API client |

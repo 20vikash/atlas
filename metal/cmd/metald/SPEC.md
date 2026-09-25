@@ -2,11 +2,11 @@
 
 For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
 
-[metal SPEC](../../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
+[Metal specification](../../SPEC.md) · Behavior: [Metal daemon and API](../../../docs/region/metald.md)
 
 ## Purpose
 
-Command `metald` loads host configuration, creates runtime services, and starts the HTTPS servers. It is the composition root.
+Command `metald` is the composition root. It loads configuration, creates services, and starts the HTTPS servers.
 
 ## Command
 
@@ -14,88 +14,68 @@ Command `metald` loads host configuration, creates runtime services, and starts 
 metald serve [--config path]
 ```
 
-The default configuration path is `/var/lib/metal/metald.toml`. A missing default file is permitted.
+The default path is `/var/lib/metal/metald.toml`. A missing default file is permitted.
 
 ## Types
 
 | Type | Role |
 |---|---|
-| `options` | Resolved runtime, listener, TLS, authentication, and base-directory settings. |
-| `fileConfig` | TOML sections for Metal and its runtime services. |
-| `tlsConfigurations` | TLS settings for the Atlas API, coordination server, and node client. |
+| `options` | Resolved runtime settings. |
+| `fileConfig` | TOML file sections. |
+| `tlsConfigurations` | TLS for both servers and the node client. |
 
 ## Startup wiring
 
-```mermaid
-flowchart TD
-    Config[Load configuration] --> TLS[Load node certificate and authority]
-    TLS --> Directories[Create required directories]
-    Directories --> Systemd[Connect to systemd]
-    Systemd --> Stores[Create storage stores]
-    Stores --> WireGuard[Create WireGuard manager]
-    WireGuard --> Mesh[Connect and configure WG Mesh]
-    Mesh --> Traffic[Create optional traffic monitor]
-    Traffic --> Runtime[Create Firecracker runtime]
-    Runtime --> VM[Validate records and create VM manager]
-    VM --> Host[Create host service]
-    Host --> Reconcile[Create reconcilers]
-    Reconcile --> Keys[Load Atlas trusted keys]
-    Keys --> APIs[Create Atlas and coordination APIs]
-    APIs --> Serve[Listen and serve]
-```
+`main.go` starts services in this order:
 
-The storage constructor receives the daemon context, pool, image directory, and logger. It returns the pool, VM, image, and snapshot stores.
+1. Configuration, TLS credentials, and directories.
+2. systemd, storage stores, and the WireGuard manager.
+3. WG Mesh and the optional traffic monitor.
+4. Firecracker runtime, record validation, and the VM manager.
+5. Host service and reconcilers.
+6. Atlas trusted keys, then the Atlas and coordination APIs.
 
-The network constructor receives optional mesh and traffic monitor services. The VM manager receives the runtime, network, storage, snapshot, optional traffic monitor, and logger services.
-
-The host service receives an optional mesh service, WireGuard, image, VM, storage, and reconciler services. The API receives this service as one dependency.
-
-Both servers require a client certificate from the regional authority. The Atlas API also pins `tls.atlas_common_name`, because a node certificate is valid for client use on the coordination API.
-
-The source starts a one-shot mutual-TLS listener on `migration.transfer_port` for each snapshot. The listener uses the coordination address host and port 9002 by default, so `metald.coordination_listen` needs one node IP address and not a wildcard host. The destination verifies the source WireGuard IP before it receives the stream.
-
-`connectMesh` runs on every start when `wg_mesh.enabled` is true. Each VM reconciliation calls `Network.Ensure` to restore and update its network.
-
-`wg_mesh.enabled = false` does not disable managed WireGuard peers.
-
-`wg_mesh.uplink` has no default. The Atlas WG Mesh NDP hook and its proxy NDP entries attach to this interface, so it must name the shared VLAN itself and never its parent. Only the controller knows which interface carries Atlas NDP, so metald requires the name.
+- The mesh and traffic monitor services are optional and can be nil.
+- `connectMesh` runs on every start when `wg_mesh.enabled` is true.
+- `wg_mesh.enabled = false` does not disable managed WireGuard peers.
+- Both servers require a client certificate from the regional authority.
+- The Atlas API also pins `tls.atlas_common_name`, because node certificates are valid clients.
+- The snapshot listener uses the `metald.coordination_listen` host. That value must be one node IP address, not a wildcard.
+- `wg_mesh.uplink` must name the shared VLAN interface, never its parent.
 
 ## Config keys
 
 | Key | Default | Meaning |
 |---|---|---|
-| `metald.base_dir` | `/var/lib/metal` | Stores machines, images, policies, peers, and staging files. |
+| `metald.base_dir` | `/var/lib/metal` | Host state root. |
 | `metald.listen` | `127.0.0.1:8080` | TCP address or `unix:/path`. |
-| `metald.coordination_listen` | `127.0.0.1:9001` | Mutual-TLS node coordination address. |
-| `tls.ca_file` | none | Required regional Metal authority certificate. |
-| `tls.certificate_file` | none | Required node certificate. |
-| `tls.private_key_file` | none | Required node private key. |
-| `tls.atlas_common_name` | none | Required common name of the Atlas client certificate. |
+| `metald.coordination_listen` | `127.0.0.1:9001` | Coordination address. |
+| `tls.ca_file` | none | Regional authority. Required. |
+| `tls.certificate_file` | none | Node certificate. Required. |
+| `tls.private_key_file` | none | Node key. Required. |
+| `tls.atlas_common_name` | none | Atlas client name. Required. |
 | `firecracker.binary_path` | `/usr/bin/firecracker` | Firecracker binary. |
-| `firecracker.sockets_dir` | `/run/metal` | Short API socket links. |
+| `firecracker.sockets_dir` | `/run/metal` | API socket links. |
 | `jailer.binary_path` | `/usr/bin/jailer` | Jailer binary. |
 | `zfs.pool` | `metal` | ZFS pool name. |
-| `wireguard.interface` | `wg0` | Underlay interface for managed peers and Atlas WG Mesh. |
-| `wg_mesh.enabled` | `true` | Enables Atlas WG Mesh host setup and VM mesh registration. |
-| `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | Atlas WG Mesh CLI. Required. |
-| `wg_mesh.uplink` | none | Private network interface that carries Atlas NDP. Required. |
-| `traffic_monitor.enabled` | `true` | Enables VM packet monitoring and idle shutdown. |
-| `migration.final_delta_mib` | `512` | Incremental size at or below which the destination stops the source and takes the final snapshot. |
-| `migration.transfer_port` | `9002` | Mutual-TLS snapshot stream port. Use the same value on every host in the region. |
+| `wireguard.interface` | `wg0` | Underlay interface. |
+| `wg_mesh.enabled` | `true` | Enables WG Mesh setup. |
+| `wg_mesh.binary_path` | `/usr/local/bin/atlas-wg-mesh` | WG Mesh CLI. |
+| `wg_mesh.uplink` | none | Interface for Atlas NDP. Required. |
+| `traffic_monitor.enabled` | `true` | Enables idle shutdown. |
+| `migration.final_delta_mib` | `512` | Delta size that triggers the final snapshot. |
+| `migration.transfer_port` | `9002` | Snapshot stream port. Same on every host. |
 
-See `config.example.toml` for the complete file format.
+`config.example.toml` shows the full file.
 
 ## Runtime loops
 
-The VM reconciler processes desired VM states. The image reconciler downloads cached images, creates warm artifacts, and removes idle local data. When traffic monitoring is enabled, one traffic listener dispatches each restoration in a separate daemon-owned goroutine.
-
-The daemon owns all reconcilers, source stream processes, and snapshot upload jobs. `SIGINT` or `SIGTERM` starts a bounded graceful shutdown. It stops both HTTPS servers, cancels workers, closes console sessions, and closes host services. It does not stop or destroy guest virtual machines.
-
-The daemon writes structured JSON logs. Log records include request and operation correlation fields when the operation comes from the API.
+- The daemon owns all reconcilers, source streams, and snapshot uploads.
+- `SIGINT` or `SIGTERM` starts a bounded graceful shutdown.
+- Shutdown never stops or destroys guest VMs.
 
 ## Related
 
-- [docs/architecture.md](../../docs/architecture.md) describes the runtime graph.
-- [internal/api/SPEC.md](../../internal/api/SPEC.md) describes the server.
-- [internal/firecracker/SPEC.md](../../internal/firecracker/SPEC.md) describes the runtime.
-- [docs/testing.md](../../docs/testing.md) describes host setup.
+- [internal/api/SPEC.md](../../internal/api/SPEC.md) owns the server.
+- [internal/firecracker/SPEC.md](../../internal/firecracker/SPEC.md) owns the runtime.
+- [Integration testing](../../../docs/develop/metal-testing.md) describes host setup.

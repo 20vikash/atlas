@@ -68,7 +68,6 @@ type capacityResponse struct {
 // @Tags		Host synchronization
 // @Accept		json
 // @Produce	json
-// @Security	BearerAuth
 // @Param		request	body		syncRequest	true	"Complete controller state"
 // @Success	200		{object}	syncResponse
 // @Failure	400		{object}	errorResponse

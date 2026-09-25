@@ -1,150 +1,40 @@
-# firecracker: VM runtime
+# firecracker: VM runtime code contract
 
-For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
+For Go code, follow the [Go review guide](../../../llm/go-code-review-guide.md). The handbook owns [VM runtime behavior](../../../docs/compute/runtime.md) and [console access](../../../docs/compute/console.md).
 
-[internal SPEC](../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
+This package implements `vm.Runtime` and `vm.WarmRuntime`. It owns the jail, guest metadata, and Firecracker API calls inside one `metal-vm@` systemd unit. It holds no VM records. systemd owns the process lifecycle.
 
-## Purpose
+## Types and boundaries
 
-This package does not own a VM process. systemd does. Each VM is a unit of the `metal-vm@` template, so a crash of metald leaves running guests alone, and a restart of metald finds them by asking systemd rather than by remembering anything.
-
-What this package owns is everything inside that unit: the jail, the boot configuration, the guest metadata, and the API conversation with Firecracker. It implements `vm.Runtime` and holds no VM records.
-
-## Types
-
-| Type | Owns |
-|---|---|
-| `Runtime` | The `vm.Runtime` implementation and the host services it needs. |
-| `machine` | One VM for the length of one operation. Binds a unit and an API client. |
+| Type | Responsibility |
+| --- | --- |
+| `Runtime` | Runtime and warm-runtime interfaces. |
+| `machine` | One VM operation, unit, and API client. |
 | `Config` | Host directories and executable paths. |
+| `firecracker/api.Client` | One VM Unix socket and serialized Firecracker requests. |
+| `firecracker/api.Error` | Non-2xx status and fault message. |
 
-`Runtime` also satisfies `vm.WarmRuntime`, which supplies Firecracker build identity and memory snapshot capture.
+`Start` chooses shared warm memory only for a fresh disk clone and exact shape. `ColdStart` never uses source guest memory. `Restore` and `RestorePaused` use VM-local saved state and return an error instead of silently cold-booting. See the [warm-memory incident](../../../docs/incidents/2026-09-24-guest-disk-corruption.md).
 
-## Composition
+## Invariants
 
-```mermaid
-flowchart LR
-    VM[vm.Manager] --> Runtime[firecracker.Runtime]
-    Runtime --> Systemd[systemd]
-    Systemd --> Jailer[jailer]
-    Jailer --> Firecracker
-    Runtime --> Disk[VM disk storage]
-    Runtime --> Image[Image storage]
-    Runtime --> Console[Serial broker]
-```
+- Each launch discards the previous jail. The chroot base and kernel stay on the same file system because the kernel is hard linked. Jailer arguments in the systemd `EnvironmentFile` cannot contain spaces.
+- The console master remains open while its VM runs. Startup adopts masters from the systemd descriptor store. See the [console package](../console/SPEC.md).
+- Firecracker gets whole vCPUs rounded up from millicores. systemd applies the exact CPU quota. The API limit is 32000 millicores.
+- A memory snapshot restores only into the Firecracker build that wrote it. Binary size and modification time identify that build.
+- `SaveAndStop` writes VM-local state to temporary files, publishes it with one atomic rename, then stops Firecracker. A running VM with an existing valid snapshot conflicts. A paused VM with one terminates Firecracker. A stopped VM with one is complete.
+- Restore removes saved state only after the new jail loads its copy. Stop, restart, remove, and incompatible shape delete it.
+- `RefreshDisk` changes live drive limits. `LimitDiskThroughput` sets a temporary migration limit. A nonpositive value cannot clear a limit.
+- `Remove` deletes runtime files. The VM manager releases storage and network.
 
-## Jail
+## Firecracker API client
 
-Everything one VM owns lives under its own directory, so removing that directory removes the jail, the chroot, and the jailer environment together. The kernel is hard linked into the chroot, which is why the chroot base sits beside the VM files rather than on another file system.
+The client sends JSON over a Unix socket. One lock per socket path covers the whole exchange because Firecracker rejects concurrent requests. Keep-alives are disabled because a new process can reuse the path. Non-2xx responses return `*Error`, even when the fault body cannot be decoded. Snapshot and drive paths are relative to the guest chroot.
 
-The jailer arguments reach systemd through an `EnvironmentFile`. systemd word splits that value, so no argument may contain a space. Firecracker's API socket lives inside the chroot at a fixed relative path, and a symlink outside gives metald a short path to dial.
+Add one request type and method for a new Firecracker endpoint. A new guest operation also needs the matching `vm.Runtime` boundary and focused tests, such as [machine tests](machine_test.go) or [saved-state tests](saved_state_test.go).
 
-## Launch
+## Related contracts
 
-Cold and warm launch share one preparation step:
-
-```mermaid
-flowchart TD
-    Environment[Write jailer environment and socket link] --> Console[Open console PTY]
-    Console --> Unit[Start systemd unit]
-    Unit --> Persist[Persist console master]
-    Persist --> Limits[Set unit resource limits]
-    Limits --> Socket[Wait for Firecracker API socket]
-    Socket --> Mode{Start mode}
-    Mode -->|Cold| Cold[Prepare disk and configure machine]
-    Mode -->|Warm| Warm[Prepare warm disk and load state]
-    Cold --> Ready[VM ready]
-    Warm --> Resume[Resume VM]
-    Resume --> Ready
-```
-
-A jail is never reused. Each launch discards the previous one, because leftover state is harder to reason about than a rebuild.
-
-The VM specification stores CPU entitlement in millicores. Firecracker receives the entitlement rounded up to a whole guest-vCPU count. For example, 1500 millicores creates 2 guest vCPUs. The API maximum is 32000 millicores because Firecracker supports at most 32 guest vCPUs. systemd applies the exact entitlement as a CPU quota, so rounding the guest topology does not increase available CPU time.
-
-The runtime has explicit start operations:
-
-```mermaid
-flowchart LR
-    Start[Start] --> Shared[Try shared warm image]
-    Shared -->|failure| Cold[Cold boot]
-    Shared -->|success| Running[Running]
-    ColdStart[ColdStart] --> Cold
-    Cold --> Running
-    Restore[Restore] --> Saved[Load VM saved state]
-    Saved --> Running
-    RestorePaused[RestorePaused] --> Paused[Load saved state and stay paused]
-```
-
-`Start` uses a warm image only when the image and derived guest-vCPU count, memory, and disk match. It cold boots if warm launch fails. `ColdStart` always cold boots, so a migrated disk never inherits the source guest memory. `Restore` returns an error instead of cold booting. This protects the saved guest state. Metadata is updated before a restored guest can run.
-
-`RefreshDisk` applies the configured disk limits to a live guest. `LimitDiskThroughput` applies a temporary combined read and write bandwidth limit to a live drive during a migration, and `RefreshDisk` restores the configured limit. A value of zero or less does nothing, so a caller never clears the limit by accident. Both do nothing when the VM is not running or paused.
-
-A memory snapshot restores only into the Firecracker build that wrote it. The binary reports no version, so its size and modification time stand in for one.
-
-## Saved state
-
-A saved state contains `state`, `memory`, and `metadata.json`. It belongs to one VM and is separate from shared warm image artifacts.
-
-```mermaid
-stateDiagram-v2
-    running --> paused: pause VM
-    paused --> pending: write state, memory, and metadata
-    pending --> saved: publish saved state atomically
-    saved --> stopped: terminate Firecracker
-    stopped --> restoring: copy state to new jail
-    restoring --> running: load, update metadata, and resume
-```
-
-The metadata records VM identity, record generations, Firecracker compatibility, creation time, fixed file names, and file sizes. Restore paths come from the VM ID.
-
-Metal validates the files and publishes the pending directory with one atomic rename. Only one saved state can exist for one VM.
-
-The saved state is published before Firecracker stops. This makes `SaveAndStop` safe to retry:
-
-| Runtime state | Valid snapshot | Result |
-|---|---|---|
-| stopped | yes | Save and stop is complete. |
-| paused | yes | Terminate Firecracker. |
-| running | yes | Report a conflict. |
-
-A restore removes the saved state only after the new jail loads its copy. `Stop`, restart, remove, or an incompatible machine shape deletes the saved state. Inspection reports an invalid saved state as an error.
-
-A requested restore never falls back to a cold boot. It can also load the guest in a paused state.
-
-## State
-
-State comes from two places. systemd owns whether the process runs, and Firecracker owns what the guest does inside it. Only an active unit is worth asking:
-
-```mermaid
-flowchart LR
-    Unit{systemd unit state}
-    Unit -->|failed| Failed[failed]
-    Unit -->|inactive or deactivating| Stopped[stopped]
-    Unit -->|active| Instance{Firecracker state}
-    Instance -->|Not started| Created[created]
-    Instance -->|Running| Running[running]
-    Instance -->|Paused| Paused[paused]
-```
-
-Anything else reads as `unknown`, and an API fault returns `unknown` with an error rather than a guess.
-
-`Stop` asks the guest to power off and kills it when it does not answer. It deletes saved state. `SaveAndStop` pauses the guest, saves its state, and stops Firecracker.
-
-`Remove` stops the unit and removes runtime-owned files, including VM saved state. The manager releases network and storage.
-
-## Guest metadata
-
-Firecracker serves MMDS to the guest. This package builds that document, so nothing per VM is baked into an image and one image serves every VM. Metadata is replaced in place on a live guest and rewritten on every launch.
-
-## SSH console
-
-An SSH session authorizes itself with a throwaway key pair: the public key is pushed into MMDS, `ssh` runs inside the VM network namespace on a PTY, and the key is removed when the session closes. No key outlives a session, and the guest image carries none. Sessions are capped host-wide.
-
-## Related
-
-- [internal/firecracker/api/SPEC.md](api/SPEC.md) describes the Firecracker client.
-- [internal/vm/SPEC.md](../vm/SPEC.md) defines the runtime interface and owns the temporary VM a warm build runs on.
-- [internal/storage/SPEC.md](../storage/SPEC.md) owns warm artifacts and the key that selects them.
-- [internal/platform/SPEC.md](../platform/SPEC.md) owns the systemd unit control.
-- [docs/vm.md](../../docs/vm.md) gives the VM lifecycle.
+- [VM manager](../vm/SPEC.md) defines runtime calls.
+- [Storage](../storage/SPEC.md) owns warm artifacts.
+- [Platform](../platform/SPEC.md) owns systemd control.

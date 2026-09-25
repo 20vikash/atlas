@@ -2,13 +2,59 @@
 
 [Atlas app specification](../SPEC.md)
 
-## Purpose
+Behavior: [Service VMs](../../docs/region/service-vms.md). This module runs Atlas services on tenant-0 VMs. A service is not a tenant workload.
 
-The Service module owns Atlas services that run on virtual machines. A service is software for Atlas. It is not a tenant workload.
+## Types
 
-## Components
+| Type | Owns |
+|---|---|
+| `ProxyServer` (DocType) | One proxy node and its VM, at most five active |
+| `CargoServer` (Single) | The regional Cargo VM |
+| `IPv6RouterServer` (DocType) | One router VM and its pool, `ipv6-router-NNN` |
+| `WireGuardGatewayServer` (DocType) | One gateway VM and its peers, `wg-gateway-NNN` |
+| `service_package` | Publishes a package when its digest changes |
+| `core/proxy`, `core/cargo`, `core/ipv6_router`, `core/wg_gateway` | Provisioning |
 
-- [Proxy Server](doctype/proxy_server/SPEC.md): Creates and configures the regional HTTP proxy.
-- [Cargo Server](doctype/cargo_server/SPEC.md): Creates and operates the regional Cargo service.
-- [IPv6 Router Server](doctype/ipv6_router_server/SPEC.md): Creates IPv6 routers and gives VMs routed IPv6 addresses.
-- [WireGuard Gateway Server](doctype/wireguard_gateway_server/SPEC.md): Creates WireGuard gateways that give customer devices tenant-wide access to private VM addresses.
+## Shared rules
+
+- Each VM is created through `VirtualMachineService` as a privileged tenant-0 VM. It needs a reserved tenant-0 IPv4 allocation.
+- A job requeues `Pending` records every minute.
+- A failure sets `Failed` with the phase and message. Nothing replaces the VM automatically.
+- A site file lock guards each record. Code reads the record again under the lock.
+- Only System Managers with System User accounts operate these records.
+- Secrets never go into an SSH Task. The Cargo installer is the only exception.
+
+## Proxy Server
+
+- Atlas sends the new peer list to active nodes before it publishes a node in regional DNS.
+- A job pushes a changed configuration digest every minute.
+
+See the [HTTP proxy specification](../../services/http-proxy/SPEC.md).
+
+## Cargo Server
+
+- Provision needs an Active Proxy Server and no attached VM.
+- The installer environment supplies every name in `ENROLMENT_VARS` of `atlas/scripts/install-cargo.sh`. A test compares the lists.
+- The storage cluster request is `private/files/cargo-storage-cluster.json`. Installation reads it. Archive removes it.
+- Tokens, 365 days each: Atlas `atlas-admin:<region-id>` (subject `cargo`, scope `*`, tenant `0`) and proxy `atlas-proxy:<region-id>` (scope `site:*`, suffix `-svc`).
+- Routes: `cargo` and `cargo-pilot` to the VM mesh address. Active after `/api/method/ping` returns `pong`.
+- The bucket job uses a 5-minute `atlas-cargo:<region-id>` token. It never replaces configured object storage.
+
+## IPv6 Router Server
+
+- The pool needs a prefix of `/84` or shorter, no gateway, and no allocations.
+- Installation fails if the eBPF program is not attached.
+- Archive is refused while tenant allocations use the pool.
+
+## WireGuard Gateway Server
+
+- Creation needs a listen port next to the image and IPv4 allocation.
+- Central manages peers through the gateway API. Every change rewrites `peers.conf` and applies `wg setconf`.
+- Archive is refused while the gateway has peers.
+
+See the [WireGuard gateway specification](doctype/wireguard_gateway_server/SPEC.md).
+
+## Related
+
+- [IPv6 router service](../../docs/networking/ipv6-router.md)
+- [HTTP proxy](../../docs/networking/http-proxy/index.md)

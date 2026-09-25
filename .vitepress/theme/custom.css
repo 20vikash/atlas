@@ -18,7 +18,7 @@
 }
 
 .VPDoc.has-aside .content-container {
-	max-width: 840px;
+	max-width: 760px;
 }
 
 .vp-doc {
@@ -27,13 +27,13 @@
 }
 
 .vp-doc h1 {
-	font-size: 40px;
-	line-height: 1.15;
+	font-size: 36px;
+	line-height: 1.2;
 	letter-spacing: -0.025em;
 }
 
 .vp-doc h2 {
-	margin-top: 52px;
+	margin-top: 40px;
 	padding-top: 14px;
 	font-size: 26px;
 	letter-spacing: -0.015em;
@@ -50,20 +50,34 @@
 }
 
 .vp-doc table {
-	display: table;
+	display: block;
 	width: 100%;
+	overflow-x: auto;
 	margin: 24px 0;
 	font-size: 15px;
 }
 
-.vp-doc th {
-	background: var(--vp-c-bg-soft);
-	font-weight: 650;
+/* Tables sit on the page: horizontal rules only, no grid and no stripes. */
+.vp-doc tr,
+.vp-doc tr:nth-child(2n) {
+	background: transparent;
+	border-top: 0;
 }
 
 .vp-doc th,
 .vp-doc td {
-	padding: 11px 14px;
+	padding: 10px 16px 10px 0;
+	border: 0;
+	border-bottom: 1px solid var(--vp-c-divider);
+	vertical-align: top;
+}
+
+.vp-doc th {
+	background: transparent;
+	color: var(--vp-c-text-2);
+	font-size: 14px;
+	font-weight: 600;
+	border-bottom-color: var(--vp-c-text-3);
 }
 
 .vp-doc .diagram-frame {
@@ -102,14 +116,37 @@
 	border-color: var(--vp-c-brand-1);
 }
 
+.diagram-scroll-hint {
+	margin-left: auto;
+	margin-right: 8px;
+	font-size: 12px;
+	font-weight: 400;
+}
+
 .diagram-canvas {
 	padding: 24px;
 	overflow: hidden;
 }
 
+.diagram-frame.is-sequence .diagram-canvas,
+.diagram-frame.is-flowchart:not(.is-fitted) .diagram-canvas {
+	overflow-x: auto;
+}
+
+.diagram-frame.is-sequence .diagram-canvas svg,
+.diagram-frame.is-flowchart:not(.is-fitted) .diagram-canvas svg {
+	max-width: none !important;
+}
+
+.vp-doc .diagram-canvas p {
+	/* VitePress paragraph spacing would make Mermaid labels taller than Mermaid measured. */
+	margin: 0;
+	line-height: 1.5;
+}
+
 .diagram-canvas svg {
 	display: block;
-	width: 100%;
+	width: auto;
 	max-width: 100% !important;
 	height: auto;
 	margin: 0 auto;
@@ -176,6 +213,14 @@ body.has-expanded-diagram {
 	letter-spacing: -0.035em;
 }
 
+.VPContent .VPHome {
+	margin-bottom: 32px;
+}
+
+.VPHome .VPHomeHero {
+	padding-bottom: 32px;
+}
+
 .VPHomeHero .container {
 	max-width: 1080px;
 }
@@ -212,8 +257,9 @@ body.has-expanded-diagram {
 }
 
 .VPHome .vp-doc h2 {
-	margin-top: 0;
+	margin-top: 24px;
 	padding-top: 32px;
+	border-top: 0;
 	font-size: 22px;
 }
 
@@ -222,65 +268,50 @@ body.has-expanded-diagram {
 	color: var(--vp-c-text-2);
 }
 
-.atlas-component-grid {
+.atlas-home-flow {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	margin-top: 30px;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 36px;
+	margin-top: 26px;
 	border-top: 1px solid var(--vp-c-divider);
-	border-bottom: 1px solid var(--vp-c-divider);
 }
 
-.atlas-component {
-	display: flex;
-	flex-direction: column;
-	gap: 7px;
-	padding: 27px 32px;
-	color: var(--vp-c-text-1) !important;
-	text-decoration: none !important;
+.atlas-home-flow-step {
+	padding: 20px 0 14px;
 }
 
-.atlas-component:nth-child(odd) {
-	padding-left: 0;
-	border-right: 1px solid var(--vp-c-divider);
-}
-
-.atlas-component:nth-child(-n + 2) {
-	border-bottom: 1px solid var(--vp-c-divider);
-}
-
-.atlas-component span {
-	color: var(--vp-c-text-2);
-	font-size: 13px;
+.atlas-home-flow a {
+	font-size: 22px;
 	font-weight: 600;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
+	text-decoration: none;
 }
 
-.atlas-component strong {
-	font-size: 20px;
-	line-height: 1.35;
-}
-
-.atlas-component p {
-	margin: 0;
+.atlas-home-flow p {
+	margin: 8px 0 0;
 	color: var(--vp-c-text-2);
-	line-height: 1.6;
+	font-size: 16px;
+	line-height: 1.55;
 }
 
-.atlas-component:hover strong {
-	color: var(--vp-c-brand-1);
+.VPHome .vp-doc .atlas-home-services {
+	max-width: 800px;
+	margin: 14px 0 0;
+	color: var(--vp-c-text-2);
 }
 
-.atlas-home-paths {
-	display: flex;
-	gap: 8px;
-	align-items: center;
-	padding-top: 20px;
-	font-size: 15px;
+.vp-doc details.custom-block {
+	margin-top: 40px;
+	font-size: 14px;
 }
 
-.atlas-home-paths span {
-	color: var(--vp-c-text-3);
+.vp-doc details.custom-block summary {
+	cursor: pointer;
+}
+
+.dark {
+	--vp-c-brand-1: #90b4ff;
+	--vp-c-brand-2: #afc9ff;
+	--vp-home-hero-name-color: #90b4ff;
 }
 
 @media (max-width: 768px) {
@@ -305,18 +336,39 @@ body.has-expanded-diagram {
 		display: none;
 	}
 
-	.atlas-component-grid {
+	.atlas-home-flow {
 		grid-template-columns: 1fr;
+		gap: 0;
+		margin-top: 12px !important;
 	}
 
-	.atlas-component,
-	.atlas-component:nth-child(odd) {
-		padding: 22px 0;
-		border-right: 0;
-		border-bottom: 1px solid var(--vp-c-divider);
+	.atlas-home-flow-step {
+		padding: 16px 0 18px;
 	}
 
-	.atlas-component:last-child {
-		border-bottom: 0;
+	.atlas-home-flow-step + .atlas-home-flow-step {
+		border-top: 1px solid var(--vp-c-divider);
+	}
+
+}
+
+.vp-doc a.atlas-api-link {
+	display: inline-block;
+	margin: 8px 0 16px;
+	padding: 8px 18px;
+	border-radius: 20px;
+	background: var(--vp-button-brand-bg);
+	color: var(--vp-button-brand-text);
+	font-weight: 600;
+	text-decoration: none;
+}
+
+.vp-doc a.atlas-api-link:hover {
+	background: var(--vp-button-brand-hover-bg);
+}
+
+@media (min-width: 768px) and (max-width: 800px) {
+	.VPNavBar .VPNavBarMenu > .VPLink {
+		padding-inline: 10px;
 	}
 }

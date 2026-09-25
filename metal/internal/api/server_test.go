@@ -1057,8 +1057,8 @@ func TestOpenAPIDocumentContainsOnlyTheVersionedControllerContract(t *testing.T)
 	if len(document.Paths["/health"]["get"].Security) != 0 {
 		t.Fatal("OpenAPI health route requires authentication")
 	}
-	if len(document.Paths["/v1/vms"]["get"].Security) == 0 {
-		t.Fatal("OpenAPI virtual machine route has no authentication")
+	if len(document.Paths["/v1/vms"]["get"].Security) != 0 {
+		t.Fatal("OpenAPI virtual machine route advertises token authentication")
 	}
 }
 

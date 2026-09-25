@@ -54,11 +54,6 @@ const (
 //	@tag.description	Replace controller-owned host state and get capacity.
 //	@tag.name		Health
 //	@tag.description	Check the Metal HTTP server.
-//
-//	@securityDefinitions.apikey	BearerAuth
-//	@in							header
-//	@name						Authorization
-//	@description				Use "Bearer", one space, and the API token.
 
 // version is the build version set with -ldflags "-X main.version=...".
 var version = "dev"

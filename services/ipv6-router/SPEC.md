@@ -29,5 +29,7 @@ Atlas owns the router VM, the block, and the gateway routes of each VM. The rout
 Compile the program with a test `config.h`:
 
 ```sh
-clang -O2 -g -Wall -Werror -I<directory with config.h> -I/usr/include/$(uname -m)-linux-gnu -target bpf -c bpf/router.c -o router.bpf.o
+clang -O2 -g -Wall -Werror -target bpf \
+  -I<directory with config.h> -I/usr/include/$(uname -m)-linux-gnu \
+  -c bpf/router.c -o router.bpf.o
 ```
