@@ -1,68 +1,56 @@
 # Metal Component Specification
 
-[Root specification](../SPEC.md)
+[Root specification](../SPEC.md) · Behavior: [Metal codebase guide](../docs/develop/metal.md)
 
 ## Purpose
 
-Metal manages virtual machines on a host. Its executable is `metald`.
+Metal manages virtual machines on a host with `metald`. It does not own the proxy or WG Mesh.
 
 For Go code, follow the repository [Go anti-pattern rules](../llm/go-code-review-guide.md).
 
 ## Layout
 
 ```text
-cmd/metald/                  metald executable
-internal/api/                HTTP API
-internal/console/            VM serial consoles over PTYs
-internal/firecracker/        Firecracker support
-internal/host/               Controller synchronization and host capacity
-internal/network/            Linux VM networking, packet activity, and WireGuard peer management
-internal/reconciler/         VM and image reconciliation
-internal/storage/            ZFS images, VM disks, and pool capacity
-internal/platform/           Host file, command, and systemd support
-internal/vm/                 VM domain logic
-scripts/                     host bootstrap scripts
-Makefile                     build metald into dist/
-docs/                        concept docs and references
-test/                        Integration test data
+cmd/metald/     metald executable
+internal/       packages, each with a SPEC.md
+scripts/        host bootstrap scripts
+test/           integration test data
+Makefile        builds metald into dist/
 ```
-
-Most packages have a `SPEC.md`. Start at [`internal/SPEC.md`](internal/SPEC.md) for
-the package map and dependency graph, or [`cmd/metald/SPEC.md`](cmd/metald/SPEC.md)
-for the daemon.
-
-## Software
-
-Metal uses Go 1.26.2, Echo, Firecracker, systemd, dbus, ZFS, and Linux host features.
-
-## Module
 
 The module path is `github.com/frappe/atlas/metal`. Run Go commands from `metal/`.
 
+## Packages
+
+| Package | Owns |
+|---|---|
+| [vm](internal/vm/SPEC.md) | VM manager, records, and host service interfaces. |
+| [vm/migration](internal/vm/migration/SPEC.md) | Live migration and its transport. |
+| [firecracker](internal/firecracker/SPEC.md) | Firecracker runtime and warm starts. |
+| [api](internal/api/SPEC.md) | Thin HTTP handlers. |
+| [host](internal/host/SPEC.md) | Host synchronization and capacity. |
+| [console](internal/console/SPEC.md) | VM serial consoles over PTYs. |
+| [reconciler](internal/reconciler/SPEC.md) | VM and image loops. |
+| [storage](internal/storage/SPEC.md) | ZFS pool, disks, images, and snapshots. |
+| [network](internal/network/SPEC.md) | VM networks and WireGuard peers. |
+| [platform](internal/platform/SPEC.md) | Host files, commands, systemd. |
+
+## Package imports
+
+| Package | Imports |
+| --- | --- |
+| `cmd/metald` | api, host, reconciler, firecracker, storage, network, vm/migration, network/traffic |
+| `api` | vm, host, console, vm/migration |
+| `host` | vm, network, storage, vm/migration |
+| `reconciler` | vm, storage, vm/migration |
+| `firecracker` | vm, storage, platform, console, Firecracker API |
+| `storage` | vm, platform |
+| `network` | vm, platform, network/traffic |
+| `vm/migration` | vm, storage, platform |
+| `network/traffic` | cilium eBPF |
+
+`vm` must not import `vm/migration`. It reads migration locks through an injected guard.
+
 ## Validation
 
-See [`docs/development.md`](docs/development.md) for the commands to run.
-
-## Documentation
-
-`docs/` gives the overall guide and the host-facing references. Package detail lives in each package's `SPEC.md`; start at [`internal/SPEC.md`](internal/SPEC.md).
-
-| Document | Purpose |
-|---|---|
-| [`docs/architecture.md`](docs/architecture.md) | The big picture. Read this first. |
-| [`docs/host-layout.md`](docs/host-layout.md) | Every host path and dataset. |
-| [`docs/testing.md`](docs/testing.md) | Bring up a development host and run the integration test. |
-| [`docs/development.md`](docs/development.md) | Local checks and where changes belong. |
-| [`docs/operations.md`](docs/operations.md) | Fault checks and safe recovery. |
-| [`docs/vm.md`](docs/vm.md) | VM lifecycle and design rationale. |
-| [`docs/storage.md`](docs/storage.md) | Storage model and design rationale. |
-| [`docs/networking.md`](docs/networking.md) | Network model and design rationale. |
-| [`docs/api.md`](docs/api.md) | Controller API model and design rationale. |
-
-## Scope
-
-Metal manages host VMs. It does not define the proxy or WG Mesh services.
-
-## Ownership
-
-Keep VM logic in `internal/vm/`. Keep HTTP handlers thin. `internal/network/` owns VM network convergence, traffic tracking, WireGuard peer reconciliation, and persistent peer state. `internal/storage/` separates the ZFS pool, VM disks, images, and snapshot staging. `internal/reconciler/` owns the asynchronous VM and image loops.
+See [Metal development](../docs/develop/metal.md). The [host layout](../docs/storage/host-layout.md) lists each host file and dataset.

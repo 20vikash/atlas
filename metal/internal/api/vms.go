@@ -14,7 +14,6 @@ import (
 // @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id		path		string			true	"Virtual machine identifier"
 // @Param		request	body		createRequest	true	"Complete desired specification"
 // @Success	202		{object}	virtualMachineResponse
@@ -52,7 +51,6 @@ func (s *Server) createVirtualMachine(c echo.Context) error {
 // @ID			listVirtualMachines
 // @Tags		Virtual machines
 // @Produce	json
-// @Security	BearerAuth
 // @Success	200	{array}		virtualMachineResponse
 // @Failure	401	{object}	errorResponse
 // @Failure	500	{object}	errorResponse
@@ -77,7 +75,6 @@ func (s *Server) listVirtualMachines(c echo.Context) error {
 // @ID			getVirtualMachine
 // @Tags		Virtual machines
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id	path		string	true	"Virtual machine identifier"
 // @Success	200	{object}	virtualMachineResponse
 // @Failure	400	{object}	errorResponse

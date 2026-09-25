@@ -2,73 +2,51 @@
 
 For Go code, follow the repository [Go anti-pattern rules](../../../llm/go-code-review-guide.md).
 
-[internal SPEC](../SPEC.md) · overview: [docs/architecture.md](../../docs/architecture.md)
+[Metal specification](../../SPEC.md) · overview: [Metal overview](../../../docs/develop/metal.md)
 
 ## Purpose
 
-Package `platform` is Metal's boundary to host files, commands, and systemd. It keeps host integration details out of domain packages.
-
-Metal talks to systemd through D-Bus. It does not call the `systemctl` command.
+Package `platform` is the Metal boundary to host files, commands, and systemd. Metal talks to systemd through D-Bus, not `systemctl`.
 
 ## Types
 
-| Type | Responsibility |
+| Type | Owns |
 |---|---|
-| `UnitManager` | Defines the systemd operations needed by a VM runtime. |
-| `DBus` | Implements `UnitManager` and owns the system-bus connection. |
-| `Status`, `Result`, and `Limits` | Carry systemd state across the platform boundary. |
-| `FileDescriptorStore` | Keeps open file descriptors in systemd across a restart of this service. |
+| `UnitManager` | The systemd operations a VM runtime needs. |
+| `DBus` | The `UnitManager` implementation and the system-bus connection. |
+| `Status`, `Result`, `Limits` | systemd state across the boundary. |
+| `FileDescriptorStore` | Open descriptors held by systemd across a restart. |
 
 ## Host commands
 
-`Run` is for commands where the caller only needs success or failure. `Output` is for commands where the caller needs stdout. `RunInNetworkNamespace` runs one command through `ip netns exec` and returns stdout. Each function preserves command diagnostics in errors and accepts a context that can stop a running command.
+| Function | Returns |
+|---|---|
+| `Run` | Success or failure. |
+| `Output` | stdout. |
+| `RunInNetworkNamespace` | stdout of `ip netns exec`. |
+
+Each error keeps the command diagnostics. A context can stop a running command.
 
 ## Systemd units
 
-One template unit runs each virtual machine:
-
-```mermaid
-flowchart LR
-    Metal -->|D-Bus| Systemd["systemd<br/>metal-vm@.service"]
-    Systemd --> Jailer[jailer]
-    Jailer --> Firecracker
-```
-
-`Connect` opens one system-bus connection and `Close` releases it. The runtime receives `UnitManager`, so it does not depend on D-Bus details.
-
-| Operation | Behavior |
-|---|---|
-| Start and stop | Submit the requested transition and wait for systemd to finish it. A replace operation makes the newest request win. |
-| Kill | Sends a signal to the unit's processes. |
-| Reset failed | Clears a failed unit. An absent unit is ignored. |
-| Status and list | Report units in terms the VM runtime can use. |
-| Wait | Waits for a unit to stop and reports an exit code or signal. |
-| Set limits | Applies the requested runtime resource limits. |
-
-The context cancels systemd waits and polling. The VM runtime maps the returned unit state to VM state; that mapping belongs in the `firecracker` package.
+- The `metal-vm@.service` template runs each VM.
+- Start and stop wait for systemd to finish. A replace job makes the newest request win.
+- Reset failed ignores an absent unit.
+- The context cancels systemd waits and polling.
+- The `firecracker` package maps unit state to VM state.
 
 ## File descriptor store
 
-systemd holds file descriptors across a restart or a stop of the service. `FileDescriptorStore` stores one with `FDSTORE=1`, removes one with `FDSTOREREMOVE=1`, and reads the descriptors that systemd returns.
+- `FileDescriptorStore` stores with `FDSTORE=1` and removes with `FDSTOREREMOVE=1`.
+- The unit needs `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes`.
+- Without the notification socket, `IsAvailable` is false and store operations do nothing.
+- Without `FileDescriptorStorePreserve=yes`, a service stop releases the descriptors.
 
-```mermaid
-sequenceDiagram
-    participant First as metald run 1
-    participant Systemd
-    participant Descriptor as Console descriptor
-    participant Second as metald run 2
+## Tests
 
-    First->>Systemd: FDSTORE=1 and FDNAME=VM ID
-    Systemd->>Descriptor: Hold descriptor
-    Systemd->>Second: LISTEN_FDS and LISTEN_FDNAMES
-```
-
-The unit needs `NotifyAccess`, `FileDescriptorStoreMax`, and `FileDescriptorStorePreserve=yes`. Without the notification socket, `IsAvailable` is false and store operations do nothing.
-
-Without `FileDescriptorStorePreserve=yes`, systemd releases the descriptors when the service stops.
+Unit tests sit next to the code, such as `systemd_dbus_test.go` and `systemd_fdstore_test.go`.
 
 ## Related
 
-- [docs/vm.md](../../docs/vm.md) describes the VM state machine.
-- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) describes the unit's `ExecStart` and runtime state mapping.
-- [docs/host-layout.md](../../docs/host-layout.md) lists host unit files and paths.
+- [Metal reconciliation](../../../docs/compute/reconciliation.md) describes the VM state machine.
+- [internal/firecracker/SPEC.md](../firecracker/SPEC.md) maps unit state to VM state.

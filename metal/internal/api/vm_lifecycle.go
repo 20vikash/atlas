@@ -12,7 +12,6 @@ import (
 // @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id		path		string		true	"Virtual machine identifier"
 // @Param		request	body		powerRequest	true	"Desired power state"
 // @Success	202		{object}	virtualMachineResponse
@@ -48,7 +47,6 @@ func (s *Server) setVirtualMachinePowerState(c echo.Context) error {
 // @ID			restartVirtualMachine
 // @Tags		Virtual machines
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id	path		string	true	"Virtual machine identifier"
 // @Success	202	{object}	virtualMachineResponse
 // @Failure	400	{object}	errorResponse
@@ -75,7 +73,6 @@ func (s *Server) restartVirtualMachine(c echo.Context) error {
 // @ID			deleteVirtualMachine
 // @Tags		Virtual machines
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id	path		string	true	"Virtual machine identifier"
 // @Success	202	{object}	virtualMachineResponse
 // @Failure	400	{object}	errorResponse

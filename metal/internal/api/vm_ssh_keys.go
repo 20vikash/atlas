@@ -27,7 +27,6 @@ type replaceVirtualMachineSSHKeysRequest struct {
 // @Tags		Virtual machines
 // @Accept		json
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id		path		string									true	"Virtual machine identifier"
 // @Param		request	body		replaceVirtualMachineSSHKeysRequest	true	"Complete SSH key list"
 // @Success	200		{object}	virtualMachineResponse

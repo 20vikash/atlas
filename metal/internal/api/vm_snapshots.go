@@ -74,7 +74,6 @@ type snapshotStatusResponse struct {
 // @ID			createVirtualMachineSnapshot
 // @Tags		Snapshots
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id			path		string	true	"Virtual machine identifier"
 // @Success	201	{object}	snapshotCreatedResponse
 // @Header		201	{string}	Location	"Path of the created snapshot"
@@ -108,7 +107,6 @@ func (s *Server) createVirtualMachineSnapshot(c echo.Context) error {
 // @ID			uploadSnapshot
 // @Tags		Snapshots
 // @Accept		json
-// @Security	BearerAuth
 // @Param		id		path	string				true	"Snapshot identifier"
 // @Param		request	body	snapshotUploadRequest	true	"Multipart upload URLs"
 // @Success	202		"Accepted"
@@ -139,7 +137,6 @@ func (s *Server) uploadSnapshot(c echo.Context) error {
 // @ID			getSnapshot
 // @Tags		Snapshots
 // @Produce	json
-// @Security	BearerAuth
 // @Param		id	path		string	true	"Snapshot identifier"
 // @Success	200	{object}	snapshotStatusResponse
 // @Failure	400	{object}	errorResponse
@@ -190,7 +187,6 @@ func progressPercent(uploaded, total int64) int {
 // @Description	Remove local staging data for one snapshot.
 // @ID			deleteSnapshot
 // @Tags		Snapshots
-// @Security	BearerAuth
 // @Param		id	path	string	true	"Snapshot identifier"
 // @Success	204	"No content"
 // @Failure	400	{object}	errorResponse
