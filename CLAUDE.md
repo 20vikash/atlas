@@ -116,7 +116,7 @@ Atlas is in active development and is not deployed to production.
 ### Commits
 
 - Use a short Conventional Commit subject: `type(scope): Sentence case`.
-- Use a kebab-case scope and one of `feat`, `fix`, `refactor`, `test`, `docs`, `build`, or `chore`.
+- Use one of `feat`, `fix`, `refactor`, `test`, `docs`, `build`, or `chore`. Use a component as the scope: `atlas`, `metal`, `http-proxy`, `ipv6-router`, or `wg-mesh`.
 - Do not add an AI co-author, session data, or agent data.
 
 ### Pull requests
