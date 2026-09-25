@@ -92,7 +92,7 @@ Atlas stores the host facts in `provider_metadata`, including `storage_pool_devi
 
 ### Add a static public IP pool
 
-Open **Public IP Pool** and add a Static pool. The complete pool must be routed to every eligible Metal Server, for example through VXLAN.
+Open **Public IP Pool** and click **Add Public IP Pool**. The complete pool must be routed to every eligible Metal Server, for example through VXLAN.
 
 | Address family | Allocation size |
 | --- | --- |

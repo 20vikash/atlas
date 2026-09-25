@@ -7,6 +7,7 @@ from atlas.metal_server.core.public_ip_service import (
 	UnsupportedIPReservation,
 	generate_available_allocations,
 )
+from atlas.metal_server.doctype.public_ip_pool.public_ip_pool import add_static_pool
 
 
 def insert_pool(prefix: str, allocation_prefix_length: int, **values):
@@ -135,3 +136,16 @@ class TestPublicIPPool(IntegrationTestCase):
 			pool.reserve_allocation()
 
 		self.assertFalse(frappe.db.exists("Public IP Allocation", {"pool": pool.name}))
+
+	def test_add_static_pool_detects_ipv4_and_generates_allocations(self) -> None:
+		pool = frappe.get_doc("Public IP Pool", add_static_pool("198.19.35.0/30"))
+
+		self.assertEqual((pool.version, pool.source, pool.enabled), ("4", "Static", 1))
+		self.assertEqual(pool.allocation_prefix_length, 32)
+		self.assertEqual(frappe.db.count("Public IP Allocation", {"pool": pool.name}), 4)
+
+	def test_add_static_pool_keeps_the_ipv6_allocation_size(self) -> None:
+		pool = frappe.get_doc("Public IP Pool", add_static_pool("2001:db8:35::/120", 124))
+
+		self.assertEqual((pool.version, pool.allocation_prefix_length), ("6", 124))
+		self.assertEqual(frappe.db.count("Public IP Allocation", {"pool": pool.name}), 16)

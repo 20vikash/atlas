@@ -282,6 +282,23 @@ class PublicIPPool(Document):
 
 
 @frappe.whitelist(methods=["POST"])
+def add_static_pool(prefix: str, allocation_prefix_length: int = 0) -> str:
+	"""Add an operator-routed pool and generate its first allocations."""
+	frappe.only_for("System Manager")
+	pool: PublicIPPool = frappe.get_doc(
+		{
+			"doctype": "Public IP Pool",
+			"prefix": prefix,
+			"allocation_prefix_length": int(allocation_prefix_length),
+			"enabled": 1,
+			"source": "Static",
+		}
+	).insert()
+	pool.generate_available_allocations()
+	return pool.name
+
+
+@frappe.whitelist(methods=["POST"])
 def reserve_from_provider(version: int = 4) -> str:
 	"""Reserve one provider resource and store it as a pool."""
 	frappe.only_for("System Manager")
