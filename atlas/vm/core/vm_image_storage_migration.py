@@ -135,10 +135,11 @@ def delete_expired_site_files() -> None:
 	migration = VirtualMachineImageStorageMigration()
 	for name in frappe.get_all(
 		"Virtual Machine Image",
-		filters={
-			"artifact_storage": "Object Storage",
-			"site_file_retention_until": ("<=", now_datetime()),
-		},
+		filters=[
+			["artifact_storage", "=", "Object Storage"],
+			["site_file_retention_until", "is", "set"],
+			["site_file_retention_until", "<=", now_datetime()],
+		],
 		pluck="name",
 	):
 		migration.delete_site_files(name)
