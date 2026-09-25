@@ -5,7 +5,7 @@ import os
 import subprocess
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import click
 import frappe
@@ -13,9 +13,11 @@ import frappe
 from atlas.atlas.core.artifacts import publish_public_file_path
 from atlas.atlas.core.host_binaries import BUILDER_IMAGE, IS_MACOS
 from atlas.vm.core.multipart_upload import bytes_to_mib
+from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
 
 if TYPE_CHECKING:
 	from atlas.atlas.object_storage import ObjectStorageClient
+	from atlas.vm.doctype.virtual_machine_image.virtual_machine_image import VirtualMachineImage
 
 ArtifactStorage = Literal["Object Storage", "Site File"]
 
@@ -68,68 +70,66 @@ def publish_ubuntu_image(
 	kernel_path: Path,
 	storage: ArtifactStorage = "Object Storage",
 ) -> None:
-	"""Publish Ubuntu artifacts and create or update their image record."""
+	"""Publish Ubuntu artifacts as a new image record and retire the records it replaces.
+
+	A record never changes its artifacts, because a VM keeps using the image it started from.
+	"""
 	image_sha256 = get_sha256(image_path)
 	kernel_sha256 = get_sha256(kernel_path)
-	existing_name = frappe.db.exists("Virtual Machine Image", {"title": title})
-	if existing_name:
-		existing = frappe.get_doc("Virtual Machine Image", existing_name)
-		if existing.image_sha256 == image_sha256 and existing.kernel_sha256 == kernel_sha256:
+	previous_images = get_available_ubuntu_images(title, architecture)
+	for image in previous_images:
+		if image.image_sha256 == image_sha256 and image.kernel_sha256 == kernel_sha256:
 			return
+	for image in previous_images:
+		image.ensure_not_termination_protected()
 
+	image_name = frappe.generate_hash(length=16)
 	if storage == "Site File":
-		location = publish_to_site_files(image_path, image_sha256, kernel_path, kernel_sha256)
+		location = publish_to_site_files(image_name, image_path, image_sha256, kernel_path, kernel_sha256)
 	else:
-		location = upload_to_object_storage(image_path, image_sha256, kernel_path, kernel_sha256)
-
-	file_values = {
-		"status": "Available",
-		"transfer_progress": 100,
-		"artifact_storage": storage,
-		"image_object_key": None,
-		"kernel_object_key": None,
-		"image_file": None,
-		"kernel_file": None,
-		"image_sha256": image_sha256,
-		"image_size_mib": bytes_to_mib(image_path.stat().st_size),
-		"kernel_sha256": kernel_sha256,
-		"kernel_size_mib": bytes_to_mib(kernel_path.stat().st_size),
-		**location,
-	}
-	if existing_name:
-		replaced_files = (existing.image_file, existing.kernel_file)
-		existing.update(file_values)
-		existing.version = (existing.version or 1) + 1
-		existing.save()
-
-		for file_name in replaced_files:
-			if file_name and file_name not in (existing.image_file, existing.kernel_file):
-				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
-		return
+		location = upload_to_object_storage(image_name, image_path, kernel_path)
 
 	frappe.get_doc(
 		{
 			"doctype": "Virtual Machine Image",
 			"title": title,
-			"version": 1,
 			"image_type": "system",
 			"architecture": architecture,
+			"status": "Available",
+			"transfer_progress": 100,
+			"artifact_storage": storage,
+			"image_sha256": image_sha256,
+			"image_size_mib": bytes_to_mib(image_path.stat().st_size),
+			"kernel_sha256": kernel_sha256,
+			"kernel_size_mib": bytes_to_mib(kernel_path.stat().st_size),
 			"tags": [
 				{"key": "purpose", "value": "base"},
 				{"key": "os", "value": "Ubuntu"},
 				{"key": "os_version", "value": version},
 			],
-			**file_values,
+			**location,
 		}
-	).insert()
+	).insert(set_name=image_name)
+
+	deletion = VirtualMachineImageDeletionService()
+	for image in previous_images:
+		deletion.request(image)
 
 
-def upload_to_object_storage(
-	image_path: Path, image_sha256: str, kernel_path: Path, kernel_sha256: str
-) -> dict[str, str]:
-	"""Upload both artifacts under their content addressed keys."""
-	image_key = f"vm-images/sha256/{image_sha256}/{image_path.name}"
-	kernel_key = f"vm-images/sha256/{kernel_sha256}/{kernel_path.name}"
+def get_available_ubuntu_images(title: str, architecture: str) -> list[VirtualMachineImage]:
+	"""Return the Available System images that a new build with this title replaces."""
+	names = frappe.get_all(
+		"Virtual Machine Image",
+		filters={"title": title, "architecture": architecture, "image_type": "system", "status": "Available"},
+		pluck="name",
+	)
+	return [cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", name)) for name in names]
+
+
+def upload_to_object_storage(image_name: str, image_path: Path, kernel_path: Path) -> dict[str, str]:
+	"""Upload both artifacts under keys owned by this image."""
+	image_key = f"images/{image_name}/rootfs.img"
+	kernel_key = f"images/{image_name}/kernel"
 	settings = frappe.get_single("Atlas Settings")
 	object_storage_client = settings.get_object_storage_client()
 	upload_with_progress(object_storage_client, image_path, image_key)
@@ -138,13 +138,13 @@ def upload_to_object_storage(
 
 
 def publish_to_site_files(
-	image_path: Path, image_sha256: str, kernel_path: Path, kernel_sha256: str
+	image_name: str, image_path: Path, image_sha256: str, kernel_path: Path, kernel_sha256: str
 ) -> dict[str, str]:
 	"""Attach both artifacts as public site files for a host to download."""
 	click.echo(f"Publishing {image_path.name} and {kernel_path.name} as public site files")
 	return {
-		"image_file": publish_public_file_path(image_path, image_sha256),
-		"kernel_file": publish_public_file_path(kernel_path, kernel_sha256),
+		"image_file": publish_public_file_path(image_path, image_sha256, image_name),
+		"kernel_file": publish_public_file_path(kernel_path, kernel_sha256, image_name),
 	}
 
 

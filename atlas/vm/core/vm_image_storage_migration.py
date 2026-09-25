@@ -91,14 +91,15 @@ class VirtualMachineImageStorageMigration:
 		image.save()
 
 	def upload(self, client: ObjectStorageClient, image: VirtualMachineImage, artifact: Artifact) -> str:
-		"""Upload one artifact under its content addressed key and verify its size."""
+		"""Upload one artifact under this image's key and verify its size."""
 		if artifact == "rootfs":
-			file_name, sha256 = image.image_file, cast(str, image.image_sha256)
+			file_name = image.image_file
+			key = f"images/{image.name}/rootfs.img"
 		else:
-			file_name, sha256 = image.kernel_file, cast(str, image.kernel_sha256)
+			file_name = image.kernel_file
+			key = f"images/{image.name}/kernel"
 
 		source = Path(frappe.get_doc("File", file_name).get_full_path())
-		key = f"vm-images/sha256/{sha256}/{source.name.removeprefix(f'{sha256[:12]}-')}"
 		client.upload_file(str(source), key)
 		self.validate_stored_size(client, key, source.stat().st_size)
 		return key

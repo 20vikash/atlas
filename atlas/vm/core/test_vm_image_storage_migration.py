@@ -90,8 +90,8 @@ class TestVirtualMachineImageStorageMigration(UnitTestCase):
 		):
 			VirtualMachineImageStorageMigration().migrate("image-1")
 
-		self.assertEqual(image.image_object_key, f"vm-images/sha256/{'a' * 64}/rootfs.ext4")
-		self.assertEqual(image.kernel_object_key, f"vm-images/sha256/{'b' * 64}/kernel")
+		self.assertEqual(image.image_object_key, "images/image-1/rootfs.img")
+		self.assertEqual(image.kernel_object_key, "images/image-1/kernel")
 		self.assertEqual(image.artifact_storage, "Object Storage")
 		self.assertEqual(image.image_file, "file-rootfs")
 		self.assertEqual(image.kernel_file, "file-kernel")

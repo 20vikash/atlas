@@ -1,6 +1,6 @@
 # VM images and artifact storage
 
-The Atlas app owns image records and published artifacts. Metal caches them on hosts and creates VM disks. See the [transfer flow](index.md) for the sequence.
+Atlas owns image records and artifacts. Metal caches the artifacts on hosts and creates VM disks. See the [transfer flow](index.md) for the sequence.
 
 | Image type | Access |
 | --- | --- |
@@ -11,12 +11,18 @@ An image records its kernel, root filesystem, architecture, sizes, and SHA-256 d
 
 ## System images
 
-The Ubuntu builder stores a kernel and root filesystem, calculates their digests, and creates or updates an Available System image.
+The Ubuntu builder publishes a kernel and root filesystem as a new Available System image. Each build gets a new record and its own artifact paths.
 
-An unchanged build keeps its version. A changed build increases the version after both artifacts are stored.
+The builder checks earlier Available images with the same title and architecture. If one has the same digests, the build changes nothing.
+
+If an earlier image is termination protected, the builder stops before upload.
+
+After publication, the builder retires the earlier images.
 
 ::: info Guest disk errors
-New Ubuntu System images set ext4 to remount the root filesystem read-only when it detects an error. This stops further writes to a damaged filesystem. It does not repair the disk. The [guest disk incident](../incidents/2026-09-24-guest-disk-corruption.md) explains why this guard was added.
+New Ubuntu System images set ext4 to remount the root filesystem read-only when it detects an error. This stops further writes to a damaged filesystem.
+
+The remount does not repair the disk. See the [guest disk incident](../incidents/2026-09-24-guest-disk-corruption.md) for the reason behind this setting.
 :::
 
 ## Artifact storage
@@ -25,7 +31,7 @@ The `artifact_storage` field selects the artifact location:
 
 | Value | Location | Download URL |
 | --- | --- | --- |
-| `Object Storage` | Atlas Settings bucket, under `vm-images/sha256/<digest>/<name>` | Signed. Valid for 24 hours. |
+| `Object Storage` | Atlas Settings bucket, under `images/<image ID>/` | Signed. Valid for 24 hours. |
 | `Site File` | Public site File under `/files/` | Public. No expiry. |
 
 ### Bootstrap without object storage
@@ -36,23 +42,27 @@ Site Files are public, so only System images can use them. The tenant download r
 
 ### Move artifacts to object storage
 
-Saving object-storage settings queues migration of Available Site File images. A job repeats the search every **15 minutes**, including failed migrations. **Migrate to Object Storage** starts one immediately.
+Saving object-storage settings queues migration of Available Site File images. A job checks again every **15 minutes**, including images whose earlier migration failed.
+
+Use **Migrate to Object Storage** to start one migration immediately.
 
 For each image, the job:
 
-1. Uploads both artifacts under content-addressed keys and compares sizes.
+1. Uploads both artifacts under keys owned by the image and compares sizes.
 2. Saves the keys and changes `artifact_storage`.
-3. Deletes the site Files.
+3. Keeps the site Files for six hours so hosts can finish earlier downloads, then deletes them.
 
-A downloadable copy remains at each step. The `immutable_reference` uses architecture and digests, so hosts keep their existing cache.
+Hosts have a downloadable copy at each step. The `immutable_reference` uses architecture and digests, so hosts keep their existing cache.
 
 ## Machine images
 
-Select **Create Machine Image** to stage the VM disk and kernel on Metal. Metal's UUIDv7 snapshot ID becomes the Atlas image record name.
+Select **Create Machine Image** to stage the VM disk and kernel on Metal. Metal's UUIDv7 snapshot ID becomes the image record name.
 
 Atlas saves multipart upload IDs before it starts the transfer. It checks hashes and sizes before publication.
 
-**On failure:** Atlas keeps the source host, snapshot ID, object keys, and upload IDs. **Retry Transfer** reuses them and the same image record. Signed URLs stay out of logs.
+If a transfer fails, Atlas keeps the source host, snapshot ID, object keys, and upload IDs. **Retry Transfer** uses the same image record and upload IDs.
+
+Atlas does not write signed URLs to logs.
 
 ## Listing
 
@@ -69,29 +79,39 @@ flowchart LR
     F -->|Retry Transfer| U
 ```
 
-The diagram shows the normal Machine image transfer and its retry path. A transfer can also fail before upload or during completion. Retirement changes an Available or Failed image to `Archived` or `Deleting` as described below.
+The diagram shows a Machine image transfer and its retry path. A transfer can also fail before upload or during completion.
+
+Retirement changes an Available or Failed image to `Archived` or `Deleting`.
 
 ## Retirement and deletion
 
-Retire an Available or Failed image to disable new use immediately. Retiring an already `Deleting` or `Archived` image changes nothing.
+Retire an Available or Failed image to stop new use immediately. Retiring an image that is already `Deleting` or `Archived` changes nothing.
+
+Termination protection blocks retirement for both System and Machine images.
 
 | Image | Result |
 | --- | --- |
-| System image | `Archived`. Shared artifacts remain. |
-| Unused Machine image | `Deleting`. A job removes objects, Metal staging, and the record. |
-| Machine image still in use | `Archived`. Changes to `Deleting` after its last VM is deleted. |
+| Unused image in object storage | `Deleting`. A job removes its objects, Metal staging, and record. |
+| Image in object storage still in use | `Archived`. Changes to `Deleting` after its last VM is deleted. |
+| Image in site files | `Archived`. The site files remain for bootstrap hosts. |
 
-Image-use checks read the last-reported `Virtual Machine State` cache. Cleanup failures keep `Deleting`, record the error, and retry every **30 seconds**.
+If you retire a migrated image during site-file retention, it stays `Archived`. Atlas can delete it after the retention deadline and after its last VM is deleted.
+
+Image-use checks read the last-reported `Virtual Machine State` cache. If cleanup fails, Atlas keeps `Deleting`, records the error, and retries every **30 seconds**.
 
 ## Cached and warm artifacts
 
 Host sync requests caching for enabled Available images with `cache_image`.
 
-A warm artifact contains disk, memory, and Firecracker state for one exact image and VM shape. It stays on its host. If a shared warm artifact cannot be used, boot falls back to a cold start.
+A warm artifact contains disk, memory, and Firecracker state for one image and VM shape. It stays on its host.
+
+If a shared warm artifact cannot be used, the VM starts without it.
 
 ## Limits and recovery
 
-Check artifact URL access and free host storage before retrying a transfer. See [Metal storage](host-storage.md) for local staging and cleanup, and the [Atlas API](/api/atlas/) for image operations.
+Check artifact URL access and free host storage before you retry a transfer.
+
+See [Metal storage](host-storage.md) for local staging and cleanup. See the [Atlas API](/api/atlas/) for image operations.
 
 ::: details Source code and tests
 
