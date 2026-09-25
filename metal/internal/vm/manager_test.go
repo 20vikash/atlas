@@ -719,3 +719,36 @@ func TestATornRemovalIsOnlyOneMissingRecord(t *testing.T) {
 		t.Fatal("an unrelated failure is not a torn read")
 	}
 }
+
+func TestStartWakesASleepingVirtualMachine(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	specification := testSpecification()
+	specification.SleepAfterIdleSeconds = 60
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+	runtime.hasSavedState = true
+
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.restores != 1 || runtime.state != StateRunning {
+		t.Fatalf("restores = %d, state = %s, want one restore to running", runtime.restores, runtime.state)
+	}
+}
+
+func TestStartLeavesAStoppedVirtualMachineWithoutSavedStateToReconcile(t *testing.T) {
+	manager, runtime, _, _ := newTestManager(t)
+	specification := testSpecification()
+	specification.SleepAfterIdleSeconds = 60
+	if _, err := manager.Create(context.Background(), "machine-1", specification); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := manager.SetPowerState(context.Background(), "machine-1", StateRunning); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.restores != 0 {
+		t.Fatalf("restores = %d, want 0", runtime.restores)
+	}
+}
