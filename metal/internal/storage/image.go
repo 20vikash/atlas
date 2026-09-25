@@ -39,7 +39,7 @@ func (store *ImageStore) deleteImage(ctx context.Context, imageReference string)
 	lock.Lock()
 	defer lock.Unlock()
 
-	if err := store.removeWarmImages(ctx, imageReference); err != nil {
+	if err := store.RemoveWarmImages(ctx, imageReference); err != nil {
 		return err
 	}
 	err := platform.Run(ctx, "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))

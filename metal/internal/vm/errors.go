@@ -11,6 +11,9 @@ var ErrNotFound = errors.New("vm: not found")
 // ErrConflict indicates that the current state blocks an operation.
 var ErrConflict = errors.New("vm: conflict")
 
+// ErrInUse indicates that a host artifact still has dependent virtual machines.
+var ErrInUse = errors.New("vm: in use")
+
 // ErrMetadataServiceTooLarge indicates that the guest values do not fit in MMDS.
 var ErrMetadataServiceTooLarge = errors.New("vm: metadata service document is too large")
 

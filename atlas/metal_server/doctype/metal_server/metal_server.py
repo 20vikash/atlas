@@ -19,6 +19,7 @@ from atlas.metal_server.core.disk_inventory import DiskInventory
 from atlas.metal_server.core.host_inspection import HostInspection
 from atlas.metal_server.core.host_installation import (
 	METALD_INSTALL_TIMEOUT_SECONDS,
+	METALD_SETUP_TIMEOUT_SECONDS,
 	WIREGUARD_CONFIGURE_TIMEOUT_SECONDS,
 	HostInstallation,
 )
@@ -323,7 +324,7 @@ class MetalServer(Document):
 			self.name,
 			"_install_metald",
 			queue="long",
-			timeout=METALD_INSTALL_TIMEOUT_SECONDS,
+			timeout=METALD_SETUP_TIMEOUT_SECONDS,
 			job_id=job_id,
 			deduplicate=True,
 			enqueue_after_commit=True,

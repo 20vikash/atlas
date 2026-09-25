@@ -409,6 +409,7 @@ class TestServer(UnitTestCase):
 	def test_every_metald_operation_shares_one_job_lock(self) -> None:
 		server = self._server(status="Running")
 		job_ids = []
+		timeouts = []
 
 		for operation in (
 			MetalServer.install_metald,
@@ -428,8 +429,10 @@ class TestServer(UnitTestCase):
 				operation(server)
 
 			job_ids.append(enqueue_doc.call_args.kwargs["job_id"])
+			timeouts.append(enqueue_doc.call_args.kwargs["timeout"])
 
 		self.assertEqual(job_ids, [server.metald_job_id] * 3)
+		self.assertEqual(timeouts, [3600, 1200, 1200])
 
 	def test_install_metald_rejects_a_missing_binary(self) -> None:
 		server = self._server(status="Running")
@@ -493,7 +496,9 @@ class TestServer(UnitTestCase):
 			ssh_runner.return_value.run_script.return_value = tls_result
 			MetalServer._install_metald(server)
 
-		arguments = create_for_script_file.call_args.kwargs
+		storage_arguments, arguments = (call.kwargs for call in create_for_script_file.call_args_list)
+		self.assertEqual(storage_arguments["script_path"], "install-metal-storage.sh")
+		self.assertEqual(storage_arguments["environment"], {"STORAGE_POOL_DEVICE": "/dev/md2"})
 		self.assertEqual(arguments["script_path"], "install-metald.sh")
 		self.assertEqual(
 			arguments["environment"],
@@ -505,7 +510,6 @@ class TestServer(UnitTestCase):
 				"LISTEN_ADDRESS": "10.0.0.7:9000",
 				"ATLAS_COMMON_NAME": "atlas.example.test",
 				"COORDINATION_LISTEN_ADDRESS": "[fdab:1::7]:9001",
-				"STORAGE_POOL_DEVICE": "/dev/md2",
 				"MESH_UPLINK_INTERFACE": "eno1.1878",
 			},
 		)
@@ -555,6 +559,7 @@ class TestServer(UnitTestCase):
 		server.settings.server_provider_controller.metald_listen_address = Mock(return_value="0.0.0.0/0")
 
 		with (
+			patch("atlas.metal_server.core.host_installation.HostInstallation.install_storage"),
 			patch("atlas.metal_server.core.host_installation.HostInstallation.install_tls_credentials"),
 			patch("atlas.metal_server.core.host_installation.frappe.throw", side_effect=ValueError),
 		):

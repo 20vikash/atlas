@@ -41,7 +41,7 @@ Atlas sends custom metadata as a map of string keys and values. Metal publishes 
 | SSH keys | Metal accepts at most 16 keys, each at most 2 KiB. |
 | User data | Metal accepts at most 16 KiB. |
 | Hostname | Metal accepts at most 253 bytes. |
-| MMDS document | Firecracker has a 256 KiB hard cap. Metal keeps the base document within 248 KiB and reserves 8 KiB for temporary console keys. |
+| MMDS document | Metal sets the Firecracker MMDS limit to 256 KiB. Metal keeps the base document within 248 KiB and reserves 8 KiB for temporary console keys. |
 
 Metal checks the complete MMDS document before it saves a create, network, SSH key, or metadata change. See [SSH key changes](ssh-keys.md) for the guest login path.
 
