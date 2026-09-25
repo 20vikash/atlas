@@ -19,11 +19,26 @@ const diagram = ref("");
 const error = ref("");
 const isExpanded = ref(false);
 const diagramCanvas = ref<HTMLElement | null>(null);
+const isFitted = ref(false);
 const isScrollable = ref(false);
 let renderVersion = 0;
 
-function updateScrollState() {
+async function updateScrollState() {
 	const canvas = diagramCanvas.value;
+	const svg = canvas?.querySelector("svg");
+	const styles = canvas ? getComputedStyle(canvas) : null;
+	const contentWidth =
+		canvas && styles
+			? canvas.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight)
+			: 0;
+	const isFlowchart = diagramType === "flowchart" || diagramType === "graph";
+
+	isFitted.value =
+		!!svg &&
+		isFlowchart &&
+		window.innerWidth > 768 &&
+		svg.viewBox.baseVal.width <= contentWidth * 1.4;
+	await nextTick();
 	isScrollable.value = !!canvas && canvas.scrollWidth > canvas.clientWidth + 1;
 }
 
@@ -108,8 +123,10 @@ watch(isDark, async () => {
 	await renderDiagram();
 });
 
-watch(isExpanded, (expanded) => {
+watch(isExpanded, async (expanded) => {
 	document.body.classList.toggle("has-expanded-diagram", expanded);
+	await nextTick();
+	await updateScrollState();
 });
 
 onMounted(() => {
@@ -131,8 +148,9 @@ onBeforeUnmount(() => {
 		class="diagram-frame"
 		:class="{
 			'is-expanded': isExpanded,
+			'is-fitted': isFitted,
 			'is-sequence': diagramType === 'sequenceDiagram',
-			'is-flowchart': diagramType === 'flowchart',
+			'is-flowchart': diagramType === 'flowchart' || diagramType === 'graph',
 		}"
 		:role="isExpanded ? 'dialog' : undefined"
 		:aria-modal="isExpanded ? 'true' : undefined"

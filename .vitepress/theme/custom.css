@@ -129,12 +129,12 @@
 }
 
 .diagram-frame.is-sequence .diagram-canvas,
-.diagram-frame.is-flowchart .diagram-canvas {
+.diagram-frame.is-flowchart:not(.is-fitted) .diagram-canvas {
 	overflow-x: auto;
 }
 
 .diagram-frame.is-sequence .diagram-canvas svg,
-.diagram-frame.is-flowchart .diagram-canvas svg {
+.diagram-frame.is-flowchart:not(.is-fitted) .diagram-canvas svg {
 	max-width: none !important;
 }
 
