@@ -1,26 +1,30 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from uuid import uuid7
 
 import frappe
-from frappe.tests import UnitTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from atlas.vm.core.metal_client import MetalClientError
-from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService
+from atlas.vm.core.vm_image_deletion import VirtualMachineImageDeletionService, has_virtual_machines
 
-NOW = datetime(2026, 9, 25, 12, 0)
+NOW = datetime(2026, 9, 25, 12)
+SIX_HOURS = timedelta(hours=6)
 
 
 def build_image(**overrides) -> SimpleNamespace:
-	"""Return one Machine image that a transfer left behind."""
 	values = {
 		"name": "image-1",
 		"image_type": "machine",
 		"status": "Available",
 		"artifact_storage": "Object Storage",
+		"artifact_retention_until": None,
 		"site_file_retention_until": None,
 		"image_object_key": "images/image-1/rootfs.img",
 		"kernel_object_key": "images/image-1/kernel",
+		"image_file": None,
+		"kernel_file": None,
 		"rootfs_multipart_upload_id": "upload-1",
 		"kernel_multipart_upload_id": None,
 		"source_server": "node-1",
@@ -31,206 +35,176 @@ def build_image(**overrides) -> SimpleNamespace:
 	return SimpleNamespace(**values)
 
 
-def live_virtual_machine(is_live: bool):
-	"""Patch the live virtual machine lookup that guards a deletion."""
-	return patch("atlas.vm.core.vm_image_deletion.has_live_virtual_machine_for_image", return_value=is_live)
-
-
-class TestMachineImageDeletionRequest(UnitTestCase):
-	def test_a_protected_image_keeps_its_status(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		guard = Mock(side_effect=frappe.ValidationError("protected"))
-		image = build_image(ensure_not_termination_protected=guard)
-
+class TestImageRetirement(UnitTestCase):
+	def test_protected_image_keeps_its_status(self) -> None:
+		image = build_image(
+			ensure_not_termination_protected=Mock(side_effect=frappe.ValidationError("protected"))
+		)
 		with self.assertRaises(frappe.ValidationError):
-			service.request(image)
-
+			VirtualMachineImageDeletionService().request(image)
 		self.assertEqual(image.status, "Available")
 		image.save.assert_not_called()
 
-	def test_an_unused_system_image_is_deleted(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image(image_type="system")
+	def test_both_image_types_keep_artifacts_for_six_hours(self) -> None:
+		for image_type in ("system", "machine"):
+			with self.subTest(image_type=image_type):
+				image = build_image(image_type=image_type)
+				with patch("atlas.vm.core.vm_image_deletion.now_datetime", return_value=NOW):
+					self.assertEqual(VirtualMachineImageDeletionService().request(image), "Archived")
+				self.assertEqual(image.artifact_retention_until, NOW + SIX_HOURS)
+				self.assertEqual(image.enabled, 0)
+				image.save.assert_called_once_with()
 
-		with (
-			live_virtual_machine(False),
-			patch.object(service, "enqueue") as enqueue,
-		):
-			self.assertEqual(service.request(image), "Deleting")
+	def test_failed_image_can_be_retired(self) -> None:
+		image = build_image(status="Failed")
+		self.assertEqual(VirtualMachineImageDeletionService().request(image), "Archived")
 
-		self.assertEqual(image.enabled, 0)
-		enqueue.assert_called_once_with("image-1")
-
-	def test_an_image_within_its_site_file_retention_is_archived(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image(image_type="system", site_file_retention_until=NOW + timedelta(hours=1))
-
-		with (
-			live_virtual_machine(False),
-			patch("atlas.vm.core.vm_image_deletion.now_datetime", return_value=NOW),
-			patch.object(service, "enqueue") as enqueue,
-		):
-			self.assertEqual(service.request(image), "Archived")
-
-		enqueue.assert_not_called()
-
-	def test_a_site_file_image_is_archived_and_keeps_its_files(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image(image_type="system", artifact_storage="Site File")
-
-		with (
-			live_virtual_machine(False),
-			patch.object(service, "enqueue") as enqueue,
-		):
-			self.assertEqual(service.request(image), "Archived")
-
-		self.assertEqual(image.enabled, 0)
-		enqueue.assert_not_called()
-
-	def test_an_image_a_live_virtual_machine_uses_is_archived_instead_of_deleted(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image()
-
-		with (
-			live_virtual_machine(True),
-			patch.object(service, "enqueue") as enqueue,
-		):
-			self.assertEqual(service.request(image), "Archived")
-
-		self.assertEqual(image.status, "Archived")
-		enqueue.assert_not_called()
-
-	def test_an_incomplete_image_cannot_be_deleted(self) -> None:
-		service = VirtualMachineImageDeletionService()
-
+	def test_incomplete_image_cannot_be_retired(self) -> None:
 		for status in ("Pending", "Snapshotting", "Uploading", "Completing", "Cleaning"):
 			with self.subTest(status=status), self.assertRaises(frappe.ValidationError):
-				service.request(build_image(status=status))
+				VirtualMachineImageDeletionService().request(build_image(status=status))
 
-	def test_an_image_already_retired_accepts_the_delete_again(self) -> None:
-		service = VirtualMachineImageDeletionService()
-
-		for status in ("Deleting", "Archived"):
-			with self.subTest(status=status), patch.object(service, "enqueue") as enqueue:
-				self.assertEqual(service.request(build_image(status=status)), status)
-				enqueue.assert_not_called()
-
-	def test_a_failed_image_can_be_retired(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image(status="Failed")
-
-		with live_virtual_machine(False), patch.object(service, "enqueue"):
-			self.assertEqual(service.request(image), "Deleting")
-
-	def test_a_request_marks_the_image_and_queues_the_cleanup(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image()
-
-		with live_virtual_machine(False), patch.object(service, "enqueue") as enqueue:
-			self.assertEqual(service.request(image), "Deleting")
-
-		self.assertEqual(image.status, "Deleting")
-		self.assertEqual(image.enabled, 0)
-		image.save.assert_called_once_with()
-		enqueue.assert_called_once_with("image-1")
+	def test_archived_image_keeps_its_original_deadline(self) -> None:
+		image = build_image(status="Archived", artifact_retention_until=NOW)
+		self.assertEqual(VirtualMachineImageDeletionService().request(image), "Archived")
+		self.assertEqual(image.artifact_retention_until, NOW)
+		image.save.assert_not_called()
 
 
 class TestArchivedImageReclamation(UnitTestCase):
-	def reclaim(self, has_live_virtual_machine: bool, site_file_retention_until: datetime | None = None):
+	def reclaim(self, image, has_virtual_machines=False):
 		service = VirtualMachineImageDeletionService()
-		database = Mock(set_value=Mock())
-		archived = frappe._dict(name="image-1", site_file_retention_until=site_file_retention_until)
-
+		database = Mock()
 		with (
-			live_virtual_machine(has_live_virtual_machine),
+			patch("atlas.vm.core.vm_image_deletion.frappe.get_all", return_value=[image]) as get_all,
 			patch("atlas.vm.core.vm_image_deletion.frappe.db", database),
-			patch("atlas.vm.core.vm_image_deletion.frappe.get_all", return_value=[archived]) as get_all,
 			patch("atlas.vm.core.vm_image_deletion.now_datetime", return_value=NOW),
+			patch("atlas.vm.core.vm_image_deletion.has_virtual_machines", return_value=has_virtual_machines),
 			patch.object(service, "enqueue") as enqueue,
 		):
 			service.reclaim_archived()
-
 		return database, get_all, enqueue
 
-	def test_an_image_within_its_site_file_retention_is_left_alone(self) -> None:
-		database, _get_all, enqueue = self.reclaim(
-			has_live_virtual_machine=False, site_file_retention_until=NOW + timedelta(hours=1)
-		)
-
+	def test_artifacts_remain_until_retirement_deadline(self) -> None:
+		image = build_image(artifact_retention_until=NOW + timedelta(minutes=1))
+		database, _get_all, enqueue = self.reclaim(image)
 		database.set_value.assert_not_called()
 		enqueue.assert_not_called()
 
-	def test_an_image_past_its_site_file_retention_is_reclaimed(self) -> None:
-		_database, _get_all, enqueue = self.reclaim(
-			has_live_virtual_machine=False, site_file_retention_until=NOW - timedelta(hours=1)
-		)
-
+	def test_artifacts_are_reclaimed_while_vm_records_exist(self) -> None:
+		image = build_image(artifact_retention_until=NOW - timedelta(minutes=1))
+		database, get_all, enqueue = self.reclaim(image, has_virtual_machines=True)
+		self.assertEqual(get_all.call_args.kwargs["filters"], {"status": "Archived"})
+		database.set_value.assert_not_called()
 		enqueue.assert_called_once_with("image-1")
 
-	def test_an_unused_archived_image_moves_to_deleting_and_queues_cleanup(self) -> None:
-		database, _get_all, enqueue = self.reclaim(has_live_virtual_machine=False)
-
+	def test_record_waits_for_all_vm_records_to_be_removed(self) -> None:
+		image = build_image(
+			artifact_retention_until=NOW - timedelta(minutes=1),
+			image_object_key=None,
+			kernel_object_key=None,
+			rootfs_multipart_upload_id=None,
+			source_server=None,
+		)
+		database, _get_all, enqueue = self.reclaim(image, has_virtual_machines=True)
+		database.set_value.assert_not_called()
+		enqueue.assert_not_called()
+		database, _get_all, enqueue = self.reclaim(image)
 		database.set_value.assert_called_once_with("Virtual Machine Image", "image-1", "status", "Deleting")
 		enqueue.assert_called_once_with("image-1")
 
-	def test_an_archived_image_a_live_virtual_machine_uses_is_left_alone(self) -> None:
-		database, _get_all, enqueue = self.reclaim(has_live_virtual_machine=True)
-
-		database.set_value.assert_not_called()
+	def test_migrated_site_files_keep_their_own_deadline(self) -> None:
+		image = build_image(
+			artifact_retention_until=NOW - timedelta(minutes=1),
+			site_file_retention_until=NOW + timedelta(minutes=1),
+		)
+		_database, _get_all, enqueue = self.reclaim(image)
 		enqueue.assert_not_called()
 
-	def test_only_archived_images_in_object_storage_are_considered(self) -> None:
-		_database, get_all, _enqueue = self.reclaim(has_live_virtual_machine=False)
 
-		self.assertEqual(
-			get_all.call_args.kwargs["filters"], {"status": "Archived", "artifact_storage": "Object Storage"}
-		)
-
-
-class TestMachineImageCleanup(UnitTestCase):
-	def test_cleanup_removes_uploads_objects_and_staged_data(self) -> None:
-		service = VirtualMachineImageDeletionService()
-		image = build_image()
-		client = Mock()
-		metal_client = Mock()
-
+class TestImageCleanup(UnitTestCase):
+	def test_cleanup_waits_for_retirement_deadline(self) -> None:
+		image = build_image(artifact_retention_until=NOW + SIX_HOURS)
 		with (
 			patch("atlas.vm.core.vm_image_deletion.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_deletion.now_datetime", return_value=NOW),
+			patch("atlas.vm.core.vm_image_deletion.frappe.delete_doc") as delete_doc,
+		):
+			VirtualMachineImageDeletionService().delete("image-1")
+		delete_doc.assert_not_called()
+
+	def test_cleanup_removes_objects_but_keeps_a_referenced_record(self) -> None:
+		image = build_image(status="Archived", artifact_retention_until=NOW - timedelta(minutes=1))
+		client = Mock()
+		metal_client = Mock()
+		with (
+			patch("atlas.vm.core.vm_image_deletion.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_deletion.now_datetime", return_value=NOW),
 			patch("atlas.vm.core.vm_image_deletion.frappe.db", Mock(exists=Mock(return_value=True))),
 			patch(
 				"atlas.vm.core.vm_image_deletion.frappe.get_single",
 				return_value=SimpleNamespace(get_object_storage_client=Mock(return_value=client)),
 			),
 			patch("atlas.vm.core.vm_image_deletion.MetalClient", return_value=metal_client),
+			patch("atlas.vm.core.vm_image_deletion.has_virtual_machines", return_value=True),
 			patch("atlas.vm.core.vm_image_deletion.frappe.delete_doc") as delete_doc,
-			patch.object(service, "validate_is_unused"),
 		):
-			service.delete("image-1")
-
+			VirtualMachineImageDeletionService().delete("image-1")
 		client.abort_multipart_upload.assert_called_once_with("images/image-1/rootfs.img", "upload-1")
 		self.assertEqual(client.delete_object.call_count, 2)
 		metal_client.delete_snapshot.assert_called_once_with("image-1")
-		delete_doc.assert_called_once()
+		self.assertEqual(image.status, "Archived")
+		self.assertIsNone(image.image_object_key)
+		self.assertIsNone(image.source_server)
+		image.save.assert_called_once_with()
+		delete_doc.assert_not_called()
 
-	def test_system_image_cleanup_removes_its_objects(self) -> None:
+	def test_site_files_are_deleted_without_object_storage(self) -> None:
 		image = build_image(
-			image_type="system",
-			image_object_key="images/system-image/rootfs.img",
-			kernel_object_key="images/system-image/kernel",
+			artifact_storage="Site File",
+			image_object_key=None,
+			kernel_object_key=None,
+			rootfs_multipart_upload_id=None,
+			source_server=None,
+			image_file="rootfs-file",
+			kernel_file="kernel-file",
 		)
-		client = Mock()
-
-		VirtualMachineImageDeletionService.delete_objects(image, client)
-
+		with (
+			patch("atlas.vm.core.vm_image_deletion.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_deletion.frappe.get_single") as get_single,
+			patch("atlas.vm.core.vm_image_deletion.has_virtual_machines", return_value=True),
+			patch("atlas.vm.core.vm_image_deletion.frappe.delete_doc") as delete_doc,
+		):
+			VirtualMachineImageDeletionService().delete("image-1")
+		get_single.assert_not_called()
 		self.assertEqual(
-			[call.args[0] for call in client.delete_object.call_args_list],
-			["images/system-image/rootfs.img", "images/system-image/kernel"],
+			[entry.args[:2] for entry in delete_doc.call_args_list],
+			[("File", "rootfs-file"), ("File", "kernel-file")],
 		)
+		self.assertTrue(all(entry.kwargs["force"] for entry in delete_doc.call_args_list))
+		self.assertIsNone(image.image_file)
+		image.save.assert_called_once_with()
 
-	def test_an_absent_snapshot_does_not_stop_the_cleanup(self) -> None:
+	def test_record_is_deleted_after_last_vm_record(self) -> None:
+		image = build_image(
+			status="Deleting",
+			image_object_key=None,
+			kernel_object_key=None,
+			rootfs_multipart_upload_id=None,
+			source_server=None,
+		)
+		with (
+			patch("atlas.vm.core.vm_image_deletion.frappe.get_doc", return_value=image),
+			patch("atlas.vm.core.vm_image_deletion.has_virtual_machines", return_value=False),
+			patch("atlas.vm.core.vm_image_deletion.frappe.delete_doc") as delete_doc,
+		):
+			VirtualMachineImageDeletionService().delete("image-1")
+		delete_doc.assert_called_once_with("Virtual Machine Image", "image-1")
+		image.save.assert_not_called()
+
+	def test_missing_snapshot_does_not_block_cleanup(self) -> None:
 		metal_client = Mock()
 		metal_client.delete_snapshot.side_effect = MetalClientError("gone", status=404)
-
 		with (
 			patch("atlas.vm.core.vm_image_deletion.frappe.db", Mock(exists=Mock(return_value=True))),
 			patch("atlas.vm.core.vm_image_deletion.frappe.get_doc", return_value=Mock()),
@@ -238,13 +212,35 @@ class TestMachineImageCleanup(UnitTestCase):
 		):
 			VirtualMachineImageDeletionService.delete_staged_snapshot(build_image())
 
-	def test_an_absent_source_server_is_skipped(self) -> None:
+	def test_missing_source_server_does_not_block_cleanup(self) -> None:
 		metal_client = Mock()
-
 		with (
 			patch("atlas.vm.core.vm_image_deletion.frappe.db", Mock(exists=Mock(return_value=False))),
 			patch("atlas.vm.core.vm_image_deletion.MetalClient", return_value=metal_client),
 		):
 			VirtualMachineImageDeletionService.delete_staged_snapshot(build_image())
-
 		metal_client.delete_snapshot.assert_not_called()
+
+
+class TestImageReferences(IntegrationTestCase):
+	def test_terminating_vm_record_keeps_the_image_record(self) -> None:
+		image_name = frappe.generate_hash(length=10)
+		virtual_machine = frappe.new_doc("Virtual Machine")
+		virtual_machine.update(
+			{
+				"name": frappe.generate_hash(length=10),
+				"server": str(uuid7()),
+				"virtual_machine_image": image_name,
+				"architecture": "amd64",
+				"cpu_millicores": 1000,
+				"memory_mib": 1024,
+				"disk_mib": 10240,
+				"tenant_id": 7,
+				"is_terminating": 1,
+			}
+		)
+		virtual_machine.db_insert()
+
+		self.assertTrue(has_virtual_machines(image_name))
+		frappe.db.delete("Virtual Machine", {"name": virtual_machine.name})
+		self.assertFalse(has_virtual_machines(image_name))

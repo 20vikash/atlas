@@ -74,6 +74,51 @@ class TestVirtualMachineImage(UnitTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			image.ensure_not_termination_protected()
 
+	def test_image_record_cannot_be_removed_before_retirement(self) -> None:
+		image = self.make_image(status="Archived")
+		with self.assertRaises(frappe.ValidationError):
+			image.on_trash()
+
+	def test_image_record_cannot_be_removed_with_artifacts(self) -> None:
+		image = self.make_image(status="Deleting")
+		with self.assertRaises(frappe.ValidationError):
+			image.on_trash()
+
+	def test_image_record_cannot_be_removed_while_a_vm_names_it(self) -> None:
+		image = self.make_image(
+			name="image-1",
+			status="Deleting",
+			image_object_key=None,
+			kernel_object_key=None,
+			rootfs_multipart_upload_id=None,
+			kernel_multipart_upload_id=None,
+			source_server=None,
+		)
+		with (
+			patch(
+				"atlas.vm.doctype.virtual_machine_image.virtual_machine_image.frappe.db.exists",
+				return_value=True,
+			),
+			self.assertRaises(frappe.ValidationError),
+		):
+			image.on_trash()
+
+	def test_clean_image_record_can_be_removed(self) -> None:
+		image = self.make_image(
+			name="image-1",
+			status="Deleting",
+			image_object_key=None,
+			kernel_object_key=None,
+			rootfs_multipart_upload_id=None,
+			kernel_multipart_upload_id=None,
+			source_server=None,
+		)
+		with patch(
+			"atlas.vm.doctype.virtual_machine_image.virtual_machine_image.frappe.db.exists",
+			return_value=False,
+		):
+			image.on_trash()
+
 	def test_an_archived_image_cannot_boot_a_virtual_machine(self) -> None:
 		image = self.make_image(status="Archived")
 

@@ -183,6 +183,7 @@ class TestExpiredSiteFileRemoval(UnitTestCase):
 		self.assertIsNone(image.site_file_retention_until)
 		image.save.assert_called_once()
 		self.assertEqual([call.args[1] for call in delete_doc.call_args_list], ["file-rootfs", "file-kernel"])
+		self.assertTrue(all(call.kwargs["force"] for call in delete_doc.call_args_list))
 
 	def test_a_failed_delete_leaves_the_image_for_the_next_sweep(self) -> None:
 		image = build_image(

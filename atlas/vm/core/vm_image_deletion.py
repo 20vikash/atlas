@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 import frappe
@@ -11,7 +11,6 @@ from atlas.atlas.core.background_jobs import run_as_admin
 from atlas.atlas.core.exceptions import AtlasUserError
 from atlas.atlas.object_storage import ObjectStorageError
 from atlas.vm.core.metal_client import MetalClient, MetalClientError
-from atlas.vm.core.vm_state import has_live_virtual_machine_for_image
 
 if TYPE_CHECKING:
 	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
@@ -21,19 +20,14 @@ if TYPE_CHECKING:
 
 
 DELETION_TIMEOUT_SECONDS = 900
-
-
-class VirtualMachineImageInUse(AtlasUserError):
-	"""Report that a virtual machine uses the image."""
-
-	http_status_code = 409
+IMAGE_ARTIFACT_RETENTION = timedelta(hours=6)
 
 
 class VirtualMachineImageDeletionService:
 	"""Own the deletion of one image."""
 
 	def request(self, image: VirtualMachineImage) -> str:
-		"""Retire one image, and reclaim its artifacts when nothing needs them."""
+		"""Retire one image and keep its artifacts for six hours."""
 		if image.status in ("Deleting", "Archived"):
 			return cast(str, image.status)
 
@@ -42,43 +36,37 @@ class VirtualMachineImageDeletionService:
 		if image.status not in ("Available", "Failed"):
 			frappe.throw(_("Only an Available or Failed image can be deleted."), exc=AtlasUserError)
 
-		image.status = "Deleting" if self.is_reclaimable(image) else "Archived"
+		image.artifact_retention_until = now_datetime() + IMAGE_ARTIFACT_RETENTION
+		image.status = "Archived"
 		image.enabled = 0
 		image.save()
-
-		if image.status == "Deleting":
-			self.enqueue(cast(str, image.name))
-
 		return cast(str, image.status)
 
 	def reclaim_archived(self) -> None:
-		"""Delete each archived image in object storage that lost its last virtual machine."""
+		"""Queue artifact cleanup, then delete records with no VM references."""
 		for image in frappe.get_all(
 			"Virtual Machine Image",
-			filters={"status": "Archived", "artifact_storage": "Object Storage"},
-			fields=["name", "site_file_retention_until"],
+			filters={"status": "Archived"},
+			fields=[
+				"name",
+				"artifact_retention_until",
+				"site_file_retention_until",
+				"image_object_key",
+				"kernel_object_key",
+				"rootfs_multipart_upload_id",
+				"kernel_multipart_upload_id",
+				"image_file",
+				"kernel_file",
+				"source_server",
+			],
 		):
-			if is_retaining_site_files(image.site_file_retention_until):
+			if is_retaining_artifacts(image):
 				continue
-			if has_live_virtual_machine_for_image(image.name):
-				continue
-
-			frappe.db.set_value("Virtual Machine Image", image.name, "status", "Deleting")
-			self.enqueue(image.name)
-
-	@staticmethod
-	def is_reclaimable(image: VirtualMachineImage) -> bool:
-		"""Return whether the stored artifacts can be removed now.
-
-		Site files serve bootstrap hosts, so only an image in object storage that no
-		live virtual machine needs releases its storage.
-		"""
-		if image.artifact_storage != "Object Storage":
-			return False
-		if is_retaining_site_files(image.site_file_retention_until):
-			return False
-
-		return not has_live_virtual_machine_for_image(cast(str, image.name))
+			if not has_virtual_machines(image.name):
+				frappe.db.set_value("Virtual Machine Image", image.name, "status", "Deleting")
+				self.enqueue(image.name)
+			elif has_stored_artifacts(image):
+				self.enqueue(image.name)
 
 	def enqueue(self, image_name: str) -> None:
 		"""Enqueue one repeatable image cleanup."""
@@ -93,20 +81,45 @@ class VirtualMachineImageDeletionService:
 		)
 
 	def delete(self, image_name: str) -> None:
-		"""Remove stored objects, incomplete uploads, and staged Metal data."""
+		"""Remove artifacts after retention, then remove an unused record."""
 		image = cast("VirtualMachineImage", frappe.get_doc("Virtual Machine Image", image_name))
-		self.validate_is_unused(image_name)
-		client = cast("AtlasSettings", frappe.get_single("Atlas Settings")).get_object_storage_client()
-		self.abort_uploads(image, client)
-		self.delete_objects(image, client)
+		if is_retaining_artifacts(image):
+			return
+		if any(
+			(
+				image.image_object_key,
+				image.kernel_object_key,
+				image.rootfs_multipart_upload_id,
+				image.kernel_multipart_upload_id,
+			)
+		):
+			client = cast("AtlasSettings", frappe.get_single("Atlas Settings")).get_object_storage_client()
+			self.abort_uploads(image, client)
+			self.delete_objects(image, client)
 		self.delete_staged_snapshot(image)
-		frappe.delete_doc("Virtual Machine Image", image_name)
-
-	@staticmethod
-	def validate_is_unused(image_name: str) -> None:
-		"""Reject deletion while a live virtual machine needs the image."""
-		if has_live_virtual_machine_for_image(image_name):
-			frappe.throw(_("A live Virtual Machine uses this image."), exc=VirtualMachineImageInUse)
+		# The image still links its owned files until cleanup is saved.
+		for file_name in (image.image_file, image.kernel_file):
+			if file_name:
+				frappe.delete_doc(
+					"File", file_name, force=True, ignore_permissions=True, delete_permanently=True
+				)
+		if has_stored_artifacts(image):
+			for field in (
+				"image_object_key",
+				"kernel_object_key",
+				"rootfs_multipart_upload_id",
+				"kernel_multipart_upload_id",
+				"image_file",
+				"kernel_file",
+				"source_server",
+				"site_file_retention_until",
+			):
+				setattr(image, field, None)
+			image.save()
+		if not has_virtual_machines(image_name):
+			if image.status != "Deleting":
+				frappe.db.set_value("Virtual Machine Image", image_name, "status", "Deleting")
+			frappe.delete_doc("Virtual Machine Image", image_name)
 
 	@staticmethod
 	def abort_uploads(image: VirtualMachineImage, client: ObjectStorageClient) -> None:
@@ -139,9 +152,31 @@ class VirtualMachineImageDeletionService:
 				raise
 
 
-def is_retaining_site_files(site_file_retention_until: str | datetime | None) -> bool:
-	"""Return whether a storage migration still keeps site files for hosts that download them."""
-	return bool(site_file_retention_until) and get_datetime(site_file_retention_until) > now_datetime()
+def is_retaining_artifacts(image: VirtualMachineImage) -> bool:
+	"""Keep downloads available through both retirement and migration deadlines."""
+	return any(
+		deadline and get_datetime(deadline) > now_datetime()
+		for deadline in (image.artifact_retention_until, image.site_file_retention_until)
+	)
+
+
+def has_stored_artifacts(image: VirtualMachineImage) -> bool:
+	return any(
+		getattr(image, field)
+		for field in (
+			"image_object_key",
+			"kernel_object_key",
+			"rootfs_multipart_upload_id",
+			"kernel_multipart_upload_id",
+			"image_file",
+			"kernel_file",
+			"source_server",
+		)
+	)
+
+
+def has_virtual_machines(image_name: str) -> bool:
+	return bool(frappe.db.exists("Virtual Machine", {"virtual_machine_image": image_name}))
 
 
 def enqueue_pending_virtual_machine_image_deletions() -> None:

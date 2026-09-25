@@ -83,7 +83,9 @@ class VirtualMachineImageStorageMigration:
 
 		for file_name in (image.image_file, image.kernel_file):
 			if file_name:
-				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
+				frappe.delete_doc(
+					"File", file_name, force=True, ignore_permissions=True, delete_permanently=True
+				)
 
 		image.image_file = None
 		image.kernel_file = None

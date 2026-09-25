@@ -81,7 +81,7 @@ flowchart LR
 
 The diagram shows a Machine image transfer and its retry path. A transfer can also fail before upload or during completion.
 
-Retirement changes an Available or Failed image to `Archived` or `Deleting`.
+Retirement changes an Available or Failed image to `Archived`.
 
 ## Retirement and deletion
 
@@ -89,15 +89,15 @@ Retire an Available or Failed image to stop new use immediately. Retiring an ima
 
 Termination protection blocks retirement for both System and Machine images.
 
-| Image | Result |
-| --- | --- |
-| Unused image in object storage | `Deleting`. A job removes its objects, Metal staging, and record. |
-| Image in object storage still in use | `Archived`. Changes to `Deleting` after its last VM is deleted. |
-| Image in site files | `Archived`. The site files remain for bootstrap hosts. |
+Atlas keeps a retired image's objects or public site files for six hours. This gives hosts time to finish downloads that started before retirement.
 
-If you retire a migrated image during site-file retention, it stays `Archived`. Atlas can delete it after the retention deadline and after its last VM is deleted.
+A migrated image also keeps its old site files until the separate migration deadline ends.
 
-Image-use checks read the last-reported `Virtual Machine State` cache. If cleanup fails, Atlas keeps `Deleting`, records the error, and retries every **30 seconds**.
+After the deadline, Atlas deletes the remote artifacts and Metal staging, even if VMs still use the image. Those VMs normally boot from local host storage. The remote recovery copy is no longer available.
+
+The image record stays `Archived` while any VM record names it. After the last VM record is deleted, Atlas changes the image to `Deleting` and removes its record.
+
+Atlas records a cleanup failure and retries every **30 seconds**.
 
 ## Cached and warm artifacts
 
