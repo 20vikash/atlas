@@ -15,8 +15,9 @@ const (
 	// downloads and imports it, so the limit is generous.
 	defaultImageReconcileTimeout = 35 * time.Minute
 
-	// defaultImageMaximumIdle is how long an unused image stays on the host.
-	defaultImageMaximumIdle = 24 * time.Hour
+	// defaultImageMaximumIdle is how long an image that host sync does not cache
+	// stays on the host after its last VM start.
+	defaultImageMaximumIdle = time.Hour
 
 	// defaultSnapshotMaximumIdle is how long unused staging stays on the host.
 	defaultSnapshotMaximumIdle = 48 * time.Hour
