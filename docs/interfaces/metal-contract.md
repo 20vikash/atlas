@@ -38,8 +38,7 @@ The complete value is the state Metal saves and reapplies after a restart or fai
 | CPU | `cpu_millicores` from `100` to `32000`. `1000` is one core. The guest gets whole vCPUs, rounded up. |
 | CPU or memory change | Needs a stopped VM. The idle timeout can change in any state. |
 | Disk | Grows only. A shrink is rejected. |
-| Metadata | Atlas accepts up to 16 custom entries and 48 KiB of JSON. |
-| MMDS document | Firecracker has a 256 KiB limit. Metal reserves 8 KiB for temporary console keys. |
+| Guest metadata | See [guest metadata limits](../compute/vm-records.md#guest-metadata). |
 | Resize | Changes CPU, memory, disk, and idle timeout as one shape, after a capacity check. |
 | Capacity | An increase that the host cannot hold returns `409 insufficient_capacity`. |
 | Restart | Each accepted restart increases `restart_generation`. |
