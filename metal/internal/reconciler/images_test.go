@@ -11,9 +11,11 @@ import (
 type fakeImageStore struct {
 	policies            []vm.Image
 	cached              []string
+	removedWarmImages   []string
 	prunedImages        bool
 	prunedSnapshots     bool
 	snapshotMaximumIdle time.Duration
+	imageMaximumIdle    time.Duration
 }
 
 func (store *fakeImageStore) ImagePolicies(context.Context) ([]vm.Image, error) {
@@ -25,13 +27,19 @@ func (store *fakeImageStore) EnsureImage(_ context.Context, image vm.Image) erro
 	return nil
 }
 
+func (store *fakeImageStore) RemoveWarmImages(_ context.Context, imageReference string) error {
+	store.removedWarmImages = append(store.removedWarmImages, imageReference)
+	return nil
+}
+
 func (store *fakeImageStore) PruneImages(
-	context.Context,
-	[]vm.Image,
-	time.Time,
-	time.Duration,
+	_ context.Context,
+	_ []vm.Image,
+	_ time.Time,
+	maximumIdle time.Duration,
 ) error {
 	store.prunedImages = true
+	store.imageMaximumIdle = maximumIdle
 	return nil
 }
 
@@ -74,11 +82,17 @@ func TestImageReconcilerCachesAndWarmsDesiredImages(t *testing.T) {
 	if len(builder.images) != 1 || builder.images[0] != "warm" {
 		t.Fatalf("warm images = %v", builder.images)
 	}
+	if len(store.removedWarmImages) != 1 || store.removedWarmImages[0] != "cold" {
+		t.Fatalf("removed warm images = %v", store.removedWarmImages)
+	}
 	if !store.prunedImages {
 		t.Fatal("unused images were not pruned")
 	}
 	if !store.prunedSnapshots {
 		t.Fatal("idle snapshots were not pruned")
+	}
+	if store.imageMaximumIdle != time.Hour {
+		t.Fatalf("image maximum idle = %s", store.imageMaximumIdle)
 	}
 	if store.snapshotMaximumIdle != 48*time.Hour {
 		t.Fatalf("snapshot maximum idle = %s", store.snapshotMaximumIdle)

@@ -142,8 +142,8 @@ func (m *machine) restoreSavedState(ctx context.Context, resume bool) (bool, err
 		return false, err
 	}
 
-	metadata := metadataServiceData(
-		m.input.ID, m.input.NetworkInterface.GuestIPAddress, m.input.NetworkInterface.MACAddress, m.input.Specification,
+	metadata := m.input.Specification.MetadataServiceData(
+		m.input.ID, m.input.NetworkInterface.GuestIPAddress, m.input.NetworkInterface.MACAddress,
 	)
 	if err := m.runtime.launchMemorySnapshot(ctx, m.input, "", snapshot.StatePath, snapshot.MemoryPath, metadata, resume); err != nil {
 		return false, err

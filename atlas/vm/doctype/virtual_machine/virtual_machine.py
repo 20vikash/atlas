@@ -55,6 +55,7 @@ class VirtualMachine(Document):
 		is_termination_protected: DF.Check
 		memory_mib: DF.Int
 		metadata: DF.Code | None
+		routes: DF.Code | None
 		server: DF.Link
 		sleep_after_idle_seconds: DF.Int
 		tags: DF.Table[AtlasTag]
@@ -229,8 +230,11 @@ class VirtualMachine(Document):
 
 	@property
 	def firewall_summary(self) -> str:
-		"""Return the empty initial value that the form replaces after its explicit firewall read."""
-		return ""
+		"""Return the desired firewall that Metal holds."""
+		information = self.get_metal_vm_info()
+		if not information:
+			return json.dumps({"enabled": False, "inbound": [], "outbound": []}, indent=2)
+		return json.dumps(information.desired.network.firewall.as_dict(), indent=2)
 
 	@property
 	def ssh_keys(self) -> str:
@@ -419,10 +423,10 @@ class VirtualMachine(Document):
 		"""Replace all custom metadata for this VM with a plain string-to-string map."""
 		self.check_permission("write")
 		self.ensure_not_migrating()
-		if not isinstance(metadata, dict) or any(
-			not isinstance(key, str) or not isinstance(value, str) for key, value in metadata.items()
-		):
-			frappe.throw(_("Metadata must be a string-to-string map."), exc=AtlasUserError)
+		try:
+			metadata = VirtualMachineCreateRequest.metadata_map({"metadata": metadata})
+		except ValueError as error:
+			frappe.throw(_(str(error)), exc=AtlasUserError)
 
 		return VirtualMachineService(self).replace_metadata(metadata)
 
@@ -457,15 +461,6 @@ class VirtualMachine(Document):
 				),
 			}
 		)
-
-	@frappe.whitelist(methods=["GET"])
-	def read_firewall(self) -> dict[str, Any]:
-		"""Return the complete desired firewall when the user opens the editor."""
-		self.check_permission("read")
-		information = self.get_metal_vm_info()
-		if not information:
-			return {"enabled": False, "inbound": [], "outbound": []}
-		return information.desired.network.firewall.as_dict()
 
 	@frappe.whitelist(methods=["POST"])
 	def update_firewall(self, firewall: dict[str, Any]) -> dict[str, Any]:

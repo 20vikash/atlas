@@ -117,7 +117,7 @@ class TestHostBinaries(UnitTestCase):
 			patch.object(host_binaries.subprocess, "run") as run,
 			self.assertRaises(FileNotFoundError) as caught,
 		):
-			host_binaries.build_host_binary(mesh, "go")
+			host_binaries.build_host_binary(mesh)
 
 		self.assertIn("clang", str(caught.exception))
 		run.assert_not_called()

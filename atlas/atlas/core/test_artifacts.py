@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
@@ -10,6 +12,28 @@ from atlas.atlas.core import artifacts
 
 
 class TestArtifacts(UnitTestCase):
+	def test_public_image_files_have_separate_paths(self) -> None:
+		with TemporaryDirectory() as temporary_directory:
+			root = Path(temporary_directory)
+			source = root / "rootfs.img"
+			source.write_bytes(b"same image")
+			file_doc = Mock(flags=SimpleNamespace())
+			file_doc.insert.return_value.name = "file-1"
+
+			with (
+				patch.object(
+					artifacts.frappe,
+					"get_site_path",
+					side_effect=lambda *_parts: str(root / _parts[-1]),
+				),
+				patch.object(artifacts.frappe, "get_doc", return_value=file_doc),
+			):
+				artifacts.publish_public_file_path(source, "a" * 64, "image-1")
+				artifacts.publish_public_file_path(source, "a" * 64, "image-2")
+
+			self.assertEqual((root / f"image-1-{'a' * 12}-rootfs.img").read_bytes(), b"same image")
+			self.assertEqual((root / f"image-2-{'a' * 12}-rootfs.img").read_bytes(), b"same image")
+
 	def test_download_url_prefers_the_configured_base(self) -> None:
 		"""A host cannot reach the site URL of a local bench."""
 		with (

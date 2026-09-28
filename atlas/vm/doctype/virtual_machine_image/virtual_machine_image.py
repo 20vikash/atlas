@@ -52,6 +52,7 @@ class VirtualMachineImage(Document):
 		from atlas.atlas.doctype.atlas_tag.atlas_tag import AtlasTag
 
 		architecture: DF.Literal["amd64", "arm64"]
+		artifact_retention_until: DF.Datetime | None
 		artifact_storage: DF.Literal["Object Storage", "Site File"]
 		cache_image: DF.Check
 		enabled: DF.Check
@@ -109,11 +110,17 @@ class VirtualMachineImage(Document):
 			self.is_termination_protected = 1
 
 	def on_trash(self) -> None:
-		"""Remove the public site files this image owns."""
+		"""Keep a retired image record until cleanup and VM removal finish."""
 		self.ensure_not_termination_protected()
-		for file_name in (self.image_file, self.kernel_file):
-			if file_name:
-				frappe.delete_doc("File", file_name, ignore_permissions=True, delete_permanently=True)
+		if self.status != "Deleting":
+			frappe.throw(_("Retire the image before deleting its record."), exc=AtlasConflictError)
+
+		from atlas.vm.core.vm_image_deletion import has_stored_artifacts
+
+		if has_stored_artifacts(self):
+			frappe.throw(_("Remove the image artifacts before deleting its record."), exc=AtlasConflictError)
+		if frappe.db.exists("Virtual Machine", {"virtual_machine_image": self.name}):
+			frappe.throw(_("A Virtual Machine still refers to this image."), exc=AtlasConflictError)
 
 	def get_metal_image_request(self) -> dict[str, Any]:
 		"""Return the image object for a Metal create request."""

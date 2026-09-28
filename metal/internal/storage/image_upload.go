@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,10 +13,6 @@ import (
 	"time"
 )
 
-// SnapshotPartSizeBytes is the compressed upload part size. Atlas must use it
-// when it signs multipart URLs.
-const SnapshotPartSizeBytes int64 = 256 << 20
-
 // Artifact names for the stored upload progress of one staged snapshot.
 const (
 	rootfsArtifact = "rootfs"
@@ -28,6 +23,9 @@ const (
 	// uploadPartAttempts retries transient failures without restarting the artifact.
 	uploadPartAttempts = 3
 	uploadRetryDelay   = 2 * time.Second
+
+	minimumPartSizeBytes = 5 << 20
+	maximumPartSizeBytes = 5 << 30
 )
 
 // errRetryableUpload marks a part failure worth repeating.
@@ -42,8 +40,9 @@ type SnapshotUploadPart struct {
 // SnapshotArtifactUpload contains all upload parts for one artifact.
 type SnapshotArtifactUpload struct {
 	// UploadID identifies the multipart upload for resumable part progress.
-	UploadID string
-	Parts    []SnapshotUploadPart
+	UploadID      string
+	PartSizeBytes int64
+	Parts         []SnapshotUploadPart
 }
 
 // SnapshotUploadRequest contains upload URLs for both image artifacts.
@@ -132,10 +131,10 @@ func (store *SnapshotStore) StartUpload(_ context.Context, snapshotID string, re
 	if metadata.UploadState == UploadStateCompleted {
 		return nil
 	}
-	if err := validateUploadParts(request.Rootfs.Parts, metadata.RootfsSizeBytes); err != nil {
+	if err := validateUploadParts(request.Rootfs, metadata.RootfsSizeBytes); err != nil {
 		return fmt.Errorf("rootfs parts: %w", err)
 	}
-	if err := validateUploadParts(request.Kernel.Parts, metadata.KernelSizeBytes); err != nil {
+	if err := validateUploadParts(request.Kernel, metadata.KernelSizeBytes); err != nil {
 		return fmt.Errorf("kernel parts: %w", err)
 	}
 
@@ -350,10 +349,14 @@ func (store *SnapshotStore) recordParts(snapshotID, artifact, uploadID string, p
 // compressed, so how many parts it needs is known only once it is written. The
 // controller signs enough parts for the uncompressed size and the upload uses
 // as many as it needs.
-func validateUploadParts(parts []SnapshotUploadPart, sizeBytes int64) error {
+func validateUploadParts(upload SnapshotArtifactUpload, sizeBytes int64) error {
 	if sizeBytes <= 0 {
 		return fmt.Errorf("%w: artifact size must be positive", ErrInvalidUpload)
 	}
+	if upload.PartSizeBytes < minimumPartSizeBytes || upload.PartSizeBytes > maximumPartSizeBytes {
+		return fmt.Errorf("%w: part size must be from 5 MiB to 5 GiB", ErrInvalidUpload)
+	}
+	parts := upload.Parts
 	if len(parts) == 0 {
 		return fmt.Errorf("%w: at least one part is required", ErrInvalidUpload)
 	}
@@ -377,20 +380,15 @@ func (store *SnapshotStore) uploadArtifact(ctx context.Context, snapshotID, arti
 	}
 	defer file.Close()
 
-	// The digest is one pass over the uncompressed artifact, so an image keeps
-	// one identity whether it is stored raw or compressed. It is separate from
-	// the part bodies, because a retried part must not feed the hash twice.
-	digest, err := artifactSHA256(file, sizeBytes)
-	if err != nil {
-		return UploadedArtifact{}, err
-	}
-
-	source := &countingReader{
+	// The digest covers the raw bytes, not the compressed parts.
+	source := newSHA256Reader(&countingReader{
 		reader:  io.NewSectionReader(file, 0, sizeBytes),
 		counter: uploaded,
-	}
-	storedBytes, parts, err := store.compressArtifact(ctx, snapshotID, artifact, source, request,
+	})
+	storedBytes, parts, err := store.compressArtifact(ctx, snapshotID, artifact, source, sizeBytes, request,
 		store.storedParts(snapshotID, artifact, request.UploadID))
+	// Call Sum before the error check, so the hash goroutine always exits.
+	digest := source.Sum()
 	if err != nil {
 		return UploadedArtifact{}, err
 	}
@@ -416,19 +414,6 @@ func (reader *countingReader) Read(buffer []byte) (int, error) {
 		reader.counter.Add(int64(read))
 	}
 	return read, err
-}
-
-// artifactSHA256 digests exactly sizeBytes of the artifact.
-func artifactSHA256(file *os.File, sizeBytes int64) ([]byte, error) {
-	digest := sha256.New()
-	read, err := io.Copy(digest, io.NewSectionReader(file, 0, sizeBytes))
-	if err != nil {
-		return nil, err
-	}
-	if read != sizeBytes {
-		return nil, fmt.Errorf("%w: read %d of %d artifact bytes", ErrInvalidUpload, read, sizeBytes)
-	}
-	return digest.Sum(nil), nil
 }
 
 // uploadPartWithRetry sends one part, repeating a failure the object store may

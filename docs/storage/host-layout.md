@@ -54,6 +54,7 @@ These are dataset names in the configured pool, not directories:
 <pool>/vms/<vm-id>                 one VM disk clone
 <pool>/staging/<snapshot-id>       read-only Machine image upload source
 <pool>/warm/<key>@ready            warm boot disk for one image and VM shape
+<pool>/state                       file system mounted at /var/lib/metal
 ```
 
 `machines/<id>` and `vms/<id>` name the same VM. Host setup creates the pool before `metald` starts. `metald` never selects a device.

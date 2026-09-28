@@ -64,7 +64,7 @@ func (builder *WarmImageBuilder) EnsureMemorySnapshot(ctx context.Context, image
 
 	compatibility := builder.runtime.Compatibility()
 	key := WarmImageKey(image, *configuration, compatibility)
-	if err := builder.store.RemoveOtherWarmImages(ctx, image.Name, key); err != nil {
+	if err := builder.store.RemoveOtherWarmImages(ctx, image.Name, key); err != nil && !errors.Is(err, ErrInUse) {
 		return err
 	}
 	found, err := builder.store.FindWarmImage(ctx, image, *configuration, compatibility)

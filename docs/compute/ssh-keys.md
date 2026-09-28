@@ -39,7 +39,7 @@ For the underlying interfaces, read [Firecracker MMDS v2](https://github.com/fir
 
 - [Atlas VM key action](../../atlas/vm/doctype/virtual_machine/virtual_machine.py) sends the replacement list.
 - [Metal key API](../../metal/internal/api/vm_ssh_keys.go) validates the complete list.
-- [Metal metadata builder](../../metal/internal/firecracker/metadata.go) writes `public-keys` to MMDS.
+- [Metal metadata builder](../../metal/internal/vm/metadata_service.go) builds the MMDS document with `public-keys`.
 - [Guest key command](../../atlas/vm/scripts/guest/authorized-keys-command) reads MMDS on SSH login.
 - [Image builder](../../atlas/vm/scripts/build_ubuntu_server_image.sh) installs the SSH configuration.
 - [SSH console key](../../metal/internal/firecracker/ssh.go) is temporary.

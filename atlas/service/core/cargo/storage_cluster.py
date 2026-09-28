@@ -59,11 +59,11 @@ def _validated_config(values: Any) -> dict[str, Any]:
 	return {
 		"storage_node_count": storage_node_count,
 		"replication_factor": replication_factor,
-		**{role: _node_size(values.get(role), role) for role in NODE_ROLES},
+		**{role: get_node_size(values.get(role), role) for role in NODE_ROLES},
 	}
 
 
-def _node_size(values: Any, role: str) -> dict[str, int]:
+def get_node_size(values: Any, role: str) -> dict[str, int]:
 	if not isinstance(values, dict) or any(field not in values for field in NODE_FIELDS):
 		frappe.throw(_("{0} must hold cpu_millicores, ram_gb and disk_gb.").format(role))
 

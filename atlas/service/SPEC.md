@@ -36,6 +36,7 @@ See the [HTTP proxy specification](../../services/http-proxy/SPEC.md).
 - Provision needs an Active Proxy Server and no attached VM.
 - The installer environment supplies every name in `ENROLMENT_VARS` of `atlas/scripts/install-cargo.sh`. A test compares the lists.
 - The storage cluster request is `private/files/cargo-storage-cluster.json`. Installation reads it. Archive removes it.
+- The Datum host request is `private/files/cargo-telemetry.json`. Installation writes it to the `default_telemetry_config` site config of Cargo. Archive removes it.
 - Tokens, 365 days each: Atlas `atlas-admin:<region-id>` (subject `cargo`, scope `*`, tenant `0`) and proxy `atlas-proxy:<region-id>` (scope `site:*`, suffix `-svc`).
 - Routes: `cargo` and `cargo-pilot` to the VM mesh address. Active after `/api/method/ping` returns `pong`.
 - The bucket job uses a 5-minute `atlas-cargo:<region-id>` token. It never replaces configured object storage.

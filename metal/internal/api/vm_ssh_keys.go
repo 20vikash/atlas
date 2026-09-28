@@ -12,8 +12,8 @@ import (
 
 // SSH keys are published to the guest through MMDS, so their size is bounded.
 const (
-	maximumSSHKeyCount  = 100
-	maximumSSHKeyLength = 16 * 1024
+	maximumSSHKeyCount  = 16
+	maximumSSHKeyLength = 2 * 1024
 )
 
 // replaceVirtualMachineSSHKeysRequest carries the complete SSH key list.

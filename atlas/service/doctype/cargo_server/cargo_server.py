@@ -18,6 +18,7 @@ from atlas.service.core.cargo.storage_cluster import (
 	remove_storage_cluster_config,
 	store_storage_cluster_config,
 )
+from atlas.service.core.cargo.telemetry import remove_telemetry_config, store_telemetry_config
 
 if TYPE_CHECKING:
 	from collections.abc import Iterator
@@ -80,6 +81,7 @@ class CargoServer(Document):
 			cargo_server: CargoServer = frappe.get_single("Cargo Server")
 			cargo_server._validate_provision_request(values)
 			store_storage_cluster_config(values.get("storage_cluster"))
+			store_telemetry_config(values.get("telemetry"))
 			cargo_server.status = "Pending"
 			cargo_server.failure_message = None
 			cargo_server.installation_task = None
@@ -162,6 +164,7 @@ class CargoServer(Document):
 				raise
 
 			remove_storage_cluster_config()
+			remove_telemetry_config()
 			cargo_server.status = "Archived"
 			cargo_server.failure_message = None
 			cargo_server.virtual_machine = None

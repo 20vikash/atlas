@@ -185,8 +185,8 @@ func (runtime *Runtime) launchWarmImage(ctx context.Context, configuration vm.Ru
 		return vm.ErrNotFound
 	}
 
-	metadata := metadataServiceData(
-		configuration.ID, configuration.NetworkInterface.GuestIPAddress, configuration.NetworkInterface.MACAddress, configuration.Specification,
+	metadata := configuration.Specification.MetadataServiceData(
+		configuration.ID, configuration.NetworkInterface.GuestIPAddress, configuration.NetworkInterface.MACAddress,
 	)
 	return runtime.launchMemorySnapshot(
 		ctx,

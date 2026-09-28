@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	platform "github.com/frappe/atlas/metal/internal/platform"
+	"github.com/frappe/atlas/metal/internal/vm"
 )
 
 // apiSocketRelativePath is the firecracker API socket path relative to the chroot root.
@@ -58,6 +59,8 @@ func (configuration Config) jailerArgs(id string, userID, groupID uint32, networ
 		"--api-sock", apiSocketRelativePath,
 		"--log-path", firecrackerLogRelativePath,
 		"--level", "Warn",
+		"--mmds-size-limit", fmt.Sprint(vm.MetadataServiceSizeLimitBytes),
+		"--http-api-max-payload-size", fmt.Sprint(vm.MetadataServiceSizeLimitBytes),
 	}
 }
 

@@ -10,6 +10,8 @@ Atlas [chooses a host](placement.md), saves a draft reservation, and asks Metal 
 
 Atlas sends power, restart, resource, network, key, and metadata changes to the assigned host. Metal reports the applied generation separately from request acceptance.
 
+See [guest metadata](vm-records.md#guest-metadata) for the limits on custom metadata and other MMDS values.
+
 A resize uses the current host if it has enough capacity. Otherwise, Atlas can reserve another host and use [migration](migration.md).
 
 Read [Metal's requested and applied generations](reconciliation.md) for current progress. The Atlas VM list uses [cached host reports](../region/host-sync.md).

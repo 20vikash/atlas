@@ -116,6 +116,8 @@ sudo apt-get update
 sudo apt-get install --yes make clang libbpf-dev linux-libc-dev
 ```
 
+On macOS, install Docker instead. Atlas uses Docker to build eBPF.
+
 The builder uses an installed Go toolchain when it is new enough for `metal/go.mod`. Otherwise it downloads Go. The builds also download Go modules. An offline machine needs an installed Go toolchain and a populated module cache. It also needs an internal APT mirror or approved local packages.
 
 Build one binary by hand with these commands. Each command skips the build when the linked File and source hash are current. A missing tool stops the command or migration.

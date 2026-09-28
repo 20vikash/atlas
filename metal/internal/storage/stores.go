@@ -19,8 +19,8 @@ var (
 	// ErrNotFound indicates that a disk, snapshot, or image does not exist.
 	ErrNotFound = errors.New("storage: not found")
 
-	// ErrInUse indicates that an image has dependent virtual machines.
-	ErrInUse = errors.New("storage: in use")
+	// ErrInUse indicates that a host artifact has dependent virtual machines.
+	ErrInUse = vm.ErrInUse
 
 	// ErrImageConflict indicates that an image reference has different content.
 	ErrImageConflict = errors.New("storage: image content conflict")

@@ -26,9 +26,9 @@ def publish_public_file(file_name: str, label: str, content: bytes) -> str:
 	return file_doc.name
 
 
-def publish_public_file_path(source: Path, digest: str) -> str:
+def publish_public_file_path(source: Path, digest: str, image_name: str) -> str:
 	"""Publish a large public build file from disk."""
-	file_name = f"{digest[:12]}-{source.name}"
+	file_name = f"{image_name}-{digest[:12]}-{source.name}"
 	destination = Path(frappe.get_site_path("public", "files", file_name))
 	destination.parent.mkdir(parents=True, exist_ok=True)
 	shutil.copyfile(source, destination)

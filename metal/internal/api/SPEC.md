@@ -72,7 +72,7 @@ A domain error maps to one status and one safe message. An unknown error becomes
 | `storage.ErrImageConflict` | `409` | `image_content_conflict` |
 | `storage.ErrImageIntegrity` | `422` | `image_integrity_failed` |
 | `storage.ErrShuttingDown` | `503` | `unavailable` |
-| `network.ErrInvalidPeers`, `storage.ErrInvalidUpload` | `400` | `invalid_request` |
+| `network.ErrInvalidPeers`, `storage.ErrInvalidUpload`, `vm.ErrMetadataServiceTooLarge` | `400` | `invalid_request` |
 
 - Every error body carries a `retryable` flag. `501` is never retryable.
 - `POST /v1/sync` maps a host-state not-found to `503`, not `404`. A `404` would stop the controller retry.

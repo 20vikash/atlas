@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,6 +19,8 @@ MAXIMUM_CPU_MILLICORES = 32_000
 MAXIMUM_SLEEP_AFTER_IDLE_SECONDS = 9_223_372_036
 FIREWALL_PROTOCOLS = ("any", "tcp", "udp", "icmp")
 MAXIMUM_FIREWALL_PREFIXES = 50
+MAXIMUM_METADATA_BYTES = 48 * 1024
+MAXIMUM_METADATA_COUNT = 16
 FIREWALL_PORTS_PATTERN = re.compile(r"^[0-9]+(?:-[0-9]+)?$")
 
 
@@ -336,9 +339,11 @@ class VirtualMachineCreateRequest:
 	@staticmethod
 	def metadata_map(payload: dict[str, Any]) -> dict[str, str]:
 		"""Return validated metadata with clean keys."""
-		value = payload.get("metadata") or {}
+		value = payload.get("metadata", {})
 		if not isinstance(value, dict):
 			raise ValueError("Metadata must be a string-to-string map.")
+		if len(value) > MAXIMUM_METADATA_COUNT:
+			raise ValueError("Metadata cannot contain more than 16 entries.")
 
 		metadata: dict[str, str] = {}
 		for key, item in value.items():
@@ -347,7 +352,14 @@ class VirtualMachineCreateRequest:
 			key = key.strip()
 			if not key:
 				raise ValueError("Metadata key cannot be empty.")
+			if key in metadata:
+				raise ValueError(f"Metadata key {key!r} appears more than once.")
 			metadata[key] = item
+		if (
+			len(json.dumps(metadata, ensure_ascii=False, separators=(",", ":")).encode())
+			> MAXIMUM_METADATA_BYTES
+		):
+			raise ValueError("Metadata must not exceed 48 KiB.")
 		return metadata
 
 	@staticmethod

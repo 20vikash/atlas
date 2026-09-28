@@ -37,6 +37,34 @@ func (manager *Manager) RestoreAfterTraffic(ctx context.Context, event traffic.E
 		}
 	}()
 
+	return manager.restoreSleeping(ctx, desired, observed)
+}
+
+// wakeSleepingVirtualMachine restores a Sleepy VM that sleeps with saved state.
+// It does nothing for any other VM.
+func (manager *Manager) wakeSleepingVirtualMachine(ctx context.Context, identifier string) error {
+	if manager.traffic == nil {
+		return nil
+	}
+	virtualMachine := manager.newVirtualMachine(identifier)
+	unlock, err := virtualMachine.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	desired, observed, err := virtualMachine.records()
+	if err != nil {
+		return err
+	}
+	if desired.State != StateRunning || desired.Specification.SleepAfterIdleSeconds <= 0 {
+		return nil
+	}
+	return manager.restoreSleeping(ctx, desired, observed)
+}
+
+// restoreSleeping restores the saved state of a stopped Sleepy VM.
+func (manager *Manager) restoreSleeping(ctx context.Context, desired DesiredRecord, observed ObservedRecord) error {
 	networkInterface, err := manager.network.Ensure(ctx, networkRequest(desired))
 	if err != nil {
 		return err

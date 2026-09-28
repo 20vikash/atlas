@@ -22,12 +22,23 @@ from atlas.atlas.core.artifacts import publish_public_file
 GO_VERSION = "1.26.2"
 GO_DOWNLOAD_URL = "https://go.dev/dl/go{version}.linux-{architecture}.tar.gz"
 BUILD_TIMEOUT_SECONDS = 900
+
 # Directories that hold the system headers a build includes.
 INCLUDE_DIRECTORIES = (
 	"/usr/include",
 	f"/usr/include/{platform.machine()}-linux-gnu",
 	"/usr/local/include",
 )
+BUILDER_IMAGE = "ghcr.io/frappe/atlas-builder:latest"
+
+# macOS has no Linux or libbpf headers, so it builds inside BUILDER_IMAGE.
+IS_MACOS = platform.system() == "Darwin"
+if IS_MACOS:
+	BUILD_COMMANDS: tuple[str, ...] = ("docker",)
+	BUILD_HEADERS: tuple[str, ...] = ()
+else:
+	BUILD_COMMANDS = ("make", "clang")
+	BUILD_HEADERS = ("bpf/bpf_helpers.h", "bpf/bpf_endian.h", "linux/bpf.h", "asm/types.h")
 
 
 @dataclass(frozen=True)
@@ -59,6 +70,8 @@ HOST_BINARIES = (
 		settings_field="metald_binary_x86_64_file",
 		source_hash_field="metald_source_hash",
 		binary_hash_field="metald_binary_hash",
+		required_commands=BUILD_COMMANDS,
+		required_headers=BUILD_HEADERS,
 	),
 	HostBinary(
 		key="wg-mesh",
@@ -68,11 +81,8 @@ HOST_BINARIES = (
 		settings_field="wg_mesh_binary_x86_64_file",
 		source_hash_field="wg_mesh_source_hash",
 		binary_hash_field="wg_mesh_binary_hash",
-		# clang compiles the BPF object before the Go build. Its headers come
-		# from libbpf-dev and linux-libc-dev on Debian, and from libbpf-devel
-		# and kernel-headers on Fedora.
-		required_commands=("make", "clang"),
-		required_headers=("bpf/bpf_helpers.h", "bpf/bpf_endian.h", "linux/bpf.h", "asm/types.h"),
+		required_commands=BUILD_COMMANDS,
+		required_headers=BUILD_HEADERS,
 	),
 )
 
@@ -96,16 +106,14 @@ def publish_host_binaries() -> None:
 		return
 
 	ensure_build_environment(tuple(binary for binary, _digest in pending_builds))
-	go_binary = ensure_go_toolchain()
-
 	for binary, digest in pending_builds:
-		file_name = publish_host_binary(binary, go_binary, digest)
+		file_name = publish_host_binary(binary, digest)
 		print(f"atlas: published {binary.label} as File {file_name}")
 
 
-def publish_host_binary(binary: HostBinary, go_binary: str, digest: str) -> str:
+def publish_host_binary(binary: HostBinary, digest: str) -> str:
 	"""Build one binary, attach it as a File, and link it in Atlas Settings."""
-	content = build_host_binary(binary, go_binary).read_bytes()
+	content = build_host_binary(binary).read_bytes()
 	file_name = publish_public_file(binary.file_name, binary.label, content)
 	frappe.db.set_single_value("Atlas Settings", binary.settings_field, file_name)
 	frappe.db.set_single_value("Atlas Settings", binary.source_hash_field, digest)
@@ -250,20 +258,25 @@ def missing_build_requirements(binary: HostBinary) -> list[str]:
 	return missing
 
 
-def build_host_binary(binary: HostBinary, go_binary: str) -> Path:
+def build_host_binary(binary: HostBinary) -> Path:
 	"""Build one host binary with `make build` and return its artifact path."""
 	missing = missing_build_requirements(binary)
 	if missing:
 		raise FileNotFoundError(_("{0} cannot build without {1}.").format(binary.label, ", ".join(missing)))
 
 	module_path = repository_path() / binary.module_directory
-	environment = {
-		"PATH": f"{Path(go_binary).parent}:{os.environ.get('PATH', '')}",
-		"HOME": os.environ.get("HOME", ""),
-		"GOFLAGS": "-buildvcs=false",
-	}
+	search_path = os.environ.get("PATH", "")
+	command = ["make", "build"]
+	if IS_MACOS:
+		repository = repository_path()
+		volume = f"--volume={repository}:{repository}"
+		command = ["docker", "run", "--rm", volume, f"--workdir={module_path}", BUILDER_IMAGE, *command]
+	else:
+		search_path = f"{Path(ensure_go_toolchain()).parent}:{search_path}"
+
+	environment = {"PATH": search_path, "HOME": os.environ.get("HOME", ""), "GOFLAGS": "-buildvcs=false"}
 	result = subprocess.run(
-		["make", "build"],
+		command,
 		cwd=module_path,
 		capture_output=True,
 		text=True,

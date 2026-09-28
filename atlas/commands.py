@@ -14,7 +14,6 @@ from frappe.utils.bench_helper import CliCtxObj
 from atlas.atlas.core.host_binaries import (
 	HostBinary,
 	ensure_build_environment,
-	ensure_go_toolchain,
 	find_host_binary,
 	is_published,
 	publish_host_binary,
@@ -81,7 +80,7 @@ def build_and_publish(context: CliCtxObj, binary: HostBinary) -> None:
 
 			ensure_build_environment((binary,))
 			click.echo(f"Building {binary.label} for {site}")
-			file_name = publish_host_binary(binary, ensure_go_toolchain(), digest)
+			file_name = publish_host_binary(binary, digest)
 			frappe.db.commit()  # nosemgrep
 			click.echo(f"Published {binary.label} as File {file_name} on {site}")
 		finally:

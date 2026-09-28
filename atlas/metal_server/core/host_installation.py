@@ -20,6 +20,8 @@ FAILURE_REASON_LINES = 3
 FAILURE_REASON_LENGTH = 500
 WIREGUARD_CONFIGURE_TIMEOUT_SECONDS = 300
 METALD_INSTALL_TIMEOUT_SECONDS = 1_200
+STORAGE_INSTALL_TIMEOUT_SECONDS = 600
+METALD_SETUP_TIMEOUT_SECONDS = 3_600
 
 MESH_PREFIX = 0xFDAB
 # The prefix and the region take the first 32 bits of the address, so the low 96
@@ -73,6 +75,7 @@ class HostInstallation:
 		if not settings.metald_binary_x86_64_file or not settings.wg_mesh_binary_x86_64_file:
 			frappe.throw(_("Atlas Settings needs the metald and Atlas WG Mesh binaries."))
 
+		self.install_storage()
 		self.install_tls_credentials()
 
 		listen_address = settings.server_provider_controller.metald_listen_address(self.server)
@@ -96,7 +99,6 @@ class HostInstallation:
 				"LISTEN_ADDRESS": f"{listen_address}:9000",
 				"ATLAS_COMMON_NAME": atlas_client_identity(settings),
 				"COORDINATION_LISTEN_ADDRESS": f"[{self.server.wireguard_ip_address}]:9001",
-				"STORAGE_POOL_DEVICE": settings.server_provider_controller.storage_pool_device(self.server),
 				"MESH_UPLINK_INTERFACE": self.server.private_network_interface,
 			},
 			timeout_seconds=METALD_INSTALL_TIMEOUT_SECONDS,
@@ -105,6 +107,25 @@ class HostInstallation:
 		if not result or not result.is_success:
 			throw_script_failure(
 				_("Could not install metald on server {0}.").format(self.server.name), result
+			)
+
+	def install_storage(self) -> None:
+		"""Create the storage pool and mount host state on it before any file is written there."""
+		result = SSHTask.create_for_script_file(
+			target_type=self.server.doctype,
+			target=self.server.name,
+			script_path="install-metal-storage.sh",
+			environment={
+				"STORAGE_POOL_DEVICE": self.server.settings.server_provider_controller.storage_pool_device(
+					self.server
+				),
+			},
+			timeout_seconds=STORAGE_INSTALL_TIMEOUT_SECONDS,
+			run_in_background=False,
+		).result
+		if not result or not result.is_success:
+			throw_script_failure(
+				_("Could not prepare storage on server {0}.").format(self.server.name), result
 			)
 
 	def install_tls_credentials(self) -> None:

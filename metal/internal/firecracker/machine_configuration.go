@@ -84,11 +84,10 @@ func configure(
 		return err
 	}
 
-	return client.PutMMDS(operationContext, metadataServiceData(
+	return client.PutMMDS(operationContext, specification.MetadataServiceData(
 		virtualMachineID,
 		networkInterface.GuestIPAddress,
 		networkInterface.MACAddress,
-		specification,
 	))
 }
 
