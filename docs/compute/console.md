@@ -18,7 +18,7 @@ In Desk, the VM form opens `/vm_console` with a token in the URL fragment. The f
 
 The browser sends the token to the Atlas realtime bridge. The bridge takes it from Redis in one operation, then opens a mutual-TLS WebSocket to the VM's Metal host.
 
-The token is valid for **60 seconds** and works **once**. A reload cannot reuse it. Open a new console from the VM form, or request another token through the API. If Metal cannot be reached after the token is used, a new token is also needed.
+The token is valid for **30 seconds** and works **once**. A reload cannot reuse it. Open a new console from the VM form, or request another token through the API. If Metal cannot be reached after the token is used, a new token is also needed.
 
 ## Choose a mode
 
@@ -28,6 +28,8 @@ The token is valid for **60 seconds** and works **once**. A reload cannot reuse 
 | SSH | One new interactive session as `root`. It ends when this browser connection closes. | Get a normal shell in a running guest that supports Atlas SSH access. |
 
 TTY output is collected while the VM runs, even with no viewer. A slow viewer is disconnected so it cannot block the guest.
+
+A TTY session stays open when the VM stops or restarts. It shows the output of the next boot. Metal discards input that you type while the VM is stopped.
 
 SSH needs a reachable guest and its SSH service. Metal creates a temporary key for that session, adds it through the guest metadata service, and removes it when the session ends. [SSH key changes](ssh-keys.md) explains the guest's key lookup.
 

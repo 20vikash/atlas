@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,7 +94,7 @@ func TestUploadArtifactDigestsTheWholeArtifact(t *testing.T) {
 	contents := bytes.Repeat([]byte("atlas"), 1000)
 	store, snapshotID, path := uploadFixture(t, contents)
 	recorder := newPartRecorder()
-	request := SnapshotArtifactUpload{UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
+	request := SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
 
 	var uploaded atomic.Int64
 	artifact, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)), request, &uploaded)
@@ -113,12 +114,24 @@ func TestUploadArtifactDigestsTheWholeArtifact(t *testing.T) {
 	}
 }
 
+func TestUploadArtifactRejectsAShortArtifact(t *testing.T) {
+	contents := bytes.Repeat([]byte("atlas"), 1000)
+	store, snapshotID, path := uploadFixture(t, contents)
+	recorder := newPartRecorder()
+	request := SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
+
+	var uploaded atomic.Int64
+	if _, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents))+1, request, &uploaded); err == nil {
+		t.Fatal("a short artifact was uploaded")
+	}
+}
+
 func TestUploadArtifactRepeatsAPartTheStoreRefuses(t *testing.T) {
 	contents := bytes.Repeat([]byte("z"), 512)
 	store, snapshotID, path := uploadFixture(t, contents)
 	recorder := newPartRecorder()
 	recorder.failPart, recorder.failTimes = 1, 2
-	request := SnapshotArtifactUpload{UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
+	request := SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
 
 	var uploaded atomic.Int64
 	if _, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)), request, &uploaded); err != nil {
@@ -150,7 +163,7 @@ func TestUploadArtifactGivesUpOnAFailureItCannotRetry(t *testing.T) {
 	store, snapshotID, path := uploadFixture(t, contents)
 	recorder := newPartRecorder()
 	recorder.failPart, recorder.failTimes, recorder.failCode = 1, 1, http.StatusForbidden
-	request := SnapshotArtifactUpload{UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
+	request := SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
 
 	var uploaded atomic.Int64
 	if _, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)), request, &uploaded); err == nil {
@@ -163,11 +176,65 @@ func TestUploadArtifactGivesUpOnAFailureItCannotRetry(t *testing.T) {
 	}
 }
 
+func TestUploadArtifactSendsEveryPartInOrder(t *testing.T) {
+	contents := make([]byte, 8<<10)
+	rand.NewChaCha8([32]byte{}).Read(contents)
+	store, snapshotID, path := uploadFixture(t, contents)
+	recorder := newPartRecorder()
+	request := SnapshotArtifactUpload{PartSizeBytes: 1 << 10, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 12)}
+
+	var uploaded atomic.Int64
+	artifact, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)), request, &uploaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stored []byte
+	for index, part := range artifact.Parts {
+		if part.PartNumber != index+1 {
+			t.Fatalf("parts = %+v", artifact.Parts)
+		}
+		stored = append(stored, recorder.bodies[part.PartNumber]...)
+	}
+	decoder, err := zstd.NewReader(bytes.NewReader(stored))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	decoded, err := io.ReadAll(decoder)
+	if err != nil || !bytes.Equal(decoded, contents) {
+		t.Fatalf("stored parts decode to %d bytes, error %v", len(decoded), err)
+	}
+}
+
+func TestUploadArtifactStopsAfterAPartFails(t *testing.T) {
+	contents := make([]byte, 8<<10)
+	rand.NewChaCha8([32]byte{}).Read(contents)
+	store, snapshotID, path := uploadFixture(t, contents)
+	recorder := newPartRecorder()
+	recorder.failPart, recorder.failTimes, recorder.failCode = 1, 1, http.StatusForbidden
+	request := SnapshotArtifactUpload{PartSizeBytes: 1 << 10, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 12)}
+
+	var uploaded atomic.Int64
+	if _, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)), request, &uploaded); err == nil {
+		t.Fatal("a rejected part must fail the artifact")
+	}
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if recorder.attempts[2] != 0 {
+		t.Fatalf("part 2 was sent after part 1 failed")
+	}
+	buffers, _ := filepath.Glob(filepath.Join(store.snapshotDirectory(snapshotID), "part-*"))
+	if len(buffers) != 0 {
+		t.Fatalf("part buffers left behind: %v", buffers)
+	}
+}
+
 func TestUploadArtifactResumesWithoutResendingStoredParts(t *testing.T) {
 	contents := bytes.Repeat([]byte("q"), 128)
 	store, snapshotID, path := uploadFixture(t, contents)
 	recorder := newPartRecorder()
-	request := SnapshotArtifactUpload{UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
+	request := SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-1", Parts: partsFor(recorder.server(t), 1)}
 
 	var uploaded atomic.Int64
 	first, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)), request, &uploaded)
@@ -199,12 +266,12 @@ func TestUploadArtifactStartsAgainAfterTheUploadIDChanges(t *testing.T) {
 
 	var uploaded atomic.Int64
 	if _, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)),
-		SnapshotArtifactUpload{UploadID: "upload-1", Parts: partsFor(server, 1)}, &uploaded); err != nil {
+		SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-1", Parts: partsFor(server, 1)}, &uploaded); err != nil {
 		t.Fatal(err)
 	}
 	// The controller replaced the multipart upload, so the stored ETag is worthless.
 	if _, err := store.uploadArtifact(t.Context(), snapshotID, rootfsArtifact, path, int64(len(contents)),
-		SnapshotArtifactUpload{UploadID: "upload-2", Parts: partsFor(server, 1)}, &uploaded); err != nil {
+		SnapshotArtifactUpload{PartSizeBytes: 64 << 20, UploadID: "upload-2", Parts: partsFor(server, 1)}, &uploaded); err != nil {
 		t.Fatal(err)
 	}
 

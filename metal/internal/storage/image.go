@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -108,8 +109,12 @@ func (store *ImageStore) ensureImage(ctx context.Context, imageReference string,
 	if err != nil {
 		return err
 	}
+	// The manifest is written last and disks clone only after it exists, so
+	// artifacts without one are an unfinished import that is safe to remove.
 	if !found && artifactsExist {
-		return fmt.Errorf("%w: image reference %q has no manifest", ErrImageConflict, imageReference)
+		if err := store.removeImageArtifacts(ctx, imageReference); err != nil {
+			return fmt.Errorf("remove incomplete image %q: %w", imageReference, err)
+		}
 	}
 
 	// An import that does not reach the manifest write leaves nothing behind.
@@ -119,8 +124,9 @@ func (store *ImageStore) ensureImage(ctx context.Context, imageReference string,
 			if completed {
 				return
 			}
-			_ = os.RemoveAll(store.imageDirectory(imageReference))
-			_ = platform.Run(context.Background(), "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
+			if err := store.removeImageArtifacts(context.Background(), imageReference); err != nil {
+				store.logger.Warn("remove incomplete image", "image", imageReference, "error", err)
+			}
 		}()
 	}
 
@@ -143,6 +149,14 @@ func (store *ImageStore) ensureImage(ctx context.Context, imageReference string,
 		completed = true
 	}
 	return nil
+}
+
+// removeImageArtifacts deletes the base dataset and directory of one image.
+func (store *ImageStore) removeImageArtifacts(ctx context.Context, imageReference string) error {
+	if err := destroyIfPresent(ctx, store.pool.baseDataset(imageReference)); err != nil {
+		return err
+	}
+	return os.RemoveAll(store.imageDirectory(imageReference))
 }
 
 // hasImageSource reports whether a policy names remote image content.
@@ -265,54 +279,79 @@ func (store *ImageStore) ensureKernel(ctx context.Context, imageReference, kerne
 		return err
 	}
 
-	kernel, err := download(ctx, store.httpClient, store.directory, kernelURL, expectedDigest, store.logger)
-	if err != nil {
+	kernel := &temporaryFileDestination{directory: store.directory}
+	if err := download(ctx, store.httpClient, kernelURL, expectedDigest, kernel, store.logger); err != nil {
 		return fmt.Errorf("download kernel: %w", err)
 	}
-	defer os.Remove(kernel)
+	defer os.Remove(kernel.file.Name())
 	if err := os.MkdirAll(store.imageDirectory(imageReference), 0o755); err != nil {
 		return err
 	}
-	if err := os.Rename(kernel, target); err != nil {
+	if err := os.Rename(kernel.file.Name(), target); err != nil {
 		return err
 	}
 	return os.Chmod(target, 0o644)
 }
 
-// importRootFileSystem downloads the root file system into a new ZFS volume and
-// snapshots it. Every failure destroys the volume, so no half-written base
-// image can be cloned.
+// importRootFileSystem downloads the root file system straight into a new ZFS
+// volume and snapshots it. Every failure destroys the volume, so no half-written
+// base image can be cloned.
 func (store *ImageStore) importRootFileSystem(ctx context.Context, imageReference, rootfsURL, expectedDigest string) error {
-	rootfs, err := download(ctx, store.httpClient, store.directory, rootfsURL, expectedDigest, store.logger)
-	if err != nil {
+	volume := &volumeDestination{store: store, imageReference: imageReference}
+	if err := download(ctx, store.httpClient, rootfsURL, expectedDigest, volume, store.logger); err != nil {
 		return fmt.Errorf("download root file system: %w", err)
 	}
-	defer os.Remove(rootfs)
-
-	information, err := os.Stat(rootfs)
-	if err != nil {
-		return err
-	}
-	sizeMiB := information.Size()>>bytesToMiBShift + rootFileSystemSlackMiB
-	if err := platform.Run(ctx, "zfs", "create", "-V", fmt.Sprintf("%dM", sizeMiB), "-o", "volblocksize="+imageVolumeBlockSize, store.pool.baseDataset(imageReference)); err != nil {
-		return err
-	}
-	rollback := func() {
-		_ = platform.Run(context.Background(), "zfs", "destroy", "-r", store.pool.baseDataset(imageReference))
-	}
-	if _, err := waitForBlockDevice(store.baseImageDevicePath(imageReference)); err != nil {
-		rollback()
-		return err
-	}
-	if err := platform.Run(ctx, "dd", "if="+rootfs, "of="+store.baseImageDevicePath(imageReference), "bs=4M", "conv=sparse,fsync", "status=none"); err != nil {
-		rollback()
-		return err
-	}
 	if err := platform.Run(ctx, "zfs", "snapshot", store.pool.baseSnapshot(imageReference)); err != nil {
-		rollback()
+		volume.destroy()
 		return err
 	}
 	return nil
+}
+
+// volumeDestination downloads into a new ZFS volume for one image.
+type volumeDestination struct {
+	store          *ImageStore
+	imageReference string
+	device         *os.File
+}
+
+func (destination *volumeDestination) open(ctx context.Context, sizeBytes int64) (io.Writer, error) {
+	sizeMiB := (sizeBytes+(1<<bytesToMiBShift)-1)>>bytesToMiBShift + rootFileSystemSlackMiB
+	dataset := destination.store.pool.baseDataset(destination.imageReference)
+	if err := platform.Run(ctx, "zfs", "create", "-V", fmt.Sprintf("%dM", sizeMiB), "-o", "volblocksize="+imageVolumeBlockSize, dataset); err != nil {
+		return nil, err
+	}
+	devicePath := destination.store.baseImageDevicePath(destination.imageReference)
+	if _, err := waitForBlockDevice(devicePath); err != nil {
+		destination.destroy()
+		return nil, err
+	}
+	device, err := os.OpenFile(devicePath, os.O_WRONLY, 0)
+	if err != nil {
+		destination.destroy()
+		return nil, err
+	}
+	destination.device = device
+	return &sparseVolumeWriter{file: device}, nil
+}
+
+func (destination *volumeDestination) commit() error {
+	if err := destination.device.Sync(); err != nil {
+		return err
+	}
+	return destination.device.Close()
+}
+
+func (destination *volumeDestination) discard() {
+	if destination.device != nil {
+		destination.device.Close()
+		destination.device = nil
+	}
+	destination.destroy()
+}
+
+func (destination *volumeDestination) destroy() {
+	_ = platform.Run(context.Background(), "zfs", "destroy", "-r", destination.store.pool.baseDataset(destination.imageReference))
 }
 
 // baseImageDevicePath is the block device of one base image volume.
